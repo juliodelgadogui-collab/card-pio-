@@ -74,9 +74,7 @@ final class CheckoutService
             }
         }
 
-        if($reusedAttempt){
-            $pdo->prepare('UPDATE payments SET status="created",raw_payload=NULL WHERE id=? AND tenant_id=? AND status<>"paid"')->execute([$paymentId,$order['tenant_id']]);
-        }
+        if($reusedAttempt)$pdo->prepare('UPDATE payments SET status="created",raw_payload=NULL WHERE id=? AND tenant_id=? AND status<>"paid"')->execute([$paymentId,$order['tenant_id']]);
         $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=?')->execute([$order['id']]);
 
         try{
@@ -113,10 +111,6 @@ final class CheckoutService
         if((string)$account->id!==(string)$gateway['account_reference'])throw new RuntimeException('Conta Stripe divergente.');
         $base=rtrim((string)env('APP_URL',''),'/');
         $metadata=['tenant_id'=>(string)$order['tenant_id'],'order_id'=>(string)$order['id']];
-        $session=$client->checkout->sessions->create([
-            'mode'=>'payment',
-            'line_items'=>[[]],
-        ]);
         $session=$client->checkout->sessions->create([
             'mode'=>'payment',
             'line_items'=>[[
@@ -182,14 +176,7 @@ final class CheckoutService
         if($ch===false)throw new RuntimeException('Falha HTTP.');
         $headers[]='Accept: application/json';
         $headers[]='Content-Type: application/json';
-        curl_setopt_array($ch,[
-            CURLOPT_RETURNTRANSFER=>true,
-            CURLOPT_CUSTOMREQUEST=>$method,
-            CURLOPT_HTTPHEADER=>$headers,
-            CURLOPT_POSTFIELDS=>json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),
-            CURLOPT_CONNECTTIMEOUT=>8,
-            CURLOPT_TIMEOUT=>25,
-        ]);
+        curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_POSTFIELDS=>json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>25]);
         $response=curl_exec($ch);
         $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
         $err=curl_error($ch);
