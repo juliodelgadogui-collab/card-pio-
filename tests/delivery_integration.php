@@ -14,6 +14,8 @@ function assert_delivery(bool $condition,string $message):void{
 }
 
 $pdo=Database::connection();
+assert_delivery(date_default_timezone_get()==='UTC','runtime PHP não está em UTC');
+assert_delivery((string)$pdo->query('SELECT @@session.time_zone')->fetchColumn()==='+00:00','sessão MySQL não está em UTC');
 $pdo->exec("INSERT INTO tenants (name,slug,plan,status) VALUES ('CI Delivery','ci-delivery','premium','active')");
 $tenantId=(int)$pdo->lastInsertId();
 $hash=password_hash('ci-password-123',PASSWORD_DEFAULT);
