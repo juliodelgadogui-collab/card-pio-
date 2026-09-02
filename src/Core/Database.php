@@ -34,13 +34,36 @@ final class Database
     public static function transaction(callable $callback): mixed
     {
         $pdo = self::connection();
-        $pdo->beginTransaction();
+        $nested = $pdo->inTransaction();
+        $savepoint = $nested ? 'em_sp_'.bin2hex(random_bytes(8)) : null;
+
+        if ($nested) {
+            $pdo->exec('SAVEPOINT '.$savepoint);
+        } else {
+            $pdo->beginTransaction();
+        }
+
         try {
             $result = $callback($pdo);
-            $pdo->commit();
+            if ($nested) {
+                $pdo->exec('RELEASE SAVEPOINT '.$savepoint);
+            } else {
+                $pdo->commit();
+            }
             return $result;
         } catch (Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                if ($nested && $savepoint !== null) {
+                    try {
+                        $pdo->exec('ROLLBACK TO SAVEPOINT '.$savepoint);
+                        $pdo->exec('RELEASE SAVEPOINT '.$savepoint);
+                    } catch (Throwable) {
+                        if ($pdo->inTransaction()) $pdo->rollBack();
+                    }
+                } else {
+                    $pdo->rollBack();
+                }
+            }
             throw $e;
         }
     }
