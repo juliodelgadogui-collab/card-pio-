@@ -1,0 +1,50 @@
+name: EventMenu CI
+
+on:
+  push:
+    branches: [ main, hardening-v9.2-continuacao ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  php-and-database:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: eventmenu
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, json, mbstring, openssl, pdo_mysql
+          coverage: none
+      - name: Validate Composer
+        run: composer validate --strict
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: PHP syntax
+        run: find app src public bin tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Smoke tests
+        run: php tests/smoke.php
+      - name: Apply database schema
+        env:
+          MYSQL_PWD: root
+        run: |
+          mysql -h 127.0.0.1 -uroot eventmenu < database/schema.sql
+          for f in database/migrations/*.sql; do echo "Applying $f"; mysql -h 127.0.0.1 -uroot eventmenu < "$f"; done
+      - name: Verify critical tables
+        env:
+          MYSQL_PWD: root
+        run: |
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations');" | grep -qx '6'
