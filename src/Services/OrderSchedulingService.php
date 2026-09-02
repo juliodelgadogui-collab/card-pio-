@@ -113,11 +113,12 @@ final class OrderSchedulingService
 
     private function ceilToSlot(\DateTimeImmutable $dt,int $slot):\DateTimeImmutable
     {
-        $minute=(int)$dt->format('i');
+        $totalMinutes=((int)$dt->format('H'))*60+(int)$dt->format('i');
         $seconds=(int)$dt->format('s');
-        $remainder=$minute%$slot;
+        $remainder=$totalMinutes%$slot;
         $add=$remainder===0&&$seconds===0?0:$slot-$remainder;
-        return $dt->modify('+'.$add.' minutes')->setTime((int)$dt->modify('+'.$add.' minutes')->format('H'),(int)$dt->modify('+'.$add.' minutes')->format('i'),0);
+        $rounded=$dt->modify('+'.$add.' minutes');
+        return $rounded->setTime((int)$rounded->format('H'),(int)$rounded->format('i'),0);
     }
 
     private function slotLabel(\DateTimeImmutable $slot,\DateTimeImmutable $now):string
