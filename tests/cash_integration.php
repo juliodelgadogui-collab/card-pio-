@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require __DIR__.'/../app/bootstrap.php';
 
+use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
 use EventMenu\Services\CashRegisterService;
 use EventMenu\Services\CounterOrderService;
@@ -17,8 +18,13 @@ function assert_cash(bool $condition,string $message):void{
 $pdo=Database::connection();$suffix=bin2hex(random_bytes(3));
 $pdo->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,? ,"premium","active")')->execute(['CI Cash','ci-cash-'.$suffix]);$tenantId=(int)$pdo->lastInsertId();
 $hash=password_hash('cash-ci-password',PASSWORD_DEFAULT);
-$pdo->prepare('INSERT INTO users (tenant_id,name,email,password_hash,role,status) VALUES (?,?,?,?,"cashier","active")')->execute([$tenantId,'Caixa CI','cash-'.$suffix.'@example.com',$hash]);$userId=(int)$pdo->lastInsertId();
-$_SESSION['user_id']=$userId;$_SESSION['tenant_id']=$tenantId;$_SESSION['role']='cashier';$_SESSION['name']='Caixa CI';
+$pdo->prepare('INSERT INTO users (tenant_id,name,email,password_hash,role,status) VALUES (?,?,?,?,"manager","active")')->execute([$tenantId,'Gerente CI','manager-'.$suffix.'@example.com',$hash]);$userId=(int)$pdo->lastInsertId();
+$_SESSION['user_id']=$userId;$_SESSION['tenant_id']=$tenantId;$_SESSION['role']='manager';$_SESSION['name']='Gerente CI';
+
+// Caixa pode receber, mas não pode autorizar reembolso. Gerente pode ambos.
+$_SESSION['role']='cashier';assert_cash(Auth::can('payments.manage'),'caixa perdeu permissão de recebimento');assert_cash(!Auth::can('refunds.manage'),'caixa recebeu permissão indevida de reembolso');
+$_SESSION['role']='manager';assert_cash(Auth::can('payments.manage'),'gerente sem permissão de recebimento');assert_cash(Auth::can('refunds.manage'),'gerente sem permissão de reembolso');
+
 $pdo->prepare('INSERT INTO products (tenant_id,name,price_cents,stock_qty,track_stock,active) VALUES (?,"Venda caixa",2000,5,1,1)')->execute([$tenantId]);$productId=(int)$pdo->lastInsertId();
 
 $order=(new CounterOrderService())->create([$productId=>1]);
