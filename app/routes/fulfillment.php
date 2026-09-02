@@ -15,8 +15,13 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     $action=(string)($_POST['action']??'');
     try{
         if($action==='lookup'){
-            $token=$service->extractToken((string)($_POST['code']??''));
-            if($token==='')throw new RuntimeException('Leia ou informe o código da venda.');
+            $raw=trim((string)($_POST['code']??''));
+            if(preg_match('/^#?(\d+)$/',$raw,$m)){
+                $token=$service->ensureToken($tenantId,(int)$m[1]);
+            }else{
+                $token=$service->extractToken($raw);
+            }
+            if($token==='')throw new RuntimeException('Leia ou informe o QR, código ou número da venda.');
             em_go('fulfillment',['token'=>$token]);
         }
         if($action==='fulfill'){
@@ -53,15 +58,18 @@ if($token!==''){
     }catch(Throwable $e){em_flash('error',$e->getMessage());$summary=null;}
 }
 
+$recentStmt=$pdo->prepare('SELECT o.id,o.fulfillment_token,o.fulfillment_status,o.created_at,c.name customer_name,COALESCE(SUM(oi.quantity-oi.fulfilled_quantity),0) remaining_qty FROM orders o LEFT JOIN customers c ON c.id=o.customer_id JOIN order_items oi ON oi.order_id=o.id WHERE o.tenant_id=? AND o.channel IN ("counter","pickup") AND o.payment_status="paid" AND o.fulfillment_status<>"fulfilled" AND o.status<>"cancelled" GROUP BY o.id,o.fulfillment_token,o.fulfillment_status,o.created_at,c.name ORDER BY o.id DESC LIMIT 50');
+$recentStmt->execute([$tenantId]);$recent=$recentStmt->fetchAll();
+
 function fulfill_qty(mixed $v):string{$n=(float)$v;return rtrim(rtrim(number_format($n,3,',','.'),'0'),',');}
 
 em_header('Retirada de produtos','fulfillment');
 ?>
 <section class="card" style="margin-bottom:18px">
- <div class="section-head"><div><h2>Ler venda / QR</h2><p class="muted">Use leitor de código, digite o código ou cole a URL impressa no comprovante.</p></div></div>
+ <div class="section-head"><div><h2>Ler venda / QR</h2><p class="muted">Use leitor de código, digite o número da venda (ex.: 123), o código ou cole a URL impressa.</p></div></div>
  <form method="post" class="actions">
   <input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="lookup">
-  <input name="code" autofocus autocomplete="off" placeholder="Código ou URL da retirada" style="min-width:300px;flex:1" required>
+  <input name="code" autofocus autocomplete="off" placeholder="QR, código ou nº da venda" style="min-width:300px;flex:1" required>
   <button class="primary">Abrir venda</button>
  </form>
 </section>
@@ -88,6 +96,8 @@ em_header('Retirada de produtos','fulfillment');
  </div>
 </section>
 
-<section class="card"><div class="section-head"><h2>Histórico de retiradas</h2><span class="muted"><?= count($history) ?> movimentos</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>Quantidade</th><th>Operador</th><th>Origem</th><th>Data UTC</th><th>Observação</th></tr></thead><tbody><?php foreach($history as$h):?><tr><td><?= Security::e($h['name_snapshot']) ?></td><td><strong><?= Security::e(fulfill_qty($h['quantity'])) ?></strong></td><td><?= Security::e($h['user_name']??'Sistema') ?></td><td><?= Security::e($h['source']) ?></td><td><?= Security::e($h['created_at']) ?></td><td><?= Security::e($h['notes']??'—') ?></td></tr><?php endforeach;?><?php if(!$history):?><tr><td colspan="6" class="muted">Nenhuma retirada registrada.</td></tr><?php endif;?></tbody></table></div></section>
+<section class="card" style="margin-bottom:18px"><div class="section-head"><h2>Histórico de retiradas</h2><span class="muted"><?= count($history) ?> movimentos</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>Quantidade</th><th>Operador</th><th>Origem</th><th>Data UTC</th><th>Observação</th></tr></thead><tbody><?php foreach($history as$h):?><tr><td><?= Security::e($h['name_snapshot']) ?></td><td><strong><?= Security::e(fulfill_qty($h['quantity'])) ?></strong></td><td><?= Security::e($h['user_name']??'Sistema') ?></td><td><?= Security::e($h['source']) ?></td><td><?= Security::e($h['created_at']) ?></td><td><?= Security::e($h['notes']??'—') ?></td></tr><?php endforeach;?><?php if(!$history):?><tr><td colspan="6" class="muted">Nenhuma retirada registrada.</td></tr><?php endif;?></tbody></table></div></section>
 <?php endif;?>
+
+<section class="card"><div class="section-head"><h2>Vendas com saldo para retirar</h2><span class="muted"><?= count($recent) ?> recentes</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Venda</th><th>Cliente</th><th>Status</th><th>Saldo de unidades</th><th>Data UTC</th><th></th></tr></thead><tbody><?php foreach($recent as$r):?><tr><td>#<?= (int)$r['id'] ?></td><td><?= Security::e($r['customer_name']??'Consumidor') ?></td><td><span class="badge"><?= Security::e($r['fulfillment_status']) ?></span></td><td><strong><?= Security::e(fulfill_qty($r['remaining_qty'])) ?></strong></td><td><?= Security::e($r['created_at']) ?></td><td><a class="button secondary" href="/?route=fulfillment&order=<?= (int)$r['id'] ?>">Abrir</a></td></tr><?php endforeach;?><?php if(!$recent):?><tr><td colspan="6" class="muted">Nenhuma venda paga com saldo pendente.</td></tr><?php endif;?></tbody></table></div></section>
 <?php em_footer();
