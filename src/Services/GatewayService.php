@@ -18,26 +18,38 @@ final class GatewayService
         Auth::requirePermission('gateways.manage');
         $tenantId=Auth::tenantId();
         $provider=strtolower(trim($provider));
-        if(!$tenantId||!in_array($provider,self::PROVIDERS,true)) throw new RuntimeException('Gateway inválido.');
-        if($active&&trim($accountReference)==='') throw new RuntimeException('Informe a conta recebedora do gateway.');
+        if(!$tenantId||!in_array($provider,self::PROVIDERS,true))throw new RuntimeException('Gateway inválido.');
+
+        if($provider==='pagbank'){
+            $token=trim((string)($config['token']??''));
+            if($active&&$token==='')throw new RuntimeException('Token PagBank obrigatório para ativar o gateway.');
+            $accountReference=$this->pagBankCredentialReference($config);
+        }
+        if($active&&trim($accountReference)==='')throw new RuntimeException('Informe a conta recebedora do gateway.');
+        if($active&&$provider!=='pagbank'&&$webhookSecret===''){
+            $existing=Database::connection()->prepare('SELECT webhook_secret_encrypted FROM payment_gateways WHERE tenant_id=? AND provider=? LIMIT 1');
+            $existing->execute([$tenantId,$provider]);
+            if(!$existing->fetchColumn())throw new RuntimeException('Configure o segredo do webhook antes de ativar o gateway.');
+        }
+
         $stmt=Database::connection()->prepare('INSERT INTO payment_gateways (tenant_id,provider,account_reference,config_encrypted,webhook_secret_encrypted,active) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE account_reference=VALUES(account_reference),config_encrypted=VALUES(config_encrypted),webhook_secret_encrypted=COALESCE(VALUES(webhook_secret_encrypted),webhook_secret_encrypted),active=VALUES(active)');
-        $stmt->execute([$tenantId,$provider,$accountReference,Crypto::encrypt($config),$webhookSecret!==''?Crypto::encrypt($webhookSecret):null,$active?1:0]);
-        Auth::audit('gateway.saved','gateway',$provider,['active'=>$active]);
+        $stmt->execute([$tenantId,$provider,$accountReference,Crypto::encrypt($config),$provider!=='pagbank'&&$webhookSecret!==''?Crypto::encrypt($webhookSecret):null,$active?1:0]);
+        Auth::audit('gateway.saved','gateway',$provider,['active'=>$active,'account_reference'=>$accountReference]);
     }
 
     public function processWebhook(string $provider,string $tenantSlug,string $rawBody,array $headers,array $query):array
     {
         $provider=strtolower($provider);
-        if(!in_array($provider,self::PROVIDERS,true)) throw new RuntimeException('Provedor não suportado.');
+        if(!in_array($provider,self::PROVIDERS,true))throw new RuntimeException('Provedor não suportado.');
         $pdo=Database::connection();
         $stmt=$pdo->prepare('SELECT g.*,t.id tenant_id,t.slug tenant_slug FROM payment_gateways g JOIN tenants t ON t.id=g.tenant_id WHERE t.slug=? AND t.status="active" AND g.provider=? AND g.active=1 LIMIT 1');
         $stmt->execute([$tenantSlug,$provider]);
         $gateway=$stmt->fetch();
-        if(!$gateway) throw new RuntimeException('Gateway não localizado.');
+        if(!$gateway)throw new RuntimeException('Gateway não localizado.');
         $tenantId=(int)$gateway['tenant_id'];
         $config=Crypto::decryptJson($gateway['config_encrypted']);
-        $secret=Crypto::decrypt($gateway['webhook_secret_encrypted']);
-        if($secret==='') throw new RuntimeException('Segredo do webhook não configurado.');
+        $secret=$provider==='pagbank'?(string)($config['token']??''):Crypto::decrypt($gateway['webhook_secret_encrypted']);
+        if($secret==='')throw new RuntimeException($provider==='pagbank'?'Token PagBank não configurado.':'Segredo do webhook não configurado.');
 
         $verified=match($provider){
             'stripe'=>$this->verifyStripe($gateway,$config,$secret,$rawBody,$headers),
@@ -50,7 +62,7 @@ final class GatewayService
             $ins=$pdo->prepare('INSERT INTO webhook_events (tenant_id,provider,external_event_id,signature_valid,payload_hash,status) VALUES (?,?,?,1,?,"received")');
             $ins->execute([$tenantId,$provider,$eventId,$hash]);
         }catch(\PDOException $e){
-            if((string)$e->getCode()==='23000') return ['ok'=>true,'duplicate'=>true];
+            if((string)$e->getCode()==='23000')return ['ok'=>true,'duplicate'=>true];
             throw $e;
         }
         try{
@@ -69,69 +81,124 @@ final class GatewayService
 
     private function verifyStripe(array $gateway,array $config,string $secret,string $raw,array $headers):array
     {
-        if(!class_exists('Stripe\\Webhook')||!class_exists('Stripe\\StripeClient')) throw new RuntimeException('Execute composer install para habilitar Stripe.');
+        if(!class_exists('Stripe\\Webhook')||!class_exists('Stripe\\StripeClient'))throw new RuntimeException('Execute composer install para habilitar Stripe.');
         $signature=$this->header($headers,'stripe-signature');
-        if($signature==='') throw new RuntimeException('Stripe-Signature ausente.');
+        if($signature==='')throw new RuntimeException('Stripe-Signature ausente.');
         $event=\Stripe\Webhook::constructEvent($raw,$signature,$secret,300);
         $eventId=(string)$event->id;
         $object=$event->data->object??null;
         $paymentIntentId='';
-        if(($object->object??'')==='payment_intent') $paymentIntentId=(string)$object->id;
-        elseif(($object->payment_intent??'')!=='') $paymentIntentId=(string)$object->payment_intent;
-        if($paymentIntentId==='') return ['external_event_id'=>$eventId,'paid'=>false];
+        if(($object->object??'')==='payment_intent')$paymentIntentId=(string)$object->id;
+        elseif(($object->payment_intent??'')!=='')$paymentIntentId=(string)$object->payment_intent;
+        if($paymentIntentId==='')return ['external_event_id'=>$eventId,'paid'=>false];
         $key=(string)($config['secret_key']??'');
-        if($key==='') throw new RuntimeException('Chave Stripe ausente.');
+        if($key==='')throw new RuntimeException('Chave Stripe ausente.');
         $client=new \Stripe\StripeClient($key);
         $account=$client->accounts->retrieve();
-        if((string)$account->id!==(string)$gateway['account_reference']) throw new RuntimeException('Conta Stripe divergente.');
+        if((string)$account->id!==(string)$gateway['account_reference'])throw new RuntimeException('Conta Stripe divergente.');
         $pi=$client->paymentIntents->retrieve($paymentIntentId,[]);
         $orderId=(int)($pi->metadata->order_id??0);
         $tenantId=(int)($pi->metadata->tenant_id??0);
-        if($tenantId!==(int)$gateway['tenant_id']||$orderId<1) throw new RuntimeException('Metadados Stripe inválidos.');
+        if($tenantId!==(int)$gateway['tenant_id']||$orderId<1)throw new RuntimeException('Metadados Stripe inválidos.');
         return ['external_event_id'=>$eventId,'paid'=>(string)$pi->status==='succeeded','tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'stripe','provider_payment_id'=>(string)$pi->id,'amount_cents'=>(int)($pi->amount_received?:$pi->amount),'currency'=>strtoupper((string)$pi->currency),'account_reference'=>(string)$account->id,'raw_status'=>(string)$pi->status];
     }
 
-    private function verifyPagBank(array $gateway,array $config,string $secret,string $raw,array $headers):array
+    private function verifyPagBank(array $gateway,array $config,string $signatureToken,string $raw,array $headers):array
     {
         $received=$this->header($headers,'x-authenticity-token');
-        $expected=hash('sha256',$secret.'-'.$raw);
-        if($received===''||!hash_equals(strtolower($expected),strtolower(trim($received)))) throw new RuntimeException('Assinatura PagBank inválida.');
+        $expected=hash('sha256',$signatureToken.'-'.$raw);
+        if($received===''||!hash_equals(strtolower($expected),strtolower(trim($received))))throw new RuntimeException('Assinatura PagBank inválida.');
         $payload=json_decode($raw,true,512,JSON_THROW_ON_ERROR);
-        $orderExternal=(string)($payload['id']??'');
-        if($orderExternal==='') throw new RuntimeException('Pedido PagBank ausente.');
+        $resourceId=(string)($payload['id']??'');
+        if($resourceId==='')throw new RuntimeException('Identificador PagBank ausente.');
+
         $token=(string)($config['token']??'');
-        if($token==='') throw new RuntimeException('Token PagBank ausente.');
+        if($token==='')throw new RuntimeException('Token PagBank ausente.');
         $base=rtrim((string)($config['api_base']??'https://api.pagseguro.com'),'/');
-        $order=$this->httpJson('GET',$base.'/orders/'.rawurlencode($orderExternal),['Authorization: Bearer '.$token]);
-        [$tenantId,$orderId]=$this->parseReference((string)($order['reference_id']??''));
-        if($tenantId!==(int)$gateway['tenant_id']) throw new RuntimeException('Empresa PagBank divergente.');
-        $paidCharge=null;
-        foreach(($order['charges']??[]) as $charge){if(($charge['status']??'')==='PAID'){$paidCharge=$charge;break;}}
-        return ['external_event_id'=>$orderExternal.':'.hash('sha256',$raw),'paid'=>$paidCharge!==null,'tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'pagbank','provider_payment_id'=>(string)($paidCharge['id']??$orderExternal),'amount_cents'=>$paidCharge?(int)($paidCharge['amount']['value']??0):0,'currency'=>'BRL','account_reference'=>(string)$gateway['account_reference'],'raw_status'=>(string)($paidCharge['status']??'')];
+        $credentialReference=$this->pagBankCredentialReference($config);
+        if($credentialReference===''||$credentialReference!==(string)$gateway['account_reference'])throw new RuntimeException('Credencial PagBank divergente.');
+
+        if(str_starts_with($resourceId,'CHEC_')){
+            $resource=$this->httpJson('GET',$base.'/checkouts/'.rawurlencode($resourceId).'?limit=100',['Authorization: Bearer '.$token]);
+            [$tenantId,$orderId]=$this->parseReference((string)($resource['reference_id']??''));
+            if($tenantId!==(int)$gateway['tenant_id'])throw new RuntimeException('Empresa PagBank divergente.');
+            $transactions=[];
+            foreach(['payments','charges'] as $key){if(!empty($resource[$key])&&is_array($resource[$key]))$transactions=array_merge($transactions,$resource[$key]);}
+            $paid=$this->findPagBankPaidTransaction($transactions,$base,$token);
+            return $this->pagBankVerifiedResult($resourceId,$raw,$tenantId,$orderId,$credentialReference,$paid,(string)($resource['status']??''));
+        }
+
+        if(str_starts_with($resourceId,'ORDE_')){
+            $resource=$this->httpJson('GET',$base.'/orders/'.rawurlencode($resourceId),['Authorization: Bearer '.$token]);
+            [$tenantId,$orderId]=$this->parseReference((string)($resource['reference_id']??''));
+            if($tenantId!==(int)$gateway['tenant_id'])throw new RuntimeException('Empresa PagBank divergente.');
+            $paid=$this->findPagBankPaidTransaction(is_array($resource['charges']??null)?$resource['charges']:[],$base,$token);
+            return $this->pagBankVerifiedResult($resourceId,$raw,$tenantId,$orderId,$credentialReference,$paid,(string)($resource['status']??''));
+        }
+
+        throw new RuntimeException('Tipo de notificação PagBank não reconhecido.');
+    }
+
+    private function findPagBankPaidTransaction(array $transactions,string $base,string $token):?array
+    {
+        foreach($transactions as $transaction){
+            $status=strtoupper((string)($transaction['status']??''));
+            if(!in_array($status,['PAID','APPROVED'],true))continue;
+            $id=(string)($transaction['id']??'');
+            if($id!==''&&str_starts_with($id,'CHAR_')){
+                try{$transaction=$this->httpJson('GET',$base.'/charges/'.rawurlencode($id),['Authorization: Bearer '.$token]);}catch(\Throwable){}
+            }
+            return $transaction;
+        }
+        return null;
+    }
+
+    private function pagBankVerifiedResult(string $resourceId,string $raw,int $tenantId,int $orderId,string $credentialReference,?array $paid,string $resourceStatus):array
+    {
+        $amount=$paid?(int)($paid['amount']['value']??$paid['amount']['summary']['paid']??$paid['summary']['paid']??0):0;
+        $currency=$paid?(string)($paid['amount']['currency']??'BRL'):'BRL';
+        return [
+            'external_event_id'=>$resourceId.':'.hash('sha256',$raw),
+            'paid'=>$paid!==null,
+            'tenant_id'=>$tenantId,
+            'order_id'=>$orderId,
+            'provider'=>'pagbank',
+            'provider_payment_id'=>(string)($paid['id']??$resourceId),
+            'amount_cents'=>$amount,
+            'currency'=>$currency,
+            'account_reference'=>$credentialReference,
+            'raw_status'=>(string)($paid['status']??$resourceStatus),
+        ];
     }
 
     private function verifyMercadoPago(array $gateway,array $config,string $secret,string $raw,array $headers,array $query):array
     {
-        if(!class_exists('MercadoPago\\Webhook\\WebhookSignatureValidator')) throw new RuntimeException('Execute composer install para habilitar Mercado Pago.');
+        if(!class_exists('MercadoPago\\Webhook\\WebhookSignatureValidator'))throw new RuntimeException('Execute composer install para habilitar Mercado Pago.');
         $sig=$this->header($headers,'x-signature');
         $requestId=$this->header($headers,'x-request-id');
         $payload=json_decode($raw,true,512,JSON_THROW_ON_ERROR);
         $dataId=(string)($query['data.id']??$query['data_id']??($payload['data']['id']??''));
-        if($sig===''||$requestId===''||$dataId==='') throw new RuntimeException('Cabeçalhos Mercado Pago incompletos.');
+        if($sig===''||$requestId===''||$dataId==='')throw new RuntimeException('Cabeçalhos Mercado Pago incompletos.');
         \MercadoPago\Webhook\WebhookSignatureValidator::validate($sig,$requestId,$dataId,$secret);
         $token=(string)($config['access_token']??'');
-        if($token==='') throw new RuntimeException('Access token Mercado Pago ausente.');
+        if($token==='')throw new RuntimeException('Access token Mercado Pago ausente.');
         $payment=$this->httpJson('GET','https://api.mercadopago.com/v1/payments/'.rawurlencode($dataId),['Authorization: Bearer '.$token]);
         [$tenantId,$orderId]=$this->parseReference((string)($payment['external_reference']??''));
-        if($tenantId!==(int)$gateway['tenant_id']) throw new RuntimeException('Empresa Mercado Pago divergente.');
+        if($tenantId!==(int)$gateway['tenant_id'])throw new RuntimeException('Empresa Mercado Pago divergente.');
         $collector=(string)($payment['collector_id']??'');
-        if($collector===''||$collector!==(string)$gateway['account_reference']) throw new RuntimeException('Conta Mercado Pago divergente.');
+        if($collector===''||$collector!==(string)$gateway['account_reference'])throw new RuntimeException('Conta Mercado Pago divergente.');
         return ['external_event_id'=>(string)($payload['id']??$requestId.':'.$dataId.':'.($payload['action']??'')),'paid'=>(($payment['status']??'')==='approved'),'tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'mercadopago','provider_payment_id'=>(string)$payment['id'],'amount_cents'=>(int)round(((float)($payment['transaction_amount']??0))*100),'currency'=>(string)($payment['currency_id']??'BRL'),'account_reference'=>$collector,'raw_status'=>(string)($payment['status']??'')];
+    }
+
+    private function pagBankCredentialReference(array $config):string
+    {
+        $token=trim((string)($config['token']??''));
+        return $token===''?'':'PGB_'.strtoupper(substr(hash('sha256',$token),0,32));
     }
 
     private function parseReference(string $reference):array
     {
-        if(!preg_match('/^eventmenu:(\d+):(\d+)$/',$reference,$m)) throw new RuntimeException('Referência do pedido inválida.');
+        if(!preg_match('/^eventmenu:(\d+):(\d+)$/',$reference,$m))throw new RuntimeException('Referência do pedido inválida.');
         return [(int)$m[1],(int)$m[2]];
     }
 
@@ -139,7 +206,7 @@ final class GatewayService
     {
         $name=strtolower($name);
         foreach($headers as $k=>$v){
-            if(strtolower((string)$k)===$name) return is_array($v)?(string)reset($v):(string)$v;
+            if(strtolower((string)$k)===$name)return is_array($v)?(string)reset($v):(string)$v;
         }
         return '';
     }
@@ -147,18 +214,18 @@ final class GatewayService
     private function httpJson(string $method,string $url,array $headers=[],?array $body=null):array
     {
         $ch=curl_init($url);
-        if($ch===false) throw new RuntimeException('Falha ao iniciar HTTP.');
+        if($ch===false)throw new RuntimeException('Falha ao iniciar HTTP.');
         $headers[]='Accept: application/json';
-        if($body!==null) $headers[]='Content-Type: application/json';
+        if($body!==null)$headers[]='Content-Type: application/json';
         curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>20]);
-        if($body!==null) curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR));
+        if($body!==null)curl_setopt($ch,CURLOPT_POSTFIELDS,json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR));
         $response=curl_exec($ch);
         $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
         $error=curl_error($ch);
         curl_close($ch);
-        if($response===false||$status<200||$status>=300) throw new RuntimeException('Falha na consulta ao provedor HTTP '.$status.($error?' - '.$error:''));
+        if($response===false||$status<200||$status>=300)throw new RuntimeException('Falha na consulta ao provedor HTTP '.$status.($error?' - '.$error:''));
         $data=json_decode((string)$response,true,512,JSON_THROW_ON_ERROR);
-        if(!is_array($data)) throw new RuntimeException('Resposta inválida do provedor.');
+        if(!is_array($data))throw new RuntimeException('Resposta inválida do provedor.');
         return $data;
     }
 }
