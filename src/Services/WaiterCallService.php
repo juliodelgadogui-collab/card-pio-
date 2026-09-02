@@ -18,6 +18,7 @@ final class WaiterCallService
             $s=$pdo->prepare('SELECT id,tenant_id,unit_id,name,status FROM restaurant_tables WHERE qr_token=? LIMIT 1 FOR UPDATE');
             $s->execute([$token]);$table=$s->fetch();
             if(!$table||$table['status']==='inactive')throw new RuntimeException('Mesa indisponível.');
+            TenantModuleService::requireModule((int)$table['tenant_id'],'restaurant');
             $c=$pdo->prepare('SELECT id FROM waiter_calls WHERE tenant_id=? AND table_id=? AND type=? AND status="open" LIMIT 1');
             $c->execute([$table['tenant_id'],$table['id'],$type]);$existing=$c->fetchColumn();
             if($existing)return(int)$existing;
@@ -35,6 +36,7 @@ final class WaiterCallService
 
     public function resolve(int $tenantId,int $id):void
     {
+        TenantModuleService::requireModule($tenantId,'restaurant');
         if(!Auth::can('waiter.calls')&&!Auth::can('tables.manage'))throw new RuntimeException('Sem permissão para resolver chamadas.');
         $s=Database::connection()->prepare('UPDATE waiter_calls SET status="resolved",resolved_by=?,resolved_at=UTC_TIMESTAMP() WHERE id=? AND tenant_id=? AND status="open"');
         $s->execute([Auth::id(),$id,$tenantId]);
