@@ -30,11 +30,11 @@ $checks=[class_exists(Auth::class),class_exists(Security::class),class_exists(Ch
 
 $old=$_SESSION;
 $_SESSION=['user_id'=>100,'tenant_id'=>1,'name'=>'Teste'];
-$_SESSION['role']='counter';$checks[] = Auth::homeRoute()==='pos';$checks[] = Auth::can('orders.create');$checks[] = Auth::can('fulfillment.manage');$checks[] = !Auth::can('payments.manage');$checks[] = Auth::roleLabel()==='Balconista';
-$_SESSION['role']='cashier';$checks[] = Auth::homeRoute()==='pos';$checks[] = Auth::can('payments.manage');$checks[] = Auth::roleLabel()==='Caixa';
-$_SESSION['role']='kitchen';$checks[] = Auth::homeRoute()==='kitchen';$checks[] = Auth::can('orders.kitchen');$checks[] = !Auth::can('payments.manage');
-$_SESSION['role']='delivery';$checks[] = Auth::homeRoute()==='my-deliveries';$checks[] = Auth::can('orders.delivery');$checks[] = !Auth::can('payments.manage');
-$_SESSION['role']='waiter';$checks[] = Auth::homeRoute()==='restaurant';$checks[] = !Auth::can('payments.manage');
+$_SESSION['role']='counter';$checks[]=Auth::homeRoute()==='pos';$checks[]=Auth::can('orders.create');$checks[]=Auth::can('fulfillment.manage');$checks[]=Auth::can('counter.orders');$checks[]=!Auth::can('orders.view');$checks[]=!Auth::can('payments.manage');$checks[]=Auth::roleLabel()==='Balconista';
+$_SESSION['role']='cashier';$checks[]=Auth::homeRoute()==='pos';$checks[]=Auth::can('payments.manage');$checks[]=Auth::can('orders.view');$checks[]=Auth::roleLabel()==='Caixa';
+$_SESSION['role']='kitchen';$checks[]=Auth::homeRoute()==='kitchen';$checks[]=Auth::can('orders.kitchen');$checks[]=!Auth::can('orders.view');$checks[]=!Auth::can('payments.manage');
+$_SESSION['role']='delivery';$checks[]=Auth::homeRoute()==='my-deliveries';$checks[]=Auth::can('orders.delivery');$checks[]=!Auth::can('orders.view');$checks[]=!Auth::can('payments.manage');
+$_SESSION['role']='waiter';$checks[]=Auth::homeRoute()==='restaurant';$checks[]=Auth::can('tables.manage');$checks[]=!Auth::can('payments.manage');
 $_SESSION=$old;
 
 if(in_array(false,$checks,true)){fwrite(STDERR,"Smoke test failed\n");exit(1);}echo "Smoke test OK\n";
