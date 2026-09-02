@@ -25,13 +25,36 @@ function load_env(string $path):void
 }
 
 load_env(__DIR__.'/../.env');
-
 date_default_timezone_set('UTC');
 
 function env(string $key,mixed $default=null):mixed
 {
     $value=$_ENV[$key]??getenv($key);
     return($value===false||$value===null||$value==='')?$default:$value;
+}
+
+function app_base_path():string
+{
+    $script=(string)($_SERVER['SCRIPT_NAME']??'');
+    $scriptDir=$script!==''?str_replace('\\','/',dirname($script)):'';
+    if($scriptDir==='/'||$scriptDir==='.')$scriptDir='';
+
+    $configured=(string)env('APP_URL','');
+    $configuredPath=$configured!==''?(string)(parse_url($configured,PHP_URL_PATH)??''):'';
+    $configuredPath=rtrim($configuredPath,'/');
+    if($configuredPath==='/')$configuredPath='';
+
+    // O caminho real da requisição tem prioridade em instalações de teste em subpastas.
+    return $scriptDir!==''?$scriptDir:$configuredPath;
+}
+
+function app_url(string $path=''):string
+{
+    $base=app_base_path();
+    if($path==='')return $base!==''?$base.'/':'/';
+    if(!str_starts_with($path,'/'))$path='/'.$path;
+    if($base!==''&&($path===$base||str_starts_with($path,$base.'/')))return $path;
+    return $base.$path;
 }
 
 $vendor=__DIR__.'/../vendor/autoload.php';
@@ -44,6 +67,42 @@ spl_autoload_register(function(string $class):void{
     $path=__DIR__.'/../src/'.str_replace('\\','/',$relative).'.php';
     if(is_file($path))require $path;
 });
+
+if(PHP_SAPI!=='cli'){
+    $base=app_base_path();
+
+    // Compatibilidade com rotas antigas que ainda retornem Location: /...
+    if(function_exists('header_register_callback')){
+        header_register_callback(static function()use($base):void{
+            if($base==='')return;
+            foreach(headers_list() as$h){
+                if(strncasecmp($h,'Location:',9)!==0)continue;
+                $location=trim(substr($h,9));
+                if($location===''||!str_starts_with($location,'/')||str_starts_with($location,'//'))return;
+                if($location===$base||str_starts_with($location,$base.'/'))return;
+                $code=http_response_code();
+                header_remove('Location');
+                header('Location: '.$base.$location,true,($code>=300&&$code<400)?$code:302);
+                return;
+            }
+        });
+    }
+
+    // Corrige href/src/action absolutos antigos sem duplicar o prefixo da subpasta.
+    if($base!==''&&ob_get_level()===0){
+        ob_start(static function(string $buffer)use($base):string{
+            return preg_replace_callback(
+                '~\b(href|src|action)=(['."'\"".'\'])(/[^' . "\"'" . '>]*)\2~i',
+                static function(array $m)use($base):string{
+                    $path=$m[3];
+                    if(str_starts_with($path,'//')||$path===$base||str_starts_with($path,$base.'/'))return$m[0];
+                    return$m[1].'='.$m[2].$base.$path.$m[2];
+                },
+                $buffer
+            )??$buffer;
+        });
+    }
+}
 
 if(PHP_SAPI!=='cli'&&!headers_sent()){
     header('Cache-Control: no-store, no-cache, must-revalidate, private');
