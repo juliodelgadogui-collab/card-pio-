@@ -10,15 +10,15 @@ use RuntimeException;
 
 final class PublicOrderService
 {
-    public function createDelivery(int $tenantId,array $cart,array $buyer,string $address,?string $couponCode=null):array
+    public function createDelivery(int $tenantId,array $cart,array $buyer,string $address,?string $couponCode=null,?string $scheduledFor=null):array
     {
-        return Database::transaction(function(PDO $pdo)use($tenantId,$cart,$buyer,$address,$couponCode){
+        return Database::transaction(function(PDO $pdo)use($tenantId,$cart,$buyer,$address,$couponCode,$scheduledFor){
             $tenant=$pdo->prepare('SELECT id,status FROM tenants WHERE id=? FOR UPDATE');
             $tenant->execute([$tenantId]);
             $t=$tenant->fetch();
             if(!$t||$t['status']!=='active')throw new RuntimeException('Empresa indisponível.');
-            (new OnlineOrderingService())->assertDeliveryOpen($pdo,$tenantId);
 
+            $schedule=(new OrderSchedulingService())->reserve($pdo,$tenantId,'delivery',$scheduledFor);
             [$items,$subtotal]=$this->validatedItems($pdo,$tenantId,$cart);
             $name=trim((string)($buyer['name']??''));
             $phone=trim((string)($buyer['phone']??''));
@@ -37,19 +37,61 @@ final class PublicOrderService
             $publicToken=bin2hex(random_bytes(20));
             $expires=(new \DateTimeImmutable('+20 minutes'))->format('Y-m-d H:i:s');
 
-            $s=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,coupon_id,delivery_zone_id,channel,status,payment_status,expires_at,subtotal_cents,discount_cents,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes,total_cents,delivery_address,delivery_postal_code,delivery_neighborhood,delivery_city) VALUES (?,?,?,?,?,"delivery","pending","unpaid",?,?,?,?,?,?,?,?,?,?,?)');
-            $s->execute([$publicToken,$tenantId,$customerId,$couponId,$delivery['zone_id'],$expires,$subtotal,$discount,$fee,$delivery['eta_min_minutes'],$delivery['eta_max_minutes'],$total,$address,$postalCode?:null,$neighborhood?:null,$city?:null]);
+            $s=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,coupon_id,delivery_zone_id,channel,status,payment_status,expires_at,scheduled_for,scheduled_slot_minutes,subtotal_cents,discount_cents,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes,total_cents,delivery_address,delivery_postal_code,delivery_neighborhood,delivery_city) VALUES (?,?,?,?,?,"delivery","pending","unpaid",?,?,?,?,?,?,?,?,?,?,?,?,?)');
+            $s->execute([$publicToken,$tenantId,$customerId,$couponId,$delivery['zone_id'],$expires,$schedule['scheduled_for'],$schedule['slot_minutes'],$subtotal,$discount,$fee,$delivery['eta_min_minutes'],$delivery['eta_max_minutes'],$total,$address,$postalCode?:null,$neighborhood?:null,$city?:null]);
             $orderId=(int)$pdo->lastInsertId();
             $this->insertItems($pdo,$orderId,$items);
+            $this->createCouponReservation($pdo,$tenantId,$couponId,$orderId,$discount,$expires);
 
-            if($couponId){
-                $pdo->prepare('INSERT INTO coupon_reservations (tenant_id,coupon_id,order_id,discount_cents,status,expires_at) VALUES (?,?,?,?,"reserved",?)')->execute([$tenantId,$couponId,$orderId,$discount,$expires]);
-                $pdo->prepare('UPDATE coupons SET reserved_count=reserved_count+1 WHERE id=?')->execute([$couponId]);
-            }
+            $pdo->prepare('INSERT INTO delivery_events (tenant_id,order_id,user_id,event_type,metadata) VALUES (?,?,NULL,"created",?)')->execute([$tenantId,$orderId,json_encode([
+                'zone_id'=>$delivery['zone_id'],'zone'=>$delivery['zone_name'],'fee_cents'=>$fee,
+                'eta_min_minutes'=>$delivery['eta_min_minutes'],'eta_max_minutes'=>$delivery['eta_max_minutes'],
+                'postal_code'=>$postalCode,'neighborhood'=>$neighborhood,'city'=>$city,
+                'scheduled_for'=>$schedule['scheduled_for'],'schedule_label'=>$schedule['label'],
+            ],JSON_UNESCAPED_UNICODE)]);
 
-            $pdo->prepare('INSERT INTO delivery_events (tenant_id,order_id,user_id,event_type,metadata) VALUES (?,?,NULL,"created",?)')->execute([$tenantId,$orderId,json_encode(['zone_id'=>$delivery['zone_id'],'zone'=>$delivery['zone_name'],'fee_cents'=>$fee,'eta_min_minutes'=>$delivery['eta_min_minutes'],'eta_max_minutes'=>$delivery['eta_max_minutes'],'postal_code'=>$postalCode,'neighborhood'=>$neighborhood,'city'=>$city],JSON_UNESCAPED_UNICODE)]);
+            return [
+                'order_id'=>$orderId,'public_token'=>$publicToken,'channel'=>'delivery',
+                'subtotal_cents'=>$subtotal,'discount_cents'=>$discount,'delivery_fee_cents'=>$fee,
+                'delivery_zone'=>$delivery['zone_name'],'eta_min_minutes'=>$delivery['eta_min_minutes'],'eta_max_minutes'=>$delivery['eta_max_minutes'],
+                'scheduled_for'=>$schedule['scheduled_for'],'schedule_label'=>$schedule['label'],
+                'total_cents'=>$total,'expires_at'=>$expires,
+            ];
+        });
+    }
 
-            return ['order_id'=>$orderId,'public_token'=>$publicToken,'subtotal_cents'=>$subtotal,'discount_cents'=>$discount,'delivery_fee_cents'=>$fee,'delivery_zone'=>$delivery['zone_name'],'eta_min_minutes'=>$delivery['eta_min_minutes'],'eta_max_minutes'=>$delivery['eta_max_minutes'],'total_cents'=>$total,'expires_at'=>$expires];
+    public function createPickup(int $tenantId,array $cart,array $buyer,?string $couponCode=null,?string $scheduledFor=null):array
+    {
+        return Database::transaction(function(PDO $pdo)use($tenantId,$cart,$buyer,$couponCode,$scheduledFor){
+            $tenant=$pdo->prepare('SELECT id,status FROM tenants WHERE id=? FOR UPDATE');
+            $tenant->execute([$tenantId]);
+            $t=$tenant->fetch();
+            if(!$t||$t['status']!=='active')throw new RuntimeException('Empresa indisponível.');
+
+            $schedule=(new OrderSchedulingService())->reserve($pdo,$tenantId,'pickup',$scheduledFor);
+            [$items,$subtotal]=$this->validatedItems($pdo,$tenantId,$cart);
+            $name=trim((string)($buyer['name']??''));
+            $phone=trim((string)($buyer['phone']??''));
+            $email=mb_strtolower(trim((string)($buyer['email']??'')));
+            if($name===''||$phone==='')throw new RuntimeException('Nome e telefone são obrigatórios para retirada.');
+            $customerId=$this->upsertCustomer($pdo,$tenantId,$name,$phone,$email);
+            [$couponId,$discount]=$this->reserveCouponData($pdo,$tenantId,$subtotal,$couponCode);
+            $total=max(0,$subtotal-$discount);
+            $publicToken=bin2hex(random_bytes(20));
+            $expires=(new \DateTimeImmutable('+20 minutes'))->format('Y-m-d H:i:s');
+
+            $s=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,coupon_id,channel,status,payment_status,expires_at,scheduled_for,scheduled_slot_minutes,subtotal_cents,discount_cents,delivery_fee_cents,total_cents) VALUES (?,?,?,? ,"pickup","pending","unpaid",?,?,?,?,?,0,?)');
+            $s->execute([$publicToken,$tenantId,$customerId,$couponId,$expires,$schedule['scheduled_for'],$schedule['slot_minutes'],$subtotal,$discount,$total]);
+            $orderId=(int)$pdo->lastInsertId();
+            $this->insertItems($pdo,$orderId,$items);
+            $this->createCouponReservation($pdo,$tenantId,$couponId,$orderId,$discount,$expires);
+
+            return [
+                'order_id'=>$orderId,'public_token'=>$publicToken,'channel'=>'pickup',
+                'subtotal_cents'=>$subtotal,'discount_cents'=>$discount,'delivery_fee_cents'=>0,
+                'scheduled_for'=>$schedule['scheduled_for'],'schedule_label'=>$schedule['label'],
+                'total_cents'=>$total,'expires_at'=>$expires,
+            ];
         });
     }
 
@@ -88,6 +130,13 @@ final class PublicOrderService
             (new StockService())->commitForOrder($pdo,$tenantId,$orderId);
             return ['order_id'=>$orderId,'public_token'=>$publicToken,'tab_id'=>$tabId,'table_name'=>$table['name'],'total_cents'=>$subtotal];
         });
+    }
+
+    private function createCouponReservation(PDO $pdo,int $tenantId,?int $couponId,int $orderId,int $discount,string $expires):void
+    {
+        if(!$couponId)return;
+        $pdo->prepare('INSERT INTO coupon_reservations (tenant_id,coupon_id,order_id,discount_cents,status,expires_at) VALUES (?,?,?,?,"reserved",?)')->execute([$tenantId,$couponId,$orderId,$discount,$expires]);
+        $pdo->prepare('UPDATE coupons SET reserved_count=reserved_count+1 WHERE id=?')->execute([$couponId]);
     }
 
     private function resolveDeliveryZone(PDO $pdo,int $tenantId,int $subtotal,array $buyer):array
