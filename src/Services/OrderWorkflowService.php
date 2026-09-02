@@ -38,6 +38,17 @@ final class OrderWorkflowService
             if($newStatus==='out_for_delivery'&&$order['channel']!=='delivery')throw new RuntimeException('Somente pedidos de delivery podem sair para entrega.');
             if($newStatus==='out_for_delivery'&&empty($order['assigned_delivery_user_id']))throw new RuntimeException('Atribua um entregador antes de sair para entrega.');
 
+            if(in_array($newStatus,['preparing','ready'],true)&&!empty($order['scheduled_for'])){
+                $settingsStmt=$pdo->prepare('SELECT settings FROM tenants WHERE id=? LIMIT 1');
+                $settingsStmt->execute([$tenantId]);
+                $settings=json_decode((string)($settingsStmt->fetchColumn()?:'{}'),true);if(!is_array($settings))$settings=[];
+                $lead=max(0,min(1440,(int)($settings['scheduled_kds_lead_minutes']??45)));
+                $scheduled=new \DateTimeImmutable((string)$order['scheduled_for'],new \DateTimeZone('UTC'));
+                $earliest=$scheduled->modify('-'.$lead.' minutes');
+                $now=new \DateTimeImmutable('now',new \DateTimeZone('UTC'));
+                if($now<$earliest)throw new RuntimeException('Pedido agendado ainda não entrou na janela de preparo.');
+            }
+
             if($newStatus==='cancelled'){
                 (new StockService())->reverseForOrder($pdo,$tenantId,$orderId);
                 $coupon=$pdo->prepare('SELECT id,coupon_id FROM coupon_reservations WHERE tenant_id=? AND order_id=? AND status="reserved" FOR UPDATE');
