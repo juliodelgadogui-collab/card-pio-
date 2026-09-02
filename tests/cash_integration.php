@@ -21,7 +21,7 @@ $_SESSION['user_id']=$userId;$_SESSION['tenant_id']=$tenantId;$_SESSION['role']=
 $pdo->prepare('INSERT INTO products (tenant_id,name,price_cents,stock_qty,track_stock,active) VALUES (?,"Venda caixa",2000,5,1,1)')->execute([$tenantId]);$productId=(int)$pdo->lastInsertId();
 
 $order=(new CounterOrderService())->create([$productId=>1]);
-$payment=new PaymentService();$key='cash-ci:'.$tenantId.':'.$order['order_id'];$payment->create((int)$order['order_id'],'manual',$key);
+$payment=new PaymentService();$key='cash-integration:'.$tenantId.':'.$order['order_id'].':'.$suffix;$payment->create((int)$order['order_id'],'manual',$key);
 $blocked=false;
 try{$payment->confirmVerified(['tenant_id'=>$tenantId,'order_id'=>(int)$order['order_id'],'provider'=>'manual','provider_payment_id'=>'MANUAL-CI-'.$suffix,'amount_cents'=>2000,'currency'=>'BRL','account_reference'=>'manual','manual_method'=>'cash']);}catch(RuntimeException $e){$blocked=str_contains($e->getMessage(),'Abra o caixa');}
 assert_cash($blocked,'pagamento manual foi aceito sem caixa aberto');
