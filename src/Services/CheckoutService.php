@@ -35,7 +35,7 @@ final class CheckoutService
         $open=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1');
         $open->execute([$order['tenant_id'],$order['id']]);
         $openPayment=$open->fetch();
-        if($openPayment&& !empty($openPayment['checkout_expires_at'])&&new \DateTimeImmutable((string)$openPayment['checkout_expires_at'])<=new \DateTimeImmutable()){
+        if($openPayment&&!empty($openPayment['checkout_expires_at'])&&new \DateTimeImmutable((string)$openPayment['checkout_expires_at'])<=new \DateTimeImmutable()){
             $state=(new CheckoutReconciliationService())->reconcilePayment((int)$openPayment['id']);
             if($state==='paid')throw new RuntimeException('Pagamento já foi confirmado. Atualize a página.');
             if($state!=='cancelled')throw new RuntimeException('O checkout expirou, mas a conciliação com o provedor ainda está pendente. Não será criada outra cobrança até essa situação ser resolvida.');
@@ -60,21 +60,36 @@ final class CheckoutService
         $attempt=$this->prepareAttempt($order,$provider);
         $paymentId=(int)$attempt['id'];
         $key=(string)$attempt['idempotency_key'];
+        $providerKey=$this->providerIdempotencyKey($key);
         $expiresAt=new \DateTimeImmutable((string)$attempt['checkout_expires_at']);
+        $attemptRaw=$this->decodePayload($attempt['raw_payload']??null);
+
+        if($provider==='mercadopago'&&(bool)$attempt['_reused']){
+            $recovered=$this->recoverMercadoPagoPreference($order,$config,$expiresAt);
+            if($recovered!==null)return $this->persistCheckoutResult($paymentId,$provider,$recovered,$expiresAt,true,$providerKey);
+            if(!empty($attemptRaw['_eventmenu_checkout_uncertain']))throw new RuntimeException('A criação anterior no Mercado Pago ficou sem resposta conclusiva. O EventMenu não criará outra preferência até a conciliação confirmar o estado da tentativa.');
+        }
 
         try{
             $result=match($provider){
-                'stripe'=>$this->stripe($order,$gateway,$config,$key,$expiresAt),
-                'mercadopago'=>$this->mercadoPago($order,$gateway,$config,$key,$expiresAt),
-                'pagbank'=>$this->pagBank($order,$gateway,$config,$key,$expiresAt),
+                'stripe'=>$this->stripe($order,$gateway,$config,$providerKey,$expiresAt),
+                'mercadopago'=>$this->mercadoPago($order,$gateway,$config,$providerKey,$expiresAt),
+                'pagbank'=>$this->pagBank($order,$gateway,$config,$providerKey,$expiresAt),
             };
-            $payload=$result['raw'];
-            $payload['_eventmenu_checkout_url']=$result['url'];
-            $payload['_eventmenu_checkout_expires_at']=$expiresAt->format(DATE_ATOM);
-            $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="pending",raw_payload=? WHERE id=?')->execute([$result['external_id'],json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
-            return ['provider'=>$provider,'url'=>$result['url'],'payment_id'=>$paymentId,'reused'=>(bool)$attempt['_reused'],'expires_at'=>$expiresAt->format(DATE_ATOM)];
+            return $this->persistCheckoutResult($paymentId,$provider,$result,$expiresAt,(bool)$attempt['_reused'],$providerKey);
         }catch(\Throwable $e){
-            $pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode(['error'=>$e->getMessage(),'idempotency_key'=>$key,'_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM)],JSON_UNESCAPED_UNICODE),$paymentId]);
+            if($provider==='mercadopago'&&!$this->isDefinitiveGatewayFailure($e)){
+                try{
+                    $recovered=$this->recoverMercadoPagoPreference($order,$config,$expiresAt);
+                    if($recovered!==null)return $this->persistCheckoutResult($paymentId,$provider,$recovered,$expiresAt,true,$providerKey);
+                }catch(\Throwable){}
+                $payload=['error'=>$e->getMessage(),'idempotency_key'=>$key,'provider_idempotency_key'=>$providerKey,'_eventmenu_checkout_uncertain'=>true,'_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM)];
+                $pdo->prepare('UPDATE payments SET status="created",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
+                $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status<>"paid"')->execute([$order['id']]);
+                throw new RuntimeException('O Mercado Pago não retornou uma resposta conclusiva. A tentativa foi preservada para conciliação e nenhuma nova cobrança será criada automaticamente.',0,$e);
+            }
+
+            $pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode(['error'=>$e->getMessage(),'idempotency_key'=>$key,'provider_idempotency_key'=>$providerKey,'_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM)],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
             $pdo->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND payment_status="pending"')->execute([$order['id']]);
             throw $e;
         }
@@ -104,6 +119,7 @@ final class CheckoutService
             if($previous&&$previous['status']==='failed'&&!empty($previous['checkout_expires_at'])&&new \DateTimeImmutable((string)$previous['checkout_expires_at'])>new \DateTimeImmutable()){
                 $pdo->prepare('UPDATE payments SET status="created",raw_payload=NULL WHERE id=?')->execute([$previous['id']]);
                 $previous['status']='created';
+                $previous['raw_payload']=null;
                 $previous['_reused']=true;
                 $this->extendReservation($pdo,$lockedOrder,new \DateTimeImmutable((string)$previous['checkout_expires_at']));
                 return $previous;
@@ -120,7 +136,7 @@ final class CheckoutService
             $ins->execute([$order['tenant_id'],$order['id'],$provider,$key,$order['total_cents'],$expiresAt->format('Y-m-d H:i:s')]);
             $id=(int)$pdo->lastInsertId();
             $this->extendReservation($pdo,$lockedOrder,$expiresAt);
-            return ['id'=>$id,'tenant_id'=>$order['tenant_id'],'order_id'=>$order['id'],'provider'=>$provider,'idempotency_key'=>$key,'amount_cents'=>$order['total_cents'],'status'=>'created','checkout_expires_at'=>$expiresAt->format('Y-m-d H:i:s'),'_reused'=>false];
+            return ['id'=>$id,'tenant_id'=>$order['tenant_id'],'order_id'=>$order['id'],'provider'=>$provider,'idempotency_key'=>$key,'amount_cents'=>$order['total_cents'],'status'=>'created','checkout_expires_at'=>$expiresAt->format('Y-m-d H:i:s'),'raw_payload'=>null,'_reused'=>false];
         });
     }
 
@@ -140,7 +156,30 @@ final class CheckoutService
         return is_array($decoded)?$decoded:[];
     }
 
-    private function stripe(array $order,array $gateway,array $config,string $key,\DateTimeImmutable $expiresAt):array
+    private function persistCheckoutResult(int $paymentId,string $provider,array $result,\DateTimeImmutable $expiresAt,bool $reused,string $providerKey):array
+    {
+        $url=(string)($result['url']??'');
+        $externalId=(string)($result['external_id']??'');
+        if($url===''||$externalId==='')throw new RuntimeException('Resposta incompleta do gateway.');
+        $payload=is_array($result['raw']??null)?$result['raw']:[];
+        $payload['_eventmenu_checkout_url']=$url;
+        $payload['_eventmenu_checkout_expires_at']=$expiresAt->format(DATE_ATOM);
+        $payload['_eventmenu_provider_idempotency_key']=$providerKey;
+        Database::connection()->prepare('UPDATE payments SET provider_payment_id=?,status="pending",raw_payload=? WHERE id=?')->execute([$externalId,json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
+        return ['provider'=>$provider,'url'=>$url,'payment_id'=>$paymentId,'reused'=>$reused,'expires_at'=>$expiresAt->format(DATE_ATOM)];
+    }
+
+    private function providerIdempotencyKey(string $localKey):string
+    {
+        return strtoupper(hash('sha256',$localKey));
+    }
+
+    private function isDefinitiveGatewayFailure(\Throwable $e):bool
+    {
+        return preg_match('/HTTP\s+4\d\d\b/',$e->getMessage())===1;
+    }
+
+    private function stripe(array $order,array $gateway,array $config,string $providerKey,\DateTimeImmutable $expiresAt):array
     {
         if(!class_exists('Stripe\\StripeClient'))throw new RuntimeException('Execute composer install para habilitar Stripe.');
         $secret=(string)($config['secret_key']??'');
@@ -160,11 +199,11 @@ final class CheckoutService
             'expires_at'=>$expiresAt->getTimestamp(),
             'success_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']).'&retorno=sucesso',
             'cancel_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']).'&retorno=cancelado',
-        ],['idempotency_key'=>$key]);
+        ],['idempotency_key'=>$providerKey]);
         return ['url'=>(string)$session->url,'external_id'=>(string)$session->id,'raw'=>$session->toArray()];
     }
 
-    private function mercadoPago(array $order,array $gateway,array $config,string $key,\DateTimeImmutable $expiresAt):array
+    private function mercadoPago(array $order,array $gateway,array $config,string $providerKey,\DateTimeImmutable $expiresAt):array
     {
         $token=(string)($config['access_token']??'');
         if($token==='')throw new RuntimeException('Mercado Pago não configurado.');
@@ -181,13 +220,42 @@ final class CheckoutService
             'expiration_date_from'=>$startsAt->format(DATE_ATOM),
             'expiration_date_to'=>$expiresAt->format(DATE_ATOM),
         ];
-        $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$key],$body);
+        $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$providerKey],$body);
         $url=(string)($data['init_point']??'');
         if($url==='')throw new RuntimeException('Mercado Pago não retornou URL de pagamento.');
         return ['url'=>$url,'external_id'=>(string)($data['id']??''),'raw'=>$data];
     }
 
-    private function pagBank(array $order,array $gateway,array $config,string $key,\DateTimeImmutable $expiresAt):array
+    private function recoverMercadoPagoPreference(array $order,array $config,\DateTimeImmutable $expiresAt):?array
+    {
+        $token=(string)($config['access_token']??'');
+        if($token==='')return null;
+        $reference='eventmenu:'.$order['tenant_id'].':'.$order['id'];
+        $url='https://api.mercadopago.com/checkout/preferences/search?'.http_build_query(['external_reference'=>$reference,'limit'=>20]);
+        $data=$this->httpGetJson($url,['Authorization: Bearer '.$token]);
+        $best=null;
+        foreach(($data['elements']??[]) as $candidate){
+            if((string)($candidate['external_reference']??$reference)!==$reference)continue;
+            $id=(string)($candidate['id']??'');
+            if($id==='')continue;
+            $detail=$this->httpGetJson('https://api.mercadopago.com/checkout/preferences/'.rawurlencode($id),['Authorization: Bearer '.$token]);
+            if((string)($detail['external_reference']??'')!==$reference)continue;
+            $to=(string)($detail['expiration_date_to']??'');
+            if($to!==''){
+                try{if(new \DateTimeImmutable($to)<new \DateTimeImmutable())continue;}catch(\Throwable){}
+            }
+            $initPoint=(string)($detail['init_point']??'');
+            if($initPoint==='')continue;
+            if($to!==''){
+                try{if(abs((new \DateTimeImmutable($to))->getTimestamp()-$expiresAt->getTimestamp())>120)continue;}catch(\Throwable){}
+            }
+            $best=['url'=>$initPoint,'external_id'=>$id,'raw'=>$detail];
+            break;
+        }
+        return $best;
+    }
+
+    private function pagBank(array $order,array $gateway,array $config,string $providerKey,\DateTimeImmutable $expiresAt):array
     {
         $token=(string)($config['token']??'');
         if($token==='')throw new RuntimeException('PagBank não configurado.');
@@ -205,7 +273,7 @@ final class CheckoutService
             'notification_urls'=>[$notification],
             'payment_notification_urls'=>[$notification],
         ];
-        $data=$this->httpJson('POST',$api.'/checkouts',['Authorization: Bearer '.$token,'x-idempotency-key: '.$key],$body);
+        $data=$this->httpJson('POST',$api.'/checkouts',['Authorization: Bearer '.$token,'x-idempotency-key: '.$providerKey],$body);
         $url='';
         foreach(($data['links']??[]) as $link){if(($link['rel']??'')==='PAY'){$url=(string)$link['href'];break;}}
         if($url==='')throw new RuntimeException('PagBank não retornou link de pagamento.');
@@ -216,12 +284,32 @@ final class CheckoutService
     {
         $ch=curl_init($url);
         if($ch===false)throw new RuntimeException('Falha HTTP.');
-        $headers[]='Accept: application/json';$headers[]='Content-Type: application/json';
+        $headers[]='Accept: application/json';
+        $headers[]='Content-Type: application/json';
         curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_POSTFIELDS=>json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>25]);
-        $response=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$err=curl_error($ch);curl_close($ch);
+        $response=curl_exec($ch);
+        $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
+        $err=curl_error($ch);
+        curl_close($ch);
         if($response===false||$status<200||$status>=300)throw new RuntimeException('Gateway recusou a criação da cobrança (HTTP '.$status.')'.($err?' '.$err:''));
         $data=json_decode((string)$response,true,512,JSON_THROW_ON_ERROR);
         if(!is_array($data))throw new RuntimeException('Resposta inválida do gateway.');
+        return $data;
+    }
+
+    private function httpGetJson(string $url,array $headers):array
+    {
+        $ch=curl_init($url);
+        if($ch===false)throw new RuntimeException('Falha HTTP durante recuperação do checkout.');
+        $headers[]='Accept: application/json';
+        curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPGET=>true,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>20]);
+        $response=curl_exec($ch);
+        $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
+        $err=curl_error($ch);
+        curl_close($ch);
+        if($response===false||$status<200||$status>=300)throw new RuntimeException('Falha ao recuperar checkout no provedor (HTTP '.$status.')'.($err?' '.$err:''));
+        $data=json_decode((string)$response,true,512,JSON_THROW_ON_ERROR);
+        if(!is_array($data))throw new RuntimeException('Resposta inválida ao recuperar checkout.');
         return $data;
     }
 }
