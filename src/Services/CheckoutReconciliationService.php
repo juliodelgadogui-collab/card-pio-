@@ -43,7 +43,7 @@ final class CheckoutReconciliationService
         if($payment['status']==='paid')return 'paid';
         if(in_array($payment['status'],['cancelled','failed','refunded'],true))return 'cancelled';
         if(!in_array($payment['status'],['created','pending','authorized'],true))return 'review';
-        if(empty($payment['provider_payment_id']))return 'review';
+        if(empty($payment['provider_payment_id'])&&$payment['provider']!=='mercadopago')return 'review';
 
         $gatewayStmt=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider=? LIMIT 1');
         $gatewayStmt->execute([$payment['tenant_id'],$payment['provider']]);
@@ -136,7 +136,29 @@ final class CheckoutReconciliationService
         }
         if($hasPending)return 'pending';
 
-        $preference=$this->httpJson('GET','https://api.mercadopago.com/checkout/preferences/'.rawurlencode((string)$payment['provider_payment_id']),['Authorization: Bearer '.$token]);
+        $preferenceId=(string)($payment['provider_payment_id']??'');
+        if($preferenceId===''){
+            $recovered=$this->recoverMercadoPagoPreference($payment,$gateway,$token,$reference);
+            if($recovered!==null){
+                $preferenceId=(string)$recovered['id'];
+                $raw=$this->decodePayload($payment['raw_payload']??null);
+                $raw=array_merge($raw,$recovered);
+                if(!empty($recovered['init_point']))$raw['_eventmenu_checkout_url']=$recovered['init_point'];
+                $raw['_eventmenu_checkout_recovered']=true;
+                $raw['_eventmenu_checkout_recovered_at']=date(DATE_ATOM);
+                Database::connection()->prepare('UPDATE payments SET provider_payment_id=?,status="pending",raw_payload=? WHERE id=? AND status IN ("created","pending","authorized")')->execute([$preferenceId,json_encode($raw,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$payment['id']]);
+            }elseif(!empty($payment['checkout_expires_at'])&&new \DateTimeImmutable((string)$payment['checkout_expires_at'])<=new \DateTimeImmutable()){
+                $this->cancelLocalAttempt((int)$payment['id'],['mercadopago_preference'=>'not_found_after_uncertain_create']);
+                return 'cancelled';
+            }else{
+                return 'review';
+            }
+        }
+
+        $preference=$this->httpJson('GET','https://api.mercadopago.com/checkout/preferences/'.rawurlencode($preferenceId),['Authorization: Bearer '.$token]);
+        if((string)($preference['external_reference']??'')!==$reference)throw new RuntimeException('Referência Mercado Pago divergente na preferência.');
+        $collector=(string)($preference['collector_id']??'');
+        if($collector!==''&&$collector!==(string)$gateway['account_reference'])throw new RuntimeException('Conta Mercado Pago divergente na preferência.');
         $expires=!empty($preference['expires']);
         $expiresAt=(string)($preference['expiration_date_to']??'');
         if($expires&&$expiresAt!==''){
@@ -149,11 +171,39 @@ final class CheckoutReconciliationService
         return 'pending';
     }
 
+    private function recoverMercadoPagoPreference(array $payment,array $gateway,string $token,string $reference):?array
+    {
+        $url='https://api.mercadopago.com/checkout/preferences/search?'.http_build_query(['external_reference'=>$reference,'limit'=>20]);
+        $search=$this->httpJson('GET',$url,['Authorization: Bearer '.$token]);
+        $expiresTs=!empty($payment['checkout_expires_at'])?(new \DateTimeImmutable((string)$payment['checkout_expires_at']))->getTimestamp():null;
+        $best=null;
+        $bestCreated=0;
+        foreach(($search['elements']??[]) as $candidate){
+            $id=(string)($candidate['id']??'');
+            if($id==='')continue;
+            $collector=(string)($candidate['collector_id']??'');
+            if($collector!==''&&$collector!==(string)$gateway['account_reference'])continue;
+            $detail=$this->httpJson('GET','https://api.mercadopago.com/checkout/preferences/'.rawurlencode($id),['Authorization: Bearer '.$token]);
+            if((string)($detail['external_reference']??'')!==$reference)continue;
+            $collector=(string)($detail['collector_id']??'');
+            if($collector!==''&&$collector!==(string)$gateway['account_reference'])continue;
+            if($expiresTs!==null&&!empty($detail['expiration_date_to'])){
+                try{if(abs((new \DateTimeImmutable((string)$detail['expiration_date_to']))->getTimestamp()-$expiresTs)>120)continue;}catch(\Throwable){}
+            }
+            $created=0;
+            if(!empty($detail['date_created'])){try{$created=(new \DateTimeImmutable((string)$detail['date_created']))->getTimestamp();}catch(\Throwable){}}
+            if($best===null||$created>$bestCreated){$best=$detail;$bestCreated=$created;}
+        }
+        return $best;
+    }
+
     private function pagBank(array $payment,array $gateway,array $config):string
     {
         $token=(string)($config['token']??'');
         if($token==='')throw new RuntimeException('Token PagBank ausente para conciliação.');
         $base=rtrim((string)($config['api_base']??'https://api.pagseguro.com'),'/');
+        $credentialReference='PGB_'.strtoupper(substr(hash('sha256',$token),0,32));
+        if($credentialReference!==(string)$gateway['account_reference'])throw new RuntimeException('Credencial PagBank divergente durante conciliação.');
         $checkout=$this->httpJson('GET',$base.'/checkouts/'.rawurlencode((string)$payment['provider_payment_id']).'?limit=100',['Authorization: Bearer '.$token]);
         $expectedReference='eventmenu:'.$payment['tenant_id'].':'.$payment['order_id'];
         if((string)($checkout['reference_id']??'')!==$expectedReference)throw new RuntimeException('Referência PagBank divergente na conciliação.');
@@ -170,7 +220,7 @@ final class CheckoutReconciliationService
             if($transactionId!==''&&str_starts_with($transactionId,'CHAR_')){
                 $detail=$this->httpJson('GET',$base.'/charges/'.rawurlencode($transactionId),['Authorization: Bearer '.$token]);
             }
-            $amount=(int)($detail['amount']['value']??$detail['summary']['paid']??0);
+            $amount=(int)($detail['amount']['value']??$detail['amount']['summary']['paid']??$detail['summary']['paid']??0);
             $currency=(string)($detail['amount']['currency']??'BRL');
             $providerPaymentId=(string)($detail['id']??$transactionId);
             if($providerPaymentId===''||$amount<=0)throw new RuntimeException('Pagamento PagBank incompleto na conciliação.');
@@ -181,7 +231,7 @@ final class CheckoutReconciliationService
                 'provider_payment_id'=>$providerPaymentId,
                 'amount_cents'=>$amount,
                 'currency'=>$currency,
-                'account_reference'=>(string)$gateway['account_reference'],
+                'account_reference'=>$credentialReference,
                 'reconciled'=>true,
             ]);
             return 'paid';
@@ -216,13 +266,19 @@ final class CheckoutReconciliationService
             $stmt->execute([$paymentId]);
             $row=$stmt->fetch();
             if(!$row)return;
-            $raw=[];
-            if(is_string($row['raw_payload']??null)){$decoded=json_decode($row['raw_payload'],true);if(is_array($decoded))$raw=$decoded;}
+            $raw=$this->decodePayload($row['raw_payload']??null);
             $raw['_eventmenu_reconciliation_error']=substr($message,0,500);
             $raw['_eventmenu_reconciliation_at']=date(DATE_ATOM);
             $pdo->prepare('UPDATE payments SET raw_payload=? WHERE id=?')->execute([json_encode($raw,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
             $this->audit($pdo,(int)$row['tenant_id'],'checkout.reconciliation_failed','payment',(string)$paymentId,['error'=>substr($message,0,500)]);
         }catch(\Throwable){}
+    }
+
+    private function decodePayload(mixed $payload):array
+    {
+        if(!is_string($payload)||$payload==='')return [];
+        $decoded=json_decode($payload,true);
+        return is_array($decoded)?$decoded:[];
     }
 
     private function audit(PDO $pdo,int $tenantId,string $action,string $entityType,string $entityId,array $metadata=[]):void
