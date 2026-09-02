@@ -9,6 +9,8 @@ use EventMenu\Services\CashRegisterService;
 use EventMenu\Services\CounterOrderService;
 use EventMenu\Services\FulfillmentService;
 use EventMenu\Services\PaymentService;
+use EventMenu\Services\StockService;
+use PDO;
 
 function assert_fulfillment(bool $condition,string $message):void{if(!$condition){fwrite(STDERR,"Fulfillment integration failed: {$message}\n");exit(1);}}
 
@@ -29,7 +31,7 @@ try{$summary=$service->byToken($token);$service->fulfill($orderId,(int)$summary[
 assert_fulfillment($blocked,'retirada foi liberada antes do pagamento');
 
 $cash=new CashRegisterService();$cash->open(0,'CI retirada');
-$payment=new PaymentService();$created=$payment->create($orderId,'manual','fulfillment-payment:'.$tenantId.':'.$orderId.':'.$suffix);
+$payment=new PaymentService();$payment->create($orderId,'manual','fulfillment-payment:'.$tenantId.':'.$orderId.':'.$suffix);
 $payment->confirmVerified(['tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'manual','provider_payment_id'=>'FULFILL-CI-'.$suffix,'amount_cents'=>5000,'currency'=>'BRL','account_reference'=>'manual','manual_method'=>'cash']);
 
 $summary=$service->byToken($token);$itemId=(int)$summary['items'][0]['id'];
@@ -48,6 +50,9 @@ $summary=$service->fulfill($orderId,$itemId,1,'scan','Replay',$key1);
 assert_fulfillment((float)$summary['items'][0]['fulfilled_quantity']===1.0,'replay idempotente duplicou retirada');
 $logs=$pdo->prepare('SELECT COUNT(*) FROM order_fulfillments WHERE tenant_id=? AND order_id=?');$logs->execute([$tenantId,$orderId]);assert_fulfillment((int)$logs->fetchColumn()===1,'replay criou log duplicado');
 
+$mismatch=false;try{$service->fulfill($orderId,$itemId,2,'scan','Chave reaproveitada indevidamente',$key1);}catch(RuntimeException $e){$mismatch=str_contains($e->getMessage(),'idempotência');}
+assert_fulfillment($mismatch,'mesma chave foi aceita com quantidade diferente');
+
 $key2='fulfillment-ci:'.$tenantId.':'.$orderId.':rest:'.$suffix;
 $summary=$service->fulfill($orderId,$itemId,4,'counter','Saldo restante',$key2);
 assert_fulfillment($summary['fulfillment_status']==='fulfilled','venda não ficou totalmente retirada');
@@ -57,7 +62,17 @@ $stock->execute([$productId]);assert_fulfillment((float)$stock->fetchColumn()===
 
 $over=false;try{$service->fulfill($orderId,$itemId,1,'counter','excesso','fulfillment-ci-over:'.$suffix.':0001');}catch(RuntimeException $e){$over=str_contains($e->getMessage(),'por completo')||str_contains($e->getMessage(),'saldo');}
 assert_fulfillment($over,'sistema permitiu retirar acima do comprado');
-
 $logs->execute([$tenantId,$orderId]);assert_fulfillment((int)$logs->fetchColumn()===2,'histórico não contém exatamente as duas retiradas válidas');
+
+// Reversão de estoque deve devolver somente o que ainda não foi entregue.
+$order2=(new CounterOrderService())->create([$productId=>2],['name'=>'Cliente Reversão'],'Teste saldo devolvido');$order2Id=(int)$order2['order_id'];
+$stock->execute([$productId]);assert_fulfillment((float)$stock->fetchColumn()===3.0,'segunda venda não baixou 2 unidades');
+$payment->create($order2Id,'manual','fulfillment-payment2:'.$tenantId.':'.$order2Id.':'.$suffix);
+$payment->confirmVerified(['tenant_id'=>$tenantId,'order_id'=>$order2Id,'provider'=>'manual','provider_payment_id'=>'FULFILL2-CI-'.$suffix,'amount_cents'=>2000,'currency'=>'BRL','account_reference'=>'manual','manual_method'=>'cash']);
+$summary2=$service->byToken((string)$order2['fulfillment_token']);$item2=(int)$summary2['items'][0]['id'];
+$service->fulfill($order2Id,$item2,1,'counter','Uma entregue','fulfillment-ci-second:'.$suffix.':0001');
+Database::transaction(function(PDO $db)use($tenantId,$order2Id):void{(new StockService())->reverseForOrder($db,$tenantId,$order2Id);});
+$stock->execute([$productId]);assert_fulfillment((float)$stock->fetchColumn()===4.0,'reversão devolveu quantidade já entregue ao cliente');
+$reversal=$pdo->prepare('SELECT quantity FROM stock_movements WHERE tenant_id=? AND order_id=? AND type="reversal"');$reversal->execute([$tenantId,$order2Id]);assert_fulfillment((float)$reversal->fetchColumn()===1.0,'movimento de reversão não registrou somente saldo não entregue');
 
 echo "Fulfillment integration OK\n";
