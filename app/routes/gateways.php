@@ -7,22 +7,84 @@ use EventMenu\Core\Crypto;
 use EventMenu\Core\Security;
 use EventMenu\Services\GatewayService;
 
-Auth::requirePermission('gateways.manage');$tenantId=em_require_tenant();
+Auth::requirePermission('gateways.manage');
+$tenantId=em_require_tenant();
+$paymentRoles=['admin','manager','cashier'];
+
 if($_SERVER['REQUEST_METHOD']==='POST'){
-    em_post_csrf();$action=(string)($_POST['action']??'');
+    em_post_csrf();
+    $action=(string)($_POST['action']??'');
+
     if($action==='gateway-save'){
-        $provider=(string)($_POST['provider']??'');$s=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider=?');$s->execute([$tenantId,$provider]);$existing=$s->fetch();$current=$existing?Crypto::decryptJson($existing['config_encrypted']):[];$config=$current;
+        $provider=(string)($_POST['provider']??'');
+        $s=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider=?');
+        $s->execute([$tenantId,$provider]);
+        $existing=$s->fetch();
+        $current=$existing?Crypto::decryptJson($existing['config_encrypted']):[];
+        $config=$current;
         foreach(['secret_key','access_token','token','api_base'] as $key){$value=trim((string)($_POST[$key]??''));if($value!=='')$config[$key]=$value;}
-        $account=trim((string)($_POST['account_reference']??($existing['account_reference']??'')));$webhook=trim((string)($_POST['webhook_secret']??''));try{(new GatewayService())->save($provider,$account,$config,$webhook,isset($_POST['active']));em_flash('ok','Gateway salvo com credenciais criptografadas.');}catch(Throwable $e){em_flash('error',$e->getMessage());}em_go('gateways');
+        $account=trim((string)($_POST['account_reference']??($existing['account_reference']??'')));
+        $webhook=trim((string)($_POST['webhook_secret']??''));
+        try{
+            (new GatewayService())->save($provider,$account,$config,$webhook,isset($_POST['active']));
+            em_flash('ok','Gateway salvo com credenciais criptografadas.');
+        }catch(Throwable $e){em_flash('error',$e->getMessage());}
+        em_go('gateways');
     }
+
     if($action==='nfc-pair'){
-        Auth::requirePermission('nfc.manage');$identifier=trim((string)($_POST['device_identifier']??''));$name=trim((string)($_POST['name']??''));$userId=(int)($_POST['user_id']??0);if(strlen($identifier)<8)exit('Identificador do dispositivo inválido.');if($userId){$u=$pdo->prepare('SELECT id FROM users WHERE id=? AND tenant_id=? AND status="active"');$u->execute([$userId,$tenantId]);if(!$u->fetchColumn())exit('Usuário inválido.');}$hash=hash('sha256',$identifier);$pdo->beginTransaction();try{$d=$pdo->prepare('SELECT * FROM nfc_devices WHERE tenant_id=? AND device_identifier_hash=? FOR UPDATE');$d->execute([$tenantId,$hash]);$device=$d->fetch();if($device&&(int)$device['pairing_attempts']>=5&&$device['status']!=='active')throw new RuntimeException('Limite de tentativas de pareamento atingido. Revogue/remova o registro antes de nova tentativa.');if($device){$pdo->prepare('UPDATE nfc_devices SET user_id=?,name=?,status="active",pairing_attempts=pairing_attempts+1,paired_at=NOW(),revoked_at=NULL WHERE id=?')->execute([$userId?:null,$name?:null,$device['id']]);$id=(int)$device['id'];}else{$pdo->prepare('INSERT INTO nfc_devices (tenant_id,user_id,provider,device_identifier_hash,name,status,pairing_attempts,paired_at) VALUES (?,?,"pagbank",?,?,"active",1,NOW())')->execute([$tenantId,$userId?:null,$hash,$name?:null]);$id=(int)$pdo->lastInsertId();}$pdo->commit();Auth::audit('nfc.paired','nfc_device',(string)$id,['user_id'=>$userId?:null]);em_flash('ok','Dispositivo NFC pareado. O identificador bruto não foi armazenado.');}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();em_flash('error',$e->getMessage());}em_go('gateways');
+        Auth::requirePermission('nfc.manage');
+        $identifier=trim((string)($_POST['device_identifier']??''));
+        $name=trim((string)($_POST['name']??''));
+        $userId=(int)($_POST['user_id']??0);
+        if(strlen($identifier)<8)exit('Identificador do dispositivo inválido.');
+        if($userId){
+            $placeholders=implode(',',array_fill(0,count($paymentRoles),'?'));
+            $u=$pdo->prepare('SELECT id FROM users WHERE id=? AND tenant_id=? AND status="active" AND role IN ('.$placeholders.')');
+            $u->execute(array_merge([$userId,$tenantId],$paymentRoles));
+            if(!$u->fetchColumn())exit('Usuário inválido para dispositivo de pagamento. Use administrador, gerente ou caixa.');
+        }
+        $hash=hash('sha256',$identifier);
+        $pdo->beginTransaction();
+        try{
+            $d=$pdo->prepare('SELECT * FROM nfc_devices WHERE tenant_id=? AND device_identifier_hash=? FOR UPDATE');
+            $d->execute([$tenantId,$hash]);
+            $device=$d->fetch();
+            if($device&&(int)$device['pairing_attempts']>=5)throw new RuntimeException('Limite de tentativas de pareamento atingido. Revogue o dispositivo e cadastre um novo identificador.');
+            if($device){
+                $pdo->prepare('UPDATE nfc_devices SET user_id=?,name=?,status="active",pairing_attempts=pairing_attempts+1,paired_at=NOW(),revoked_at=NULL WHERE id=?')->execute([$userId?:null,$name?:null,$device['id']]);
+                $id=(int)$device['id'];
+            }else{
+                $pdo->prepare('INSERT INTO nfc_devices (tenant_id,user_id,provider,device_identifier_hash,name,status,pairing_attempts,paired_at) VALUES (?,?,"pagbank",?,?,"active",1,NOW())')->execute([$tenantId,$userId?:null,$hash,$name?:null]);
+                $id=(int)$pdo->lastInsertId();
+            }
+            $pdo->commit();
+            Auth::audit('nfc.paired','nfc_device',(string)$id,['user_id'=>$userId?:null]);
+            em_flash('ok','Dispositivo NFC pareado. O identificador bruto não foi armazenado.');
+        }catch(Throwable $e){
+            if($pdo->inTransaction())$pdo->rollBack();
+            em_flash('error',$e->getMessage());
+        }
+        em_go('gateways');
     }
+
     if($action==='nfc-revoke'){
-        Auth::requirePermission('nfc.manage');$id=(int)($_POST['id']??0);$pdo->prepare('UPDATE nfc_devices SET status="revoked",revoked_at=NOW() WHERE id=? AND tenant_id=?')->execute([$id,$tenantId]);Auth::audit('nfc.revoked','nfc_device',(string)$id);em_flash('ok','Dispositivo revogado.');em_go('gateways');
+        Auth::requirePermission('nfc.manage');
+        $id=(int)($_POST['id']??0);
+        $pdo->prepare('UPDATE nfc_devices SET status="revoked",revoked_at=NOW() WHERE id=? AND tenant_id=?')->execute([$id,$tenantId]);
+        Auth::audit('nfc.revoked','nfc_device',(string)$id);
+        em_flash('ok','Dispositivo revogado.');
+        em_go('gateways');
     }
 }
-$tenant=$pdo->prepare('SELECT slug FROM tenants WHERE id=?');$tenant->execute([$tenantId]);$tenantSlug=(string)$tenant->fetchColumn();$g=$pdo->prepare('SELECT id,provider,account_reference,active,created_at,updated_at FROM payment_gateways WHERE tenant_id=? ORDER BY provider');$g->execute([$tenantId]);$gateways=[];foreach($g->fetchAll() as $row)$gateways[$row['provider']]=$row;
-$users=$pdo->prepare('SELECT id,name,role FROM users WHERE tenant_id=? AND status="active" ORDER BY name');$users->execute([$tenantId]);$users=$users->fetchAll();$d=$pdo->prepare('SELECT d.*,u.name user_name FROM nfc_devices d LEFT JOIN users u ON u.id=d.user_id WHERE d.tenant_id=? ORDER BY d.id DESC');$d->execute([$tenantId]);$devices=$d->fetchAll();
+
+$tenant=$pdo->prepare('SELECT slug FROM tenants WHERE id=?');$tenant->execute([$tenantId]);$tenantSlug=(string)$tenant->fetchColumn();
+$g=$pdo->prepare('SELECT id,provider,account_reference,active,created_at,updated_at FROM payment_gateways WHERE tenant_id=? ORDER BY provider');$g->execute([$tenantId]);$gateways=[];foreach($g->fetchAll() as $row)$gateways[$row['provider']]=$row;
+$placeholders=implode(',',array_fill(0,count($paymentRoles),'?'));
+$users=$pdo->prepare('SELECT id,name,role FROM users WHERE tenant_id=? AND status="active" AND role IN ('.$placeholders.') ORDER BY name');
+$users->execute(array_merge([$tenantId],$paymentRoles));$users=$users->fetchAll();
+$d=$pdo->prepare('SELECT d.*,u.name user_name,u.role user_role FROM nfc_devices d LEFT JOIN users u ON u.id=d.user_id WHERE d.tenant_id=? ORDER BY d.id DESC');$d->execute([$tenantId]);$devices=$d->fetchAll();
+
 em_header('Gateways e NFC','gateways');
-?><p class="muted">Segredos são criptografados com APP_KEY e nunca são exibidos novamente pelo painel.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"><?php foreach(['stripe'=>'Stripe','pagbank'=>'PagBank','mercadopago'=>'Mercado Pago'] as $provider=>$label):$row=$gateways[$provider]??null;?><section class="card"><div class="section-head"><h2><?= $label ?></h2><span class="badge"><?= $row&&$row['active']?'Ativo':'Inativo' ?></span></div><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="gateway-save"><input type="hidden" name="provider" value="<?= $provider ?>"><label class="span-2"><?= $provider==='stripe'?'Account ID (acct_...)':($provider==='mercadopago'?'Collector ID':'Referência da conta PagBank') ?><input name="account_reference" value="<?= Security::e($row['account_reference']??'') ?>" required></label><?php if($provider==='stripe'):?><label class="span-2">Secret key<input type="password" name="secret_key" placeholder="Deixe vazio para manter a atual"></label><?php elseif($provider==='mercadopago'):?><label class="span-2">Access token<input type="password" name="access_token" placeholder="Deixe vazio para manter o atual"></label><?php else:?><label class="span-2">Token PagBank<input type="password" name="token" placeholder="Deixe vazio para manter o atual"></label><label class="span-2">API base<input name="api_base" placeholder="https://api.pagseguro.com (vazio mantém)"></label><?php endif;?><label class="span-2">Segredo do webhook<input type="password" name="webhook_secret" placeholder="Deixe vazio para manter o atual"></label><label class="checkbox span-2"><input type="checkbox" name="active"<?= em_checked($row['active']??0) ?>> Gateway ativo</label><button class="primary span-2">Salvar <?= $label ?></button></form><p class="muted">Webhook: <code><?= Security::e(rtrim((string)env('APP_URL',''),'/').'/webhook.php?provider='.$provider.'&tenant='.$tenantSlug) ?></code></p></section><?php endforeach;?></div><section class="card" style="margin-top:18px"><div class="section-head"><h2>Dispositivos NFC PagBank</h2><span class="muted">Pareamento limitado e revogável</span></div><div class="grid" style="grid-template-columns:minmax(280px,1fr) minmax(0,2fr)"><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="nfc-pair"><label class="span-2">Nome do aparelho<input name="name" placeholder="Caixa 01"></label><label class="span-2">Identificador do dispositivo<input name="device_identifier" required autocomplete="off"></label><label class="span-2">Usuário autorizado<select name="user_id"><option value="0">Sem usuário fixo</option><?php foreach($users as $u):?><option value="<?= (int)$u['id'] ?>"><?= Security::e($u['name'].' · '.$u['role']) ?></option><?php endforeach;?></select></label><button class="secondary span-2">Parear dispositivo</button><p class="muted span-2">O servidor armazena apenas SHA-256 do identificador. A aprovação do pagamento continua dependendo de confirmação do PagBank, não do app.</p></form><div class="table-wrap"><table class="table"><thead><tr><th>Dispositivo</th><th>Usuário</th><th>Status</th><th>Tentativas</th><th></th></tr></thead><tbody><?php foreach($devices as $d):?><tr><td><?= Security::e($d['name']??'Sem nome') ?><br><code><?= Security::e(substr($d['device_identifier_hash'],0,12)) ?>…</code></td><td><?= Security::e($d['user_name']??'—') ?></td><td><span class="badge"><?= Security::e($d['status']) ?></span></td><td><?= (int)$d['pairing_attempts'] ?>/5</td><td><?php if($d['status']!=='revoked'):?><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="nfc-revoke"><input type="hidden" name="id" value="<?= (int)$d['id'] ?>"><button class="secondary">Revogar</button></form><?php endif;?></td></tr><?php endforeach;?></tbody></table></div></div></section><?php em_footer();
+?><p class="muted">Segredos são criptografados com APP_KEY e nunca são exibidos novamente pelo painel.</p><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))"><?php foreach(['stripe'=>'Stripe','pagbank'=>'PagBank','mercadopago'=>'Mercado Pago'] as $provider=>$label):$row=$gateways[$provider]??null;?><section class="card"><div class="section-head"><h2><?= $label ?></h2><span class="badge"><?= $row&&$row['active']?'Ativo':'Inativo' ?></span></div><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="gateway-save"><input type="hidden" name="provider" value="<?= $provider ?>"><label class="span-2"><?= $provider==='stripe'?'Account ID (acct_...)':($provider==='mercadopago'?'Collector ID':'Referência da conta PagBank') ?><input name="account_reference" value="<?= Security::e($row['account_reference']??'') ?>" required></label><?php if($provider==='stripe'):?><label class="span-2">Secret key<input type="password" name="secret_key" placeholder="Deixe vazio para manter a atual"></label><?php elseif($provider==='mercadopago'):?><label class="span-2">Access token<input type="password" name="access_token" placeholder="Deixe vazio para manter o atual"></label><?php else:?><label class="span-2">Token PagBank<input type="password" name="token" placeholder="Deixe vazio para manter o atual"></label><label class="span-2">API base<input name="api_base" placeholder="https://api.pagseguro.com (vazio mantém)"></label><?php endif;?><label class="span-2">Segredo do webhook<input type="password" name="webhook_secret" placeholder="Deixe vazio para manter o atual"></label><label class="checkbox span-2"><input type="checkbox" name="active"<?= em_checked($row['active']??0) ?>> Gateway ativo</label><button class="primary span-2">Salvar <?= $label ?></button></form><p class="muted">Webhook: <code><?= Security::e(rtrim((string)env('APP_URL',''),'/').'/webhook.php?provider='.$provider.'&tenant='.$tenantSlug) ?></code></p></section><?php endforeach;?></div>
+<section class="card" style="margin-top:18px"><div class="section-head"><h2>Dispositivos NFC PagBank</h2><span class="muted">Pareamento limitado e revogável</span></div><div class="grid" style="grid-template-columns:minmax(280px,1fr) minmax(0,2fr)"><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="nfc-pair"><label class="span-2">Nome do aparelho<input name="name" placeholder="Caixa 01"></label><label class="span-2">Identificador do dispositivo<input name="device_identifier" required autocomplete="off"></label><label class="span-2">Usuário autorizado<select name="user_id"><option value="0">Sem usuário fixo</option><?php foreach($users as $u):?><option value="<?= (int)$u['id'] ?>"><?= Security::e($u['name'].' · '.$u['role']) ?></option><?php endforeach;?></select></label><button class="secondary span-2">Parear dispositivo</button><p class="muted span-2">Somente administrador, gerente ou caixa podem ser vinculados a NFC. O servidor armazena apenas SHA-256 do identificador. A aprovação do pagamento continua dependendo de confirmação do PagBank, não do app.</p></form><div class="table-wrap"><table class="table"><thead><tr><th>Dispositivo</th><th>Usuário</th><th>Status</th><th>Tentativas</th><th></th></tr></thead><tbody><?php foreach($devices as $d):?><tr><td><?= Security::e($d['name']??'Sem nome') ?><br><code><?= Security::e(substr($d['device_identifier_hash'],0,12)) ?>…</code></td><td><?= Security::e($d['user_name']??'—') ?><?php if($d['user_role']):?><br><span class="muted"><?= Security::e($d['user_role']) ?></span><?php endif;?></td><td><span class="badge"><?= Security::e($d['status']) ?></span></td><td><?= (int)$d['pairing_attempts'] ?>/5</td><td><?php if($d['status']!=='revoked'):?><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="nfc-revoke"><input type="hidden" name="id" value="<?= (int)$d['id'] ?>"><button class="secondary">Revogar</button></form><?php endif;?></td></tr><?php endforeach;?></tbody></table></div></div></section><?php em_footer();
