@@ -21,6 +21,7 @@ final class Auth
         $valid=$user&&($user['tenant_id']===null||$user['tenant_status']==='active')&&password_verify($password,(string)$user['password_hash']);
         if(!$valid||$blocked){if(!$blocked)self::registerLoginFailure($pdo,$email);return false;}
         self::clearLoginThrottle($pdo,$email);session_regenerate_id(true);unset($_SESSION['super_admin_tenant_id'],$_SESSION['unit_id']);self::setSession($user);self::$permissionCache=[];
+        self::ensureSelectedUnit();
         $pdo->prepare('UPDATE users SET last_login_at=NOW() WHERE id=?')->execute([$user['id']]);self::audit('auth.login','user',(string)$user['id']);return true;
     }
 
@@ -59,7 +60,10 @@ final class Auth
     public static function selectUnit(?int $unitId):void
     {
         $tenantId=self::tenantId();if(!$tenantId)throw new RuntimeException('Empresa não selecionada.');
-        if($unitId===null||$unitId<1){unset($_SESSION['unit_id']);return;}
+        if($unitId===null||$unitId<1){
+            if(!in_array(self::role(),['super_admin','admin','manager'],true)&&self::availableUnits())throw new RuntimeException('Seu perfil precisa operar em uma unidade selecionada.');
+            unset($_SESSION['unit_id']);return;
+        }
         $pdo=Database::connection();$stmt=$pdo->prepare('SELECT id,status FROM business_units WHERE id=? AND tenant_id=? LIMIT 1');$stmt->execute([$unitId,$tenantId]);$unit=$stmt->fetch();if(!$unit||$unit['status']!=='active')throw new RuntimeException('Unidade indisponível.');
         if(!in_array(self::role(),['super_admin','admin','manager'],true)){
             $check=$pdo->prepare('SELECT 1 FROM user_units WHERE tenant_id=? AND user_id=? AND unit_id=? LIMIT 1');$check->execute([$tenantId,self::id(),$unitId]);if(!$check->fetchColumn())throw new RuntimeException('Seu usuário não possui acesso a esta unidade.');
@@ -74,7 +78,13 @@ final class Auth
     }
     private static function ensureSelectedUnit():void
     {
-        $unit=self::unitId();if(!$unit||!self::tenantId())return;try{$ids=array_map(fn($r)=>(int)$r['id'],self::availableUnits());if(!in_array($unit,$ids,true))unset($_SESSION['unit_id']);}catch(\Throwable){unset($_SESSION['unit_id']);}
+        if(!self::tenantId())return;
+        try{
+            $units=self::availableUnits();$ids=array_map(fn($r)=>(int)$r['id'],$units);$unit=self::unitId();
+            if($unit&&in_array($unit,$ids,true))return;
+            unset($_SESSION['unit_id']);
+            if(!in_array(self::role(),['super_admin','admin','manager'],true)&&$ids)$_SESSION['unit_id']=$ids[0];
+        }catch(\Throwable){unset($_SESSION['unit_id']);}
     }
 
     public static function logout():void
