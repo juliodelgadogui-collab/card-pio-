@@ -7,8 +7,9 @@ use EventMenu\Core\Security;
 use EventMenu\Services\FulfillmentService;
 
 Auth::requirePermission('fulfillment.manage');
-$tenantId=em_require_tenant();
+$tenantId=em_require_tenant();$unitId=Auth::unitId();
 $service=new FulfillmentService();
+$assertUnit=function(array $summary)use($unitId):void{if($unitId&&(int)($summary['unit_id']??0)!==$unitId)throw new RuntimeException('Venda pertence a outra unidade.');};
 
 if($_SERVER['REQUEST_METHOD']==='POST'){
     em_post_csrf();
@@ -20,6 +21,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
                 $token=$service->ensureToken($tenantId,(int)$m[1]);
             }else{
                 $token=$service->extractToken($raw);
+                if($token!=='')$assertUnit($service->byToken($token));
             }
             if($token==='')throw new RuntimeException('Leia ou informe o QR, código ou número da venda.');
             em_go('fulfillment',['token'=>$token]);
@@ -27,7 +29,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         if($action==='fulfill'){
             $token=$service->extractToken((string)($_POST['token']??''));
             $summary=$service->byToken($token);
-            if((int)$summary['tenant_id']!==$tenantId)throw new RuntimeException('Venda pertence a outra empresa.');
+            if((int)$summary['tenant_id']!==$tenantId)throw new RuntimeException('Venda pertence a outra empresa.');$assertUnit($summary);
             $service->fulfill(
                 (int)$summary['id'],
                 (int)($_POST['order_item_id']??0),
@@ -53,18 +55,19 @@ $summary=null;$history=[];
 if($token!==''){
     try{
         $summary=$service->byToken($token);
-        if((int)$summary['tenant_id']!==$tenantId)throw new RuntimeException('Venda pertence a outra empresa.');
+        if((int)$summary['tenant_id']!==$tenantId)throw new RuntimeException('Venda pertence a outra empresa.');$assertUnit($summary);
         $history=$service->history($tenantId,(int)$summary['id']);
     }catch(Throwable $e){em_flash('error',$e->getMessage());$summary=null;}
 }
 
-$recentStmt=$pdo->prepare('SELECT o.id,o.fulfillment_token,o.fulfillment_status,o.created_at,c.name customer_name,COALESCE(SUM(oi.quantity-oi.fulfilled_quantity),0) remaining_qty FROM orders o LEFT JOIN customers c ON c.id=o.customer_id JOIN order_items oi ON oi.order_id=o.id WHERE o.tenant_id=? AND o.channel IN ("counter","pickup") AND o.payment_status="paid" AND o.fulfillment_status<>"fulfilled" AND o.status<>"cancelled" GROUP BY o.id,o.fulfillment_token,o.fulfillment_status,o.created_at,c.name ORDER BY o.id DESC LIMIT 50');
-$recentStmt->execute([$tenantId]);$recent=$recentStmt->fetchAll();
+$sql='SELECT o.id,o.fulfillment_token,o.fulfillment_status,o.created_at,c.name customer_name,COALESCE(SUM(oi.quantity-oi.fulfilled_quantity),0) remaining_qty FROM orders o LEFT JOIN customers c ON c.id=o.customer_id JOIN order_items oi ON oi.order_id=o.id WHERE o.tenant_id=?'.($unitId?' AND o.unit_id=?':'').' AND o.channel IN ("counter","pickup") AND o.payment_status="paid" AND o.fulfillment_status<>"fulfilled" AND o.status<>"cancelled" GROUP BY o.id,o.fulfillment_token,o.fulfillment_status,o.created_at,c.name ORDER BY o.id DESC LIMIT 50';
+$args=[$tenantId];if($unitId)$args[]=$unitId;$recentStmt=$pdo->prepare($sql);$recentStmt->execute($args);$recent=$recentStmt->fetchAll();
 
 function fulfill_qty(mixed $v):string{$n=(float)$v;return rtrim(rtrim(number_format($n,3,',','.'),'0'),',');}
 
 em_header('Retirada de produtos','fulfillment');
 ?>
+<?php if($unitId):?><div class="alert"><strong>Retiradas da unidade selecionada.</strong> QR ou venda de outra filial será recusado pelo servidor.</div><?php endif;?>
 <section class="card" style="margin-bottom:18px">
  <div class="section-head"><div><h2>Ler venda / QR</h2><p class="muted">Use leitor de código, digite o número da venda (ex.: 123), o código ou cole a URL impressa.</p></div></div>
  <form method="post" class="actions">
@@ -99,5 +102,5 @@ em_header('Retirada de produtos','fulfillment');
 <section class="card" style="margin-bottom:18px"><div class="section-head"><h2>Histórico de retiradas</h2><span class="muted"><?= count($history) ?> movimentos</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>Quantidade</th><th>Operador</th><th>Origem</th><th>Data UTC</th><th>Observação</th></tr></thead><tbody><?php foreach($history as$h):?><tr><td><?= Security::e($h['name_snapshot']) ?></td><td><strong><?= Security::e(fulfill_qty($h['quantity'])) ?></strong></td><td><?= Security::e($h['user_name']??'Sistema') ?></td><td><?= Security::e($h['source']) ?></td><td><?= Security::e($h['created_at']) ?></td><td><?= Security::e($h['notes']??'—') ?></td></tr><?php endforeach;?><?php if(!$history):?><tr><td colspan="6" class="muted">Nenhuma retirada registrada.</td></tr><?php endif;?></tbody></table></div></section>
 <?php endif;?>
 
-<section class="card"><div class="section-head"><h2>Vendas com saldo para retirar</h2><span class="muted"><?= count($recent) ?> recentes</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Venda</th><th>Cliente</th><th>Status</th><th>Saldo de unidades</th><th>Data UTC</th><th></th></tr></thead><tbody><?php foreach($recent as$r):?><tr><td>#<?= (int)$r['id'] ?></td><td><?= Security::e($r['customer_name']??'Consumidor') ?></td><td><span class="badge"><?= Security::e($r['fulfillment_status']) ?></span></td><td><strong><?= Security::e(fulfill_qty($r['remaining_qty'])) ?></strong></td><td><?= Security::e($r['created_at']) ?></td><td><a class="button secondary" href="/?route=fulfillment&order=<?= (int)$r['id'] ?>">Abrir</a></td></tr><?php endforeach;?><?php if(!$recent):?><tr><td colspan="6" class="muted">Nenhuma venda paga com saldo pendente.</td></tr><?php endif;?></tbody></table></div></section>
+<section class="card"><div class="section-head"><h2>Vendas com saldo para retirar</h2><span class="muted"><?= count($recent) ?> recentes</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Venda</th><th>Cliente</th><th>Status</th><th>Saldo de unidades</th><th>Data UTC</th><th></th></tr></thead><tbody><?php foreach($recent as$r):?><tr><td>#<?= (int)$r['id'] ?></td><td><?= Security::e($r['customer_name']??'Consumidor') ?></td><td><span class="badge"><?= Security::e($r['fulfillment_status']) ?></span></td><td><strong><?= Security::e(fulfill_qty($r['remaining_qty'])) ?></strong></td><td><?= Security::e($r['created_at']) ?></td><td><a class="button secondary" href="/?route=fulfillment&order=<?= (int)$r['id'] ?>">Abrir</a></td></tr><?php endforeach;?><?php if(!$recent):?><tr><td colspan="6" class="muted">Nenhuma venda paga com saldo pendente nesta unidade.</td></tr><?php endif;?></tbody></table></div></section>
 <?php em_footer();
