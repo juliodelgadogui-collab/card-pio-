@@ -28,6 +28,8 @@ final class StockService
 
     public function commitForOrder(PDO $pdo,int $tenantId,int $orderId):void
     {
+        $channel=$pdo->prepare('SELECT channel FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$channel->execute([$orderId,$tenantId]);$orderChannel=$channel->fetchColumn();
+        if($orderChannel==='table')TenantModuleService::requireModule($tenantId,'restaurant');
         foreach($this->requirements($pdo,$tenantId,$orderId,false)as$productId=>$qty){
             $p=$pdo->prepare('SELECT track_stock FROM products WHERE id=? AND tenant_id=?');$p->execute([$productId,$tenantId]);if((int)$p->fetchColumn()!==1)continue;$key=$this->commitKey($orderId,$productId);
             $check=$pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$check->execute([$tenantId,$key]);if($check->fetchColumn())continue;
