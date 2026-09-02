@@ -96,10 +96,10 @@ final class Auth
     {
         $role=self::role();if($role==='super_admin')return true;
         $map=[
-            'admin'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage'],
-            'manager'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign'],
-            'cashier'=>['dashboard','orders.manage','orders.view','orders.create','payments.manage','customers.manage','tables.manage'],
-            'waiter'=>['dashboard','orders.create','orders.view','tables.manage'],
+            'admin'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','fulfillment.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage'],
+            'manager'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','fulfillment.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign'],
+            'cashier'=>['dashboard','orders.manage','orders.view','orders.create','payments.manage','fulfillment.manage','customers.manage','tables.manage'],
+            'waiter'=>['dashboard','orders.create','orders.view','tables.manage','fulfillment.manage'],
             'kitchen'=>['dashboard','orders.kitchen','orders.view'],
             'delivery'=>['dashboard','orders.delivery','orders.view'],
             'promoter'=>['dashboard','events.promoter','reports.own','guests.manage'],
