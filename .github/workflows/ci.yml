@@ -52,39 +52,70 @@ jobs:
           mysql -h 127.0.0.1 -uroot eventmenu < database/schema.sql
           for f in database/migrations/*.sql; do echo "Applying $f"; mysql -h 127.0.0.1 -uroot eventmenu < "$f"; done
       - name: Delivery integration
-        env: &app_env
+        env:
           DB_HOST: 127.0.0.1
           DB_PORT: 3306
           DB_DATABASE: eventmenu
           DB_USERNAME: root
           DB_PASSWORD: root
           APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          SESSION_NAME: eventmenu_ci
           SESSION_SECURE: 'false'
         run: php tests/delivery_integration.php
       - name: Scheduling integration
         env:
-          <<: *app_env
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
           SESSION_NAME: eventmenu_ci_schedule
+          SESSION_SECURE: 'false'
         run: php tests/scheduling_integration.php
       - name: POS integration
         env:
-          <<: *app_env
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
           SESSION_NAME: eventmenu_ci_pos
+          SESSION_SECURE: 'false'
         run: php tests/pos_integration.php
       - name: Fulfillment integration
         env:
-          <<: *app_env
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
           SESSION_NAME: eventmenu_ci_fulfillment
+          SESSION_SECURE: 'false'
         run: php tests/fulfillment_integration.php
       - name: Cash integration
         env:
-          <<: *app_env
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
           SESSION_NAME: eventmenu_ci_cash
+          SESSION_SECURE: 'false'
         run: php tests/cash_integration.php
       - name: NFC integration
         env:
-          <<: *app_env
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
           SESSION_NAME: eventmenu_ci_nfc
+          SESSION_SECURE: 'false'
         run: php tests/nfc_integration.php
       - name: Verify critical database objects
         env:
