@@ -42,9 +42,10 @@ final class CounterOrderService
 
             $customerId=$this->customer($pdo,$tenantId,$buyer);
             $token=bin2hex(random_bytes(20));
+            $fulfillmentToken=bin2hex(random_bytes(20));
             $notes=mb_substr(trim($notes),0,1000);
-            $order=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,channel,status,payment_status,subtotal_cents,discount_cents,delivery_fee_cents,total_cents,notes,created_by) VALUES (?,?,?,"counter","confirmed","unpaid",?,0,0,?,?,?)');
-            $order->execute([$token,$tenantId,$customerId,$subtotal,$subtotal,$notes!==''?$notes:null,Auth::id()]);
+            $order=$pdo->prepare('INSERT INTO orders (public_token,fulfillment_token,tenant_id,customer_id,channel,status,payment_status,fulfillment_status,subtotal_cents,discount_cents,delivery_fee_cents,total_cents,notes,created_by) VALUES (?,?,?, ?,"counter","confirmed","unpaid","pending",?,0,0,?,?,?)');
+            $order->execute([$token,$fulfillmentToken,$tenantId,$customerId,$subtotal,$subtotal,$notes!==''?$notes:null,Auth::id()]);
             $orderId=(int)$pdo->lastInsertId();
 
             $insert=$pdo->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents) VALUES (?,?,?,?,?,?)');
@@ -52,7 +53,7 @@ final class CounterOrderService
 
             (new StockService())->commitForOrder($pdo,$tenantId,$orderId);
             Auth::audit('order.counter_created','order',(string)$orderId,['total_cents'=>$subtotal,'items'=>count($items)]);
-            return ['order_id'=>$orderId,'public_token'=>$token,'total_cents'=>$subtotal,'status'=>'confirmed','payment_status'=>'unpaid'];
+            return ['order_id'=>$orderId,'public_token'=>$token,'fulfillment_token'=>$fulfillmentToken,'total_cents'=>$subtotal,'status'=>'confirmed','payment_status'=>'unpaid','fulfillment_status'=>'pending'];
         });
     }
 
