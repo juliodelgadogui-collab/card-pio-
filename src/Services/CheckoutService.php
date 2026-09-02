@@ -6,10 +6,13 @@ namespace EventMenu\Services;
 
 use EventMenu\Core\Crypto;
 use EventMenu\Core\Database;
+use PDO;
 use RuntimeException;
 
 final class CheckoutService
 {
+    private const CHECKOUT_MINUTES=40;
+
     public function create(string $publicToken,string $provider):array
     {
         $provider=strtolower(trim($provider));
@@ -33,6 +36,14 @@ final class CheckoutService
         $open->execute([$order['tenant_id'],$order['id']]);
         $openPayment=$open->fetch();
         if($openPayment){
+            if(!empty($openPayment['checkout_expires_at'])&&new \DateTimeImmutable((string)$openPayment['checkout_expires_at'])<=new \DateTimeImmutable()){
+                $state=(new CheckoutReconciliationService())->reconcilePayment((int)$openPayment['id']);
+                if($state==='paid')throw new RuntimeException('Pagamento já foi confirmado. Atualize a página.');
+                if($state!=='cancelled')throw new RuntimeException('O checkout expirou, mas a conciliação com o provedor ainda está pendente. Não será criada outra cobrança até essa situação ser resolvida.');
+                $openPayment=null;
+            }
+        }
+        if($openPayment){
             $raw=$this->decodePayload($openPayment['raw_payload']??null);
             if(!empty($raw['_eventmenu_checkout_url']))return ['provider'=>$openPayment['provider'],'url'=>$raw['_eventmenu_checkout_url'],'payment_id'=>(int)$openPayment['id'],'reused'=>true];
             if($openPayment['provider']!==$provider)throw new RuntimeException('Já existe uma cobrança em andamento para este pedido.');
@@ -44,54 +55,84 @@ final class CheckoutService
                 $r=$pdo->prepare('SELECT MIN(reserved_until) FROM tickets WHERE order_id=? AND status="reserved"');
                 $r->execute([$order['id']]);
                 $until=$r->fetchColumn();
-                if($until&&new \DateTimeImmutable()>new \DateTimeImmutable((string)$until))throw new RuntimeException('A reserva dos ingressos expirou. Faça uma nova reserva.');
+                if(!$until||new \DateTimeImmutable()>new \DateTimeImmutable((string)$until))throw new RuntimeException('A reserva dos ingressos expirou. Faça uma nova reserva.');
             }
         }
 
-        $key='public:'.$provider.':'.$order['tenant_id'].':'.$order['id'];
-        $paymentId=0;
-        $reusedAttempt=false;
-
-        if($openPayment&&$openPayment['provider']===$provider){
-            $paymentId=(int)$openPayment['id'];
-            $key=(string)$openPayment['idempotency_key'];
-            $reusedAttempt=true;
-        }else{
-            $same=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');
-            $same->execute([$order['tenant_id'],$key]);
-            $previous=$same->fetch();
-            if($previous){
-                $raw=$this->decodePayload($previous['raw_payload']??null);
-                if(!empty($raw['_eventmenu_checkout_url'])&&in_array($previous['status'],['created','pending','authorized'],true))return ['provider'=>$previous['provider'],'url'=>$raw['_eventmenu_checkout_url'],'payment_id'=>(int)$previous['id'],'reused'=>true];
-                if($previous['status']==='paid')throw new RuntimeException('Pedido já está pago.');
-                if(!in_array($previous['status'],['failed','created','pending','authorized'],true))throw new RuntimeException('Esta tentativa de cobrança não pode ser reutilizada.');
-                $paymentId=(int)$previous['id'];
-                $reusedAttempt=true;
-            }else{
-                $ins=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")');
-                $ins->execute([$order['tenant_id'],$order['id'],$provider,$key,$order['total_cents']]);
-                $paymentId=(int)$pdo->lastInsertId();
-            }
-        }
-
-        if($reusedAttempt)$pdo->prepare('UPDATE payments SET status="created",raw_payload=NULL WHERE id=? AND tenant_id=? AND status<>"paid"')->execute([$paymentId,$order['tenant_id']]);
-        $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=?')->execute([$order['id']]);
+        $attempt=$this->prepareAttempt($order,$provider,$openPayment);
+        $paymentId=(int)$attempt['id'];
+        $key=(string)$attempt['idempotency_key'];
+        $expiresAt=new \DateTimeImmutable((string)$attempt['checkout_expires_at']);
 
         try{
             $result=match($provider){
-                'stripe'=>$this->stripe($order,$gateway,$config,$key),
-                'mercadopago'=>$this->mercadoPago($order,$gateway,$config,$key),
-                'pagbank'=>$this->pagBank($order,$gateway,$config,$key),
+                'stripe'=>$this->stripe($order,$gateway,$config,$key,$expiresAt),
+                'mercadopago'=>$this->mercadoPago($order,$gateway,$config,$key,$expiresAt),
+                'pagbank'=>$this->pagBank($order,$gateway,$config,$key,$expiresAt),
             };
             $payload=$result['raw'];
             $payload['_eventmenu_checkout_url']=$result['url'];
+            $payload['_eventmenu_checkout_expires_at']=$expiresAt->format(DATE_ATOM);
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="pending",raw_payload=? WHERE id=?')->execute([$result['external_id'],json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
-            return ['provider'=>$provider,'url'=>$result['url'],'payment_id'=>$paymentId,'reused'=>$reusedAttempt];
+            return ['provider'=>$provider,'url'=>$result['url'],'payment_id'=>$paymentId,'reused'=>(bool)$attempt['_reused'],'expires_at'=>$expiresAt->format(DATE_ATOM)];
         }catch(\Throwable $e){
-            $pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode(['error'=>$e->getMessage(),'idempotency_key'=>$key],JSON_UNESCAPED_UNICODE),$paymentId]);
+            $pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode(['error'=>$e->getMessage(),'idempotency_key'=>$key,'_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM)],JSON_UNESCAPED_UNICODE),$paymentId]);
             $pdo->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND payment_status="pending"')->execute([$order['id']]);
             throw $e;
         }
+    }
+
+    private function prepareAttempt(array $order,string $provider,array|false|null $openPayment):array
+    {
+        return Database::transaction(function(PDO $pdo)use($order,$provider,$openPayment){
+            $lock=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
+            $lock->execute([$order['id'],$order['tenant_id']]);
+            $lockedOrder=$lock->fetch();
+            if(!$lockedOrder||in_array($lockedOrder['status'],['cancelled','completed'],true)||in_array($lockedOrder['payment_status'],['paid','refunded'],true))throw new RuntimeException('Pedido não aceita nova cobrança.');
+
+            $current=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE');
+            $current->execute([$order['tenant_id'],$order['id']]);
+            $row=$current->fetch();
+            if($row){
+                if($row['provider']!==$provider)throw new RuntimeException('Já existe uma cobrança em andamento para outro provedor.');
+                if(!empty($row['checkout_expires_at'])&&new \DateTimeImmutable((string)$row['checkout_expires_at'])<=new \DateTimeImmutable())throw new RuntimeException('Cobrança expirada aguardando conciliação.');
+                $row['_reused']=true;
+                return $row;
+            }
+
+            $last=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND provider=? ORDER BY id DESC LIMIT 1 FOR UPDATE');
+            $last->execute([$order['tenant_id'],$order['id'],$provider]);
+            $previous=$last->fetch();
+            if($previous&&$previous['status']==='failed'&&!empty($previous['checkout_expires_at'])&&new \DateTimeImmutable((string)$previous['checkout_expires_at'])>new \DateTimeImmutable()){
+                $pdo->prepare('UPDATE payments SET status="created",raw_payload=NULL WHERE id=?')->execute([$previous['id']]);
+                $previous['status']='created';
+                $previous['_reused']=true;
+                $this->extendReservation($pdo,$lockedOrder,new \DateTimeImmutable((string)$previous['checkout_expires_at']));
+                return $previous;
+            }
+
+            if($previous&&$lockedOrder['channel']!=='table'&&!empty($previous['checkout_expires_at'])&&new \DateTimeImmutable((string)$previous['checkout_expires_at'])<=new \DateTimeImmutable())throw new RuntimeException('A janela de pagamento deste pedido terminou. Faça um novo pedido ou uma nova reserva.');
+
+            $count=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND provider=?');
+            $count->execute([$order['tenant_id'],$order['id'],$provider]);
+            $attempt=(int)$count->fetchColumn()+1;
+            $key='public:'.$provider.':'.$order['tenant_id'].':'.$order['id'].':'.$attempt;
+            $expiresAt=(new \DateTimeImmutable())->modify('+'.self::CHECKOUT_MINUTES.' minutes');
+            $ins=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status,checkout_expires_at) VALUES (?,?,?,?,?,"BRL","created",?)');
+            $ins->execute([$order['tenant_id'],$order['id'],$provider,$key,$order['total_cents'],$expiresAt->format('Y-m-d H:i:s')]);
+            $id=(int)$pdo->lastInsertId();
+            $this->extendReservation($pdo,$lockedOrder,$expiresAt);
+            return ['id'=>$id,'tenant_id'=>$order['tenant_id'],'order_id'=>$order['id'],'provider'=>$provider,'idempotency_key'=>$key,'amount_cents'=>$order['total_cents'],'status'=>'created','checkout_expires_at'=>$expiresAt->format('Y-m-d H:i:s'),'_reused'=>false];
+        });
+    }
+
+    private function extendReservation(PDO $pdo,array $order,\DateTimeImmutable $expiresAt):void
+    {
+        $expires=$expiresAt->format('Y-m-d H:i:s');
+        if(in_array($order['channel'],['event','delivery','pickup'],true))$pdo->prepare('UPDATE orders SET payment_status="pending",expires_at=? WHERE id=? AND tenant_id=?')->execute([$expires,$order['id'],$order['tenant_id']]);
+        else $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=?')->execute([$order['id'],$order['tenant_id']]);
+        if($order['channel']==='event')$pdo->prepare('UPDATE tickets SET reserved_until=? WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$expires,$order['tenant_id'],$order['id']]);
+        $pdo->prepare('UPDATE coupon_reservations SET expires_at=? WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$expires,$order['tenant_id'],$order['id']]);
     }
 
     private function decodePayload(mixed $payload):array
@@ -101,7 +142,7 @@ final class CheckoutService
         return is_array($decoded)?$decoded:[];
     }
 
-    private function stripe(array $order,array $gateway,array $config,string $key):array
+    private function stripe(array $order,array $gateway,array $config,string $key,\DateTimeImmutable $expiresAt):array
     {
         if(!class_exists('Stripe\\StripeClient'))throw new RuntimeException('Execute composer install para habilitar Stripe.');
         $secret=(string)($config['secret_key']??'');
@@ -121,24 +162,29 @@ final class CheckoutService
             'customer_email'=>$order['customer_email']?:null,
             'metadata'=>$metadata,
             'payment_intent_data'=>['metadata'=>$metadata],
+            'expires_at'=>$expiresAt->getTimestamp(),
             'success_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']).'&retorno=sucesso',
             'cancel_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']).'&retorno=cancelado',
         ],['idempotency_key'=>$key]);
         return ['url'=>(string)$session->url,'external_id'=>(string)$session->id,'raw'=>$session->toArray()];
     }
 
-    private function mercadoPago(array $order,array $gateway,array $config,string $key):array
+    private function mercadoPago(array $order,array $gateway,array $config,string $key,\DateTimeImmutable $expiresAt):array
     {
         $token=(string)($config['access_token']??'');
         if($token==='')throw new RuntimeException('Mercado Pago não configurado.');
         $base=rtrim((string)env('APP_URL',''),'/');
         $notification=$base.'/webhook.php?provider=mercadopago&tenant='.rawurlencode($order['tenant_slug']);
+        $now=new \DateTimeImmutable();
         $body=[
             'items'=>[['id'=>'order-'.$order['id'],'title'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'currency_id'=>'BRL','unit_price'=>((int)$order['total_cents'])/100]],
             'external_reference'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],
             'back_urls'=>['success'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),'pending'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),'failure'=>$base.'/pedido.php?t='.rawurlencode($order['public_token'])],
             'notification_url'=>$notification,
             'metadata'=>['tenant_id'=>$order['tenant_id'],'order_id'=>$order['id']],
+            'expires'=>true,
+            'expiration_date_from'=>$now->format(DATE_ATOM),
+            'expiration_date_to'=>$expiresAt->format(DATE_ATOM),
         ];
         $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$key],$body);
         $url=(string)($data['init_point']??'');
@@ -146,7 +192,7 @@ final class CheckoutService
         return ['url'=>$url,'external_id'=>(string)($data['id']??''),'raw'=>$data];
     }
 
-    private function pagBank(array $order,array $gateway,array $config,string $key):array
+    private function pagBank(array $order,array $gateway,array $config,string $key,\DateTimeImmutable $expiresAt):array
     {
         $token=(string)($config['token']??'');
         if($token==='')throw new RuntimeException('PagBank não configurado.');
@@ -157,6 +203,7 @@ final class CheckoutService
             'reference_id'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],
             'items'=>[['reference_id'=>'order-'.$order['id'],'name'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'unit_amount'=>(int)$order['total_cents']]],
             'payment_methods'=>[['type'=>'CREDIT_CARD'],['type'=>'PIX']],
+            'expiration_date'=>$expiresAt->format(DATE_ATOM),
             'redirect_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),
             'return_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),
             'redirect_waiting_time'=>5,
