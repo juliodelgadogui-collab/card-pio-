@@ -26,7 +26,7 @@ if(!Auth::check()){header('Location: /?route=login');exit;}
 require __DIR__.'/../app/admin_helpers.php';
 if(Auth::role()==='super_admin' && !Auth::tenantId() && $route==='dashboard')$route='superadmin';
 $routes=[
- 'superadmin'=>'superadmin.php','dashboard'=>'dashboard.php','pos'=>'pos.php','products'=>'products.php','orders'=>'orders.php','delivery'=>'delivery.php','kitchen'=>'kitchen.php','restaurant'=>'restaurant.php','customers'=>'customers.php','coupons'=>'coupons.php','events'=>'events.php','tickets'=>'tickets.php','guests'=>'guests.php','promoters'=>'promoters.php','payments'=>'payments.php','gateways'=>'gateways.php','users'=>'users.php','reports'=>'reports.php','audit'=>'audit.php','settings'=>'settings.php'
+ 'superadmin'=>'superadmin.php','dashboard'=>'dashboard.php','pos'=>'pos.php','products'=>'products.php','orders'=>'orders.php','delivery'=>'delivery.php','kitchen'=>'kitchen.php','restaurant'=>'restaurant.php','cash'=>'cash.php','customers'=>'customers.php','coupons'=>'coupons.php','events'=>'events.php','tickets'=>'tickets.php','guests'=>'guests.php','promoters'=>'promoters.php','payments'=>'payments.php','gateways'=>'gateways.php','users'=>'users.php','reports'=>'reports.php','audit'=>'audit.php','settings'=>'settings.php'
 ];
 $file=$routes[$route]??null;if(!$file){http_response_code(404);em_header('Página não encontrada','');echo '<section class="card"><h2>404</h2><p>A página solicitada não existe.</p><a class="button primary" href="/">Voltar</a></section>';em_footer();exit;}
 require __DIR__.'/../app/routes/'.$file;
