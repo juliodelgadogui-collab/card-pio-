@@ -10,6 +10,7 @@ use EventMenu\Services\CheckoutReconciliationService;
 use EventMenu\Services\CheckoutService;
 use EventMenu\Services\CounterOrderService;
 use EventMenu\Services\DeliveryService;
+use EventMenu\Services\FulfillmentService;
 use EventMenu\Services\MaintenanceService;
 use EventMenu\Services\NfcDeviceService;
 use EventMenu\Services\NfcPaymentService;
@@ -31,6 +32,7 @@ $checks=[
     class_exists(PaymentService::class),
     class_exists(PublicOrderService::class),
     class_exists(CounterOrderService::class),
+    class_exists(FulfillmentService::class),
     class_exists(CashRegisterService::class),
     class_exists(RefundCoordinatorService::class),
     class_exists(NfcDeviceService::class),
