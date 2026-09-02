@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use EventMenu\Core\Auth;
 use EventMenu\Core\Security;
-use EventMenu\Services\RefundService;
+use EventMenu\Services\RefundCoordinatorService;
 
 Auth::requirePermission('payments.manage');
 $tenantId=em_require_tenant();
@@ -30,7 +30,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
             $amount=em_parse_brl_to_cents((string)($_POST['amount']??''));
             $restoreStock=!empty($_POST['restore_stock']);
             $key=(string)($_POST['idempotency_key']??'');
-            $refund=(new RefundService())->request($paymentId,$amount,$key,$restoreStock);
+            $refund=(new RefundCoordinatorService())->request($paymentId,$amount,$key,$restoreStock);
             $message=$refund['status']==='succeeded'?'Reembolso confirmado.':'Reembolso enviado e aguardando confirmação do provedor.';
             em_flash('ok',$message);
         }catch(Throwable $e){em_flash('error',$e->getMessage());}
@@ -99,6 +99,7 @@ em_header('Pagamentos','payments');
      <input type="hidden" name="idempotency_key" value="refund:<?= (int)$tenantId ?>:<?= (int)$p['id'] ?>:<?= bin2hex(random_bytes(12)) ?>">
      <label>Valor <input name="amount" inputmode="decimal" placeholder="vazio = <?= em_money($remaining) ?>"<?= $p['channel']==='event'?' readonly':'' ?>></label>
      <?php if($p['channel']!=='event'):?><label style="display:block;margin:6px 0"><input type="checkbox" name="restore_stock" value="1"> devolver estoque se o reembolso quitar 100%</label><?php else:?><div class="muted">Ingresso: somente reembolso integral e sem check-in.</div><?php endif;?>
+     <?php if($p['provider']==='manual'):?><div class="muted">Pagamento manual: o reembolso será lançado no caixa aberto usando a mesma forma de recebimento da venda.</div><?php endif;?>
      <button class="secondary" type="submit">Reembolsar</button>
     </form>
    <?php elseif($remaining<=0):?><span class="muted">Sem saldo</span><?php endif;?>
