@@ -13,92 +13,30 @@ $tenantId=Auth::tenantId();
 function em_money(int|float|string $cents):string{return 'R$ '.number_format(((int)$cents)/100,2,',','.');}
 function em_csrf():string{return Security::e(Security::csrfToken());}
 function em_post_csrf():void{if(!Security::validateCsrf($_POST['_csrf']??null)){http_response_code(419);exit('Sessão expirada. Atualize a página.');}}
-
-function em_base_path():string
-{
-    $configured=(string)env('APP_URL','');
-    $path=$configured!==''?(string)(parse_url($configured,PHP_URL_PATH)??''):'';
-    if($path===''||$path==='/'){
-        $script=(string)($_SERVER['SCRIPT_NAME']??'');
-        $dir=str_replace('\\','/',dirname($script));
-        $path=$dir==='/'||$dir==='.'?'':$dir;
-    }
-    return rtrim($path,'/');
-}
-function em_url(string $path=''):string
-{
-    $base=em_base_path();
-    if($path==='')return $base!==''?$base.'/':'/';
-    if(!str_starts_with($path,'/'))$path='/'.$path;
-    return $base.$path;
-}
-function em_go(string $route,array $params=[]):never
-{
-    $params=['route'=>$route]+$params;
-    header('Location: '.em_url('/?'.http_build_query($params)));
-    exit;
-}
+function em_base_path():string{$configured=(string)env('APP_URL','');$path=$configured!==''?(string)(parse_url($configured,PHP_URL_PATH)??''):'';if($path===''||$path==='/'){$script=(string)($_SERVER['SCRIPT_NAME']??'');$dir=str_replace('\\','/',dirname($script));$path=$dir==='/'||$dir==='.'?'':$dir;}return rtrim($path,'/');}
+function em_url(string $path=''):string{$base=em_base_path();if($path==='')return $base!==''?$base.'/':'/';if(!str_starts_with($path,'/'))$path='/'.$path;return $base.$path;}
+function em_go(string $route,array $params=[]):never{$params=['route'=>$route]+$params;header('Location: '.em_url('/?'.http_build_query($params)));exit;}
 function em_slug(string $value):string{$v=iconv('UTF-8','ASCII//TRANSLIT//IGNORE',$value)?:$value;$v=strtolower(trim(preg_replace('/[^a-zA-Z0-9]+/','-',$v)??'','-'));return $v?:bin2hex(random_bytes(3));}
 function em_selected(mixed $a,mixed $b):string{return (string)$a===(string)$b?' selected':'';}
 function em_checked(bool|int|string $v):string{return(bool)$v?' checked':'';}
 function em_flash(?string $type=null,?string $message=null):?array{if($type&&$message){$_SESSION['_flash']=[$type,$message];return null;}$f=$_SESSION['_flash']??null;unset($_SESSION['_flash']);return $f;}
 function em_can_nav(string $permission):bool{if($permission==='superadmin.only')return Auth::role()==='super_admin';return $permission==='reports.any'?(Auth::can('reports.view')||Auth::can('reports.own')):Auth::can($permission);}
-
-function em_role_label(?string $role):string
-{
-    return match($role){
-        'super_admin'=>'Super administrador',
-        'admin'=>'Administrador',
-        'manager'=>'Gerente',
-        'cashier'=>'Caixa',
-        'waiter'=>'Garçom',
-        'kitchen'=>'Cozinha',
-        'delivery'=>'Entregador',
-        'promoter'=>'Promotor',
-        default=>$role?:'Usuário',
-    };
-}
-function em_status_label(?string $status):string
-{
-    return match($status){
-        'active'=>'Ativo','blocked'=>'Bloqueado','pending'=>'Pendente','confirmed'=>'Confirmado',
-        'preparing'=>'Em preparo','ready'=>'Pronto','out_for_delivery'=>'Saiu para entrega','completed'=>'Concluído',
-        'cancelled'=>'Cancelado','paid'=>'Pago','unpaid'=>'Não pago','partial'=>'Parcial','fulfilled'=>'Entregue',
-        default=>$status?:'—',
-    };
-}
-function em_initials(string $name):string
-{
-    $parts=preg_split('/\s+/',trim($name))?:[];
-    $a=$parts[0]??'E';$b=count($parts)>1?$parts[array_key_last($parts)]:'';
-    return mb_strtoupper(mb_substr($a,0,1).mb_substr($b,0,1));
-}
+function em_role_label(?string $role):string{return Auth::roleLabel($role);}
+function em_status_label(?string $status):string{return match($status){'active'=>'Ativo','blocked'=>'Bloqueado','pending'=>'Pendente','confirmed'=>'Confirmado','preparing'=>'Em preparo','ready'=>'Pronto','out_for_delivery'=>'Saiu para entrega','completed'=>'Concluído','cancelled'=>'Cancelado','paid'=>'Pago','unpaid'=>'Não pago','partial'=>'Parcial','fulfilled'=>'Entregue',default=>$status?:'—'};}
+function em_initials(string $name):string{$parts=preg_split('/\s+/',trim($name))?:[];$a=$parts[0]??'E';$b=count($parts)>1?$parts[array_key_last($parts)]:'';return mb_strtoupper(mb_substr($a,0,1).mb_substr($b,0,1));}
 
 function em_nav():array
 {
+    $role=Auth::role();
+    if($role==='kitchen')return [['kitchen','Tela da cozinha','orders.kitchen','kitchen']];
+    if($role==='delivery')return [['my-deliveries','Minhas entregas','orders.delivery','delivery']];
+    if($role==='counter')return [['pos','Nova venda','orders.create','pos'],['fulfillment','Retiradas','fulfillment.manage','scan'],['orders','Consultar pedidos','orders.view','orders']];
+    if($role==='cashier')return [['pos','PDV / Balcão','orders.create','pos'],['fulfillment','Retiradas','fulfillment.manage','scan'],['orders','Pedidos','orders.view','orders'],['cash','Caixa','payments.manage','cash'],['customers','Clientes','customers.manage','users']];
+    if($role==='waiter')return [['restaurant','Mesas e comandas','tables.manage','tables'],['pos','Lançar pedido','orders.create','pos'],['fulfillment','Retiradas','fulfillment.manage','scan'],['orders','Pedidos','orders.view','orders']];
+    if($role==='promoter')return [['guests','Convidados','guests.manage','users'],['reports','Meus relatórios','reports.any','chart']];
     return array_filter([
-        Auth::role()==='super_admin'?['superadmin','Super ADM','superadmin.only','building']:null,
-        ['dashboard','Visão geral','dashboard','home'],
-        ['pos','PDV / Balcão','orders.create','pos'],
-        ['fulfillment','Retiradas','fulfillment.manage','scan'],
-        ['products','Cardápio','catalog.manage','menu'],
-        ['orders','Pedidos','orders.view','orders'],
-        ['delivery','Delivery','delivery.assign','delivery'],
-        ['kitchen','Cozinha / KDS','orders.kitchen','kitchen'],
-        ['restaurant','Mesas e comandas','tables.manage','tables'],
-        ['cash','Caixa','payments.manage','cash'],
-        ['customers','Clientes e pontos','customers.manage','users'],
-        ['coupons','Cupons','coupons.manage','coupon'],
-        ['events','Eventos','events.manage','calendar'],
-        ['tickets','Ingressos / Check-in','tickets.manage','ticket'],
-        ['guests','Convidados','guests.manage','users'],
-        ['promoters','Promotores','promoters.manage','promoter'],
-        ['payments','Pagamentos','payments.manage','card'],
-        ['gateways','Gateways e NFC','gateways.manage','nfc'],
-        ['users','Equipe','users.manage','team'],
-        ['reports','Relatórios','reports.any','chart'],
-        ['audit','Auditoria','audit.view','audit'],
-        ['settings','Configurações','settings.manage','settings'],
+        $role==='super_admin'?['superadmin','Super ADM','superadmin.only','building']:null,
+        ['dashboard','Visão geral','dashboard','home'],['pos','PDV / Balcão','orders.create','pos'],['fulfillment','Retiradas','fulfillment.manage','scan'],['products','Cardápio','catalog.manage','menu'],['orders','Pedidos','orders.view','orders'],['delivery','Delivery','delivery.assign','delivery'],['kitchen','Cozinha / KDS','orders.kitchen','kitchen'],['restaurant','Mesas e comandas','tables.manage','tables'],['cash','Caixa','payments.manage','cash'],['customers','Clientes e pontos','customers.manage','users'],['coupons','Cupons','coupons.manage','coupon'],['events','Eventos','events.manage','calendar'],['tickets','Ingressos / Check-in','tickets.manage','ticket'],['guests','Convidados','guests.manage','users'],['promoters','Promotores','promoters.manage','promoter'],['payments','Pagamentos','payments.manage','card'],['gateways','Gateways e NFC','gateways.manage','nfc'],['users','Equipe','users.manage','team'],['reports','Relatórios','reports.any','chart'],['audit','Auditoria','audit.view','audit'],['settings','Configurações','settings.manage','settings']
     ]);
 }
 
@@ -130,73 +68,24 @@ function em_icon(string $name):string
     return '<svg viewBox="0 0 24 24" aria-hidden="true">'.$paths.'</svg>';
 }
 
-function em_header(string $title,string $active):void
+function em_workspace_subtitle():string
 {
-    $flash=em_flash();
-    $name=Auth::name();
-    $role=em_role_label(Auth::role());
-    $base=em_base_path();
-    ?>
-<!doctype html>
-<html lang="pt-BR">
-<head>
- <meta charset="utf-8">
- <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
- <meta name="theme-color" content="#6d4aff">
- <title><?= Security::e($title) ?> — EventMenu Premium</title>
- <link rel="manifest" href="<?= Security::e(em_url('/manifest.webmanifest')) ?>">
- <link rel="stylesheet" href="<?= Security::e(em_url('/assets/app.css')) ?>?v=92p2">
-</head>
-<body>
- <div class="mobile-bar">
-   <button class="mobile-menu-btn" type="button" id="mobileMenuBtn" aria-label="Abrir menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-   <div class="mobile-brand">EventMenu <span>Premium</span></div>
-   <div class="mobile-avatar"><?= Security::e(em_initials($name)) ?></div>
- </div>
- <div class="sidebar-overlay" id="sidebarOverlay"></div>
- <div class="layout">
-  <aside class="sidebar" id="sidebar">
-   <div class="brand-wrap"><div class="brand-mark">EM</div><div class="brand">EventMenu <span>Premium</span></div></div>
-   <div class="sidebar-label">Operação</div>
-   <nav class="nav">
-    <?php foreach(em_nav() as$item):[$route,$label,$permission,$icon]=$item;if(!em_can_nav($permission))continue;?>
-      <a class="<?= $active===$route?'active':'' ?>" href="<?= Security::e(em_url('/?route='.$route)) ?>"><span class="nav-icon"><?= em_icon($icon) ?></span><span><?= Security::e($label) ?></span></a>
-    <?php endforeach;?>
-   </nav>
-   <div class="sidebar-foot">
-    <div class="user-avatar"><?= Security::e(em_initials($name)) ?></div>
-    <div class="sidebar-user"><strong><?= Security::e($name) ?></strong><span><?= Security::e($role) ?></span></div>
-    <a class="logout-link" href="<?= Security::e(em_url('/?route=logout')) ?>" title="Sair">Sair</a>
-   </div>
-  </aside>
-  <main class="content">
-   <header class="topbar">
-    <div class="topbar-copy"><h1><?= Security::e($title) ?></h1><div class="topbar-subtitle">Olá, <?= Security::e(explode(' ',trim($name))[0]??$name) ?> · gerencie sua operação em um só lugar</div></div>
-    <div class="topbar-actions"><span class="workspace-chip">EventMenu online</span><?php if(Auth::can('users.manage')&&Auth::tenantId()):?><a class="button secondary" href="<?= Security::e(em_url('/update.php')) ?>">Atualizar sistema</a><?php endif;?></div>
-   </header>
-   <?php if($flash):?><div class="alert <?= Security::e($flash[0]) ?>"><?= Security::e($flash[1]) ?></div><?php endif;?>
-<?php
+    return match(Auth::role()){
+        'counter'=>'Venda e retirada de produtos',
+        'cashier'=>'Vendas, recebimentos e caixa',
+        'waiter'=>'Mesas, comandas e atendimento',
+        'kitchen'=>'Fila de preparo em tempo real',
+        'delivery'=>'Entregas atribuídas ao seu usuário',
+        'promoter'=>'Convidados e resultados da sua operação',
+        default=>'Gerencie sua operação em um só lugar',
+    };
 }
 
-function em_footer():void
+function em_header(string $title,string $active):void
 {
-    $sw=em_url('/sw.js');
-    ?>
-   <script>
-   (()=>{
-     const body=document.body,btn=document.getElementById('mobileMenuBtn'),overlay=document.getElementById('sidebarOverlay');
-     const close=()=>body.classList.remove('nav-open');
-     if(btn)btn.addEventListener('click',()=>body.classList.toggle('nav-open'));
-     if(overlay)overlay.addEventListener('click',close);
-     document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click',close));
-     window.addEventListener('keydown',e=>{if(e.key==='Escape')close();});
-     if('serviceWorker'in navigator){navigator.serviceWorker.register('<?= Security::e($sw) ?>').catch(()=>{});}
-   })();
-   </script>
-  </main>
- </div>
-</body>
-</html>
-<?php
+    $flash=em_flash();$name=Auth::name();$role=em_role_label(Auth::role());
+    ?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#6d4aff"><title><?= Security::e($title) ?> — EventMenu Premium</title><link rel="manifest" href="<?= Security::e(em_url('/manifest.webmanifest')) ?>"><link rel="stylesheet" href="<?= Security::e(em_url('/assets/app.css')) ?>?v=92p3"></head><body>
+    <div class="mobile-bar"><button class="mobile-menu-btn" type="button" id="mobileMenuBtn" aria-label="Abrir menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button><div class="mobile-brand">EventMenu <span>Premium</span></div><div class="mobile-avatar"><?= Security::e(em_initials($name)) ?></div></div><div class="sidebar-overlay" id="sidebarOverlay"></div><div class="layout"><aside class="sidebar" id="sidebar"><div class="brand-wrap"><div class="brand-mark">EM</div><div class="brand">EventMenu <span>Premium</span></div></div><div class="sidebar-label"><?= Security::e($role) ?></div><nav class="nav"><?php foreach(em_nav() as$item):[$route,$label,$permission,$icon]=$item;if(!em_can_nav($permission))continue;?><a class="<?= $active===$route?'active':'' ?>" href="<?= Security::e(em_url('/?route='.$route)) ?>"><span class="nav-icon"><?= em_icon($icon) ?></span><span><?= Security::e($label) ?></span></a><?php endforeach;?></nav><div class="sidebar-foot"><div class="user-avatar"><?= Security::e(em_initials($name)) ?></div><div class="sidebar-user"><strong><?= Security::e($name) ?></strong><span><?= Security::e($role) ?></span></div><a class="logout-link" href="<?= Security::e(em_url('/?route=logout')) ?>" title="Sair">Sair</a></div></aside><main class="content"><header class="topbar"><div class="topbar-copy"><h1><?= Security::e($title) ?></h1><div class="topbar-subtitle"><?= Security::e(em_workspace_subtitle()) ?></div></div><div class="topbar-actions"><span class="workspace-chip"><?= Security::e($role) ?></span><?php if(Auth::can('users.manage')&&Auth::tenantId()):?><a class="button secondary" href="<?= Security::e(em_url('/update.php')) ?>">Atualizar sistema</a><?php endif;?></div></header><?php if($flash):?><div class="alert <?= Security::e($flash[0]) ?>"><?= Security::e($flash[1]) ?></div><?php endif;?><?php
 }
+function em_footer():void{$sw=em_url('/sw.js');?><script>(()=>{const body=document.body,btn=document.getElementById('mobileMenuBtn'),overlay=document.getElementById('sidebarOverlay');const close=()=>body.classList.remove('nav-open');if(btn)btn.addEventListener('click',()=>body.classList.toggle('nav-open'));if(overlay)overlay.addEventListener('click',close);document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click',close));window.addEventListener('keydown',e=>{if(e.key==='Escape')close();});if('serviceWorker'in navigator){navigator.serviceWorker.register('<?= Security::e($sw) ?>').catch(()=>{});}})();</script></main></div></body></html><?php }
 function em_require_tenant():int{$id=Auth::tenantId();if(!$id){http_response_code(403);exit('Selecione uma empresa no Super ADM.');}return $id;}
