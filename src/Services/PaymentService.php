@@ -65,7 +65,7 @@ final class PaymentService
         }
         $verified['provider']=strtolower((string)$verified['provider']);
 
-        Database::transaction(function(PDO $pdo)use($verified){
+        $confirmed=Database::transaction(function(PDO $pdo)use($verified):bool{
             $tenantId=(int)$verified['tenant_id'];
             $orderId=(int)$verified['order_id'];
             $provider=(string)$verified['provider'];
@@ -92,7 +92,7 @@ final class PaymentService
             $find->execute([$tenantId,$orderId,$provider]);
             $payment=$find->fetch();
             if(!$payment)throw new RuntimeException('Cobrança local não encontrada.');
-            if($payment['status']==='paid')return;
+            if($payment['status']==='paid')return false;
             if($order['payment_status']==='paid')throw new RuntimeException('Pedido já foi pago por outra cobrança.');
             if((int)$payment['amount_cents']!==(int)$verified['amount_cents']||strtoupper((string)$payment['currency'])!=='BRL')throw new RuntimeException('Cobrança divergente.');
 
@@ -134,7 +134,7 @@ final class PaymentService
                 }
             }
 
-            if(!empty($order['customer_id'])){
+            if(!empty($order['customer_id'])&&$this->pointsEnabled($pdo,$tenantId)){
                 $points=intdiv((int)$order['total_cents'],100);
                 if($points>0){
                     $key='payment:'.$payment['id'].':points';
@@ -153,6 +153,34 @@ final class PaymentService
                     $pdo->prepare('INSERT IGNORE INTO promoter_commissions (tenant_id,promoter_id,order_id,amount_cents,status,idempotency_key) VALUES (?,?,?,?,"approved",?)')->execute([$tenantId,$order['promoter_id'],$orderId,$commission,'payment:'.$payment['id'].':commission']);
                 }
             }
+            return true;
         });
+
+        if($confirmed)$this->afterConfirmed($verified);
+    }
+
+    private function pointsEnabled(PDO $pdo,int $tenantId):bool
+    {
+        try{$s=$pdo->prepare('SELECT settings FROM tenants WHERE id=?');$s->execute([$tenantId]);$settings=json_decode((string)($s->fetchColumn()?:'{}'),true);return!is_array($settings)||!array_key_exists('points_enabled',$settings)||(bool)$settings['points_enabled'];}catch(\Throwable){return true;}
+    }
+
+    private function afterConfirmed(array $verified):void
+    {
+        $tenantId=(int)$verified['tenant_id'];$orderId=(int)$verified['order_id'];$notifications=new NotificationService();
+        $notifications->push($tenantId,'payment','Pagamento confirmado','Pedido #'.$orderId.' pago com sucesso via '.strtoupper((string)$verified['provider']).'.','order',$orderId);
+        try{
+            $pdo=Database::connection();
+            $low=$pdo->prepare('SELECT DISTINCT p.id,p.name,p.stock_qty,p.min_stock_qty FROM stock_movements sm JOIN products p ON p.id=sm.product_id AND p.tenant_id=sm.tenant_id WHERE sm.tenant_id=? AND sm.order_id=? AND sm.type="out" AND p.track_stock=1 AND p.min_stock_qty IS NOT NULL AND p.stock_qty<=p.min_stock_qty');
+            $low->execute([$tenantId,$orderId]);
+            foreach($low->fetchAll() as$p)$notifications->pushOnce($tenantId,'stock','Estoque baixo: '.$p['name'],'Saldo atual: '.$p['stock_qty'].' · mínimo configurado: '.$p['min_stock_qty'].'.','product',(int)$p['id']);
+
+            $s=$pdo->prepare('SELECT o.id,o.channel,o.total_cents,c.name customer_name,c.email customer_email FROM orders o LEFT JOIN customers c ON c.id=o.customer_id WHERE o.id=? AND o.tenant_id=? LIMIT 1');$s->execute([$orderId,$tenantId]);$order=$s->fetch();
+            if(!$order||!filter_var((string)($order['customer_email']??''),FILTER_VALIDATE_EMAIL))return;
+            $body='Olá, '.(($order['customer_name']??'')?:'cliente').".\n\nO pagamento do pedido #{$orderId} foi confirmado.\nValor: R$ ".number_format(((int)$order['total_cents'])/100,2,',','.').".\n";
+            $tickets=$pdo->prepare('SELECT t.code,t.qr_token,e.name event_name FROM tickets t JOIN events e ON e.id=t.event_id WHERE t.tenant_id=? AND t.order_id=? AND t.status IN ("paid","checked_in") ORDER BY t.id');$tickets->execute([$tenantId,$orderId]);$rows=$tickets->fetchAll();
+            if($rows){$body.="\nSeus ingressos:\n";$base=rtrim((string)env('APP_URL',''),'/');foreach($rows as$t){$body.='- '.($t['event_name']??'Evento').' · '.$t['code'];if($base!==''&&!empty($t['qr_token']))$body.=' · '.$base.'/ingresso.php?t='.rawurlencode((string)$t['qr_token']);$body.="\n";}}
+            $body.="\nObrigado por usar o EventMenu Premium.";
+            (new MailQueueService())->queue((string)$order['customer_email'],$rows?'Pagamento confirmado e ingressos · EventMenu':'Pagamento confirmado · EventMenu',$body,'payment-confirmed|'.$tenantId.'|'.$orderId);
+        }catch(\Throwable $e){error_log('[eventmenu post-payment] '.$e->getMessage());}
     }
 }
