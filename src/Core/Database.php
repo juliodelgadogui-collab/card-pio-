@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace EventMenu\Core;
 
 use PDO;
-use PDOException;
 use Throwable;
 
 final class Database
@@ -28,6 +27,7 @@ final class Database
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
             PDO::ATTR_EMULATE_PREPARES => false,
         ]);
+        self::$pdo->exec("SET time_zone = '+00:00'");
         return self::$pdo;
     }
 
