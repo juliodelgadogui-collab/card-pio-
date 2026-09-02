@@ -33,6 +33,20 @@ final class NfcPaymentService
         $orderStmt=$pdo->prepare('SELECT id,total_cents,status,payment_status FROM orders WHERE id=? AND tenant_id=? LIMIT 1');
         $orderStmt->execute([$orderId,$tenantId]);$order=$orderStmt->fetch();
         if(!$order)throw new RuntimeException('Pedido não encontrado para NFC.');
+
+        // Retry idempotente: se o app perdeu a resposta depois da confirmação, o mesmo
+        // transactionCode no mesmo pedido deve retornar sucesso sem criar nova cobrança.
+        $existingStmt=$pdo->prepare('SELECT * FROM nfc_payment_attempts WHERE tenant_id=? AND transaction_code_hash=? LIMIT 1');
+        $existingStmt->execute([$tenantId,$transactionHash]);$existing=$existingStmt->fetch();
+        if($existing){
+            if((int)$existing['order_id']!==$orderId)throw new RuntimeException('Esta transação PagBank já foi vinculada a outro pedido.');
+            if($existing['status']==='verified'){
+                $paymentStmt=$pdo->prepare('SELECT id FROM payments WHERE tenant_id=? AND order_id=? AND provider="pagbank" AND provider_payment_id=? AND status IN ("paid","partially_refunded","refunded") ORDER BY id DESC LIMIT 1');
+                $paymentStmt->execute([$tenantId,$orderId,$transactionCode]);
+                return ['ok'=>true,'verified'=>true,'reused'=>true,'order_id'=>$orderId,'payment_id'=>(int)($paymentStmt->fetchColumn()?:0),'transaction_code'=>$transactionCode];
+            }
+        }
+
         if(in_array($order['status'],['cancelled','completed'],true))throw new RuntimeException('Pedido cancelado ou finalizado não aceita pagamento NFC.');
         if(in_array($order['payment_status'],['paid','partially_refunded','refunded'],true))throw new RuntimeException('Pedido já pago ou reembolsado.');
         $amount=(int)$order['total_cents'];if($amount<100||$amount>1000000)throw new RuntimeException('Valor fora dos limites suportados pelo Tap On.');
