@@ -16,6 +16,7 @@ final class Auth
         $user = $stmt->fetch();
         if (!$user || ($user['tenant_id'] !== null && $user['tenant_status'] !== 'active') || !password_verify($password, $user['password_hash'])) return false;
         session_regenerate_id(true);
+        unset($_SESSION['super_admin_tenant_id']);
         self::setSession($user);
         $pdo->prepare('UPDATE users SET last_login_at=NOW() WHERE id=?')->execute([$user['id']]);
         self::audit('auth.login','user',(string)$user['id']);
@@ -25,9 +26,14 @@ final class Auth
     private static function setSession(array $user): void
     {
         $_SESSION['user_id']=(int)$user['id'];
-        $_SESSION['tenant_id']=$user['tenant_id']!==null?(int)$user['tenant_id']:null;
         $_SESSION['role']=$user['role'];
         $_SESSION['name']=$user['name'];
+        if ($user['role'] === 'super_admin') {
+            $_SESSION['tenant_id'] = isset($_SESSION['super_admin_tenant_id']) ? (int)$_SESSION['super_admin_tenant_id'] : null;
+        } else {
+            unset($_SESSION['super_admin_tenant_id']);
+            $_SESSION['tenant_id']=$user['tenant_id']!==null?(int)$user['tenant_id']:null;
+        }
     }
 
     public static function enforceCurrentUser(): void
@@ -36,7 +42,27 @@ final class Auth
         $stmt=Database::connection()->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.id=? LIMIT 1');
         $stmt->execute([self::id()]);$user=$stmt->fetch();
         if(!$user||$user['status']!=='active'||($user['tenant_id']!==null&&$user['tenant_status']!=='active')){self::logout();header('Location: /?route=login&blocked=1');exit;}
+        if (($user['role'] ?? '') === 'super_admin' && isset($_SESSION['super_admin_tenant_id'])) {
+            $check=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? AND status="active"');
+            $check->execute([(int)$_SESSION['super_admin_tenant_id']]);
+            if(!$check->fetchColumn()) unset($_SESSION['super_admin_tenant_id']);
+        }
         self::setSession($user);
+    }
+
+    public static function selectTenant(?int $tenantId): void
+    {
+        if (self::role() !== 'super_admin') throw new RuntimeException('Apenas Super ADM pode selecionar empresa.');
+        if ($tenantId === null || $tenantId < 1) {
+            unset($_SESSION['super_admin_tenant_id']);
+            $_SESSION['tenant_id']=null;
+            return;
+        }
+        $stmt=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? LIMIT 1');
+        $stmt->execute([$tenantId]);
+        if(!$stmt->fetchColumn()) throw new RuntimeException('Empresa não encontrada.');
+        $_SESSION['super_admin_tenant_id']=$tenantId;
+        $_SESSION['tenant_id']=$tenantId;
     }
 
     public static function logout(): void
