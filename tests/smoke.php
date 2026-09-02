@@ -7,8 +7,10 @@ require __DIR__.'/../app/bootstrap.php';
 use EventMenu\Core\Security;
 use EventMenu\Services\CheckoutService;
 use EventMenu\Services\MaintenanceService;
+use EventMenu\Services\OrderWorkflowService;
 use EventMenu\Services\PaymentService;
 use EventMenu\Services\PublicOrderService;
+use EventMenu\Services\StockService;
 use EventMenu\Services\TicketService;
 
 $checks=[
@@ -18,6 +20,8 @@ $checks=[
     class_exists(PublicOrderService::class),
     class_exists(TicketService::class),
     class_exists(MaintenanceService::class),
+    class_exists(OrderWorkflowService::class),
+    class_exists(StockService::class),
     strlen(Security::randomKey(16))===32,
     class_exists('Stripe\\StripeClient'),
     class_exists('MercadoPago\\Webhook\\WebhookSignatureValidator'),
