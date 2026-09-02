@@ -5,6 +5,8 @@ declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Core\Database;
+use EventMenu\Services\DeliveryService;
+use EventMenu\Services\OrderWorkflowService;
 use EventMenu\Services\PublicOrderService;
 
 function assert_delivery(bool $condition,string $message):void{
@@ -14,6 +16,10 @@ function assert_delivery(bool $condition,string $message):void{
 $pdo=Database::connection();
 $pdo->exec("INSERT INTO tenants (name,slug,plan,status) VALUES ('CI Delivery','ci-delivery','premium','active')");
 $tenantId=(int)$pdo->lastInsertId();
+$hash=password_hash('ci-password-123',PASSWORD_DEFAULT);
+$u=$pdo->prepare('INSERT INTO users (tenant_id,name,email,password_hash,role,status) VALUES (?,?,?,?,?,"active")');
+$u->execute([$tenantId,'Admin CI','admin-ci@example.com',$hash,'admin']);$adminId=(int)$pdo->lastInsertId();
+$u->execute([$tenantId,'Entregador CI','delivery-ci@example.com',$hash,'delivery']);$driverId=(int)$pdo->lastInsertId();
 $pdo->prepare('INSERT INTO products (tenant_id,name,price_cents,track_stock,active) VALUES (?,"Produto teste",1000,0,1)')->execute([$tenantId]);
 $productId=(int)$pdo->lastInsertId();
 $pdo->prepare('INSERT INTO delivery_zones (tenant_id,name,match_type,match_value,fee_cents,min_order_cents,free_above_cents,eta_min_minutes,eta_max_minutes,sort_order,active) VALUES (?,"Zona CEP","postal_prefix","283",700,1500,5000,25,45,0,1)')->execute([$tenantId]);
@@ -36,6 +42,25 @@ assert_delivery($order['delivery_address']==='Rua Teste, 10','logradouro não pe
 assert_delivery($order['delivery_postal_code']==='28300-000','CEP não persistido');
 assert_delivery($order['delivery_neighborhood']==='Centro','bairro não persistido');
 assert_delivery($order['delivery_city']==='Cidade Teste','cidade não persistida');
+
+$_SESSION['user_id']=$adminId;$_SESSION['tenant_id']=$tenantId;$_SESSION['role']='admin';$_SESSION['name']='Admin CI';
+(new DeliveryService())->assign($tenantId,(int)$result['order_id'],$driverId);
+$assigned=$pdo->prepare('SELECT assigned_delivery_user_id FROM orders WHERE id=?');$assigned->execute([$result['order_id']]);
+assert_delivery((int)$assigned->fetchColumn()===$driverId,'entregador não foi atribuído');
+$pdo->prepare('UPDATE orders SET payment_status="paid",status="ready" WHERE id=?')->execute([$result['order_id']]);
+
+$_SESSION['user_id']=$driverId;$_SESSION['tenant_id']=$tenantId;$_SESSION['role']='delivery';$_SESSION['name']='Entregador CI';
+$workflow=new OrderWorkflowService();
+$workflow->transition($tenantId,(int)$result['order_id'],'out_for_delivery');
+$workflow->transition($tenantId,(int)$result['order_id'],'completed');
+$lifecycle=$pdo->prepare('SELECT status,delivery_started_at,delivered_at FROM orders WHERE id=?');$lifecycle->execute([$result['order_id']]);$lifecycle=$lifecycle->fetch();
+assert_delivery($lifecycle['status']==='completed','pedido não foi concluído');
+assert_delivery(!empty($lifecycle['delivery_started_at']),'horário de saída não foi salvo');
+assert_delivery(!empty($lifecycle['delivered_at']),'horário de entrega não foi salvo');
+$events=$pdo->prepare('SELECT event_type FROM delivery_events WHERE tenant_id=? AND order_id=? ORDER BY id');$events->execute([$tenantId,$result['order_id']]);$eventTypes=array_column($events->fetchAll(),'event_type');
+assert_delivery(in_array('assigned',$eventTypes,true),'evento de atribuição ausente');
+assert_delivery(in_array('out_for_delivery',$eventTypes,true),'evento de saída ausente');
+assert_delivery(in_array('delivered',$eventTypes,true),'evento de entrega ausente');
 
 $free=$service->createDelivery($tenantId,[['product_id'=>$productId,'qty'=>5]],['name'=>'Cliente CI 2','phone'=>'22999990001','postal_code'=>'28310-000','neighborhood'=>'Centro','city'=>'Cidade Teste'],'Rua Teste, 20');
 assert_delivery((int)$free['subtotal_cents']===5000,'subtotal do frete grátis incorreto');
