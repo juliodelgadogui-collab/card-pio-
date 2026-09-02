@@ -8,10 +8,19 @@ function load_env(string $path):void
     foreach(file($path,FILE_IGNORE_NEW_LINES|FILE_SKIP_EMPTY_LINES)?:[] as $line){
         $line=trim($line);
         if($line===''||str_starts_with($line,'#')||!str_contains($line,'='))continue;
-        [$key,$value]=explode('=',$line,2);
+        [$key,$raw]=explode('=',$line,2);
         $key=trim($key);
-        $value=trim($value," \t\n\r\0\x0B\"'");
-        if(getenv($key)===false){putenv("{$key}={$value}");$_ENV[$key]=$value;}
+        if(!preg_match('/^[A-Z0-9_]+$/i',$key))continue;
+        $raw=trim($raw);
+        $value=$raw;
+        if(strlen($raw)>=2&&$raw[0]==='"'&&substr($raw,-1)==='"'){
+            $decoded=json_decode($raw,true);
+            if(is_string($decoded))$value=$decoded;
+            else $value=substr($raw,1,-1);
+        }elseif(strlen($raw)>=2&&$raw[0]==="'"&&substr($raw,-1)==="'"){
+            $value=substr($raw,1,-1);
+        }
+        if(getenv($key)===false){putenv($key.'='.$value);$_ENV[$key]=$value;}
     }
 }
 
