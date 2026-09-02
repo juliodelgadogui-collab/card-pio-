@@ -37,6 +37,8 @@ jobs:
         run: find app src public bin tests -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Smoke tests
         run: php tests/smoke.php
+      - name: Installer environment test
+        run: php tests/installer_env.php
       - name: Apply database schema
         env:
           MYSQL_PWD: root
@@ -130,27 +132,39 @@ jobs:
           mkdir -p build/EventMenu-Premium-v9.2
           cp -a app bin database public src vendor composer.json composer.lock .env.example README.md build/EventMenu-Premium-v9.2/
           cat > build/EventMenu-Premium-v9.2/INSTALACAO.txt <<'EOF'
-          EVENTMENU PREMIUM v9.2 — PACOTE DE INSTALACAO
+          EVENTMENU PREMIUM v9.2 — PRONTO PARA INSTALAR
 
           Requisitos:
           - PHP 8.2+
           - MySQL 8.0+
           - extensoes PHP: curl, json, mbstring, openssl, pdo_mysql
-          - HTTPS obrigatorio em producao
+          - HTTPS em producao
 
-          Instalacao:
-          1. Envie todo o conteudo deste pacote ao servidor.
-          2. Configure o DocumentRoot do dominio para a pasta public/.
-          3. Copie .env.example para .env e preencha APP_URL, APP_KEY e acesso ao MySQL.
-          4. Acesse /install.php pelo dominio para criar/validar o banco.
-          5. Depois da instalacao, remova ou bloqueie public/install.php e public/update.php.
-          6. Configure o cron do servidor para executar bin/cron.php.
-          7. Cadastre gateways pelo painel; tokens e segredos nao devem ser colocados no app Android.
+          INSTALACAO GUIADA:
+          1. Envie a pasta EventMenu-Premium-v9.2 para o servidor.
+          2. Configure o dominio/subdominio para usar a pasta public/ como DocumentRoot.
+          3. Abra https://SEU-DOMINIO/install.php e preencha:
+             - URL do sistema
+             - host, porta, nome, usuario e senha do MySQL
+             - nome da empresa
+             - nome, e-mail e senha do administrador
+          4. Clique em "Instalar EventMenu Premium".
 
-          Este pacote ja inclui vendor/ e nao exige Composer no servidor.
-          O PDV possui retirada parcial por item com comprovante termico 80mm e QR.
+          O assistente cria automaticamente:
+          - arquivo .env
+          - APP_KEY aleatoria e segura
+          - configuracao de sessao
+          - schema e todas as migrations
+          - primeira empresa
+          - primeiro administrador
+          - lock contra nova instalacao
+
+          Nao e necessario rodar Composer: vendor/ ja esta incluido.
+          Depois, configure o cron do servidor para executar bin/cron.php e cadastre os gateways no painel.
+
+          O PDV possui retirada parcial por item, comprovante termico 80mm e QR.
           O estoque baixa na venda; retiradas posteriores apenas consomem o saldo do cliente.
-          Build gerado somente depois dos testes automaticos Delivery, Agendamento, PDV, Retirada Parcial, Caixa e NFC.
+          Build gerado somente depois dos testes automaticos do instalador, Delivery, Agendamento, PDV, Retirada Parcial, Caixa e NFC.
           EOF
       - name: Upload production install package
         if: github.event_name == 'push'
