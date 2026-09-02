@@ -12,6 +12,7 @@ final class OrderSchedulingService
     public function reserve(PDO $pdo,int $tenantId,string $channel,?string $requested):array
     {
         if(!in_array($channel,['delivery','pickup'],true))throw new RuntimeException('Canal inválido para agendamento.');
+        TenantModuleService::requireModule($tenantId,'delivery');
         $ordering=new OnlineOrderingService();
         $settings=$ordering->settings($pdo,$tenantId,true);
         $requested=trim((string)$requested);
@@ -44,6 +45,7 @@ final class OrderSchedulingService
     public function availableSlots(PDO $pdo,int $tenantId,string $channel,int $limit=40):array
     {
         if(!in_array($channel,['delivery','pickup'],true))return [];
+        if(!TenantModuleService::enabled($tenantId,'delivery'))return [];
         $ordering=new OnlineOrderingService();
         try{$settings=$ordering->settings($pdo,$tenantId,false);}catch(\Throwable){return [];}
         if(empty($settings['scheduling_enabled']))return [];
