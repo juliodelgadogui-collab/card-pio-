@@ -51,7 +51,7 @@ final class Auth
     public static function selectTenant(?int $tenantId):void
     {
         if(self::role()!=='super_admin')throw new RuntimeException('Apenas Super ADM pode selecionar empresa.');
-        unset($_SESSION['unit_id']);
+        unset($_SESSION['unit_id']);self::$permissionCache=[];
         if($tenantId===null||$tenantId<1){unset($_SESSION['super_admin_tenant_id']);$_SESSION['tenant_id']=null;return;}
         $stmt=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? LIMIT 1');$stmt->execute([$tenantId]);if(!$stmt->fetchColumn())throw new RuntimeException('Empresa não encontrada.');$_SESSION['super_admin_tenant_id']=$tenantId;$_SESSION['tenant_id']=$tenantId;
     }
@@ -123,7 +123,7 @@ final class Auth
             'promoter'=>['dashboard','events.promoter','reports.own','guests.manage'],
         ];
         $base=in_array($permission,$map[$role]??[],true);$userId=self::id();$tenantId=self::tenantId();if(!$userId||!$tenantId)return$base;
-        $key=$userId.':'.$permission;if(array_key_exists($key,self::$permissionCache))return self::$permissionCache[$key];
+        $key=$tenantId.':'.$userId.':'.($role??'').':'.$permission;if(array_key_exists($key,self::$permissionCache))return self::$permissionCache[$key];
         try{$s=Database::connection()->prepare('SELECT allowed FROM user_permissions WHERE tenant_id=? AND user_id=? AND permission_key=? LIMIT 1');$s->execute([$tenantId,$userId,$permission]);$v=$s->fetchColumn();if($v!==false)return self::$permissionCache[$key]=(bool)$v;}catch(\Throwable){}
         return self::$permissionCache[$key]=$base;
     }
