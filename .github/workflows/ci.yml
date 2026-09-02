@@ -110,3 +110,38 @@ jobs:
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='cash_movements' AND column_name IN ('cash_session_id','order_id','type','method','amount_cents','idempotency_key');" | grep -qx '6'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='nfc_devices' AND column_name IN ('identifier_version','pairing_window_started_at','pairing_locked_until','last_seen_at','last_payment_at','revocation_reason','revoked_by');" | grep -qx '7'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='nfc_payment_attempts' AND column_name IN ('transaction_code_hash','status','amount_cents','currency','provider_payment_id','failure_reason','verified_at');" | grep -qx '7'
+      - name: Build production install package
+        if: github.event_name == 'push'
+        run: |
+          rm -rf build
+          mkdir -p build/EventMenu-Premium-v9.2
+          cp -a app bin database public src vendor composer.json composer.lock .env.example README.md build/EventMenu-Premium-v9.2/
+          cat > build/EventMenu-Premium-v9.2/INSTALACAO.txt <<'EOF'
+          EVENTMENU PREMIUM v9.2 — PACOTE DE INSTALACAO
+
+          Requisitos:
+          - PHP 8.2+
+          - MySQL 8.0+
+          - extensoes PHP: curl, json, mbstring, openssl, pdo_mysql
+          - HTTPS obrigatorio em producao
+
+          Instalacao:
+          1. Envie todo o conteudo deste pacote ao servidor.
+          2. Configure o DocumentRoot do dominio para a pasta public/.
+          3. Copie .env.example para .env e preencha APP_URL, APP_KEY e acesso ao MySQL.
+          4. Acesse /install.php pelo dominio para criar/validar o banco.
+          5. Depois da instalacao, remova ou bloqueie public/install.php e public/update.php.
+          6. Configure o cron do servidor para executar bin/cron.php.
+          7. Cadastre gateways pelo painel; tokens e segredos nao devem ser colocados no app Android.
+
+          Este pacote ja inclui vendor/ e nao exige Composer no servidor.
+          Build gerado somente depois dos testes automaticos Delivery, Agendamento, PDV, Caixa e NFC.
+          EOF
+      - name: Upload production install package
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-v9.2-INSTALL
+          path: build/EventMenu-Premium-v9.2/
+          if-no-files-found: error
+          retention-days: 14
