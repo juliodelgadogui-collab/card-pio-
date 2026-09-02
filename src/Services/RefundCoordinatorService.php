@@ -13,7 +13,7 @@ final class RefundCoordinatorService
 {
     public function request(int $paymentId,?int $amountCents,string $idempotencyKey,bool $restoreStock=false):array
     {
-        Auth::requirePermission('payments.manage');
+        Auth::requirePermission('refunds.manage');
         $tenantId=Auth::tenantId();
         $userId=Auth::id();
         if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida para reembolso.');
