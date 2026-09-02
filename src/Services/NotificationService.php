@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace EventMenu\Services;
 
 use EventMenu\Core\Database;
-use PDO;
 
 final class NotificationService
 {
@@ -14,6 +13,18 @@ final class NotificationService
         $allowed=['info','success','warning','error','order','payment','stock','event'];if(!in_array($type,$allowed,true))$type='info';
         try{$s=Database::connection()->prepare('INSERT INTO notifications (tenant_id,target_user_id,type,title,message,entity_type,entity_id) VALUES (?,?,?,?,?,?,?)');$s->execute([$tenantId,$targetUserId,$type,mb_substr($title,0,160),$message,$entityType,$entityId]);}catch(\Throwable){}
     }
+
+    public function pushOnce(int $tenantId,string $type,string $title,string $message,?string $entityType=null,?int $entityId=null,?int $targetUserId=null):void
+    {
+        try{
+            $pdo=Database::connection();
+            $sql='SELECT id FROM notifications WHERE tenant_id=? AND status="unread" AND type=? AND title=? AND entity_type<=>? AND entity_id<=>? AND target_user_id<=>? LIMIT 1';
+            $s=$pdo->prepare($sql);$s->execute([$tenantId,$type,mb_substr($title,0,160),$entityType,$entityId,$targetUserId]);
+            if($s->fetchColumn())return;
+            $this->push($tenantId,$type,$title,$message,$entityType,$entityId,$targetUserId);
+        }catch(\Throwable){}
+    }
+
     public function unread(int $tenantId,?int $userId=null,int $limit=30):array
     {
         $pdo=Database::connection();$limit=max(1,min(100,$limit));$sql='SELECT * FROM notifications WHERE tenant_id=? AND status="unread" AND (target_user_id IS NULL';$args=[$tenantId];
