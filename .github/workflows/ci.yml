@@ -54,6 +54,17 @@ jobs:
           SESSION_NAME: eventmenu_ci
           SESSION_SECURE: 'false'
         run: php tests/delivery_integration.php
+      - name: Scheduling integration
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          SESSION_NAME: eventmenu_ci_schedule
+          SESSION_SECURE: 'false'
+        run: php tests/scheduling_integration.php
       - name: Verify critical database objects
         env:
           MYSQL_PWD: root
@@ -61,3 +72,4 @@ jobs:
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles','delivery_zones','delivery_events');" | grep -qx '10'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='payments' AND column_name='checkout_expires_at';" | grep -qx '1'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='orders' AND column_name IN ('delivery_zone_id','delivery_eta_min_minutes','delivery_eta_max_minutes','delivery_started_at','delivered_at','delivery_postal_code','delivery_neighborhood','delivery_city');" | grep -qx '8'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='orders' AND column_name IN ('scheduled_for','scheduled_slot_minutes');" | grep -qx '2'
