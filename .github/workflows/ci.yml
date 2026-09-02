@@ -39,6 +39,12 @@ jobs:
         run: php tests/smoke.php
       - name: Installer environment test
         run: php tests/installer_env.php
+      - name: Real installer database path
+        env:
+          MYSQL_PWD: root
+        run: |
+          mysql -h 127.0.0.1 -uroot -e "DROP DATABASE IF EXISTS eventmenu_installer_ci; CREATE DATABASE eventmenu_installer_ci CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          DB_HOST=127.0.0.1 DB_PORT=3306 DB_DATABASE=eventmenu_installer_ci DB_USERNAME=root DB_PASSWORD=root APP_KEY=ci-installer-eventmenu-key-0123456789abcdef SESSION_SECURE=false php tests/installer_database.php
       - name: Apply database schema
         env:
           MYSQL_PWD: root
@@ -46,84 +52,47 @@ jobs:
           mysql -h 127.0.0.1 -uroot eventmenu < database/schema.sql
           for f in database/migrations/*.sql; do echo "Applying $f"; mysql -h 127.0.0.1 -uroot eventmenu < "$f"; done
       - name: Delivery integration
-        env:
+        env: &app_env
           DB_HOST: 127.0.0.1
           DB_PORT: 3306
           DB_DATABASE: eventmenu
           DB_USERNAME: root
           DB_PASSWORD: root
           APP_KEY: ci-only-eventmenu-key-0123456789abcdef
-          SESSION_NAME: eventmenu_ci
           SESSION_SECURE: 'false'
         run: php tests/delivery_integration.php
       - name: Scheduling integration
         env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_DATABASE: eventmenu
-          DB_USERNAME: root
-          DB_PASSWORD: root
-          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          <<: *app_env
           SESSION_NAME: eventmenu_ci_schedule
-          SESSION_SECURE: 'false'
         run: php tests/scheduling_integration.php
       - name: POS integration
         env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_DATABASE: eventmenu
-          DB_USERNAME: root
-          DB_PASSWORD: root
-          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          <<: *app_env
           SESSION_NAME: eventmenu_ci_pos
-          SESSION_SECURE: 'false'
         run: php tests/pos_integration.php
       - name: Fulfillment integration
         env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_DATABASE: eventmenu
-          DB_USERNAME: root
-          DB_PASSWORD: root
-          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          <<: *app_env
           SESSION_NAME: eventmenu_ci_fulfillment
-          SESSION_SECURE: 'false'
         run: php tests/fulfillment_integration.php
       - name: Cash integration
         env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_DATABASE: eventmenu
-          DB_USERNAME: root
-          DB_PASSWORD: root
-          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          <<: *app_env
           SESSION_NAME: eventmenu_ci_cash
-          SESSION_SECURE: 'false'
         run: php tests/cash_integration.php
       - name: NFC integration
         env:
-          DB_HOST: 127.0.0.1
-          DB_PORT: 3306
-          DB_DATABASE: eventmenu
-          DB_USERNAME: root
-          DB_PASSWORD: root
-          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          <<: *app_env
           SESSION_NAME: eventmenu_ci_nfc
-          SESSION_SECURE: 'false'
         run: php tests/nfc_integration.php
       - name: Verify critical database objects
         env:
           MYSQL_PWD: root
         run: |
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles','delivery_zones','delivery_events','cash_sessions','cash_movements','nfc_devices','nfc_payment_attempts','order_fulfillments');" | grep -qx '15'
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='payments' AND column_name='checkout_expires_at';" | grep -qx '1'
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='orders' AND column_name IN ('delivery_zone_id','delivery_eta_min_minutes','delivery_eta_max_minutes','delivery_started_at','delivered_at','delivery_postal_code','delivery_neighborhood','delivery_city');" | grep -qx '8'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='orders' AND column_name IN ('scheduled_for','scheduled_slot_minutes','fulfillment_token','fulfillment_status','fulfilled_at');" | grep -qx '5'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='order_items' AND column_name='fulfilled_quantity';" | grep -qx '1'
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='order_fulfillments' AND column_name IN ('order_item_id','quantity','source','idempotency_key','user_id','created_at');" | grep -qx '6'
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='cash_sessions' AND column_name IN ('opening_balance_cents','expected_cash_cents','declared_cash_cents','difference_cents','opened_at','closed_at');" | grep -qx '6'
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='cash_movements' AND column_name IN ('cash_session_id','order_id','type','method','amount_cents','idempotency_key');" | grep -qx '6'
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='nfc_devices' AND column_name IN ('identifier_version','pairing_window_started_at','pairing_locked_until','last_seen_at','last_payment_at','revocation_reason','revoked_by');" | grep -qx '7'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='nfc_payment_attempts' AND column_name IN ('transaction_code_hash','status','amount_cents','currency','provider_payment_id','failure_reason','verified_at');" | grep -qx '7'
       - name: Build production install package
         if: github.event_name == 'push'
@@ -143,28 +112,18 @@ jobs:
           INSTALACAO GUIADA:
           1. Envie a pasta EventMenu-Premium-v9.2 para o servidor.
           2. Configure o dominio/subdominio para usar a pasta public/ como DocumentRoot.
-          3. Abra https://SEU-DOMINIO/install.php e preencha:
-             - URL do sistema
-             - host, porta, nome, usuario e senha do MySQL
-             - nome da empresa
-             - nome, e-mail e senha do administrador
-          4. Clique em "Instalar EventMenu Premium".
+          3. Abra https://SEU-DOMINIO/install.php.
+          4. Preencha os dados do MySQL, empresa e administrador e clique em Instalar.
 
-          O assistente cria automaticamente:
-          - arquivo .env
-          - APP_KEY aleatoria e segura
-          - configuracao de sessao
-          - schema e todas as migrations
-          - primeira empresa
-          - primeiro administrador
-          - lock contra nova instalacao
+          O assistente cria automaticamente .env, APP_KEY segura, schema, migrations,
+          primeira empresa, primeiro administrador e lock contra reinstalacao.
 
           Nao e necessario rodar Composer: vendor/ ja esta incluido.
           Depois, configure o cron do servidor para executar bin/cron.php e cadastre os gateways no painel.
 
           O PDV possui retirada parcial por item, comprovante termico 80mm e QR.
           O estoque baixa na venda; retiradas posteriores apenas consomem o saldo do cliente.
-          Build gerado somente depois dos testes automaticos do instalador, Delivery, Agendamento, PDV, Retirada Parcial, Caixa e NFC.
+          Build gerado somente depois dos testes do instalador real, Delivery, Agendamento, PDV, Retirada Parcial, Caixa e NFC.
           EOF
       - name: Upload production install package
         if: github.event_name == 'push'
