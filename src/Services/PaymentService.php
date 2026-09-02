@@ -38,7 +38,7 @@ final class PaymentService
             $existing=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');
             $existing->execute([$tenantId,$idempotencyKey]);
             if($payment=$existing->fetch()){
-                if($payment['provider']!==$provider|| (int)$payment['order_id']!==$orderId)throw new RuntimeException('Chave de idempotência vinculada a outra cobrança.');
+                if($payment['provider']!==$provider||(int)$payment['order_id']!==$orderId)throw new RuntimeException('Chave de idempotência vinculada a outra cobrança.');
                 return $payment;
             }
 
@@ -99,6 +99,13 @@ final class PaymentService
             $dupe=$pdo->prepare('SELECT id FROM payments WHERE provider=? AND provider_payment_id=? AND id<>? LIMIT 1');
             $dupe->execute([$provider,(string)$verified['provider_payment_id'],$payment['id']]);
             if($dupe->fetchColumn())throw new RuntimeException('Transação do provedor já vinculada a outra cobrança.');
+
+            if($provider==='manual'){
+                $userId=Auth::id();
+                if(!$userId)throw new RuntimeException('Operador não autenticado para pagamento manual.');
+                $method=(string)($verified['manual_method']??'');
+                (new CashRegisterService())->recordManualSale($pdo,$tenantId,$userId,$orderId,(int)$verified['amount_cents'],$method,(string)$payment['idempotency_key']);
+            }
 
             (new StockService())->commitForOrder($pdo,$tenantId,$orderId);
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="paid",verified_at=NOW(),raw_payload=? WHERE id=?')->execute([(string)$verified['provider_payment_id'],json_encode($verified,JSON_UNESCAPED_UNICODE),$payment['id']]);
