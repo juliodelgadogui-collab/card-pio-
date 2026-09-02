@@ -1,0 +1,31 @@
+Options -Indexes
+DirectoryIndex public/index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Nunca exponha codigo, banco, dependencias, testes ou arquivos de runtime.
+    RewriteRule ^(?:app|bin|database|src|storage|tests|vendor)(?:/|$) - [F,L,NC]
+    RewriteRule ^(?:\.git|\.github)(?:/|$) - [F,L,NC]
+    RewriteRule ^(?:\.env(?:\..*)?|composer\.(?:json|lock)|README\.md|INSTALACAO\.txt)$ - [F,L,NC]
+
+    # Permite instalar o projeto diretamente em /1, /teste, /eventmenu etc.
+    # A URL fica limpa, mas os arquivos publicos continuam fisicamente em public/.
+    RewriteRule ^$ public/index.php [L]
+    RewriteRule ^index\.php$ public/index.php [L,NC]
+    RewriteRule ^assets/(.*)$ public/assets/$1 [L,NC]
+    RewriteRule ^manifest\.webmanifest$ public/manifest.webmanifest [L,NC]
+    RewriteRule ^sw\.js$ public/sw.js [L,NC]
+    RewriteRule ^offline\.html$ public/offline.html [L,NC]
+    RewriteRule ^(install|update|menu|mesa|pedido|retirada|evento|ingresso|webhook)\.php$ public/$1.php [L,NC]
+</IfModule>
+
+<FilesMatch "^(?:\.env|composer\.(?:json|lock)|README\.md)$">
+    Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-Frame-Options "SAMEORIGIN"
+</IfModule>
