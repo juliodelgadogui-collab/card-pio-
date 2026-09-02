@@ -68,7 +68,7 @@ final class Auth
             'admin'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','fulfillment.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage'],
             'manager'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','fulfillment.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign'],
             'cashier'=>['dashboard','orders.manage','orders.view','orders.create','payments.manage','fulfillment.manage','customers.manage','tables.manage'],
-            'counter'=>['orders.view','orders.create','fulfillment.manage'],
+            'counter'=>['orders.create','fulfillment.manage','counter.orders'],
             'waiter'=>['dashboard','orders.create','orders.view','tables.manage','fulfillment.manage'],
             'kitchen'=>['orders.kitchen'],
             'delivery'=>['orders.delivery'],
