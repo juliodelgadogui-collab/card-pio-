@@ -43,8 +43,9 @@ jobs:
         run: |
           mysql -h 127.0.0.1 -uroot eventmenu < database/schema.sql
           for f in database/migrations/*.sql; do echo "Applying $f"; mysql -h 127.0.0.1 -uroot eventmenu < "$f"; done
-      - name: Verify critical tables
+      - name: Verify critical database objects
         env:
           MYSQL_PWD: root
         run: |
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles');" | grep -qx '8'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='payments' AND column_name='checkout_expires_at';" | grep -qx '1'
