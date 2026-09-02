@@ -30,6 +30,10 @@ final class OrderWorkflowService
             if($newStatus==='completed'&&$order['payment_status']!=='paid')throw new RuntimeException('Pedido não pago não pode ser finalizado.');
             if($newStatus==='cancelled'&&$order['payment_status']==='paid')throw new RuntimeException('Pedido pago não pode ser cancelado diretamente. Faça o reembolso antes.');
             if($newStatus==='out_for_delivery'&&$order['channel']!=='delivery')throw new RuntimeException('Somente pedidos de delivery podem sair para entrega.');
+            if($newStatus==='cancelled'){
+                (new StockService())->reverseForOrder($pdo,$tenantId,$orderId);
+                $coupon=$pdo->prepare('SELECT id,coupon_id FROM coupon_reservations WHERE tenant_id=? AND order_id=? AND status="reserved" FOR UPDATE');$coupon->execute([$tenantId,$orderId]);if($reservation=$coupon->fetch()){$pdo->prepare('UPDATE coupon_reservations SET status="released" WHERE id=?')->execute([$reservation['id']]);$pdo->prepare('UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1) WHERE id=? AND tenant_id=?')->execute([$reservation['coupon_id'],$tenantId]);}
+            }
             $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$newStatus,$orderId,$tenantId]);Auth::audit('order.status','order',(string)$orderId,['from'=>$current,'to'=>$newStatus]);$order['status']=$newStatus;return $order;
         });
     }
