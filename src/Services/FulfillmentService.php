@@ -13,10 +13,12 @@ final class FulfillmentService
 {
     public function ensureToken(int $tenantId,int $orderId):string
     {
-        return Database::transaction(function(PDO $pdo)use($tenantId,$orderId):string{
-            $s=$pdo->prepare('SELECT fulfillment_token,channel FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
+        $unitId=Auth::unitId();
+        return Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$unitId):string{
+            $s=$pdo->prepare('SELECT fulfillment_token,channel,unit_id FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
             $s->execute([$orderId,$tenantId]);$order=$s->fetch();
             if(!$order)throw new RuntimeException('Pedido não encontrado.');
+            if($unitId&&(int)($order['unit_id']??0)!==$unitId)throw new RuntimeException('Venda pertence a outra unidade.');
             if(!in_array($order['channel'],['counter','pickup'],true))throw new RuntimeException('Este pedido não usa retirada parcial.');
             if(!empty($order['fulfillment_token']))return(string)$order['fulfillment_token'];
             $token=bin2hex(random_bytes(20));
@@ -42,30 +44,32 @@ final class FulfillmentService
         $s=$pdo->prepare('SELECT o.*,t.name tenant_name,c.name customer_name,c.phone customer_phone FROM orders o JOIN tenants t ON t.id=o.tenant_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.id=? AND o.tenant_id=? LIMIT 1');
         $s->execute([$orderId,$tenantId]);$order=$s->fetch();
         if(!$order)throw new RuntimeException('Venda não encontrada.');
+        $this->assertCurrentUnit($order);
         return $this->hydrate($pdo,$order);
     }
 
     public function fulfill(int $orderId,int $orderItemId,string|float|int $quantity,string $source='counter',string $notes='',?string $idempotencyKey=null):array
     {
         Auth::requirePermission('fulfillment.manage');
-        $tenantId=Auth::tenantId();$userId=Auth::id();
+        $tenantId=Auth::tenantId();$userId=Auth::id();$unitId=Auth::unitId();
         if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida para retirada.');
         if(!in_array($source,['counter','scan','admin'],true))$source='counter';
         $qty=$this->normalizeQuantity($quantity);
         $key=$idempotencyKey?:('fulfill:'.$tenantId.':'.$orderId.':'.$orderItemId.':'.bin2hex(random_bytes(12)));
         if(strlen($key)<12||strlen($key)>190)throw new RuntimeException('Chave de idempotência inválida.');
 
-        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$orderId,$orderItemId,$qty,$source,$notes,$key):array{
+        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$unitId,$orderId,$orderItemId,$qty,$source,$notes,$key):array{
             $dupe=$pdo->prepare('SELECT order_id,order_item_id,quantity FROM order_fulfillments WHERE tenant_id=? AND idempotency_key=? LIMIT 1 FOR UPDATE');
             $dupe->execute([$tenantId,$key]);$previous=$dupe->fetch();
             if($previous){
                 if((int)$previous['order_id']!==$orderId||(int)$previous['order_item_id']!==$orderItemId||abs((float)$previous['quantity']-$qty)>0.000001)throw new RuntimeException('Chave de idempotência já utilizada em outra retirada.');
-                return $this->summaryLocked($pdo,$tenantId,$orderId);
+                $summary=$this->summaryLocked($pdo,$tenantId,$orderId);$this->assertCurrentUnit($summary);return$summary;
             }
 
             $o=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
             $o->execute([$orderId,$tenantId]);$order=$o->fetch();
             if(!$order)throw new RuntimeException('Venda não encontrada.');
+            if($unitId&&(int)($order['unit_id']??0)!==$unitId)throw new RuntimeException('Venda pertence a outra unidade.');
             if(!in_array($order['channel'],['counter','pickup'],true))throw new RuntimeException('Retirada parcial disponível somente para balcão/retirada.');
             if($order['payment_status']!=='paid')throw new RuntimeException('Somente venda totalmente paga pode liberar retirada.');
             if($order['status']==='cancelled')throw new RuntimeException('Venda cancelada não pode liberar itens.');
@@ -90,7 +94,7 @@ final class FulfillmentService
             $status=$remainingItems===0?'fulfilled':($hasAny?'partial':'pending');
             $pdo->prepare('UPDATE orders SET fulfillment_status=?,fulfilled_at='.($status==='fulfilled'?'NOW()':'NULL').' WHERE id=? AND tenant_id=?')->execute([$status,$orderId,$tenantId]);
 
-            Auth::audit('fulfillment.item','order',(string)$orderId,['order_item_id'=>$orderItemId,'quantity'=>$qty,'source'=>$source]);
+            Auth::audit('fulfillment.item','order',(string)$orderId,['order_item_id'=>$orderItemId,'quantity'=>$qty,'source'=>$source,'unit_id'=>$unitId]);
             return $this->summaryLocked($pdo,$tenantId,$orderId);
         });
     }
@@ -133,6 +137,11 @@ final class FulfillmentService
         $s->execute([$orderId,$tenantId]);$order=$s->fetch();
         if(!$order)throw new RuntimeException('Venda não encontrada.');
         return$this->hydrate($pdo,$order);
+    }
+
+    private function assertCurrentUnit(array $order):void
+    {
+        $unitId=Auth::unitId();if($unitId&&(int)($order['unit_id']??0)!==$unitId)throw new RuntimeException('Venda pertence a outra unidade.');
     }
 
     private function normalizeQuantity(string|float|int $quantity):float
