@@ -25,6 +25,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     em_post_csrf();
     $action=(string)($_POST['action']??'');
     if($action==='refund'){
+        Auth::requirePermission('refunds.manage');
         try{
             $paymentId=(int)($_POST['payment_id']??0);
             $amount=em_parse_brl_to_cents((string)($_POST['amount']??''));
@@ -91,7 +92,7 @@ em_header('Pagamentos','payments');
   <td><strong><?= em_money($p['amount_cents']) ?></strong><?php if((int)$p['refunded_cents']>0):?><br><span class="muted">devolvido <?= em_money($p['refunded_cents']) ?></span><?php endif;?></td>
   <td>
    <?php if((int)$p['refund_processing_cents']>0):?><div class="badge">Processando <?= em_money($p['refund_processing_cents']) ?></div><?php endif;?>
-   <?php if($canRefund):?>
+   <?php if($canRefund&&Auth::can('refunds.manage')):?>
     <form method="post" style="min-width:250px;margin-top:7px" onsubmit="return confirm('Solicitar este reembolso? A operação financeira pode ser irreversível no provedor.')">
      <input type="hidden" name="_csrf" value="<?= em_csrf() ?>">
      <input type="hidden" name="action" value="refund">
@@ -102,7 +103,7 @@ em_header('Pagamentos','payments');
      <?php if($p['provider']==='manual'):?><div class="muted">Pagamento manual: o reembolso será lançado no caixa aberto usando a mesma forma de recebimento da venda.</div><?php endif;?>
      <button class="secondary" type="submit">Reembolsar</button>
     </form>
-   <?php elseif($remaining<=0):?><span class="muted">Sem saldo</span><?php endif;?>
+   <?php elseif($canRefund):?><span class="muted">Reembolso requer gerente ou administrador.</span><?php elseif($remaining<=0):?><span class="muted">Sem saldo</span><?php endif;?>
   </td>
   <td><code><?= Security::e($p['provider_payment_id']??'—') ?></code></td>
   <td><?= Security::e($p['verified_at']??'—') ?></td>
