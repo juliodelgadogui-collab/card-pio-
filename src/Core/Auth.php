@@ -58,9 +58,7 @@ final class Auth
         $stmt->execute([self::id()]);
         $user=$stmt->fetch();
         if(!$user||$user['status']!=='active'||($user['tenant_id']!==null&&$user['tenant_status']!=='active')){
-            self::logout();
-            header('Location: /?route=login&blocked=1');
-            exit;
+            self::logout();header('Location: /?route=login&blocked=1');exit;
         }
         if(($user['role']??'')==='super_admin'&&isset($_SESSION['super_admin_tenant_id'])){
             $check=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? AND status="active"');
@@ -73,26 +71,18 @@ final class Auth
     public static function selectTenant(?int $tenantId):void
     {
         if(self::role()!=='super_admin')throw new RuntimeException('Apenas Super ADM pode selecionar empresa.');
-        if($tenantId===null||$tenantId<1){
-            unset($_SESSION['super_admin_tenant_id']);
-            $_SESSION['tenant_id']=null;
-            return;
-        }
+        if($tenantId===null||$tenantId<1){unset($_SESSION['super_admin_tenant_id']);$_SESSION['tenant_id']=null;return;}
         $stmt=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? LIMIT 1');
         $stmt->execute([$tenantId]);
         if(!$stmt->fetchColumn())throw new RuntimeException('Empresa não encontrada.');
-        $_SESSION['super_admin_tenant_id']=$tenantId;
-        $_SESSION['tenant_id']=$tenantId;
+        $_SESSION['super_admin_tenant_id']=$tenantId;$_SESSION['tenant_id']=$tenantId;
     }
 
     public static function logout():void
     {
         if(self::check())self::audit('auth.logout','user',(string)self::id());
         $_SESSION=[];
-        if(ini_get('session.use_cookies')){
-            $p=session_get_cookie_params();
-            setcookie(session_name(),'',time()-42000,$p['path'],$p['domain']??'',(bool)$p['secure'],(bool)$p['httponly']);
-        }
+        if(ini_get('session.use_cookies')){$p=session_get_cookie_params();setcookie(session_name(),'',time()-42000,$p['path'],$p['domain']??'',(bool)$p['secure'],(bool)$p['httponly']);}
         session_destroy();
     }
 
@@ -104,8 +94,7 @@ final class Auth
 
     public static function can(string $permission):bool
     {
-        $role=self::role();
-        if($role==='super_admin')return true;
+        $role=self::role();if($role==='super_admin')return true;
         $map=[
             'admin'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage'],
             'manager'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign'],
@@ -140,38 +129,35 @@ final class Auth
 
     private static function isLoginBlocked(PDO $pdo,string $email):bool
     {
-        $stmt=$pdo->prepare('SELECT locked_until>NOW() FROM login_throttles WHERE key_hash=? LIMIT 1');
-        $stmt->execute([self::throttleKey($email)]);
-        return (bool)$stmt->fetchColumn();
+        try{
+            $stmt=$pdo->prepare('SELECT locked_until>NOW() FROM login_throttles WHERE key_hash=? LIMIT 1');
+            $stmt->execute([self::throttleKey($email)]);
+            return (bool)$stmt->fetchColumn();
+        }catch(\Throwable){
+            return false;
+        }
     }
 
     private static function registerLoginFailure(PDO $pdo,string $email):void
     {
         $key=self::throttleKey($email);
-        Database::transaction(function(PDO $db)use($key):void{
-            $stmt=$db->prepare('SELECT attempts,window_started_at<DATE_SUB(NOW(),INTERVAL '.self::LOGIN_WINDOW_MINUTES.' MINUTE) expired,locked_until>NOW() locked FROM login_throttles WHERE key_hash=? FOR UPDATE');
-            $stmt->execute([$key]);
-            $row=$stmt->fetch();
-            if(!$row){
-                $db->prepare('INSERT INTO login_throttles (key_hash,attempts,window_started_at) VALUES (?,1,NOW())')->execute([$key]);
-                return;
-            }
-            if((int)$row['locked']===1)return;
-            if((int)$row['expired']===1){
-                $db->prepare('UPDATE login_throttles SET attempts=1,window_started_at=NOW(),locked_until=NULL WHERE key_hash=?')->execute([$key]);
-                return;
-            }
-            $attempts=(int)$row['attempts']+1;
-            if($attempts>=self::LOGIN_MAX_ATTEMPTS){
-                $db->prepare('UPDATE login_throttles SET attempts=?,locked_until=DATE_ADD(NOW(),INTERVAL '.self::LOGIN_LOCK_MINUTES.' MINUTE) WHERE key_hash=?')->execute([$attempts,$key]);
-            }else{
-                $db->prepare('UPDATE login_throttles SET attempts=? WHERE key_hash=?')->execute([$attempts,$key]);
-            }
-        });
+        try{
+            Database::transaction(function(PDO $db)use($key):void{
+                $stmt=$db->prepare('SELECT attempts,window_started_at<DATE_SUB(NOW(),INTERVAL '.self::LOGIN_WINDOW_MINUTES.' MINUTE) expired,locked_until>NOW() locked FROM login_throttles WHERE key_hash=? FOR UPDATE');
+                $stmt->execute([$key]);
+                $row=$stmt->fetch();
+                if(!$row){$db->prepare('INSERT INTO login_throttles (key_hash,attempts,window_started_at) VALUES (?,1,NOW())')->execute([$key]);return;}
+                if((int)$row['locked']===1)return;
+                if((int)$row['expired']===1){$db->prepare('UPDATE login_throttles SET attempts=1,window_started_at=NOW(),locked_until=NULL WHERE key_hash=?')->execute([$key]);return;}
+                $attempts=(int)$row['attempts']+1;
+                if($attempts>=self::LOGIN_MAX_ATTEMPTS)$db->prepare('UPDATE login_throttles SET attempts=?,locked_until=DATE_ADD(NOW(),INTERVAL '.self::LOGIN_LOCK_MINUTES.' MINUTE) WHERE key_hash=?')->execute([$attempts,$key]);
+                else $db->prepare('UPDATE login_throttles SET attempts=? WHERE key_hash=?')->execute([$attempts,$key]);
+            });
+        }catch(\Throwable){}
     }
 
     private static function clearLoginThrottle(PDO $pdo,string $email):void
     {
-        $pdo->prepare('DELETE FROM login_throttles WHERE key_hash=?')->execute([self::throttleKey($email)]);
+        try{$pdo->prepare('DELETE FROM login_throttles WHERE key_hash=?')->execute([self::throttleKey($email)]);}catch(\Throwable){}
     }
 }
