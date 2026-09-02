@@ -7,6 +7,7 @@ require __DIR__.'/../app/bootstrap.php';
 use EventMenu\Core\Security;
 use EventMenu\Services\CheckoutReconciliationService;
 use EventMenu\Services\CheckoutService;
+use EventMenu\Services\DeliveryService;
 use EventMenu\Services\MaintenanceService;
 use EventMenu\Services\OrderWorkflowService;
 use EventMenu\Services\PaymentService;
@@ -21,6 +22,7 @@ $checks=[
     class_exists(CheckoutReconciliationService::class),
     class_exists(PaymentService::class),
     class_exists(PublicOrderService::class),
+    class_exists(DeliveryService::class),
     class_exists(TicketService::class),
     class_exists(MaintenanceService::class),
     class_exists(OrderWorkflowService::class),
