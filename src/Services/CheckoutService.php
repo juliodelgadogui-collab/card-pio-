@@ -23,7 +23,7 @@ final class CheckoutService
         $s->execute([$publicToken]);
         $order=$s->fetch();
         if(!$order||$order['tenant_status']!=='active')throw new RuntimeException('Pedido não encontrado.');
-        if(in_array($order['status'],['cancelled','completed'],true)||in_array($order['payment_status'],['paid','refunded'],true))throw new RuntimeException('Pedido não aceita nova cobrança.');
+        if(in_array($order['status'],['cancelled','completed'],true)||in_array($order['payment_status'],['paid','partially_refunded','refunded'],true))throw new RuntimeException('Pedido não aceita nova cobrança.');
         if((int)$order['total_cents']<=0)throw new RuntimeException('Pedido com valor inválido.');
 
         $g=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider=? AND active=1');
@@ -59,8 +59,8 @@ final class CheckoutService
 
         $attempt=$this->prepareAttempt($order,$provider);
         $paymentId=(int)$attempt['id'];
-        $key=(string)$attempt['idempotency_key'];
-        $providerKey=$this->providerIdempotencyKey($key);
+        $localKey=(string)$attempt['idempotency_key'];
+        $providerKey=$this->providerIdempotencyKey($localKey);
         $expiresAt=new \DateTimeImmutable((string)$attempt['checkout_expires_at']);
         $attemptRaw=$this->decodePayload($attempt['raw_payload']??null);
 
@@ -73,8 +73,8 @@ final class CheckoutService
         try{
             $result=match($provider){
                 'stripe'=>$this->stripe($order,$gateway,$config,$providerKey,$expiresAt),
-                'mercadopago'=>$this->mercadoPago($order,$gateway,$config,$providerKey,$expiresAt),
-                'pagbank'=>$this->pagBank($order,$gateway,$config,$providerKey,$expiresAt),
+                'mercadopago'=>$this->mercadoPago($order,$config,$expiresAt),
+                'pagbank'=>$this->pagBank($order,$config,$providerKey,$expiresAt),
             };
             return $this->persistCheckoutResult($paymentId,$provider,$result,$expiresAt,(bool)$attempt['_reused'],$providerKey);
         }catch(\Throwable $e){
@@ -83,13 +83,18 @@ final class CheckoutService
                     $recovered=$this->recoverMercadoPagoPreference($order,$config,$expiresAt);
                     if($recovered!==null)return $this->persistCheckoutResult($paymentId,$provider,$recovered,$expiresAt,true,$providerKey);
                 }catch(\Throwable){}
-                $payload=['error'=>$e->getMessage(),'idempotency_key'=>$key,'provider_idempotency_key'=>$providerKey,'_eventmenu_checkout_uncertain'=>true,'_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM)];
+                $payload=[
+                    'error'=>$e->getMessage(),
+                    'idempotency_key'=>$localKey,
+                    '_eventmenu_checkout_uncertain'=>true,
+                    '_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM),
+                ];
                 $pdo->prepare('UPDATE payments SET status="created",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
-                $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status<>"paid"')->execute([$order['id']]);
+                $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status NOT IN ("paid","partially_refunded","refunded")')->execute([$order['id']]);
                 throw new RuntimeException('O Mercado Pago não retornou uma resposta conclusiva. A tentativa foi preservada para conciliação e nenhuma nova cobrança será criada automaticamente.',0,$e);
             }
 
-            $pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode(['error'=>$e->getMessage(),'idempotency_key'=>$key,'provider_idempotency_key'=>$providerKey,'_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM)],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
+            $pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=? AND status<>"paid"')->execute([json_encode(['error'=>$e->getMessage(),'idempotency_key'=>$localKey,'provider_idempotency_key'=>$providerKey,'_eventmenu_checkout_expires_at'=>$expiresAt->format(DATE_ATOM)],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
             $pdo->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND payment_status="pending"')->execute([$order['id']]);
             throw $e;
         }
@@ -101,7 +106,7 @@ final class CheckoutService
             $lock=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
             $lock->execute([$order['id'],$order['tenant_id']]);
             $lockedOrder=$lock->fetch();
-            if(!$lockedOrder||in_array($lockedOrder['status'],['cancelled','completed'],true)||in_array($lockedOrder['payment_status'],['paid','refunded'],true))throw new RuntimeException('Pedido não aceita nova cobrança.');
+            if(!$lockedOrder||in_array($lockedOrder['status'],['cancelled','completed'],true)||in_array($lockedOrder['payment_status'],['paid','partially_refunded','refunded'],true))throw new RuntimeException('Pedido não aceita nova cobrança.');
 
             $current=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE');
             $current->execute([$order['tenant_id'],$order['id']]);
@@ -203,7 +208,7 @@ final class CheckoutService
         return ['url'=>(string)$session->url,'external_id'=>(string)$session->id,'raw'=>$session->toArray()];
     }
 
-    private function mercadoPago(array $order,array $gateway,array $config,string $providerKey,\DateTimeImmutable $expiresAt):array
+    private function mercadoPago(array $order,array $config,\DateTimeImmutable $expiresAt):array
     {
         $token=(string)($config['access_token']??'');
         if($token==='')throw new RuntimeException('Mercado Pago não configurado.');
@@ -220,7 +225,7 @@ final class CheckoutService
             'expiration_date_from'=>$startsAt->format(DATE_ATOM),
             'expiration_date_to'=>$expiresAt->format(DATE_ATOM),
         ];
-        $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$providerKey],$body);
+        $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token],$body);
         $url=(string)($data['init_point']??'');
         if($url==='')throw new RuntimeException('Mercado Pago não retornou URL de pagamento.');
         return ['url'=>$url,'external_id'=>(string)($data['id']??''),'raw'=>$data];
@@ -233,29 +238,27 @@ final class CheckoutService
         $reference='eventmenu:'.$order['tenant_id'].':'.$order['id'];
         $url='https://api.mercadopago.com/checkout/preferences/search?'.http_build_query(['external_reference'=>$reference,'limit'=>20]);
         $data=$this->httpGetJson($url,['Authorization: Bearer '.$token]);
-        $best=null;
         foreach(($data['elements']??[]) as $candidate){
-            if((string)($candidate['external_reference']??$reference)!==$reference)continue;
             $id=(string)($candidate['id']??'');
             if($id==='')continue;
             $detail=$this->httpGetJson('https://api.mercadopago.com/checkout/preferences/'.rawurlencode($id),['Authorization: Bearer '.$token]);
             if((string)($detail['external_reference']??'')!==$reference)continue;
             $to=(string)($detail['expiration_date_to']??'');
             if($to!==''){
-                try{if(new \DateTimeImmutable($to)<new \DateTimeImmutable())continue;}catch(\Throwable){}
+                try{
+                    $toDate=new \DateTimeImmutable($to);
+                    if($toDate<new \DateTimeImmutable())continue;
+                    if(abs($toDate->getTimestamp()-$expiresAt->getTimestamp())>120)continue;
+                }catch(\Throwable){continue;}
             }
             $initPoint=(string)($detail['init_point']??'');
             if($initPoint==='')continue;
-            if($to!==''){
-                try{if(abs((new \DateTimeImmutable($to))->getTimestamp()-$expiresAt->getTimestamp())>120)continue;}catch(\Throwable){}
-            }
-            $best=['url'=>$initPoint,'external_id'=>$id,'raw'=>$detail];
-            break;
+            return ['url'=>$initPoint,'external_id'=>$id,'raw'=>$detail];
         }
-        return $best;
+        return null;
     }
 
-    private function pagBank(array $order,array $gateway,array $config,string $providerKey,\DateTimeImmutable $expiresAt):array
+    private function pagBank(array $order,array $config,string $providerKey,\DateTimeImmutable $expiresAt):array
     {
         $token=(string)($config['token']??'');
         if($token==='')throw new RuntimeException('PagBank não configurado.');
