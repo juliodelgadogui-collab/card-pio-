@@ -5,12 +5,13 @@ declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
 
 use EventMenu\Core\Database;
+use EventMenu\Core\Migrator;
 use EventMenu\Core\Security;
 
 $lock = __DIR__ . '/../storage/installed.lock';
 if (is_file($lock)) {
     http_response_code(403);
-    exit('O EventMenu já está instalado. Remova storage/installed.lock apenas se souber o que está fazendo.');
+    exit('O EventMenu já está instalado. Use /update.php para aplicar atualizações de banco.');
 }
 
 $error = null;
@@ -22,7 +23,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo = Database::connection();
             $schema = file_get_contents(__DIR__ . '/../database/schema.sql');
+            if ($schema === false) throw new RuntimeException('Schema principal não encontrado.');
             $pdo->exec($schema);
+            Migrator::run($pdo);
 
             $tenantName = trim((string)($_POST['tenant_name'] ?? 'Minha Empresa'));
             $tenantSlug = strtolower(preg_replace('/[^a-z0-9]+/i', '-', $tenantName) ?? 'empresa');
