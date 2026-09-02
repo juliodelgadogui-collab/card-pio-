@@ -56,9 +56,12 @@ final class FulfillmentService
         if(strlen($key)<12||strlen($key)>190)throw new RuntimeException('Chave de idempotência inválida.');
 
         return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$orderId,$orderItemId,$qty,$source,$notes,$key):array{
-            $dupe=$pdo->prepare('SELECT id FROM order_fulfillments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');
-            $dupe->execute([$tenantId,$key]);
-            if($dupe->fetchColumn())return $this->summaryLocked($pdo,$tenantId,$orderId);
+            $dupe=$pdo->prepare('SELECT order_id,order_item_id,quantity FROM order_fulfillments WHERE tenant_id=? AND idempotency_key=? LIMIT 1 FOR UPDATE');
+            $dupe->execute([$tenantId,$key]);$previous=$dupe->fetch();
+            if($previous){
+                if((int)$previous['order_id']!==$orderId||(int)$previous['order_item_id']!==$orderItemId||abs((float)$previous['quantity']-$qty)>0.000001)throw new RuntimeException('Chave de idempotência já utilizada em outra retirada.');
+                return $this->summaryLocked($pdo,$tenantId,$orderId);
+            }
 
             $o=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
             $o->execute([$orderId,$tenantId]);$order=$o->fetch();
