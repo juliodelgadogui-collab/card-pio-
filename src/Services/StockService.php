@@ -23,8 +23,17 @@ final class StockService
 
     public function reverseForOrder(PDO $pdo,int $tenantId,int $orderId):void
     {
-        $s=$pdo->prepare('SELECT product_id,quantity FROM stock_movements WHERE tenant_id=? AND order_id=? AND type="out" AND idempotency_key LIKE ?');$s->execute([$tenantId,$orderId,'order:'.$orderId.':product:%:commit']);
-        foreach($s->fetchAll() as$row){$productId=(int)$row['product_id'];$qty=(float)$row['quantity'];$key=$this->reversalKey($orderId,$productId);$check=$pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$check->execute([$tenantId,$key]);if($check->fetchColumn())continue;$pdo->prepare('UPDATE products SET stock_qty=stock_qty+? WHERE id=? AND tenant_id=?')->execute([$qty,$productId,$tenantId]);$pdo->prepare('INSERT INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key) VALUES (?,?,?,"reversal",?,?)')->execute([$tenantId,$productId,$orderId,$qty,$key]);}
+        $s=$pdo->prepare('SELECT product_id,quantity FROM stock_movements WHERE tenant_id=? AND order_id=? AND type="out" AND idempotency_key LIKE ?');
+        $s->execute([$tenantId,$orderId,'order:'.$orderId.':product:%:commit']);
+        $remaining=$pdo->prepare('SELECT COALESCE(SUM(GREATEST(quantity-fulfilled_quantity,0)),0) FROM order_items WHERE order_id=? AND product_id=?');
+        foreach($s->fetchAll() as$row){
+            $productId=(int)$row['product_id'];$committed=(float)$row['quantity'];$key=$this->reversalKey($orderId,$productId);
+            $check=$pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$check->execute([$tenantId,$key]);if($check->fetchColumn())continue;
+            $remaining->execute([$orderId,$productId]);$unfulfilled=max(0,(float)$remaining->fetchColumn());$qty=min($committed,$unfulfilled);
+            if($qty<=0.000001)continue;
+            $pdo->prepare('UPDATE products SET stock_qty=stock_qty+? WHERE id=? AND tenant_id=?')->execute([$qty,$productId,$tenantId]);
+            $pdo->prepare('INSERT INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key) VALUES (?,?,?,"reversal",?,?)')->execute([$tenantId,$productId,$orderId,$qty,$key]);
+        }
     }
 
     private function commitKey(int $orderId,int $productId):string{return 'order:'.$orderId.':product:'.$productId.':commit';}
