@@ -51,6 +51,18 @@ jobs:
         run: |
           mysql -h 127.0.0.1 -uroot eventmenu < database/schema.sql
           for f in database/migrations/*.sql; do echo "Applying $f"; mysql -h 127.0.0.1 -uroot eventmenu < "$f"; done
+      - name: Legacy parity integration
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          SESSION_NAME: eventmenu_ci_legacy
+          SESSION_SECURE: 'false'
+          MAIL_DRIVER: log
+        run: php tests/legacy_parity_integration.php
       - name: Delivery integration
         env:
           DB_HOST: 127.0.0.1
@@ -121,8 +133,10 @@ jobs:
         env:
           MYSQL_PWD: root
         run: |
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles','delivery_zones','delivery_events','cash_sessions','cash_movements','nfc_devices','nfc_payment_attempts','order_fulfillments');" | grep -qx '15'
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='orders' AND column_name IN ('scheduled_for','scheduled_slot_minutes','fulfillment_token','fulfillment_status','fulfilled_at');" | grep -qx '5'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles','delivery_zones','delivery_events','cash_sessions','cash_movements','nfc_devices','nfc_payment_attempts','order_fulfillments','tenant_modules','business_units','user_units','user_permissions','notifications','waiter_calls','product_option_groups','product_options','order_item_options','product_combo_items','password_reset_tokens','legal_documents','legal_acceptances','backup_history','stock_reservations');" | grep -qx '30'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='orders' AND column_name IN ('scheduled_for','scheduled_slot_minutes','fulfillment_token','fulfillment_status','fulfilled_at','unit_id','cancel_reason','cancelled_at','cancelled_by');" | grep -qx '9'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='products' AND column_name IN ('unit_id','product_type','promo_price_cents','min_stock_qty','preparation_minutes','badge','featured');" | grep -qx '7'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='tickets' AND column_name IN ('transferred_at','transferred_from_customer_id');" | grep -qx '2'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='order_items' AND column_name='fulfilled_quantity';" | grep -qx '1'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='nfc_payment_attempts' AND column_name IN ('transaction_code_hash','status','amount_cents','currency','provider_payment_id','failure_reason','verified_at');" | grep -qx '7'
       - name: Build production install package
@@ -132,29 +146,23 @@ jobs:
           mkdir -p build/EventMenu-Premium-v9.2
           cp -a app bin database public src vendor composer.json composer.lock .env.example README.md build/EventMenu-Premium-v9.2/
           cat > build/EventMenu-Premium-v9.2/INSTALACAO.txt <<'EOF'
-          EVENTMENU PREMIUM v9.2 — PRONTO PARA INSTALAR
+          EVENTMENU PREMIUM v9.2 — PACOTE DE TESTE
 
           Requisitos:
           - PHP 8.2+
           - MySQL 8.0+
           - extensoes PHP: curl, json, mbstring, openssl, pdo_mysql
-          - HTTPS em producao
+          - HTTPS para pagamentos reais
 
           INSTALACAO GUIADA:
           1. Envie a pasta EventMenu-Premium-v9.2 para o servidor.
-          2. Configure o dominio/subdominio para usar a pasta public/ como DocumentRoot.
-          3. Abra https://SEU-DOMINIO/install.php.
-          4. Preencha os dados do MySQL, empresa e administrador e clique em Instalar.
+          2. Preferencialmente configure public/ como DocumentRoot.
+          3. Abra /install.php no endereco publicado.
+          4. Preencha MySQL, empresa e administrador e clique em Instalar.
 
-          O assistente cria automaticamente .env, APP_KEY segura, schema, migrations,
-          primeira empresa, primeiro administrador e lock contra reinstalacao.
-
-          Nao e necessario rodar Composer: vendor/ ja esta incluido.
-          Depois, configure o cron do servidor para executar bin/cron.php e cadastre os gateways no painel.
-
-          O PDV possui retirada parcial por item, comprovante termico 80mm e QR.
-          O estoque baixa na venda; retiradas posteriores apenas consomem o saldo do cliente.
-          Build gerado somente depois dos testes do instalador real, Delivery, Agendamento, PDV, Retirada Parcial, Caixa e NFC.
+          O assistente cria .env, APP_KEY, schema, migrations, empresa e administrador.
+          Configure bin/cron.php para conciliacao, expiracao, reembolsos e fila de e-mail.
+          Para testar e-mail sem disparar mensagens reais, mantenha MAIL_DRIVER=log.
           EOF
       - name: Upload production install package
         if: github.event_name == 'push'
