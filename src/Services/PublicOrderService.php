@@ -39,7 +39,7 @@ final class PublicOrderService
             $tab=$pdo->prepare('SELECT * FROM tabs WHERE tenant_id=? AND table_id=? AND status="open" LIMIT 1 FOR UPDATE');$tab->execute([$tenantId,$table['id']]);$open=$tab->fetch();
             if(!$open){$label=$name!==''?$name:'Mesa '.$table['name'];$pdo->prepare('INSERT INTO tabs (tenant_id,table_id,customer_id,label,status) VALUES (?,?,?,?,"open")')->execute([$tenantId,$table['id'],$customerId,$label]);$tabId=(int)$pdo->lastInsertId();$pdo->prepare('UPDATE restaurant_tables SET status="occupied" WHERE id=?')->execute([$table['id']]);}
             else{$tabId=(int)$open['id'];if($customerId&&!$open['customer_id'])$pdo->prepare('UPDATE tabs SET customer_id=? WHERE id=?')->execute([$customerId,$tabId]);}
-            $publicToken=bin2hex(random_bytes(20));$s=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,table_id,tab_id,channel,status,payment_status,subtotal_cents,total_cents) VALUES (?,?,?,?,?,"table","pending","unpaid",?,?)');$s->execute([$publicToken,$tenantId,$customerId,$table['id'],$tabId,$subtotal,$subtotal]);$orderId=(int)$pdo->lastInsertId();$this->insertItems($pdo,$orderId,$items);
+            $publicToken=bin2hex(random_bytes(20));$s=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,table_id,tab_id,channel,status,payment_status,subtotal_cents,total_cents) VALUES (?,?,?,?,?,"table","confirmed","unpaid",?,?)');$s->execute([$publicToken,$tenantId,$customerId,$table['id'],$tabId,$subtotal,$subtotal]);$orderId=(int)$pdo->lastInsertId();$this->insertItems($pdo,$orderId,$items);
             return ['order_id'=>$orderId,'public_token'=>$publicToken,'tab_id'=>$tabId,'table_name'=>$table['name'],'total_cents'=>$subtotal];
         });
     }
