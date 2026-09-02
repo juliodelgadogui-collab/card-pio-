@@ -44,7 +44,6 @@ function app_base_path():string
     $configuredPath=rtrim($configuredPath,'/');
     if($configuredPath==='/')$configuredPath='';
 
-    // O caminho real da requisição tem prioridade em instalações de teste em subpastas.
     return $scriptDir!==''?$scriptDir:$configuredPath;
 }
 
@@ -71,7 +70,6 @@ spl_autoload_register(function(string $class):void{
 if(PHP_SAPI!=='cli'){
     $base=app_base_path();
 
-    // Compatibilidade com rotas antigas que ainda retornem Location: /...
     if(function_exists('header_register_callback')){
         header_register_callback(static function()use($base):void{
             if($base==='')return;
@@ -88,11 +86,10 @@ if(PHP_SAPI!=='cli'){
         });
     }
 
-    // Corrige href/src/action absolutos antigos sem duplicar o prefixo da subpasta.
     if($base!==''&&ob_get_level()===0){
         ob_start(static function(string $buffer)use($base):string{
             return preg_replace_callback(
-                '~\b(href|src|action)=(['."'\"".'\'])(/[^' . "\"'" . '>]*)\2~i',
+                "~\\b(href|src|action)=([\"'])(/[^\"'>]*)\\2~i",
                 static function(array $m)use($base):string{
                     $path=$m[3];
                     if(str_starts_with($path,'//')||$path===$base||str_starts_with($path,$base.'/'))return$m[0];
