@@ -47,4 +47,4 @@ jobs:
         env:
           MYSQL_PWD: root
         run: |
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations');" | grep -qx '6'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles');" | grep -qx '8'
