@@ -27,11 +27,15 @@ assert_delivery((int)$result['delivery_fee_cents']===700,'taxa da zona incorreta
 assert_delivery((int)$result['total_cents']===2700,'total com frete incorreto');
 assert_delivery((int)$result['eta_min_minutes']===25&&(int)$result['eta_max_minutes']===45,'ETA incorreto');
 
-$stmt=$pdo->prepare('SELECT delivery_zone_id,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes FROM orders WHERE id=?');
+$stmt=$pdo->prepare('SELECT delivery_zone_id,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes,delivery_address,delivery_postal_code,delivery_neighborhood,delivery_city FROM orders WHERE id=?');
 $stmt->execute([$result['order_id']]);
 $order=$stmt->fetch();
 assert_delivery((int)$order['delivery_zone_id']===$zoneId,'zona não persistida');
 assert_delivery((int)$order['delivery_fee_cents']===700,'frete não persistido');
+assert_delivery($order['delivery_address']==='Rua Teste, 10','logradouro não persistido');
+assert_delivery($order['delivery_postal_code']==='28300-000','CEP não persistido');
+assert_delivery($order['delivery_neighborhood']==='Centro','bairro não persistido');
+assert_delivery($order['delivery_city']==='Cidade Teste','cidade não persistida');
 
 $free=$service->createDelivery($tenantId,[['product_id'=>$productId,'qty'=>5]],['name'=>'Cliente CI 2','phone'=>'22999990001','postal_code'=>'28310-000','neighborhood'=>'Centro','city'=>'Cidade Teste'],'Rua Teste, 20');
 assert_delivery((int)$free['subtotal_cents']===5000,'subtotal do frete grátis incorreto');
