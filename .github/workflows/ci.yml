@@ -139,32 +139,40 @@ jobs:
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='tickets' AND column_name IN ('transferred_at','transferred_from_customer_id');" | grep -qx '2'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='order_items' AND column_name='fulfilled_quantity';" | grep -qx '1'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='nfc_payment_attempts' AND column_name IN ('transaction_code_hash','status','amount_cents','currency','provider_payment_id','failure_reason','verified_at');" | grep -qx '7'
-      - name: Build production install package
+      - name: Build test install package
         if: github.event_name == 'push'
         run: |
           rm -rf build
           mkdir -p build/EventMenu-Premium-v9.2
-          cp -a app bin database public src vendor composer.json composer.lock .env.example README.md build/EventMenu-Premium-v9.2/
+          cp -a app bin database public src vendor composer.json composer.lock .env.example README.md .htaccess build/EventMenu-Premium-v9.2/
           cat > build/EventMenu-Premium-v9.2/INSTALACAO.txt <<'EOF'
           EVENTMENU PREMIUM v9.2 — PACOTE DE TESTE
 
           Requisitos:
           - PHP 8.2+
           - MySQL 8.0+
+          - Apache ou LiteSpeed com .htaccess habilitado
           - extensoes PHP: curl, json, mbstring, openssl, pdo_mysql
-          - HTTPS para pagamentos reais
 
-          INSTALACAO GUIADA:
-          1. Envie a pasta EventMenu-Premium-v9.2 para o servidor.
-          2. Preferencialmente configure public/ como DocumentRoot.
-          3. Abra /install.php no endereco publicado.
-          4. Preencha MySQL, empresa e administrador e clique em Instalar.
+          TESTE DIRETO NA PASTA /1:
+          1. Apague ou renomeie o conteudo antigo da pasta /1.
+          2. Extraia TODO o conteudo desta pasta EventMenu-Premium-v9.2 diretamente dentro de /1.
+          3. Nao mova somente public/. O .htaccess da raiz faz o roteamento seguro para public/.
+          4. Abra https://SEU-DOMINIO/1/install.php.
+          5. Preencha MySQL, empresa e administrador e clique em Instalar.
+          6. Depois abra https://SEU-DOMINIO/1/.
+
+          O .htaccess desativa listagem de diretorio e bloqueia acesso web a app/, src/,
+          database/, bin/, vendor/, storage/, tests/, .env e arquivos internos.
 
           O assistente cria .env, APP_KEY, schema, migrations, empresa e administrador.
           Configure bin/cron.php para conciliacao, expiracao, reembolsos e fila de e-mail.
           Para testar e-mail sem disparar mensagens reais, mantenha MAIL_DRIVER=log.
           EOF
-      - name: Upload production install package
+          test -f build/EventMenu-Premium-v9.2/.htaccess
+          test -f build/EventMenu-Premium-v9.2/public/index.php
+          test -f build/EventMenu-Premium-v9.2/public/assets/app.css
+      - name: Upload test install package
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
