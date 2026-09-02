@@ -17,6 +17,8 @@ function load_env(string $path):void
 
 load_env(__DIR__.'/../.env');
 
+date_default_timezone_set('UTC');
+
 function env(string $key,mixed $default=null):mixed
 {
     $value=$_ENV[$key]??getenv($key);
