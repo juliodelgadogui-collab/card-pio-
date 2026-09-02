@@ -10,6 +10,7 @@ use EventMenu\Services\MaintenanceService;
 use EventMenu\Services\OrderWorkflowService;
 use EventMenu\Services\PaymentService;
 use EventMenu\Services\PublicOrderService;
+use EventMenu\Services\RefundService;
 use EventMenu\Services\StockService;
 use EventMenu\Services\TicketService;
 
@@ -22,6 +23,7 @@ $checks=[
     class_exists(MaintenanceService::class),
     class_exists(OrderWorkflowService::class),
     class_exists(StockService::class),
+    class_exists(RefundService::class),
     strlen(Security::randomKey(16))===32,
     class_exists('Stripe\\StripeClient'),
     class_exists('MercadoPago\\Webhook\\WebhookSignatureValidator'),
