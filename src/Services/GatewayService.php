@@ -7,6 +7,7 @@ namespace EventMenu\Services;
 use EventMenu\Core\Auth;
 use EventMenu\Core\Crypto;
 use EventMenu\Core\Database;
+use PDO;
 use RuntimeException;
 
 final class GatewayService
@@ -25,15 +26,34 @@ final class GatewayService
             if($active&&$token==='')throw new RuntimeException('Token PagBank obrigatório para ativar o gateway.');
             $accountReference=$this->pagBankCredentialReference($config);
         }
-        if($active&&trim($accountReference)==='')throw new RuntimeException('Informe a conta recebedora do gateway.');
-        if($active&&$provider!=='pagbank'&&$webhookSecret===''){
-            $existing=Database::connection()->prepare('SELECT webhook_secret_encrypted FROM payment_gateways WHERE tenant_id=? AND provider=? LIMIT 1');
-            $existing->execute([$tenantId,$provider]);
-            if(!$existing->fetchColumn())throw new RuntimeException('Configure o segredo do webhook antes de ativar o gateway.');
-        }
+        $accountReference=trim($accountReference);
+        if($active&&$accountReference==='')throw new RuntimeException('Informe a conta recebedora do gateway.');
 
-        $stmt=Database::connection()->prepare('INSERT INTO payment_gateways (tenant_id,provider,account_reference,config_encrypted,webhook_secret_encrypted,active) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE account_reference=VALUES(account_reference),config_encrypted=VALUES(config_encrypted),webhook_secret_encrypted=COALESCE(VALUES(webhook_secret_encrypted),webhook_secret_encrypted),active=VALUES(active)');
-        $stmt->execute([$tenantId,$provider,$accountReference,Crypto::encrypt($config),$provider!=='pagbank'&&$webhookSecret!==''?Crypto::encrypt($webhookSecret):null,$active?1:0]);
+        Database::transaction(function(PDO $pdo)use($tenantId,$provider,$accountReference,$config,$webhookSecret,$active):void{
+            $currentStmt=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider=? LIMIT 1 FOR UPDATE');
+            $currentStmt->execute([$tenantId,$provider]);
+            $existing=$currentStmt->fetch()?:null;
+
+            if($active&&$provider!=='pagbank'&&$webhookSecret===''){if(!$existing||empty($existing['webhook_secret_encrypted']))throw new RuntimeException('Configure o segredo do webhook antes de ativar o gateway.');}
+
+            $openStmt=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND provider=? AND status IN ("created","pending","authorized")');
+            $openStmt->execute([$tenantId,$provider]);
+            $open=(int)$openStmt->fetchColumn();
+            if($existing&&$open>0){
+                if(!$active&&(int)$existing['active']===1)throw new RuntimeException('Não é possível desativar o gateway enquanto existem cobranças abertas. Aguarde a conciliação/expiração primeiro.');
+                if((string)$existing['account_reference']!==$accountReference)throw new RuntimeException('Não é possível trocar a conta/credencial do gateway enquanto existem cobranças abertas. Aguarde a conciliação/expiração primeiro.');
+            }
+
+            $encryptedConfig=Crypto::encrypt($config);
+            $encryptedWebhook=$provider!=='pagbank'&&$webhookSecret!==''?Crypto::encrypt($webhookSecret):null;
+            if($existing){
+                $stmt=$pdo->prepare('UPDATE payment_gateways SET account_reference=?,config_encrypted=?,webhook_secret_encrypted=COALESCE(?,webhook_secret_encrypted),active=? WHERE id=? AND tenant_id=?');
+                $stmt->execute([$accountReference,$encryptedConfig,$encryptedWebhook,$active?1:0,$existing['id'],$tenantId]);
+            }else{
+                $stmt=$pdo->prepare('INSERT INTO payment_gateways (tenant_id,provider,account_reference,config_encrypted,webhook_secret_encrypted,active) VALUES (?,?,?,?,?,?)');
+                $stmt->execute([$tenantId,$provider,$accountReference,$encryptedConfig,$encryptedWebhook,$active?1:0]);
+            }
+        });
         Auth::audit('gateway.saved','gateway',$provider,['active'=>$active,'account_reference'=>$accountReference]);
     }
 
