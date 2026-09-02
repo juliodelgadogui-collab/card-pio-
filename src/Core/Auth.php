@@ -92,6 +92,36 @@ final class Auth
     public static function role():?string{return $_SESSION['role']??null;}
     public static function name():string{return(string)($_SESSION['name']??'');}
 
+    public static function homeRoute():string
+    {
+        return match(self::role()){
+            'super_admin'=>'superadmin',
+            'kitchen'=>'kitchen',
+            'delivery'=>'my-deliveries',
+            'counter'=>'pos',
+            'cashier'=>'pos',
+            'waiter'=>'restaurant',
+            'promoter'=>'guests',
+            default=>'dashboard',
+        };
+    }
+
+    public static function roleLabel(?string $role=null):string
+    {
+        return match($role??self::role()){
+            'super_admin'=>'Super Administrador',
+            'admin'=>'Administrador',
+            'manager'=>'Gerente',
+            'cashier'=>'Caixa',
+            'counter'=>'Balconista',
+            'waiter'=>'Garçom',
+            'kitchen'=>'Cozinha',
+            'delivery'=>'Motoboy / Entregador',
+            'promoter'=>'Promotor',
+            default=>(string)($role??self::role()??''),
+        };
+    }
+
     public static function can(string $permission):bool
     {
         $role=self::role();if($role==='super_admin')return true;
@@ -99,9 +129,10 @@ final class Auth
             'admin'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','fulfillment.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage'],
             'manager'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','payments.manage','refunds.manage','fulfillment.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign'],
             'cashier'=>['dashboard','orders.manage','orders.view','orders.create','payments.manage','fulfillment.manage','customers.manage','tables.manage'],
+            'counter'=>['orders.view','orders.create','fulfillment.manage'],
             'waiter'=>['dashboard','orders.create','orders.view','tables.manage','fulfillment.manage'],
-            'kitchen'=>['dashboard','orders.kitchen','orders.view'],
-            'delivery'=>['dashboard','orders.delivery','orders.view'],
+            'kitchen'=>['orders.kitchen','orders.view'],
+            'delivery'=>['orders.delivery','orders.view'],
             'promoter'=>['dashboard','events.promoter','reports.own','guests.manage'],
         ];
         return in_array($permission,$map[$role]??[],true);
