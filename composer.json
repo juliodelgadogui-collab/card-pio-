@@ -10,9 +10,9 @@
     "ext-mbstring": "*",
     "ext-openssl": "*",
     "ext-pdo": "*",
-    "stripe/stripe-php": "21.3.1",
-    "mercadopago/dx-php": "3.16.0",
-    "endroid/qr-code": "6.0.9"
+    "stripe/stripe-php": "^21.3",
+    "mercadopago/dx-php": "^3.16",
+    "endroid/qr-code": "^6.0"
   },
   "autoload": {
     "psr-4": {
