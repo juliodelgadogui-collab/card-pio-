@@ -16,6 +16,7 @@ use EventMenu\Services\OrderSchedulingService;
 use EventMenu\Services\OrderWorkflowService;
 use EventMenu\Services\PaymentService;
 use EventMenu\Services\PublicOrderService;
+use EventMenu\Services\RefundCoordinatorService;
 use EventMenu\Services\RefundService;
 use EventMenu\Services\StockService;
 use EventMenu\Services\TicketService;
@@ -28,6 +29,7 @@ $checks=[
     class_exists(PublicOrderService::class),
     class_exists(CounterOrderService::class),
     class_exists(CashRegisterService::class),
+    class_exists(RefundCoordinatorService::class),
     class_exists(DeliveryService::class),
     class_exists(OnlineOrderingService::class),
     class_exists(OrderSchedulingService::class),
