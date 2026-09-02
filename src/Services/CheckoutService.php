@@ -35,13 +35,11 @@ final class CheckoutService
         $open=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1');
         $open->execute([$order['tenant_id'],$order['id']]);
         $openPayment=$open->fetch();
-        if($openPayment){
-            if(!empty($openPayment['checkout_expires_at'])&&new \DateTimeImmutable((string)$openPayment['checkout_expires_at'])<=new \DateTimeImmutable()){
-                $state=(new CheckoutReconciliationService())->reconcilePayment((int)$openPayment['id']);
-                if($state==='paid')throw new RuntimeException('Pagamento já foi confirmado. Atualize a página.');
-                if($state!=='cancelled')throw new RuntimeException('O checkout expirou, mas a conciliação com o provedor ainda está pendente. Não será criada outra cobrança até essa situação ser resolvida.');
-                $openPayment=null;
-            }
+        if($openPayment&& !empty($openPayment['checkout_expires_at'])&&new \DateTimeImmutable((string)$openPayment['checkout_expires_at'])<=new \DateTimeImmutable()){
+            $state=(new CheckoutReconciliationService())->reconcilePayment((int)$openPayment['id']);
+            if($state==='paid')throw new RuntimeException('Pagamento já foi confirmado. Atualize a página.');
+            if($state!=='cancelled')throw new RuntimeException('O checkout expirou, mas a conciliação com o provedor ainda está pendente. Não será criada outra cobrança até essa situação ser resolvida.');
+            $openPayment=null;
         }
         if($openPayment){
             $raw=$this->decodePayload($openPayment['raw_payload']??null);
@@ -59,7 +57,7 @@ final class CheckoutService
             }
         }
 
-        $attempt=$this->prepareAttempt($order,$provider,$openPayment);
+        $attempt=$this->prepareAttempt($order,$provider);
         $paymentId=(int)$attempt['id'];
         $key=(string)$attempt['idempotency_key'];
         $expiresAt=new \DateTimeImmutable((string)$attempt['checkout_expires_at']);
@@ -82,9 +80,9 @@ final class CheckoutService
         }
     }
 
-    private function prepareAttempt(array $order,string $provider,array|false|null $openPayment):array
+    private function prepareAttempt(array $order,string $provider):array
     {
-        return Database::transaction(function(PDO $pdo)use($order,$provider,$openPayment){
+        return Database::transaction(function(PDO $pdo)use($order,$provider){
             $lock=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
             $lock->execute([$order['id'],$order['tenant_id']]);
             $lockedOrder=$lock->fetch();
@@ -154,10 +152,7 @@ final class CheckoutService
         $metadata=['tenant_id'=>(string)$order['tenant_id'],'order_id'=>(string)$order['id']];
         $session=$client->checkout->sessions->create([
             'mode'=>'payment',
-            'line_items'=>[[
-                'price_data'=>['currency'=>'brl','unit_amount'=>(int)$order['total_cents'],'product_data'=>['name'=>'Pedido EventMenu #'.$order['id']]],
-                'quantity'=>1,
-            ]],
+            'line_items'=>[['price_data'=>['currency'=>'brl','unit_amount'=>(int)$order['total_cents'],'product_data'=>['name'=>'Pedido EventMenu #'.$order['id']]],'quantity'=>1]],
             'client_reference_id'=>(string)$order['id'],
             'customer_email'=>$order['customer_email']?:null,
             'metadata'=>$metadata,
@@ -175,7 +170,7 @@ final class CheckoutService
         if($token==='')throw new RuntimeException('Mercado Pago não configurado.');
         $base=rtrim((string)env('APP_URL',''),'/');
         $notification=$base.'/webhook.php?provider=mercadopago&tenant='.rawurlencode($order['tenant_slug']);
-        $now=new \DateTimeImmutable();
+        $startsAt=$expiresAt->modify('-'.self::CHECKOUT_MINUTES.' minutes');
         $body=[
             'items'=>[['id'=>'order-'.$order['id'],'title'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'currency_id'=>'BRL','unit_price'=>((int)$order['total_cents'])/100]],
             'external_reference'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],
@@ -183,7 +178,7 @@ final class CheckoutService
             'notification_url'=>$notification,
             'metadata'=>['tenant_id'=>$order['tenant_id'],'order_id'=>$order['id']],
             'expires'=>true,
-            'expiration_date_from'=>$now->format(DATE_ATOM),
+            'expiration_date_from'=>$startsAt->format(DATE_ATOM),
             'expiration_date_to'=>$expiresAt->format(DATE_ATOM),
         ];
         $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$key],$body);
@@ -221,13 +216,9 @@ final class CheckoutService
     {
         $ch=curl_init($url);
         if($ch===false)throw new RuntimeException('Falha HTTP.');
-        $headers[]='Accept: application/json';
-        $headers[]='Content-Type: application/json';
+        $headers[]='Accept: application/json';$headers[]='Content-Type: application/json';
         curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_POSTFIELDS=>json_encode($body,JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>25]);
-        $response=curl_exec($ch);
-        $status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);
-        $err=curl_error($ch);
-        curl_close($ch);
+        $response=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$err=curl_error($ch);curl_close($ch);
         if($response===false||$status<200||$status>=300)throw new RuntimeException('Gateway recusou a criação da cobrança (HTTP '.$status.')'.($err?' '.$err:''));
         $data=json_decode((string)$response,true,512,JSON_THROW_ON_ERROR);
         if(!is_array($data))throw new RuntimeException('Resposta inválida do gateway.');
