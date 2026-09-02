@@ -22,6 +22,9 @@ final class PublicOrderService
             $name=trim((string)($buyer['name']??''));
             $phone=trim((string)($buyer['phone']??''));
             $email=mb_strtolower(trim((string)($buyer['email']??'')));
+            $postalCode=trim((string)($buyer['postal_code']??''));
+            $neighborhood=trim((string)($buyer['neighborhood']??''));
+            $city=trim((string)($buyer['city']??''));
             $address=trim($address);
             if($name===''||$phone===''||$address==='')throw new RuntimeException('Nome, telefone e endereço são obrigatórios.');
 
@@ -33,8 +36,8 @@ final class PublicOrderService
             $publicToken=bin2hex(random_bytes(20));
             $expires=(new \DateTimeImmutable('+20 minutes'))->format('Y-m-d H:i:s');
 
-            $s=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,coupon_id,delivery_zone_id,channel,status,payment_status,expires_at,subtotal_cents,discount_cents,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes,total_cents,delivery_address) VALUES (?,?,?,?,?,"delivery","pending","unpaid",?,?,?,?,?,?,?,?)');
-            $s->execute([$publicToken,$tenantId,$customerId,$couponId,$delivery['zone_id'],$expires,$subtotal,$discount,$fee,$delivery['eta_min_minutes'],$delivery['eta_max_minutes'],$total,$address]);
+            $s=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,coupon_id,delivery_zone_id,channel,status,payment_status,expires_at,subtotal_cents,discount_cents,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes,total_cents,delivery_address,delivery_postal_code,delivery_neighborhood,delivery_city) VALUES (?,?,?,?,?,"delivery","pending","unpaid",?,?,?,?,?,?,?,?,?,?,?)');
+            $s->execute([$publicToken,$tenantId,$customerId,$couponId,$delivery['zone_id'],$expires,$subtotal,$discount,$fee,$delivery['eta_min_minutes'],$delivery['eta_max_minutes'],$total,$address,$postalCode?:null,$neighborhood?:null,$city?:null]);
             $orderId=(int)$pdo->lastInsertId();
             $this->insertItems($pdo,$orderId,$items);
 
@@ -43,7 +46,7 @@ final class PublicOrderService
                 $pdo->prepare('UPDATE coupons SET reserved_count=reserved_count+1 WHERE id=?')->execute([$couponId]);
             }
 
-            $pdo->prepare('INSERT INTO delivery_events (tenant_id,order_id,user_id,event_type,metadata) VALUES (?,?,NULL,"created",?)')->execute([$tenantId,$orderId,json_encode(['zone_id'=>$delivery['zone_id'],'zone'=>$delivery['zone_name'],'fee_cents'=>$fee,'eta_min_minutes'=>$delivery['eta_min_minutes'],'eta_max_minutes'=>$delivery['eta_max_minutes']],JSON_UNESCAPED_UNICODE)]);
+            $pdo->prepare('INSERT INTO delivery_events (tenant_id,order_id,user_id,event_type,metadata) VALUES (?,?,NULL,"created",?)')->execute([$tenantId,$orderId,json_encode(['zone_id'=>$delivery['zone_id'],'zone'=>$delivery['zone_name'],'fee_cents'=>$fee,'eta_min_minutes'=>$delivery['eta_min_minutes'],'eta_max_minutes'=>$delivery['eta_max_minutes'],'postal_code'=>$postalCode,'neighborhood'=>$neighborhood,'city'=>$city],JSON_UNESCAPED_UNICODE)]);
 
             return [
                 'order_id'=>$orderId,
