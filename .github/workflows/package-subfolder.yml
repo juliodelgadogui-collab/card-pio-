@@ -1,0 +1,76 @@
+name: EventMenu Subfolder Package
+
+on:
+  push:
+    branches: [ hardening-v9.2-continuacao ]
+  workflow_dispatch:
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, json, mbstring, openssl, pdo_mysql, pdo_sqlite
+          coverage: none
+      - name: Install production dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress --no-dev --optimize-autoloader
+      - name: Validate shared-host entrypoints
+        run: |
+          php -l shared-host.php
+          php -l diagnostico.php
+          for f in index.php install.php update.php menu.php mesa.php pedido.php retirada.php evento.php ingresso.php webhook.php; do php -l "$f"; done
+          ! grep -q '^Options ' .htaccess
+      - name: Build physical subfolder package
+        run: |
+          set -euo pipefail
+          ROOT=build/EventMenu-v9.2-SUBPASTA
+          rm -rf build
+          mkdir -p "$ROOT" "$ROOT/storage/logs" "$ROOT/storage/mail"
+          cp -a app bin database public src vendor "$ROOT/"
+          cp composer.json .env.example README.md .htaccess shared-host.php diagnostico.php "$ROOT/"
+          if [ -f composer.lock ]; then cp composer.lock "$ROOT/"; fi
+          for f in index.php install.php update.php menu.php mesa.php pedido.php retirada.php evento.php ingresso.php webhook.php; do cp "$f" "$ROOT/"; done
+          if [ -f test-password-reset.php ]; then cp test-password-reset.php "$ROOT/"; fi
+          cp -a public/assets "$ROOT/assets"
+          cp public/manifest.webmanifest "$ROOT/manifest.webmanifest"
+          cp public/sw.js "$ROOT/sw.js"
+          cp public/offline.html "$ROOT/offline.html"
+          cat > "$ROOT/INSTALACAO.txt" <<'EOF'
+          EVENTMENU PREMIUM v9.2 — TESTE EM SUBPASTA /1
+
+          1. Extraia TODO o conteúdo deste pacote diretamente dentro da pasta /1.
+          2. Acesse /1/diagnostico.php primeiro se quiser conferir PHP/extensões.
+          3. Para instalação normal, abra /1/install.php.
+          4. Escolha SQLite — teste ou MySQL — produção.
+          5. Depois abra /1/.
+
+          Este pacote possui arquivos físicos na raiz para index, instalador, atualização,
+          cardápio, mesa, pedido, retirada, evento, ingresso e webhook. Assim o LiteSpeed
+          não depende de RewriteRule para localizar as páginas.
+
+          Se pdo_sqlite estiver desativado, a página exibirá um diagnóstico amigável em
+          vez de HTTP 500. SQLite continua sendo destinado somente a testes.
+          EOF
+          test -f "$ROOT/index.php"
+          test -f "$ROOT/menu.php"
+          test -f "$ROOT/mesa.php"
+          test -f "$ROOT/pedido.php"
+          test -f "$ROOT/retirada.php"
+          test -f "$ROOT/evento.php"
+          test -f "$ROOT/ingresso.php"
+          test -f "$ROOT/webhook.php"
+          test -f "$ROOT/assets/app.css"
+          test -f "$ROOT/assets/icon.svg"
+          test -f "$ROOT/manifest.webmanifest"
+          test -f "$ROOT/sw.js"
+          test -f "$ROOT/offline.html"
+      - name: Upload subfolder package
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-v9.2-SUBPASTA-LITESPEED
+          path: build/EventMenu-v9.2-SUBPASTA/
+          if-no-files-found: error
+          retention-days: 14
