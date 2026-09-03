@@ -68,6 +68,8 @@ jobs:
           Este pacote já contém um banco SQLite de teste e não usa install.php.
           Para produção, use MySQL.
           EOF
+          test -f build/EventMenu-v9.2-TESTE/.env
+          test -f build/EventMenu-v9.2-TESTE/.htaccess
           test -f build/EventMenu-v9.2-TESTE/index.php
           test -f build/EventMenu-v9.2-TESTE/diagnostico.php
           test -f build/EventMenu-v9.2-TESTE/storage/eventmenu-test.sqlite
@@ -78,4 +80,5 @@ jobs:
           name: EventMenu-v9.2-SHARED-SQLITE-TEST
           path: build/EventMenu-v9.2-TESTE/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 14
