@@ -12,7 +12,10 @@ $checks=[
     'Eventos legado'=>['app/routes/events_legacy.php',['Todos','Ativos','Encerrados','Rascunhos','Novo Evento','Adicionar Ingresso']],
     'Evento público legado'=>['public/evento.php',['Ingressos','Dados','Pagamento','Confirmação','Comprar Agora']],
     'Checkout legado'=>['public/pedido.php',['Forma de Pagamento','Confirmação','checkout-stepper']],
-    'Acessos por função'=>['app/admin_helpers.php',['Tela da Cozinha','Minhas Entregas','Nova Venda','Mesas e Comandas','Cardápio Digital','Financeiro / Pagamentos']],
+    'Ingressos e check-in legado'=>['app/routes/tickets.php',['Check-in rápido','Abrir câmera','Válidos','Utilizados','Reservados','Transferir ingresso']],
+    'Super ADM legado'=>['app/routes/superadmin.php',['Clientes do EventMenu','Novo Cliente','Ativos','Suspensos','Acessar','Módulos do cliente']],
+    'Configurações legado'=>['app/routes/settings_hub.php',['Central de Configurações','Empresa e operação','Cardápio Digital','Equipe e permissões','Pagamentos, Gateways e NFC','Central de Ajuda']],
+    'Acessos por função'=>['app/admin_helpers.php',['Tela da Cozinha','Minhas Entregas','Nova Venda','Mesas e Comandas','Cardápio Digital','Financeiro']],
     'Ajuda legado'=>['app/routes/help.php',['Central de Ajuda EventMenu','Cardápio Digital','PDV / Balcão','Eventos e ingressos']],
 ];
 
@@ -24,6 +27,6 @@ foreach($checks as$name=>[$file,$needles]){
     foreach($needles as$needle){if(!str_contains($content,$needle))$failed[]="$name: marcador ausente [$needle]";}
 }
 $routes=(string)file_get_contents($root.'/public/index.php');
-foreach(['orders_legacy.php','kitchen_legacy.php','my_deliveries_legacy.php','restaurant_legacy.php','cash_legacy.php','customers_legacy.php','reports_legacy.php','payments_legacy.php','help.php'] as$file){if(!str_contains($routes,$file))$failed[]="Roteador: $file não está ativo";}
+foreach(['orders_legacy.php','kitchen_legacy.php','my_deliveries_legacy.php','restaurant_legacy.php','cash_legacy.php','customers_legacy.php','reports_legacy.php','payments_legacy.php','help.php','tickets.php','superadmin.php','settings_hub.php','menu_hub.php','finance_hub.php'] as$file){if(!str_contains($routes,$file))$failed[]="Roteador: $file não está ativo";}
 if($failed){fwrite(STDERR,"Legacy UI parity FAILED:\n - ".implode("\n - ",$failed)."\n");exit(1);}
 echo "Legacy UI parity OK\n";
