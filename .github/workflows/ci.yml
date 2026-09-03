@@ -65,6 +65,17 @@ jobs:
           SESSION_SECURE: 'false'
           MAIL_DRIVER: log
         run: php tests/legacy_parity_integration.php
+      - name: Remember-me integration
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: eventmenu
+          DB_USERNAME: root
+          DB_PASSWORD: root
+          APP_KEY: ci-only-eventmenu-key-0123456789abcdef
+          SESSION_NAME: eventmenu_ci_remember
+          SESSION_SECURE: 'false'
+        run: php tests/remember_auth_integration.php
       - name: Delivery integration
         env:
           DB_HOST: 127.0.0.1
@@ -152,6 +163,7 @@ jobs:
           MAIL_DRIVER: log
         run: |
           php tests/legacy_parity_integration.php
+          php tests/remember_auth_integration.php
           php tests/delivery_integration.php
           php tests/scheduling_integration.php
           php tests/pos_integration.php
@@ -162,7 +174,7 @@ jobs:
         env:
           MYSQL_PWD: root
         run: |
-          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles','delivery_zones','delivery_events','cash_sessions','cash_movements','nfc_devices','nfc_payment_attempts','order_fulfillments','tenant_modules','business_units','user_units','user_permissions','notifications','waiter_calls','product_option_groups','product_options','order_item_options','product_combo_items','password_reset_tokens','legal_documents','legal_acceptances','backup_history','stock_reservations');" | grep -qx '30'
+          mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='eventmenu' AND table_name IN ('tenants','orders','payments','tickets','restaurant_tables','coupon_reservations','refunds','login_throttles','remember_tokens','delivery_zones','delivery_events','cash_sessions','cash_movements','nfc_devices','nfc_payment_attempts','order_fulfillments','tenant_modules','business_units','user_units','user_permissions','notifications','waiter_calls','product_option_groups','product_options','order_item_options','product_combo_items','password_reset_tokens','legal_documents','legal_acceptances','backup_history','stock_reservations');" | grep -qx '31'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='orders' AND column_name IN ('scheduled_for','scheduled_slot_minutes','fulfillment_token','fulfillment_status','fulfilled_at','unit_id','cancel_reason','cancelled_at','cancelled_by');" | grep -qx '9'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='products' AND column_name IN ('unit_id','product_type','promo_price_cents','min_stock_qty','preparation_minutes','badge','featured');" | grep -qx '7'
           mysql -N -h 127.0.0.1 -uroot eventmenu -e "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema='eventmenu' AND table_name='tickets' AND column_name IN ('transferred_at','transferred_from_customer_id');" | grep -qx '2'
