@@ -1,0 +1,81 @@
+name: Build shared-host SQLite test package
+
+on:
+  push:
+    branches: [ hardening-v9.2-continuacao ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, json, mbstring, openssl, pdo_sqlite
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Lint shared-host entrypoints
+        run: |
+          php -l shared-host.php
+          php -l diagnostico.php
+          for f in index.php install.php update.php menu.php mesa.php pedido.php retirada.php evento.php ingresso.php webhook.php test-password-reset.php; do php -l "$f"; done
+      - name: Build package
+        env:
+          PRESET_EMAIL: admin-test@example.test
+          PRESET_PASSWORD: eventmenu-test
+          PRESET_NAME: Administrador Teste
+          PRESET_TENANT: EventMenu Teste
+        run: |
+          rm -rf build/EventMenu-v9.2-TESTE
+          mkdir -p build/EventMenu-v9.2-TESTE/storage
+          cp -a app bin database public src vendor composer.json composer.lock README.md .htaccess shared-host.php diagnostico.php index.php install.php update.php menu.php mesa.php pedido.php retirada.php evento.php ingresso.php webhook.php test-password-reset.php build/EventMenu-v9.2-TESTE/
+          cp -a public/assets build/EventMenu-v9.2-TESTE/assets
+          cp public/manifest.webmanifest build/EventMenu-v9.2-TESTE/manifest.webmanifest
+          cp public/sw.js build/EventMenu-v9.2-TESTE/sw.js
+          cp public/offline.html build/EventMenu-v9.2-TESTE/offline.html
+          APP_KEY=$(php -r 'echo bin2hex(random_bytes(32));')
+          cat > build/EventMenu-v9.2-TESTE/.env <<EOF
+          APP_NAME="EventMenu Premium"
+          APP_ENV="testing"
+          APP_DEBUG="false"
+          APP_URL="https://gestao2.store/1"
+          APP_KEY="$APP_KEY"
+          DB_DRIVER="sqlite"
+          DB_HOST=""
+          DB_PORT=""
+          DB_DATABASE="storage/eventmenu-test.sqlite"
+          DB_USERNAME=""
+          DB_PASSWORD=""
+          SESSION_NAME="eventmenu_shared_test"
+          SESSION_SECURE="true"
+          PAYMENT_CURRENCY="BRL"
+          MAIL_DRIVER="log"
+          EOF
+          APP_KEY="$APP_KEY" php bin/build-sqlite-test-db.php build/EventMenu-v9.2-TESTE/storage/eventmenu-test.sqlite
+          cat > build/EventMenu-v9.2-TESTE/storage/installed.lock <<'EOF'
+          {"version":"9.2","database":"sqlite","mode":"testing","preset":true}
+          EOF
+          cat > build/EventMenu-v9.2-TESTE/LEIA-ME.txt <<'EOF'
+          EVENTMENU PREMIUM v9.2 — TESTE EM /1
+
+          1. Apague o conteúdo antigo de /1.
+          2. Extraia TODO este pacote diretamente dentro de /1.
+          3. Abra https://gestao2.store/1/diagnostico.php primeiro.
+          4. Se pdo_sqlite aparecer OK, abra https://gestao2.store/1/.
+
+          Este pacote já contém um banco SQLite de teste e não usa install.php.
+          Para produção, use MySQL.
+          EOF
+          test -f build/EventMenu-v9.2-TESTE/index.php
+          test -f build/EventMenu-v9.2-TESTE/diagnostico.php
+          test -f build/EventMenu-v9.2-TESTE/storage/eventmenu-test.sqlite
+          test -f build/EventMenu-v9.2-TESTE/assets/app.css
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-v9.2-SHARED-SQLITE-TEST
+          path: build/EventMenu-v9.2-TESTE/
+          if-no-files-found: error
+          retention-days: 14
