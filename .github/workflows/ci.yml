@@ -37,6 +37,8 @@ jobs:
         run: find app src public bin tests -name '*.php' -print0 | xargs -0 -n1 php -l && php -l index.php && php -l install.php && php -l update.php
       - name: Smoke tests
         run: php tests/smoke.php
+      - name: Legacy UI parity
+        run: php tests/legacy_ui_parity.php
       - name: Installer environment test
         run: php tests/installer_env.php
       - name: Real installer database path
