@@ -9,6 +9,7 @@ declare(strict_types=1);
  */
 function em_render_legacy_route(string $target,string $screen):never
 {
+    global $pdo;
     ob_start();
     require $target;
     $html=(string)ob_get_clean();
