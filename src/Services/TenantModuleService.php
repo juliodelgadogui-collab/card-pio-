@@ -16,6 +16,7 @@ final class TenantModuleService
         'pos'=>'menu',
         'counter-orders'=>'menu',
         'fulfillment'=>'menu',
+        'menu-editor'=>'menu',
         'products'=>'menu',
         'cash'=>'menu',
         'delivery'=>'delivery',
@@ -40,7 +41,6 @@ final class TenantModuleService
         try{
             $s=Database::connection()->prepare('SELECT enabled FROM tenant_modules WHERE tenant_id=? AND module_key=? LIMIT 1');
             $s->execute([$tenantId,$module]);$value=$s->fetchColumn();
-            // Empresas criadas antes da migration mantêm todos os módulos ativos por padrão.
             return self::$cache[$key]=$value===false?true:(bool)$value;
         }catch(\Throwable){return self::$cache[$key]=true;}
     }
