@@ -27,14 +27,14 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: curl, json, mbstring, openssl, pdo_mysql
+          extensions: curl, json, mbstring, openssl, pdo_mysql, pdo_sqlite
           coverage: none
       - name: Validate Composer
         run: composer validate --strict
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
       - name: PHP syntax
-        run: find app src public bin tests -name '*.php' -print0 | xargs -0 -n1 php -l
+        run: find app src public bin tests -name '*.php' -print0 | xargs -0 -n1 php -l && php -l index.php && php -l install.php && php -l update.php
       - name: Smoke tests
         run: php tests/smoke.php
       - name: Installer environment test
@@ -129,6 +129,33 @@ jobs:
           SESSION_NAME: eventmenu_ci_nfc
           SESSION_SECURE: 'false'
         run: php tests/nfc_integration.php
+      - name: SQLite full schema and migrations
+        env:
+          DB_DRIVER: sqlite
+          DB_DATABASE: /tmp/eventmenu-ci.sqlite
+          APP_KEY: ci-only-eventmenu-sqlite-key-0123456789abcdef
+          SESSION_NAME: eventmenu_ci_sqlite
+          SESSION_SECURE: 'false'
+          MAIL_DRIVER: log
+        run: |
+          rm -f /tmp/eventmenu-ci.sqlite /tmp/eventmenu-ci.sqlite-wal /tmp/eventmenu-ci.sqlite-shm
+          php tests/sqlite_installation.php
+      - name: SQLite operational smoke
+        env:
+          DB_DRIVER: sqlite
+          DB_DATABASE: /tmp/eventmenu-ci.sqlite
+          APP_KEY: ci-only-eventmenu-sqlite-key-0123456789abcdef
+          SESSION_NAME: eventmenu_ci_sqlite_ops
+          SESSION_SECURE: 'false'
+          MAIL_DRIVER: log
+        run: |
+          php tests/legacy_parity_integration.php
+          php tests/delivery_integration.php
+          php tests/scheduling_integration.php
+          php tests/pos_integration.php
+          php tests/fulfillment_integration.php
+          php tests/cash_integration.php
+          php tests/nfc_integration.php
       - name: Verify critical database objects
         env:
           MYSQL_PWD: root
@@ -144,32 +171,37 @@ jobs:
         run: |
           rm -rf build
           mkdir -p build/EventMenu-Premium-v9.2
-          cp -a app bin database public src vendor composer.json composer.lock .env.example README.md .htaccess build/EventMenu-Premium-v9.2/
+          cp -a app bin database public src vendor composer.json composer.lock .env.example README.md .htaccess index.php install.php update.php build/EventMenu-Premium-v9.2/
           cat > build/EventMenu-Premium-v9.2/INSTALACAO.txt <<'EOF'
           EVENTMENU PREMIUM v9.2 — PACOTE DE TESTE
 
           Requisitos:
           - PHP 8.2+
-          - MySQL 8.0+
-          - Apache ou LiteSpeed com .htaccess habilitado
-          - extensoes PHP: curl, json, mbstring, openssl, pdo_mysql
+          - Apache ou LiteSpeed
+          - extensoes PHP: curl, json, mbstring, openssl e PDO
+          - pdo_sqlite para teste sem MySQL
+          - pdo_mysql + MySQL 8.0+ para producao
 
           TESTE DIRETO NA PASTA /1:
           1. Apague ou renomeie o conteudo antigo da pasta /1.
           2. Extraia TODO o conteudo desta pasta EventMenu-Premium-v9.2 diretamente dentro de /1.
-          3. Nao mova somente public/. O .htaccess da raiz faz o roteamento seguro para public/.
-          4. Abra https://SEU-DOMINIO/1/install.php.
-          5. Preencha MySQL, empresa e administrador e clique em Instalar.
+          3. Abra https://SEU-DOMINIO/1/install.php.
+          4. Escolha:
+             - SQLite — teste: nao pede banco/usuario/senha e cria storage/eventmenu-test.sqlite.
+             - MySQL — producao: informe host, banco, usuario e senha.
+          5. Cadastre empresa e administrador e clique em Instalar.
           6. Depois abra https://SEU-DOMINIO/1/.
 
-          O .htaccess desativa listagem de diretorio e bloqueia acesso web a app/, src/,
-          database/, bin/, vendor/, storage/, tests/, .env e arquivos internos.
+          A raiz possui index.php real para evitar o erro 403/Index of em hospedagens LiteSpeed.
+          O .htaccess desativa listagem e bloqueia acesso web a app/, src/, database/,
+          bin/, vendor/, storage/, tests/, .env e arquivos internos.
 
-          O assistente cria .env, APP_KEY, schema, migrations, empresa e administrador.
-          Configure bin/cron.php para conciliacao, expiracao, reembolsos e fila de e-mail.
-          Para testar e-mail sem disparar mensagens reais, mantenha MAIL_DRIVER=log.
+          SQLite e somente para avaliacao/testes. Para pagamentos reais e operacao de producao,
+          reinstale com MySQL.
           EOF
           test -f build/EventMenu-Premium-v9.2/.htaccess
+          test -f build/EventMenu-Premium-v9.2/index.php
+          test -f build/EventMenu-Premium-v9.2/install.php
           test -f build/EventMenu-Premium-v9.2/public/index.php
           test -f build/EventMenu-Premium-v9.2/public/assets/app.css
       - name: Upload test install package
