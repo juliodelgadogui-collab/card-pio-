@@ -8,8 +8,8 @@ use EventMenu\Core\Security;
 Auth::requirePermission('dashboard');$tenantId=em_require_tenant();
 $stats=[];
 $queries=[
- 'orders'=>'SELECT COUNT(*) FROM orders WHERE tenant_id=? AND DATE(created_at)=CURDATE()',
- 'sales'=>'SELECT COALESCE(SUM(total_cents),0) FROM orders WHERE tenant_id=? AND payment_status="paid" AND DATE(created_at)=CURDATE()',
+ 'orders'=>'SELECT COUNT(*) FROM orders WHERE tenant_id=? AND DATE(created_at)=CURRENT_DATE',
+ 'sales'=>'SELECT COALESCE(SUM(total_cents),0) FROM orders WHERE tenant_id=? AND payment_status="paid" AND DATE(created_at)=CURRENT_DATE',
  'open_tabs'=>'SELECT COUNT(*) FROM tabs WHERE tenant_id=? AND status="open"',
  'tickets'=>'SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND status IN ("paid","checked_in")',
 ];
