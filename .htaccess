@@ -1,27 +1,22 @@
-Options -Indexes
 DirectoryIndex index.php
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
 
-    # Nunca exponha codigo, banco, dependencias, testes ou arquivos de runtime.
+    # Nunca exponha código, banco, dependências, testes ou runtime.
     RewriteRule ^(?:app|bin|database|src|storage|tests|vendor)(?:/|$) - [F,L,NC]
     RewriteRule ^(?:\.git|\.github)(?:/|$) - [F,L,NC]
     RewriteRule ^(?:\.env(?:\..*)?|composer\.(?:json|lock)|README\.md|INSTALACAO\.txt)$ - [F,L,NC]
-
-    # Hospedagem em subpasta (/1, /teste, /eventmenu): index.php existe fisicamente
-    # na raiz e encaminha ao public/index.php. Os demais arquivos publicos continuam
-    # fisicamente dentro de public/.
-    RewriteRule ^$ index.php [L]
-    RewriteRule ^assets/(.*)$ public/assets/$1 [L,NC]
-    RewriteRule ^manifest\.webmanifest$ public/manifest.webmanifest [L,NC]
-    RewriteRule ^sw\.js$ public/sw.js [L,NC]
-    RewriteRule ^offline\.html$ public/offline.html [L,NC]
-    RewriteRule ^(menu|mesa|pedido|retirada|evento|ingresso|webhook)\.php$ public/$1.php [L,NC]
 </IfModule>
 
-<FilesMatch "^(?:\.env|composer\.(?:json|lock)|README\.md)$">
-    Require all denied
+<FilesMatch "^(?:\.env(?:\..*)?|composer\.(?:json|lock)|README\.md|INSTALACAO\.txt)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule mod_access_compat.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
 </FilesMatch>
 
 <IfModule mod_headers.c>
