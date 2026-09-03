@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $root=dirname(__DIR__);
 $checks=[
+    'Login legado'=>['public/index.php',['Acesse sua conta','Lembrar-me','Esqueci minha senha','EVENTMENU','PREMIUM']],
     'Dashboard legado'=>['app/routes/dashboard.php',['Faturamento (Mês)','Pedidos (Mês)','Ingressos Vendidos','Ticket Médio','Últimos 7 dias','Vendas por Tipo','Pedidos Recentes']],
     'Cardápio público legado'=>['public/menu_legacy.php',['legacy-hero','Destaques','legacy-cart-drawer','Finalizar Pedido','checkout-stepper']],
     'Mesa / comanda no mesmo cardápio'=>['public/mesa.php',['Cardápio da mesa','Destaques','Buscar no cardápio','Chamar garçom','Pedir conta','Enviar para a comanda','Pedido da mesa']],
