@@ -46,6 +46,8 @@ final class CompatiblePDO extends PDO
     {
         if(!$this->sqliteMode)return$sql;
 
+        if(preg_match('/^\s*SELECT\s+@@(?:session\.)?time_zone\s*;?\s*$/i',$sql))return "SELECT '+00:00'";
+
         $sql=preg_replace('/\s+FOR\s+UPDATE\b/i','',$sql)??$sql;
         $sql=preg_replace('/\s+LOCK\s+IN\s+SHARE\s+MODE\b/i','',$sql)??$sql;
         $sql=preg_replace('/\bINSERT\s+IGNORE\s+INTO\b/i','INSERT OR IGNORE INTO',$sql)??$sql;
