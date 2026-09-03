@@ -12,17 +12,21 @@ final class Auth
     private const LOGIN_WINDOW_MINUTES=15;
     private const LOGIN_MAX_ATTEMPTS=5;
     private const LOGIN_LOCK_MINUTES=15;
+    private const REMEMBER_DAYS=30;
     private static array $permissionCache=[];
+    private static bool $rememberChecked=false;
 
-    public static function attempt(string $email,string $password):bool
+    public static function attempt(string $email,string $password,bool $remember=false):bool
     {
         $pdo=Database::connection();$email=mb_strtolower(trim($email));$blocked=self::isLoginBlocked($pdo,$email);
         $stmt=$pdo->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.email=? AND u.status="active" LIMIT 1');$stmt->execute([$email]);$user=$stmt->fetch();
         $valid=$user&&($user['tenant_id']===null||$user['tenant_status']==='active')&&password_verify($password,(string)$user['password_hash']);
         if(!$valid||$blocked){if(!$blocked)self::registerLoginFailure($pdo,$email);return false;}
-        self::clearLoginThrottle($pdo,$email);session_regenerate_id(true);unset($_SESSION['super_admin_tenant_id'],$_SESSION['unit_id']);self::setSession($user);self::$permissionCache=[];
+        self::clearLoginThrottle($pdo,$email);session_regenerate_id(true);unset($_SESSION['super_admin_tenant_id'],$_SESSION['unit_id']);self::setSession($user);self::$permissionCache=[];self::$rememberChecked=true;
         self::ensureSelectedUnit();
-        $pdo->prepare('UPDATE users SET last_login_at=NOW() WHERE id=?')->execute([$user['id']]);self::audit('auth.login','user',(string)$user['id']);return true;
+        $pdo->prepare('UPDATE users SET last_login_at=NOW() WHERE id=?')->execute([$user['id']]);
+        if($remember)self::issueRememberToken($pdo,(int)$user['id']);else self::revokeRememberCookie($pdo);
+        self::audit('auth.login','user',(string)$user['id'],['remember'=>$remember]);return true;
     }
 
     private static function setSession(array $user):void
@@ -89,17 +93,78 @@ final class Auth
 
     public static function logout():void
     {
-        if(self::check())self::audit('auth.logout','user',(string)self::id());$_SESSION=[];self::$permissionCache=[];
+        $wasLoggedIn=self::check();$uid=$wasLoggedIn?self::id():null;if($wasLoggedIn)self::audit('auth.logout','user',(string)$uid);
+        self::revokeRememberCookie();$_SESSION=[];self::$permissionCache=[];self::$rememberChecked=true;
         if(ini_get('session.use_cookies')){$p=session_get_cookie_params();setcookie(session_name(),'',time()-42000,$p['path'],$p['domain']??'',(bool)$p['secure'],(bool)$p['httponly']);}session_destroy();
     }
 
-    public static function check():bool{return!empty($_SESSION['user_id']);}
+    public static function check():bool
+    {
+        if(!empty($_SESSION['user_id']))return true;
+        if(self::$rememberChecked)return false;
+        self::$rememberChecked=true;
+        return self::restoreRemembered();
+    }
     public static function id():?int{return self::check()?(int)$_SESSION['user_id']:null;}
     public static function tenantId():?int{return isset($_SESSION['tenant_id'])?(int)$_SESSION['tenant_id']:null;}
     public static function role():?string{return $_SESSION['role']??null;}
     public static function name():string{return(string)($_SESSION['name']??'');}
     public static function homeRoute():string{return match(self::role()){'super_admin'=>'superadmin','kitchen'=>'kitchen','delivery'=>'my-deliveries','counter'=>'pos','cashier'=>'pos','waiter'=>'restaurant','promoter'=>'guests',default=>'dashboard'};}
     public static function roleLabel(?string $role=null):string{return match($role??self::role()){'super_admin'=>'Super Administrador','admin'=>'Administrador','manager'=>'Gerente','cashier'=>'Caixa','counter'=>'Balconista','waiter'=>'Garçom','kitchen'=>'Cozinha','delivery'=>'Motoboy / Entregador','promoter'=>'Promotor',default=>(string)($role??self::role()??'')};}
+
+    public static function revokeRememberTokensForUser(int $userId):void
+    {
+        if($userId<1)return;try{Database::connection()->prepare('DELETE FROM remember_tokens WHERE user_id=?')->execute([$userId]);}catch(\Throwable){}
+        if(self::id()===$userId)self::clearRememberCookie();
+    }
+
+    private static function restoreRemembered():bool
+    {
+        $raw=(string)($_COOKIE[self::rememberCookieName()]??'');
+        if($raw===''||!str_contains($raw,'.'))return false;
+        [$selector,$validator]=array_pad(explode('.',$raw,2),2,'');
+        if(!preg_match('/^[a-f0-9]{18,40}$/',$selector)||!preg_match('/^[a-f0-9]{64}$/',$validator)){self::clearRememberCookie();return false;}
+        try{
+            $pdo=Database::connection();
+            $stmt=$pdo->prepare('SELECT rt.token_hash,rt.expires_at,u.*,t.status tenant_status FROM remember_tokens rt JOIN users u ON u.id=rt.user_id LEFT JOIN tenants t ON t.id=u.tenant_id WHERE rt.selector=? AND rt.expires_at>NOW() LIMIT 1');$stmt->execute([$selector]);$user=$stmt->fetch();
+            if(!$user||$user['status']!=='active'||($user['tenant_id']!==null&&$user['tenant_status']!=='active')||!hash_equals((string)$user['token_hash'],hash('sha256',$validator))){$pdo->prepare('DELETE FROM remember_tokens WHERE selector=?')->execute([$selector]);self::clearRememberCookie();return false;}
+            $pdo->prepare('DELETE FROM remember_tokens WHERE selector=?')->execute([$selector]);session_regenerate_id(true);unset($_SESSION['super_admin_tenant_id'],$_SESSION['unit_id']);self::setSession($user);self::$permissionCache=[];self::ensureSelectedUnit();
+            $pdo->prepare('UPDATE users SET last_login_at=NOW() WHERE id=?')->execute([$user['id']]);self::issueRememberToken($pdo,(int)$user['id']);self::audit('auth.remember_login','user',(string)$user['id']);return true;
+        }catch(\Throwable){self::clearRememberCookie();return false;}
+    }
+
+    private static function issueRememberToken(PDO $pdo,int $userId):void
+    {
+        try{
+            $selector=bin2hex(random_bytes(10));$validator=bin2hex(random_bytes(32));$expires=time()+self::REMEMBER_DAYS*86400;$expiresSql=gmdate('Y-m-d H:i:s',$expires);
+            $pdo->prepare('DELETE FROM remember_tokens WHERE user_id=? AND expires_at<=NOW()')->execute([$userId]);
+            $pdo->prepare('INSERT INTO remember_tokens (user_id,selector,token_hash,expires_at,last_used_at) VALUES (?,?,?,?,NOW())')->execute([$userId,$selector,hash('sha256',$validator),$expiresSql]);
+            self::setRememberCookie($selector.'.'.$validator,$expires);
+        }catch(\Throwable){self::clearRememberCookie();}
+    }
+
+    private static function revokeRememberCookie(?PDO $pdo=null):void
+    {
+        $raw=(string)($_COOKIE[self::rememberCookieName()]??'');
+        if($raw!==''&&str_contains($raw,'.')){$selector=explode('.',$raw,2)[0];if(preg_match('/^[a-f0-9]{18,40}$/',$selector)){try{($pdo??Database::connection())->prepare('DELETE FROM remember_tokens WHERE selector=?')->execute([$selector]);}catch(\Throwable){}}}
+        self::clearRememberCookie();
+    }
+    private static function rememberCookieName():string
+    {
+        $name=(string)env('REMEMBER_COOKIE',((string)env('SESSION_NAME','eventmenu')).'_remember');$name=preg_replace('/[^A-Za-z0-9_-]/','_',$name)??'eventmenu_remember';return$name!==''?$name:'eventmenu_remember';
+    }
+    private static function setRememberCookie(string $value,int $expires):void
+    {
+        $path=self::appBasePath();if($path==='')$path='/';setcookie(self::rememberCookieName(),$value,['expires'=>$expires,'path'=>$path,'secure'=>self::secureRequest(),'httponly'=>true,'samesite'=>'Lax']);$_COOKIE[self::rememberCookieName()]=$value;
+    }
+    private static function clearRememberCookie():void
+    {
+        $path=self::appBasePath();if($path==='')$path='/';setcookie(self::rememberCookieName(),'', ['expires'=>time()-3600,'path'=>$path,'secure'=>self::secureRequest(),'httponly'=>true,'samesite'=>'Lax']);unset($_COOKIE[self::rememberCookieName()]);
+    }
+    private static function secureRequest():bool
+    {
+        $url=(string)env('APP_URL','');if(str_starts_with(strtolower($url),'https://'))return true;$https=strtolower((string)($_SERVER['HTTPS']??''));if($https!==''&&$https!=='off'&&$https!=='0')return true;return strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO']??''))==='https';
+    }
 
     public static function can(string $permission):bool
     {
