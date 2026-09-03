@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace EventMenu\Core;
 
 use PDO;
-use RuntimeException;
 
 final class SqliteSchema
 {
     public static function executeBatch(PDO $pdo,string $sql):void
     {
+        $sql=preg_replace('/^\s*--[^\r\n]*(?:\r?\n|$)/m','',$sql)??$sql;
+        $sql=preg_replace('~/\*.*?\*/~s','',$sql)??$sql;
         foreach(self::splitStatements($sql) as$statement){
             foreach(self::translate($statement) as$translated){
                 $translated=trim($translated);
