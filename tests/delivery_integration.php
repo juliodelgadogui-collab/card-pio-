@@ -24,8 +24,9 @@ $u->execute([$tenantId,'Admin CI','admin-ci@example.com',$hash,'admin']);$adminI
 $u->execute([$tenantId,'Entregador CI','delivery-ci@example.com',$hash,'delivery']);$driverId=(int)$pdo->lastInsertId();
 $pdo->prepare('INSERT INTO products (tenant_id,name,price_cents,track_stock,active) VALUES (?,"Produto teste",1000,0,1)')->execute([$tenantId]);
 $productId=(int)$pdo->lastInsertId();
-$pdo->prepare('INSERT INTO delivery_zones (tenant_id,name,match_type,match_value,fee_cents,min_order_cents,free_above_cents,eta_min_minutes,eta_max_minutes,sort_order,active) VALUES (?,"Zona CEP","postal_prefix","283",700,1500,5000,25,45,0,1)')->execute([$tenantId]);
-$zoneId=(int)$pdo->lastInsertId();
+$zone=$pdo->prepare('INSERT INTO delivery_zones (tenant_id,name,match_type,match_value,fee_cents,min_order_cents,free_above_cents,eta_min_minutes,eta_max_minutes,sort_order,active) VALUES (?,?,?,?,?,?,?,?,?,?,1)');
+$zone->execute([$tenantId,'Zona CEP','postal_prefix','283',700,1500,5000,25,45,0]);$zoneId=(int)$pdo->lastInsertId();
+$zone->execute([$tenantId,'Zona CEP 2','postal_prefix','284',900,1500,null,35,55,0]);$zone2Id=(int)$pdo->lastInsertId();
 
 $service=new PublicOrderService();
 $buyer=['name'=>'Cliente CI','phone'=>'22999990000','email'=>'ci@example.com','postal_code'=>'28300-000','neighborhood'=>'Centro','city'=>'Cidade Teste'];
@@ -35,7 +36,7 @@ assert_delivery((int)$result['delivery_fee_cents']===700,'taxa da zona incorreta
 assert_delivery((int)$result['total_cents']===2700,'total com frete incorreto');
 assert_delivery((int)$result['eta_min_minutes']===25&&(int)$result['eta_max_minutes']===45,'ETA incorreto');
 
-$stmt=$pdo->prepare('SELECT delivery_zone_id,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes,delivery_address,delivery_postal_code,delivery_neighborhood,delivery_city FROM orders WHERE id=?');
+$stmt=$pdo->prepare('SELECT delivery_zone_id,delivery_fee_cents,delivery_eta_min_minutes,delivery_eta_max_minutes,total_cents,delivery_address,delivery_postal_code,delivery_neighborhood,delivery_city FROM orders WHERE id=?');
 $stmt->execute([$result['order_id']]);
 $order=$stmt->fetch();
 assert_delivery((int)$order['delivery_zone_id']===$zoneId,'zona não persistida');
@@ -44,6 +45,26 @@ assert_delivery($order['delivery_address']==='Rua Teste, 10','logradouro não pe
 assert_delivery($order['delivery_postal_code']==='28300-000','CEP não persistido');
 assert_delivery($order['delivery_neighborhood']==='Centro','bairro não persistido');
 assert_delivery($order['delivery_city']==='Cidade Teste','cidade não persistida');
+
+// O checkout antigo permite "Alterar" endereço. O servidor deve recalcular zona, frete e ETA.
+$changed=$service->updateDeliveryAddress((string)$result['public_token'],['address'=>'Avenida Nova, 20','postal_code'=>'28400-000','neighborhood'=>'Centro 2','city'=>'Cidade Teste']);
+assert_delivery((int)$changed['delivery_fee_cents']===900,'alteração de endereço não recalculou frete');
+assert_delivery((int)$changed['total_cents']===2900,'alteração de endereço não recalculou total');
+assert_delivery((int)$changed['eta_min_minutes']===35&&(int)$changed['eta_max_minutes']===55,'alteração de endereço não recalculou ETA');
+$stmt->execute([$result['order_id']]);$order=$stmt->fetch();
+assert_delivery((int)$order['delivery_zone_id']===$zone2Id,'nova zona não persistida');
+assert_delivery($order['delivery_address']==='Avenida Nova, 20','novo endereço não persistido');
+assert_delivery($order['delivery_postal_code']==='28400-000','novo CEP não persistido');
+assert_delivery((int)$order['total_cents']===2900,'novo total não persistido');
+
+// Depois que existe tentativa ativa de pagamento, endereço/valor não pode mais mudar.
+$pay=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?, ?,"manual",?, ?,"BRL","pending")');
+$pay->execute([$tenantId,$result['order_id'],'delivery-address-lock-'.$result['order_id'],2900]);$paymentId=(int)$pdo->lastInsertId();
+$paymentLocked=false;
+try{$service->updateDeliveryAddress((string)$result['public_token'],['address'=>'Rua Volta, 30','postal_code'=>'28300-000','neighborhood'=>'Centro','city'=>'Cidade Teste']);}
+catch(RuntimeException $e){$paymentLocked=str_contains($e->getMessage(),'pagamento em andamento');}
+assert_delivery($paymentLocked,'endereço foi alterado durante pagamento ativo');
+$pdo->prepare('UPDATE payments SET status="failed" WHERE id=?')->execute([$paymentId]);
 
 $_SESSION['user_id']=$adminId;$_SESSION['tenant_id']=$tenantId;$_SESSION['role']='admin';$_SESSION['name']='Admin CI';
 (new DeliveryService())->assign($tenantId,(int)$result['order_id'],$driverId);
@@ -60,6 +81,7 @@ assert_delivery($lifecycle['status']==='completed','pedido não foi concluído')
 assert_delivery(!empty($lifecycle['delivery_started_at']),'horário de saída não foi salvo');
 assert_delivery(!empty($lifecycle['delivered_at']),'horário de entrega não foi salvo');
 $events=$pdo->prepare('SELECT event_type FROM delivery_events WHERE tenant_id=? AND order_id=? ORDER BY id');$events->execute([$tenantId,$result['order_id']]);$eventTypes=array_column($events->fetchAll(),'event_type');
+assert_delivery(in_array('address_updated',$eventTypes,true),'evento de alteração de endereço ausente');
 assert_delivery(in_array('assigned',$eventTypes,true),'evento de atribuição ausente');
 assert_delivery(in_array('out_for_delivery',$eventTypes,true),'evento de saída ausente');
 assert_delivery(in_array('delivered',$eventTypes,true),'evento de entrega ausente');
