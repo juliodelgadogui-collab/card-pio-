@@ -49,6 +49,8 @@ final class CompatiblePDO extends PDO
         $sql=preg_replace('/\s+FOR\s+UPDATE\b/i','',$sql)??$sql;
         $sql=preg_replace('/\s+LOCK\s+IN\s+SHARE\s+MODE\b/i','',$sql)??$sql;
         $sql=preg_replace('/\bINSERT\s+IGNORE\s+INTO\b/i','INSERT OR IGNORE INTO',$sql)??$sql;
+        // MySQL <=> é igualdade null-safe. SQLite usa IS com a mesma finalidade.
+        $sql=str_replace('<=>',' IS ',$sql);
 
         // MySQL: DATE_ADD(x, INTERVAL 15 MINUTE) / DATE_SUB(...)
         $sql=preg_replace_callback(
@@ -74,7 +76,7 @@ final class CompatiblePDO extends PDO
 
         // UPSERT do MySQL -> UPSERT do SQLite. O alvo pode ser inferido pelo índice UNIQUE.
         if(preg_match('/\s+ON\s+DUPLICATE\s+KEY\s+UPDATE\s+(.+)$/is',$sql,$match,PREG_OFFSET_CAPTURE)){
-            $full=$match[0][0];$offset=$match[0][1];$updates=$match[1][0];
+            $offset=$match[0][1];$updates=$match[1][0];
             $updates=preg_replace('/\bVALUES\s*\(\s*([A-Za-z0-9_]+)\s*\)/i','excluded.$1',$updates)??$updates;
             $sql=substr($sql,0,$offset).' ON CONFLICT DO UPDATE SET '.$updates;
         }
