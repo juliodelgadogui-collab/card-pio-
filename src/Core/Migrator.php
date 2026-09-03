@@ -38,9 +38,6 @@ final class Migrator
                 $sql=file_get_contents($file);
                 if($sql===false)throw new RuntimeException('Não foi possível ler a migração '.$name);
 
-                // MySQL executa COMMIT implícito em DDL. Não envolvemos ALTER/CREATE em
-                // beginTransaction(), pois isso faria o instalador tentar commit de uma
-                // transação já encerrada pelo servidor.
                 try{
                     $pdo->exec($sql);
                     $stmt=$pdo->prepare('INSERT INTO migrations (migration) VALUES (?)');
@@ -61,7 +58,9 @@ final class Migrator
         $dir=dirname(__DIR__,2).'/database/migrations';
         if(!is_dir($dir))return[];
         $files=glob($dir.'/*.sql')?:[];sort($files,SORT_NATURAL);$applied=[];
-        $lockPath=dirname(__DIR__,2).'/storage/sqlite-migrations.lock';
+        $storage=dirname(__DIR__,2).'/storage';
+        if(!is_dir($storage)&&!@mkdir($storage,0775,true)&&!is_dir($storage))throw new RuntimeException('Não foi possível criar a pasta storage para as migrations SQLite.');
+        $lockPath=$storage.'/sqlite-migrations.lock';
         $handle=@fopen($lockPath,'c+');
         if($handle===false||!flock($handle,LOCK_EX))throw new RuntimeException('Não foi possível bloquear as migrations do SQLite.');
         try{
