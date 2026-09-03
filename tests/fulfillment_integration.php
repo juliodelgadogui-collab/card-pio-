@@ -10,7 +10,6 @@ use EventMenu\Services\CounterOrderService;
 use EventMenu\Services\FulfillmentService;
 use EventMenu\Services\PaymentService;
 use EventMenu\Services\StockService;
-use PDO;
 
 function assert_fulfillment(bool $condition,string $message):void{if(!$condition){fwrite(STDERR,"Fulfillment integration failed: {$message}\n");exit(1);}}
 
@@ -71,7 +70,7 @@ $payment->create($order2Id,'manual','fulfillment-payment2:'.$tenantId.':'.$order
 $payment->confirmVerified(['tenant_id'=>$tenantId,'order_id'=>$order2Id,'provider'=>'manual','provider_payment_id'=>'FULFILL2-CI-'.$suffix,'amount_cents'=>2000,'currency'=>'BRL','account_reference'=>'manual','manual_method'=>'cash']);
 $summary2=$service->byToken((string)$order2['fulfillment_token']);$item2=(int)$summary2['items'][0]['id'];
 $service->fulfill($order2Id,$item2,1,'counter','Uma entregue','fulfillment-ci-second:'.$suffix.':0001');
-Database::transaction(function(PDO $db)use($tenantId,$order2Id):void{(new StockService())->reverseForOrder($db,$tenantId,$order2Id);});
+Database::transaction(function(\PDO $db)use($tenantId,$order2Id):void{(new StockService())->reverseForOrder($db,$tenantId,$order2Id);});
 $stock->execute([$productId]);assert_fulfillment((float)$stock->fetchColumn()===4.0,'reversão devolveu quantidade já entregue ao cliente');
 $reversal=$pdo->prepare('SELECT quantity FROM stock_movements WHERE tenant_id=? AND order_id=? AND type="reversal"');$reversal->execute([$tenantId,$order2Id]);assert_fulfillment((float)$reversal->fetchColumn()===1.0,'movimento de reversão não registrou somente saldo não entregue');
 
