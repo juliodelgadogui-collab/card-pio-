@@ -1,13 +1,17 @@
 {
   "name": "eventmenu/premium",
-  "description": "EventMenu Premium - eventos, cardápio, delivery e pagamentos multiempresa",
+  "description": "EventMenu Premium - SaaS multiempresa para eventos, cardapio digital, restaurante, delivery e pagamentos.",
   "type": "project",
+  "license": "proprietary",
   "require": {
-    "php": "^8.2",
+    "php": ">=8.2",
     "ext-curl": "*",
+    "ext-json": "*",
+    "ext-mbstring": "*",
     "ext-openssl": "*",
-    "stripe/stripe-php": "^18.0",
-    "mercadopago/dx-php": "^3.8",
+    "ext-pdo": "*",
+    "stripe/stripe-php": "^21.3",
+    "mercadopago/dx-php": "^3.16",
     "endroid/qr-code": "^6.0"
   },
   "autoload": {

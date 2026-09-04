@@ -1,0 +1,11 @@
+<?php
+
+declare(strict_types=1);
+
+use EventMenu\Core\Auth;
+use EventMenu\Core\Security;
+
+if(Auth::role()!=='super_admin'){http_response_code(403);exit('Acesso negado.');}$checks=[];$add=function(string$name,bool$ok,string$detail='')use(&$checks){$checks[]=compact('name','ok','detail');};$add('PHP 8.2+',version_compare(PHP_VERSION,'8.2.0','>='),PHP_VERSION);foreach(['pdo_mysql','curl','openssl','fileinfo','mbstring']as$ext)$add('Extensão '.$ext,extension_loaded($ext),extension_loaded($ext)?'OK':'Ausente');
+try{$add('Banco MySQL',$pdo->getAttribute(PDO::ATTR_DRIVER_NAME)==='mysql',$pdo->getAttribute(PDO::ATTR_SERVER_VERSION));$tables=['tenants','users','orders','payments','refunds','stock_movements','stock_reservations','business_units','notifications','product_option_groups','password_reset_tokens','legal_documents','backup_history'];foreach($tables as$t){$s=$pdo->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=?');$s->execute([$t]);$add('Tabela '.$t,(int)$s->fetchColumn()===1);}}catch(Throwable$e){$add('Banco de dados',false,$e->getMessage());}
+$storage=dirname(__DIR__,2).'/storage';$add('Storage gravável',is_dir($storage)&&is_writable($storage),$storage);$appKey=(string)env('APP_KEY','');$add('APP_KEY forte',strlen($appKey)>=32&&$appKey!=='change-me',strlen($appKey).' caracteres');$appUrl=(string)env('APP_URL','');$add('HTTPS configurado',str_starts_with($appUrl,'https://'),$appUrl?:'não definido');$ok=count(array_filter($checks,fn($c)=>$c['ok']));em_header('Diagnóstico','diagnostic');?>
+<section class="card"><div class="section-head"><div><h2>Saúde da instalação</h2><span class="muted"><?= $ok ?>/<?= count($checks) ?> verificações aprovadas</span></div><span class="badge <?= $ok===count($checks)?'active':'' ?>"><?= $ok===count($checks)?'Tudo certo':'Revisão necessária' ?></span></div><div class="table-wrap"><table class="table"><thead><tr><th>Verificação</th><th>Status</th><th>Detalhe</th></tr></thead><tbody><?php foreach($checks as$c):?><tr><td><?= Security::e($c['name']) ?></td><td><span class="badge"><?= $c['ok']?'OK':'FALHA' ?></span></td><td><?= Security::e($c['detail']) ?></td></tr><?php endforeach;?></tbody></table></div></section><?php em_footer();

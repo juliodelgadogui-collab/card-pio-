@@ -1,0 +1,35 @@
+ALTER TABLE nfc_devices
+  ADD COLUMN identifier_version ENUM('sha256','hmac-sha256') NOT NULL DEFAULT 'sha256' AFTER device_identifier_hash,
+  ADD COLUMN pairing_window_started_at DATETIME NULL AFTER pairing_attempts,
+  ADD COLUMN pairing_locked_until DATETIME NULL AFTER pairing_window_started_at,
+  ADD COLUMN last_seen_at DATETIME NULL AFTER paired_at,
+  ADD COLUMN last_payment_at DATETIME NULL AFTER last_seen_at,
+  ADD COLUMN revocation_reason VARCHAR(190) NULL AFTER revoked_at,
+  ADD COLUMN revoked_by BIGINT UNSIGNED NULL AFTER revocation_reason,
+  ADD CONSTRAINT fk_nfc_revoked_by FOREIGN KEY (revoked_by) REFERENCES users(id) ON DELETE SET NULL,
+  ADD INDEX idx_nfc_active_user (tenant_id,status,user_id),
+  ADD INDEX idx_nfc_pair_lock (tenant_id,pairing_locked_until);
+
+CREATE TABLE nfc_payment_attempts (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  device_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  transaction_code_hash CHAR(64) NOT NULL,
+  status ENUM('pending','verified','rejected','error') NOT NULL DEFAULT 'pending',
+  amount_cents INT UNSIGNED NULL,
+  currency CHAR(3) NULL,
+  provider_payment_id VARCHAR(190) NULL,
+  failure_reason VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  verified_at DATETIME NULL,
+  CONSTRAINT fk_nfc_attempt_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_nfc_attempt_device FOREIGN KEY (device_id) REFERENCES nfc_devices(id) ON DELETE CASCADE,
+  CONSTRAINT fk_nfc_attempt_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  CONSTRAINT fk_nfc_attempt_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_nfc_transaction (tenant_id,transaction_code_hash),
+  INDEX idx_nfc_attempt_order (tenant_id,order_id,status),
+  INDEX idx_nfc_attempt_pending (tenant_id,status,updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

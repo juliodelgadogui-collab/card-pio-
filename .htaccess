@@ -1,0 +1,26 @@
+DirectoryIndex index.php
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Nunca exponha código, banco, dependências, testes ou runtime.
+    RewriteRule ^(?:app|bin|database|src|storage|tests|vendor)(?:/|$) - [F,L,NC]
+    RewriteRule ^(?:\.git|\.github)(?:/|$) - [F,L,NC]
+    RewriteRule ^(?:\.env(?:\..*)?|composer\.(?:json|lock)|README\.md|INSTALACAO\.txt)$ - [F,L,NC]
+</IfModule>
+
+<FilesMatch "^(?:\.env(?:\..*)?|composer\.(?:json|lock)|README\.md|INSTALACAO\.txt)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule mod_access_compat.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set X-Frame-Options "SAMEORIGIN"
+</IfModule>
