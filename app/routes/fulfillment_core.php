@@ -30,7 +30,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
             $token=$service->extractToken((string)($_POST['token']??''));
             $summary=$service->byToken($token);
             if((int)$summary['tenant_id']!==$tenantId)throw new RuntimeException('Venda pertence a outra empresa.');$assertUnit($summary);
-            $service->fulfill(
+            $updated=$service->fulfill(
                 (int)$summary['id'],
                 (int)($_POST['order_item_id']??0),
                 (string)($_POST['quantity']??'1'),
@@ -38,7 +38,11 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
                 (string)($_POST['notes']??''),
                 (string)($_POST['idempotency_key']??'')
             );
-            em_flash('ok','Retirada registrada. O estoque não foi baixado novamente.');
+            if((string)($_POST['after']??'')==='print'){
+                header('Location: '.em_url('/retirada.php?t='.rawurlencode($token).'&auto=1'),true,303);exit;
+            }
+            $remaining=(float)($updated['remaining_items']??0);
+            em_flash('ok',$remaining>0.000001?'Retirada registrada. O saldo restante foi atualizado.':'Retirada registrada. Todos os itens desta venda foram entregues.');
             em_go('fulfillment',['token'=>$token]);
         }
     }catch(Throwable $e){em_flash('error',$e->getMessage());em_go('fulfillment');}
@@ -79,8 +83,8 @@ em_header('Retirada de produtos','fulfillment');
 
 <?php if($summary):?>
 <section class="card" style="margin-bottom:18px">
- <div class="section-head"><div><h2>Venda #<?= (int)$summary['id'] ?></h2><p class="muted"><?= Security::e($summary['customer_name']??'Consumidor') ?> · <?= Security::e((string)$summary['channel']) ?></p></div><div class="actions"><span class="badge"><?= Security::e((string)$summary['payment_status']) ?></span><span class="badge"><?= Security::e((string)$summary['fulfillment_status']) ?></span><a class="button secondary" target="_blank" href="/retirada.php?t=<?= rawurlencode($token) ?>">Imprimir comprovante</a></div></div>
- <?php if($summary['payment_status']!=='paid'):?><div class="alert error">Esta venda ainda não está totalmente paga. Nenhuma retirada será liberada.</div><?php elseif($summary['fulfillment_status']==='fulfilled'):?><div class="alert ok">Todos os itens desta venda já foram entregues.</div><?php endif;?>
+ <div class="section-head"><div><h2>Venda #<?= (int)$summary['id'] ?></h2><p class="muted"><?= Security::e($summary['customer_name']??'Consumidor') ?> · <?= Security::e((string)$summary['channel']) ?></p></div><div class="actions"><span class="badge"><?= Security::e((string)$summary['payment_status']) ?></span><span class="badge"><?= Security::e((string)$summary['fulfillment_status']) ?></span><a class="button secondary" target="_blank" rel="noopener" href="<?= Security::e(em_url('/retirada.php?t='.rawurlencode($token))) ?>">Imprimir comprovante</a></div></div>
+ <?php if($summary['payment_status']!=='paid'):?><div class="alert error">Esta venda ainda não está totalmente paga. Nenhuma retirada será liberada.</div><?php elseif($summary['fulfillment_status']==='fulfilled'):?><div class="alert ok">Todos os itens desta venda já foram entregues.</div><?php else:?><div class="alert"><strong>Retirada parcial ativa.</strong> Entregue somente a quantidade informada. O saldo ficará disponível para a próxima leitura deste mesmo QR.</div><?php endif;?>
  <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr))">
  <?php foreach($summary['items'] as$item):$remaining=(float)$item['remaining_quantity'];?>
   <article style="padding:16px;border:1px solid var(--line);border-radius:18px">
@@ -91,7 +95,7 @@ em_header('Retirada de produtos','fulfillment');
     <input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="fulfill"><input type="hidden" name="token" value="<?= Security::e($token) ?>"><input type="hidden" name="order_item_id" value="<?= (int)$item['id'] ?>"><input type="hidden" name="idempotency_key" value="fulfill:<?= (int)$tenantId ?>:<?= (int)$summary['id'] ?>:<?= (int)$item['id'] ?>:<?= bin2hex(random_bytes(10)) ?>">
     <label>Entregar agora<input name="quantity" type="number" min="0.001" step="0.001" max="<?= Security::e((string)$remaining) ?>" value="<?= $remaining>=1?'1':Security::e((string)$remaining) ?>" required></label>
     <label>Observação<input name="notes" maxlength="500" placeholder="Opcional"></label>
-    <button class="primary" style="width:100%">Confirmar retirada</button>
+    <div class="actions" style="margin-top:10px"><button class="primary" type="submit">Confirmar retirada</button><button class="secondary" type="submit" name="after" value="print" formtarget="_blank">Confirmar e imprimir</button></div>
    </form>
    <?php else:?><span class="badge"><?= $remaining<=0.000001?'Entregue':'Bloqueado' ?></span><?php endif;?>
   </article>
@@ -102,5 +106,5 @@ em_header('Retirada de produtos','fulfillment');
 <section class="card" style="margin-bottom:18px"><div class="section-head"><h2>Histórico de retiradas</h2><span class="muted"><?= count($history) ?> movimentos</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Item</th><th>Quantidade</th><th>Operador</th><th>Origem</th><th>Data UTC</th><th>Observação</th></tr></thead><tbody><?php foreach($history as$h):?><tr><td><?= Security::e($h['name_snapshot']) ?></td><td><strong><?= Security::e(fulfill_qty($h['quantity'])) ?></strong></td><td><?= Security::e($h['user_name']??'Sistema') ?></td><td><?= Security::e($h['source']) ?></td><td><?= Security::e($h['created_at']) ?></td><td><?= Security::e($h['notes']??'—') ?></td></tr><?php endforeach;?><?php if(!$history):?><tr><td colspan="6" class="muted">Nenhuma retirada registrada.</td></tr><?php endif;?></tbody></table></div></section>
 <?php endif;?>
 
-<section class="card"><div class="section-head"><h2>Vendas com saldo para retirar</h2><span class="muted"><?= count($recent) ?> recentes</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Venda</th><th>Cliente</th><th>Status</th><th>Saldo de unidades</th><th>Data UTC</th><th></th></tr></thead><tbody><?php foreach($recent as$r):?><tr><td>#<?= (int)$r['id'] ?></td><td><?= Security::e($r['customer_name']??'Consumidor') ?></td><td><span class="badge"><?= Security::e($r['fulfillment_status']) ?></span></td><td><strong><?= Security::e(fulfill_qty($r['remaining_qty'])) ?></strong></td><td><?= Security::e($r['created_at']) ?></td><td><a class="button secondary" href="/?route=fulfillment&order=<?= (int)$r['id'] ?>">Abrir</a></td></tr><?php endforeach;?><?php if(!$recent):?><tr><td colspan="6" class="muted">Nenhuma venda paga com saldo pendente nesta unidade.</td></tr><?php endif;?></tbody></table></div></section>
+<section class="card"><div class="section-head"><h2>Vendas com saldo para retirar</h2><span class="muted"><?= count($recent) ?> recentes</span></div><div class="table-wrap"><table class="table"><thead><tr><th>Venda</th><th>Cliente</th><th>Status</th><th>Saldo de unidades</th><th>Data UTC</th><th></th></tr></thead><tbody><?php foreach($recent as$r):?><tr><td>#<?= (int)$r['id'] ?></td><td><?= Security::e($r['customer_name']??'Consumidor') ?></td><td><span class="badge"><?= Security::e($r['fulfillment_status']) ?></span></td><td><strong><?= Security::e(fulfill_qty($r['remaining_qty'])) ?></strong></td><td><?= Security::e($r['created_at']) ?></td><td><a class="button secondary" href="<?= Security::e(em_url('/?route=fulfillment&order='.(int)$r['id'])) ?>">Abrir</a></td></tr><?php endforeach;?><?php if(!$recent):?><tr><td colspan="6" class="muted">Nenhuma venda paga com saldo pendente nesta unidade.</td></tr><?php endif;?></tbody></table></div></section>
 <?php em_footer();
