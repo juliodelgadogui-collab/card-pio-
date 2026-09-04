@@ -11,6 +11,7 @@ $checks=[
     'Editor do cardápio'=>['app/routes/menu_editor.php',['Editar Cardápio Digital','Capa / banner','Logo','Prévia real','Categorias']],
     'Pedidos legado'=>['app/routes/orders_legacy.php',['Todos','Novos','Em Preparo','Saiu para Entrega','Concluídos']],
     'PDV legado'=>['app/routes/pos_legacy.php',['Nova venda','Pedido atual','Total estimado','Retirada parcial']],
+    'PDV retirada no ato'=>['app/routes/pos.php',['Entregar agora','pos_v2','FulfillmentService','retirada.php']],
     'Retirada parcial legado'=>['app/routes/fulfillment_core.php',['Comprado:','Retirado:','Saldo:','Confirmar retirada','Confirmar e imprimir','Vendas com saldo para retirar']],
     'Comprovante térmico'=>['public/retirada.php',['Usar ','Comprou','Retirou','Saldo','Forma de pagamento','SALDO PENDENTE','RETIRADA CONCLUÍDA','58','80']],
     'Eventos legado'=>['app/routes/events_legacy.php',['Todos','Ativos','Encerrados','Rascunhos','Novo Evento','Adicionar Ingresso']],
