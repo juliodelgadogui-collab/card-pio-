@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.GoState
 
 @Composable
@@ -41,12 +42,12 @@ fun PosScreen(
     onPix: (Int,String) -> Unit,
     onNfc: (Int) -> Unit,
     onRefreshPayment: () -> Unit,
-    onNewSale: () -> Unit,
+    onFinishFlow: () -> Unit,
     onClearTable: () -> Unit,
 ) {
     val order=state.posOrder
     if(order!=null){
-        PosPaymentScreen(state,onCash,onPix,onNfc,onRefreshPayment,onNewSale)
+        PosPaymentScreen(state,onCash,onPix,onNfc,onRefreshPayment,onFinishFlow)
         return
     }
 
@@ -148,7 +149,7 @@ private fun PosPaymentScreen(
     onPix: (Int,String) -> Unit,
     onNfc: (Int) -> Unit,
     onRefresh: () -> Unit,
-    onNewSale: () -> Unit,
+    onFinishFlow: () -> Unit,
 ){
     val order=state.posOrder?:return
     val balance=state.paymentBalance
@@ -160,6 +161,7 @@ private fun PosPaymentScreen(
     LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         item{
             Text("Pagamento · Pedido #${order.id}",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Black)
+            if(state.posReturnScreen==AppScreen.TABLE_ACCOUNT)Text("Recebimento vinculado à comanda da mesa.")
             Text("Total: ${posMoney(balance?.totalCents?:order.totalCents)}")
             Text("Pago: ${posMoney(balance?.paidCents?:0)}")
             Text("Restante: ${posMoney(remaining)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
@@ -196,7 +198,9 @@ private fun PosPaymentScreen(
                     Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
                         Text("✅ PAGAMENTO CONCLUÍDO",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
                         Text("O servidor confirmou que a soma das parcelas atingiu exatamente o total do pedido.")
-                        Button(onClick=onNewSale,modifier=Modifier.fillMaxWidth()){Text("NOVO PEDIDO")}
+                        Button(onClick=onFinishFlow,modifier=Modifier.fillMaxWidth()){
+                            Text(if(state.posReturnScreen==AppScreen.TABLE_ACCOUNT)"VOLTAR À CONTA" else "NOVO PEDIDO")
+                        }
                     }
                 }
             }
