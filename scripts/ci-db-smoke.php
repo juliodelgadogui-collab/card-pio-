@@ -7,10 +7,6 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 use EventMenu\Core\Database;
 use EventMenu\Core\Migrator;
 use EventMenu\Services\GatewayService;
-use PDO;
-use ReflectionClass;
-use RuntimeException;
-use Throwable;
 
 function fail_ci(string $message): never
 {
@@ -44,7 +40,7 @@ try {
     foreach ($requiredTables as $table) {
         try {
             $pdo->query('SELECT 1 FROM ' . $table . ' LIMIT 1');
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             fail_ci("Tabela ausente ou inválida: {$table} - {$e->getMessage()}");
         }
     }
@@ -72,11 +68,11 @@ try {
     $orderId = (int)$pdo->lastInsertId();
     $pdo->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents) VALUES (?, ?, "Produto CI", 1000, 1, 1000)')->execute([$orderId, $productId]);
 
-    Database::transaction(function (PDO $tx) use ($tenantId, $orderId): void {
+    Database::transaction(function (\PDO $tx) use ($tenantId, $orderId): void {
         $sql = Database::portableSql($tx, 'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE');
         $stmt = $tx->prepare($sql);
         $stmt->execute([$orderId, $tenantId]);
-        if (!$stmt->fetch()) throw new RuntimeException('Lock/read do pedido falhou.');
+        if (!$stmt->fetch()) throw new \RuntimeException('Lock/read do pedido falhou.');
     });
 
     $portableIgnore = Database::portableSql($pdo, 'INSERT IGNORE INTO migrations (migration) VALUES (?)');
@@ -92,24 +88,24 @@ try {
 
     $rollbackSlug = 'rollback-' . bin2hex(random_bytes(4));
     try {
-        Database::transaction(function (PDO $tx) use ($rollbackSlug): void {
+        Database::transaction(function (\PDO $tx) use ($rollbackSlug): void {
             $tx->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,?,"premium","active")')->execute(['Rollback', $rollbackSlug]);
-            throw new RuntimeException('rollback-test');
+            throw new \RuntimeException('rollback-test');
         });
         fail_ci('Transação de rollback não lançou exceção.');
-    } catch (RuntimeException $e) {
+    } catch (\RuntimeException $e) {
         if ($e->getMessage() !== 'rollback-test') throw $e;
     }
     $s = $pdo->prepare('SELECT COUNT(*) FROM tenants WHERE slug=?');
     $s->execute([$rollbackSlug]);
     assert_ci((int)$s->fetchColumn() === 0, 'Rollback não reverteu a gravação.');
 
-    $reflection = new ReflectionClass(GatewayService::class);
+    $reflection = new \ReflectionClass(GatewayService::class);
     $method = $reflection->getMethod('header');
     $headerValue = $method->invoke(new GatewayService(), ['Stripe-Signature' => 'ci-signature'], 'stripe-signature');
     assert_ci($headerValue === 'ci-signature', 'Normalização de headers de webhook regrediu.');
 
     echo "CI DB smoke OK ({$driver})\n";
-} catch (Throwable $e) {
+} catch (\Throwable $e) {
     fail_ci($e->getMessage() . "\n" . $e->getTraceAsString());
 }
