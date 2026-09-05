@@ -1,0 +1,26 @@
+CREATE TABLE IF NOT EXISTS refunds (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  payment_id INTEGER NOT NULL,
+  order_id INTEGER NOT NULL,
+  requested_by INTEGER NULL,
+  provider TEXT NOT NULL CHECK(provider IN ('stripe','pagbank','mercadopago','manual')),
+  provider_refund_id TEXT NULL,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'BRL',
+  status TEXT NOT NULL DEFAULT 'requested' CHECK(status IN ('requested','provider_succeeded','completed','failed')),
+  reason TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  provider_payload TEXT NULL,
+  error_message TEXT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  provider_succeeded_at TEXT NULL,
+  completed_at TEXT NULL,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE RESTRICT,
+  FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+  FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE(tenant_id,idempotency_key),
+  UNIQUE(tenant_id,payment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_refunds_order ON refunds(tenant_id,order_id,status);
