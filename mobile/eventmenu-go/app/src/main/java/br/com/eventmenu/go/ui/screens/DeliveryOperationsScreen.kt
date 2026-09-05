@@ -48,6 +48,7 @@ fun DeliveryOperationsScreen(
     onPix: (Int, String) -> Unit,
     onNfc: (Int) -> Unit,
     onCash: (Int, Int) -> Unit,
+    onReceipt: (Int) -> Unit,
     onPollPix: () -> Unit,
     onDismissPix: () -> Unit,
 ) {
@@ -79,6 +80,7 @@ fun DeliveryOperationsScreen(
                             Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO NFC") }
                             OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("DINHEIRO") }
                         } else {
+                            OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ENVIAR COMPROVANTE") }
                             Button(onClick = { onStatus(order.id, "completed") }, modifier = Modifier.fillMaxWidth()) { Text("CONCLUIR ENTREGA") }
                         }
                     }
