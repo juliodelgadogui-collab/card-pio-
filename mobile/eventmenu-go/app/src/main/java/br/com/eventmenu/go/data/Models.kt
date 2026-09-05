@@ -31,6 +31,16 @@ data class QrResult(
     val raw: String,
 )
 
+data class TapOnRequest(
+    val intentToken: String,
+    val orderId: Int,
+    val amountCents: Int,
+    val appKey: String,
+    val appName: String,
+    val appVersion: String,
+    val enableTaxPassThrough: Boolean,
+)
+
 enum class AppMode(val label: String, val emoji: String) {
     OPERATION("Operação", "🍽"),
     DELIVERY("Delivery", "🛵"),
