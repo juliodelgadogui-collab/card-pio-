@@ -14,7 +14,7 @@ final class EventOperationsService
     {
         $tenantId=Auth::tenantId();
         if(!$tenantId)throw new RuntimeException('Empresa inválida.');
-        if(!Auth::can('tickets.manage')&&!Auth::can('guests.manage')&&!Auth::can('events.manage')&&!Auth::can('events.promoter'))throw new RuntimeException('Acesso negado ao modo Evento.');
+        if(!Auth::can('tickets.manage')&&!Auth::can('guests.manage')&&!Auth::can('events.manage')&&!Auth::can('events.bar')&&!Auth::can('events.promoter'))throw new RuntimeException('Acesso negado ao modo Evento.');
         $pdo=Database::connection();
         $sql='SELECT e.id,e.name,e.slug,e.venue,e.address,e.starts_at,e.ends_at,e.status,
             (SELECT COUNT(*) FROM tickets t WHERE t.tenant_id=e.tenant_id AND t.event_id=e.id AND t.status IN ("paid","checked_in")) tickets_paid,
@@ -22,9 +22,12 @@ final class EventOperationsService
             (SELECT COUNT(*) FROM tickets t WHERE t.tenant_id=e.tenant_id AND t.event_id=e.id AND t.status="reserved") tickets_reserved,
             (SELECT COUNT(*) FROM event_guests g WHERE g.tenant_id=e.tenant_id AND g.event_id=e.id AND g.status="invited") guests_pending,
             (SELECT COUNT(*) FROM event_guests g WHERE g.tenant_id=e.tenant_id AND g.event_id=e.id AND g.status="checked_in") guests_checked_in,
-            (SELECT COALESCE(SUM(o.total_cents),0) FROM orders o WHERE o.tenant_id=e.tenant_id AND o.channel="event" AND o.payment_status="paid" AND o.id IN (SELECT DISTINCT t.order_id FROM tickets t WHERE t.tenant_id=e.tenant_id AND t.event_id=e.id AND t.order_id IS NOT NULL)) revenue_cents
+            (SELECT COALESCE(SUM(o.total_cents),0) FROM orders o WHERE o.tenant_id=e.tenant_id AND o.channel="event" AND o.payment_status="paid" AND o.id IN (SELECT DISTINCT t.order_id FROM tickets t WHERE t.tenant_id=e.tenant_id AND t.event_id=e.id AND t.order_id IS NOT NULL)) ticket_revenue_cents,
+            (SELECT COALESCE(SUM(o.total_cents),0) FROM orders o WHERE o.tenant_id=e.tenant_id AND o.event_id=e.id AND o.channel="bar" AND o.payment_status="paid") bar_revenue_cents
             FROM events e WHERE e.tenant_id=? AND e.status IN ("published","draft","closed") ORDER BY CASE WHEN e.status="published" THEN 0 WHEN e.status="draft" THEN 1 ELSE 2 END,e.starts_at DESC LIMIT 100';
-        $s=$pdo->prepare($sql);$s->execute([$tenantId]);return $s->fetchAll();
+        $s=$pdo->prepare($sql);$s->execute([$tenantId]);$rows=$s->fetchAll();
+        foreach($rows as &$row){$row['revenue_cents']=(int)$row['ticket_revenue_cents']+(int)$row['bar_revenue_cents'];}unset($row);
+        return $rows;
     }
 
     public function recentEntries(int $eventId): array
