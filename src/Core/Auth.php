@@ -10,11 +10,14 @@ final class Auth
 {
     public static function attempt(string $email, string $password): bool
     {
+        $email=mb_strtolower(trim($email));$throttle=new \EventMenu\Services\LoginThrottleService();$key=$throttle->key($email);
+        try{$throttle->assertAllowed($key);}catch(RuntimeException){return false;}
         $pdo = Database::connection();
         $stmt = $pdo->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.email=? AND u.status="active" LIMIT 1');
-        $stmt->execute([mb_strtolower(trim($email))]);
+        $stmt->execute([$email]);
         $user = $stmt->fetch();
-        if (!$user || ($user['tenant_id'] !== null && $user['tenant_status'] !== 'active') || !password_verify($password, $user['password_hash'])) return false;
+        if (!$user || ($user['tenant_id'] !== null && $user['tenant_status'] !== 'active') || !password_verify($password, $user['password_hash'])) {$throttle->failed($key);return false;}
+        $throttle->succeeded($key);
         session_regenerate_id(true);
         unset($_SESSION['acting_tenant_id']);
         self::setSession($user);
