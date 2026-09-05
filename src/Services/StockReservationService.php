@@ -41,22 +41,17 @@ final class StockReservationService
         }
     }
 
-    /** Mantém a reserva enquanto há uma cobrança externa em andamento. */
     public function holdForPayment(int $tenantId,int $orderId):void
     {
         Database::connection()->prepare('UPDATE stock_reservations SET expires_at=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);
     }
 
-    /** Reabre uma janela curta para nova tentativa quando a criação da cobrança falha. */
     public function rearmAfterPaymentFailure(int $tenantId,int $orderId,int $minutes=30):void
     {
         $expires=(new \DateTimeImmutable('+'.max(5,$minutes).' minutes'))->format('Y-m-d H:i:s');
         Database::connection()->prepare('UPDATE stock_reservations SET expires_at=? WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$expires,$tenantId,$orderId]);
     }
 
-    /**
-     * Consome reservas no pagamento. Para pedidos antigos sem reserva, mantém fallback seguro.
-     */
     public function consumeForPayment(PDO $pdo,int $tenantId,int $orderId,int $paymentId):void
     {
         $items=$pdo->prepare('SELECT oi.product_id,oi.quantity,p.track_stock,p.name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=?');
@@ -72,7 +67,6 @@ final class StockReservationService
                 if($reservation['status']==='reserved')$pdo->prepare('UPDATE stock_reservations SET status="consumed",expires_at=NULL WHERE id=?')->execute([$reservation['id']]);
                 $movementQty=(float)$reservation['quantity'];
             }else{
-                // Compatibilidade com pedidos criados antes da migration 011 ou reserva já liberada.
                 $update=$pdo->prepare('UPDATE products SET stock_qty=stock_qty-? WHERE id=? AND tenant_id=? AND stock_qty>=?');
                 $update->execute([$qty,$productId,$tenantId,$qty]);
                 if($update->rowCount()!==1)throw new RuntimeException('Estoque insuficiente para confirmar o pagamento de '.$item['name'].'.');
@@ -82,7 +76,6 @@ final class StockReservationService
         }
     }
 
-    /** Libera uma reserva de pedido ainda não pago e devolve o saldo disponível. */
     public function release(PDO $pdo,int $tenantId,int $orderId):int
     {
         $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM stock_reservations WHERE tenant_id=? AND order_id=? AND status="reserved" FOR UPDATE'));
@@ -95,15 +88,18 @@ final class StockReservationService
         return $released;
     }
 
-    /** Libera apenas reservas expiradas de pedidos que não estão com pagamento ativo. */
+    /**
+     * Expira somente pedidos públicos ainda não aceitos pela operação.
+     * Ao mudar de pending/draft para confirmed a reserva passa a ser mantida até pagamento/cancelamento.
+     */
     public function releaseExpired():int
     {
         return Database::transaction(function(PDO $pdo):int{
-            $sql='SELECT sr.tenant_id,sr.order_id FROM stock_reservations sr JOIN orders o ON o.id=sr.order_id WHERE sr.status="reserved" AND sr.expires_at IS NOT NULL AND sr.expires_at<CURRENT_TIMESTAMP AND o.payment_status IN ("unpaid","failed") GROUP BY sr.tenant_id,sr.order_id';
+            $sql='SELECT sr.tenant_id,sr.order_id FROM stock_reservations sr JOIN orders o ON o.id=sr.order_id WHERE sr.status="reserved" AND sr.expires_at IS NOT NULL AND sr.expires_at<CURRENT_TIMESTAMP AND o.payment_status IN ("unpaid","failed") AND o.status IN ("draft","pending") GROUP BY sr.tenant_id,sr.order_id';
             $s=$pdo->query(Database::portableSql($pdo,$sql));$groups=$s->fetchAll();$total=0;
             foreach($groups as $g){
                 $tenantId=(int)$g['tenant_id'];$orderId=(int)$g['order_id'];$total+=$this->release($pdo,$tenantId,$orderId);
-                $pdo->prepare('UPDATE orders SET status="cancelled",payment_status=CASE WHEN payment_status="unpaid" THEN "failed" ELSE payment_status END WHERE id=? AND tenant_id=? AND payment_status IN ("unpaid","failed") AND channel IN ("delivery","pickup","counter")')->execute([$orderId,$tenantId]);
+                $pdo->prepare('UPDATE orders SET status="cancelled",payment_status=CASE WHEN payment_status="unpaid" THEN "failed" ELSE payment_status END WHERE id=? AND tenant_id=? AND payment_status IN ("unpaid","failed") AND status IN ("draft","pending")')->execute([$orderId,$tenantId]);
             }
             return $total;
         });
