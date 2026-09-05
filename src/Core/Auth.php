@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace EventMenu\Core;
 
+use RuntimeException;
+
 final class Auth
 {
     public static function attempt(string $email, string $password): bool
@@ -14,6 +16,7 @@ final class Auth
         $user = $stmt->fetch();
         if (!$user || ($user['tenant_id'] !== null && $user['tenant_status'] !== 'active') || !password_verify($password, $user['password_hash'])) return false;
         session_regenerate_id(true);
+        unset($_SESSION['acting_tenant_id']);
         self::setSession($user);
         $pdo->prepare('UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$user['id']]);
         self::audit('auth.login','user',(string)$user['id']);
@@ -26,6 +29,7 @@ final class Auth
         $_SESSION['tenant_id']=$user['tenant_id']!==null?(int)$user['tenant_id']:null;
         $_SESSION['role']=$user['role'];
         $_SESSION['name']=$user['name'];
+        if(($user['role']??'')!=='super_admin') unset($_SESSION['acting_tenant_id']);
     }
 
     public static function enforceCurrentUser(): void
@@ -35,6 +39,14 @@ final class Auth
         $stmt->execute([self::id()]);$user=$stmt->fetch();
         if(!$user||$user['status']!=='active'||($user['tenant_id']!==null&&$user['tenant_status']!=='active')){self::logout();\app_redirect('?route=login&blocked=1');}
         self::setSession($user);
+
+        if(self::isSuperAdmin() && isset($_SESSION['acting_tenant_id'])){
+            $tenantId=(int)$_SESSION['acting_tenant_id'];
+            $t=Database::connection()->prepare('SELECT status FROM tenants WHERE id=? LIMIT 1');
+            $t->execute([$tenantId]);
+            $status=$t->fetchColumn();
+            if($status!=='active') unset($_SESSION['acting_tenant_id']);
+        }
     }
 
     public static function logout(): void
@@ -47,9 +59,38 @@ final class Auth
 
     public static function check(): bool { return !empty($_SESSION['user_id']); }
     public static function id(): ?int { return self::check()?(int)$_SESSION['user_id']:null; }
-    public static function tenantId(): ?int { return isset($_SESSION['tenant_id'])?(int)$_SESSION['tenant_id']:null; }
     public static function role(): ?string { return $_SESSION['role']??null; }
     public static function name(): string { return (string)($_SESSION['name']??''); }
+    public static function isSuperAdmin(): bool { return self::role()==='super_admin'; }
+
+    public static function tenantId(): ?int
+    {
+        if(self::isSuperAdmin()) return isset($_SESSION['acting_tenant_id'])?(int)$_SESSION['acting_tenant_id']:null;
+        return isset($_SESSION['tenant_id'])?(int)$_SESSION['tenant_id']:null;
+    }
+
+    public static function actingTenantId(): ?int
+    {
+        return self::isSuperAdmin()&&isset($_SESSION['acting_tenant_id'])?(int)$_SESSION['acting_tenant_id']:null;
+    }
+
+    public static function actAsTenant(int $tenantId): void
+    {
+        if(!self::isSuperAdmin()) throw new RuntimeException('Apenas o Super ADM pode selecionar uma empresa.');
+        $stmt=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? AND status="active" LIMIT 1');
+        $stmt->execute([$tenantId]);
+        if(!$stmt->fetchColumn()) throw new RuntimeException('Empresa indisponível para acesso.');
+        $_SESSION['acting_tenant_id']=$tenantId;
+        self::audit('platform.tenant_selected','tenant',(string)$tenantId);
+    }
+
+    public static function clearTenantContext(): void
+    {
+        if(!self::isSuperAdmin()) return;
+        $previous=self::actingTenantId();
+        unset($_SESSION['acting_tenant_id']);
+        if($previous) self::audit('platform.tenant_left','tenant',(string)$previous);
+    }
 
     public static function can(string $permission): bool
     {
