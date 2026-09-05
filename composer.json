@@ -9,6 +9,7 @@
     "ext-mbstring": "*",
     "ext-openssl": "*",
     "ext-pdo": "*",
+    "ext-simplexml": "*",
     "stripe/stripe-php": "^18.0",
     "mercadopago/dx-php": "^3.8",
     "endroid/qr-code": "^6.0"
