@@ -77,7 +77,7 @@ function app_rewrite_root_urls(string $html): string
     $base = app_base_path();
     if ($base === '') return $html;
     return preg_replace_callback(
-        '~\b(href|src|action)=("|\')/(?!/)~i',
+        "~\\b(href|src|action)=([\"'])/(?!/)~i",
         static fn(array $m): string => $m[1] . '=' . $m[2] . $base . '/',
         $html
     ) ?? $html;
