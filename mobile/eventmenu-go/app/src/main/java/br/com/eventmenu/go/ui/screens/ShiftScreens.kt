@@ -4,13 +4,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -30,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.GoState
+import br.com.eventmenu.go.data.ShiftSummary
 
 @Composable
 fun ShiftStartScreen(state: GoState, onStart: () -> Unit, onChangeMode: (() -> Unit)? = null, onLogout: () -> Unit) {
@@ -49,6 +51,9 @@ fun ShiftStartScreen(state: GoState, onStart: () -> Unit, onChangeMode: (() -> U
 @Composable
 fun EmployeeProfileScreen(
     state: GoState,
+    shiftSummary: ShiftSummary?,
+    summaryLoading: Boolean,
+    onRefreshSummary: () -> Unit,
     onSavePin: (String) -> Unit,
     onBiometric: (Boolean) -> Unit,
     onCloseShift: () -> Unit,
@@ -59,60 +64,133 @@ fun EmployeeProfileScreen(
 ) {
     val user = state.session?.user ?: return
     var pin by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(user.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-        Text("${state.mode?.label ?: user.role} · ${user.email}")
-        state.workShift?.let { shift ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Turno aberto", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Text("Iniciado: ${shift.startedAt}")
-                    Text("Modo: ${shift.mode}")
-                }
-            }
 
-            if (shift.mode == "delivery") {
-                val cash=state.deliveryCash
+    LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item {
+            Text(user.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text("${state.mode?.label ?: user.role} · ${user.email}")
+        }
+
+        state.workShift?.let { shift ->
+            item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text("Fechamento do entregador", style=MaterialTheme.typography.titleMedium, fontWeight=FontWeight.Bold)
-                        Text("Dinheiro recebido: ${moneyDelivery(cash?.cashCollectedCents ?: 0)}")
-                        Text("Já entregue ao caixa: ${moneyDelivery(cash?.confirmedHandoffCents ?: 0)}")
-                        Text("Dinheiro a entregar: ${moneyDelivery(cash?.outstandingCents ?: 0)}", style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.Black)
-                        if ((cash?.outstandingCents ?: 0) > 0) {
-                            Button(onClick=onCreateHandoff,modifier=Modifier.fillMaxWidth()) { Text("GERAR QR PARA O CAIXA") }
-                        }
-                        OutlinedButton(onClick=onRefreshDeliveryCash,modifier=Modifier.fillMaxWidth()) { Text("ATUALIZAR VALORES") }
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Turno aberto", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Text("Iniciado: ${shift.startedAt}")
+                        Text("Modo: ${modeLabel(shift.mode)}")
+                        if (summaryLoading) CircularProgressIndicator()
                     }
                 }
             }
 
-            Button(onClick = onCloseShift, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Resumo do turno", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        Text("Pedidos/entregas vinculados: ${shiftSummary?.orders?.qty ?: 0}")
+                        Text("Valor dos pedidos: ${profileMoney(shiftSummary?.orders?.totalCents ?: 0)}")
+                        Text("Recebimentos registrados: ${profileMoney(shiftSummary?.receivedTotalCents ?: 0)}", fontWeight = FontWeight.Bold)
+                        HorizontalDivider()
+                        if (shiftSummary?.byMethod.isNullOrEmpty()) {
+                            Text("Nenhum recebimento registrado neste turno.")
+                        } else {
+                            shiftSummary!!.byMethod
+                                .filter { it.direction == "in" }
+                                .groupBy { it.method }
+                                .forEach { (method, rows) ->
+                                    val total = rows.sumOf { it.totalCents }
+                                    val qty = rows.sumOf { it.qty }
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text(methodLabel(method))
+                                        Text("${profileMoney(total)} · $qty", fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                        }
+                        OutlinedButton(onClick = onRefreshSummary, enabled = !summaryLoading, modifier = Modifier.fillMaxWidth()) {
+                            Text("ATUALIZAR RESUMO")
+                        }
+                    }
+                }
+            }
+
+            if (shift.mode == "delivery") {
+                val cash = shiftSummary?.deliveryCash ?: state.deliveryCash
+                item {
+                    Card(Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            Text("Fechamento do entregador", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Dinheiro recebido: ${profileMoney(cash?.cashCollectedCents ?: 0)}")
+                            Text("Já entregue ao caixa: ${profileMoney(cash?.confirmedHandoffCents ?: 0)}")
+                            Text("Dinheiro a entregar: ${profileMoney(cash?.outstandingCents ?: 0)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                            if ((cash?.outstandingCents ?: 0) > 0) {
+                                Button(onClick = onCreateHandoff, modifier = Modifier.fillMaxWidth()) { Text("GERAR QR PARA O CAIXA") }
+                            }
+                            OutlinedButton(onClick = onRefreshDeliveryCash, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR DINHEIRO") }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Button(onClick = onCloseShift, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") }
+            }
         }
-        HorizontalDivider()
-        Text("Segurança deste aparelho", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(8) }, label = { Text("Novo PIN (4 a 8 dígitos)") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        OutlinedButton(onClick = { onSavePin(pin); pin = "" }, enabled = pin.length >= 4, modifier = Modifier.fillMaxWidth()) { Text("SALVAR PIN") }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Entrar com biometria")
-            Switch(checked = state.biometricEnabled, onCheckedChange = onBiometric)
+
+        item { HorizontalDivider() }
+        item { Text("Segurança deste aparelho", style = MaterialTheme.typography.titleMedium) }
+        item {
+            OutlinedTextField(
+                pin,
+                { pin = it.filter(Char::isDigit).take(8) },
+                label = { Text("Novo PIN (4 a 8 dígitos)") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
-        Text("PIN e biometria só desbloqueiam a sessão local. A API revalida usuário, empresa, aparelho e permissões em todas as ações.")
-        Spacer(Modifier.weight(1f))
-        OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("SAIR DO APP") }
+        item {
+            OutlinedButton(onClick = { onSavePin(pin); pin = "" }, enabled = pin.length >= 4, modifier = Modifier.fillMaxWidth()) { Text("SALVAR PIN") }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Entrar com biometria")
+                Switch(checked = state.biometricEnabled, onCheckedChange = onBiometric)
+            }
+        }
+        item { Text("PIN e biometria só desbloqueiam a sessão local. A API revalida usuário, empresa, aparelho e permissões em todas as ações.") }
+        item { OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("SAIR DO APP") } }
     }
 
     state.cashHandoff?.let { handoff ->
-        val bitmap=remember(handoff.qrPayload){qrBitmap(handoff.qrPayload)}
+        val bitmap = remember(handoff.qrPayload) { qrBitmap(handoff.qrPayload) }
         AlertDialog(
-            onDismissRequest=onDismissHandoff,
-            title={Text("Entregar dinheiro ao caixa")},
-            text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
-                Text("Valor: ${moneyDelivery(handoff.amountCents)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
-                bitmap?.let{Image(it.asImageBitmap(),contentDescription="QR do repasse",modifier=Modifier.fillMaxWidth())}
-                Text("O caixa deve ler este QR no EventMenu GO. O turno só poderá ser encerrado depois da confirmação do recebimento.")
-            }},
-            confirmButton={TextButton(onClick=onDismissHandoff){Text("FECHAR")}},
+            onDismissRequest = onDismissHandoff,
+            title = { Text("Entregar dinheiro ao caixa") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Valor: ${profileMoney(handoff.amountCents)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    bitmap?.let { Image(it.asImageBitmap(), contentDescription = "QR do repasse", modifier = Modifier.fillMaxWidth()) }
+                    Text("O caixa deve ler este QR no EventMenu GO. O turno só poderá ser encerrado depois da confirmação do recebimento.")
+                }
+            },
+            confirmButton = { TextButton(onClick = onDismissHandoff) { Text("FECHAR") } },
         )
     }
 }
+
+private fun modeLabel(mode: String) = when (mode) {
+    "operation" -> "Operação"
+    "delivery" -> "Delivery"
+    "events" -> "Eventos"
+    "pay" -> "Pay"
+    else -> mode
+}
+
+private fun methodLabel(method: String) = when (method.lowercase()) {
+    "cash" -> "Dinheiro"
+    "pix" -> "PIX"
+    "nfc", "card", "credit", "debit" -> "Cartão / NFC"
+    "handoff" -> "Repasse"
+    else -> method.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+}
+
+private fun profileMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
