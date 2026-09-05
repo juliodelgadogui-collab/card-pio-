@@ -44,6 +44,7 @@ import br.com.eventmenu.go.ui.screens.OrdersScreen
 import br.com.eventmenu.go.ui.screens.PosScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
 import br.com.eventmenu.go.ui.screens.ShiftStartScreen
+import br.com.eventmenu.go.ui.screens.TablesScreen
 
 @Composable
 fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: () -> Unit, onTapOn: (TapOnRequest) -> Unit) {
@@ -58,6 +59,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     val nav=buildList{
         add(AppScreen.HOME)
         if("orders_create" in permissions)add(AppScreen.POS)
+        if(mode==AppMode.OPERATION&&"tables" in permissions)add(AppScreen.TABLES)
         if(mode==AppMode.OPERATION&&"orders_kitchen" in permissions)add(AppScreen.KITCHEN)
         if(mode==AppMode.DELIVERY||("orders_view" in permissions||"orders_create" in permissions||"orders_manage" in permissions))add(AppScreen.ORDERS)
         if("cash" in permissions)add(AppScreen.CASH)
@@ -70,7 +72,15 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         floatingActionButton={FloatingActionButton(onClick=onScan){Icon(Icons.Default.QrCodeScanner,contentDescription="Escanear")}},
         bottomBar={NavigationBar{nav.forEach{screen->
             val icon=when(screen){
-                AppScreen.HOME->Icons.Default.Home;AppScreen.POS->Icons.Default.ShoppingCart;AppScreen.ORDERS->Icons.Default.ReceiptLong;AppScreen.KITCHEN->Icons.Default.Restaurant;AppScreen.CASH->Icons.Default.PointOfSale;AppScreen.DELIVERY->Icons.Default.DeliveryDining;AppScreen.EVENTS->Icons.Default.ConfirmationNumber;AppScreen.PROFILE->Icons.Default.Badge
+                AppScreen.HOME->Icons.Default.Home
+                AppScreen.POS->Icons.Default.ShoppingCart
+                AppScreen.TABLES->Icons.Default.Restaurant
+                AppScreen.ORDERS->Icons.Default.ReceiptLong
+                AppScreen.KITCHEN->Icons.Default.Restaurant
+                AppScreen.CASH->Icons.Default.PointOfSale
+                AppScreen.DELIVERY->Icons.Default.DeliveryDining
+                AppScreen.EVENTS->Icons.Default.ConfirmationNumber
+                AppScreen.PROFILE->Icons.Default.Badge
             }
             NavigationBarItem(selected=state.screen==screen,onClick={viewModel.navigate(screen)},icon={Icon(icon,contentDescription=screen.name)})
         }}}
@@ -78,7 +88,8 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         Box(Modifier.fillMaxSize().padding(padding)){
             when(state.screen){
                 AppScreen.HOME->HomeScreen(state,viewModel::refreshOrders)
-                AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::newPosSale)
+                AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::newPosSale,viewModel::clearSelectedTable)
+                AppScreen.TABLES->TablesScreen(state.tables,"orders_create" in permissions,viewModel::refreshTables,viewModel::openTable,viewModel::closeTable,viewModel::orderForTable)
                 AppScreen.ORDERS->OrdersScreen(state.orders,viewModel::refreshOrders,viewModel::changeOrderStatus)
                 AppScreen.KITCHEN->KitchenScreen(state.kitchenTickets,viewModel::refreshKitchen,viewModel::kitchenStatus)
                 AppScreen.CASH->CashScreen(state.cashOpen,viewModel::openCash,viewModel::closeCash)
