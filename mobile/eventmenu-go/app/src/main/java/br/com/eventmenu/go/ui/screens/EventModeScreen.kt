@@ -29,7 +29,9 @@ fun EventModeScreen(
     entries: List<EventEntry>,
     canScanTicket: Boolean,
     canScanGuest: Boolean,
+    canUseBar: Boolean,
     onSelect: (Int) -> Unit,
+    onOpenBar: (Int) -> Unit,
     onRefresh: () -> Unit,
     onScan: () -> Unit,
 ) {
@@ -41,7 +43,7 @@ fun EventModeScreen(
     ) {
         item {
             Text("Modo Evento", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Check-in, lista e operação rápida. Cadastro e configurações continuam no painel web.")
+            Text("Check-in, lista, bar e operação rápida. Cadastro e configurações continuam no painel web.")
         }
 
         if (events.isNotEmpty()) {
@@ -85,8 +87,20 @@ fun EventModeScreen(
                     EventMetric("Entraram", selected.guestsCheckedIn.toString(), Modifier.weight(1f))
                 }
             }
-            item { EventMetric("Receita confirmada", eventMoney(selected.revenueCents), Modifier.fillMaxWidth()) }
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    EventMetric("Ingressos R$", eventMoney(selected.ticketRevenueCents), Modifier.weight(1f))
+                    EventMetric("Bar R$", eventMoney(selected.barRevenueCents), Modifier.weight(1f))
+                }
+            }
+            item { EventMetric("Receita total confirmada", eventMoney(selected.revenueCents), Modifier.fillMaxWidth()) }
             if (selected.ticketsReserved > 0) item { Text("${selected.ticketsReserved} ingresso(s) ainda reservado(s)/aguardando definição.") }
+
+            if (canUseBar && selected.status == "published") {
+                item {
+                    Button(onClick = { onOpenBar(selected.id) }, modifier = Modifier.fillMaxWidth()) { Text("🍹 ABRIR BAR") }
+                }
+            }
 
             if (canScanTicket || canScanGuest) {
                 item {
@@ -106,9 +120,7 @@ fun EventModeScreen(
             if (entries.isEmpty()) {
                 item { Text("Nenhum check-in recente para este evento.") }
             } else {
-                items(entries, key = { "${it.type}-${it.id}-${it.checkedInAt}" }) { entry ->
-                    EventEntryCard(entry)
-                }
+                items(entries, key = { "${it.type}-${it.id}-${it.checkedInAt}" }) { entry -> EventEntryCard(entry) }
             }
         }
 
