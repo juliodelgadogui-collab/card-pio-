@@ -23,7 +23,7 @@ final class OrderCreationService
         $quantities=[];foreach($rawItems as $item){if(!is_array($item))continue;$id=(int)($item['product_id']??0);$qty=(float)str_replace(',','.',(string)($item['quantity']??$item['qty']??0));if($id<1||!is_finite($qty)||$qty<=0)continue;$quantities[$id]=($quantities[$id]??0)+$qty;}
         if(!$quantities)throw new RuntimeException('Nenhum item válido no pedido.');
 
-        return Database::transaction(function(PDO $tx)use($tenantId,$userId,$channel,$tableId,$name,$phone,$address,$notes,$quantities):array{
+        $order=Database::transaction(function(PDO $tx)use($tenantId,$userId,$channel,$tableId,$name,$phone,$address,$notes,$quantities):array{
             $validTableId=null;$tabId=null;
             if($channel==='table'){
                 $t=$tx->prepare(Database::portableSql($tx,'SELECT id,status FROM restaurant_tables WHERE id=? AND tenant_id=? FOR UPDATE'));$t->execute([$tableId,$tenantId]);$table=$t->fetch();if(!$table||$table['status']==='inactive')throw new RuntimeException('Mesa inválida.');
@@ -34,10 +34,18 @@ final class OrderCreationService
             if($total<=0)throw new RuntimeException('Pedido sem valor válido.');
             $token=bin2hex(random_bytes(20));$o=$tx->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,channel,status,payment_status,subtotal_cents,total_cents,table_id,tab_id,delivery_address,notes,created_by) VALUES (?,?,?,?,"confirmed","unpaid",?,?,?,?,?,?,?)');$o->execute([$token,$tenantId,$customerId,$channel,$total,$total,$validTableId,$tabId,$channel==='delivery'?$address:null,$notes?:null,$userId]);$orderId=(int)$tx->lastInsertId();
             $i=$tx->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents) VALUES (?,?,?,?,?,?)');foreach($items as $item)$i->execute([$orderId,$item['product_id'],$item['name'],$item['price'],$item['quantity'],$item['total']]);
-            // Pedidos lançados pela operação permanecem reservados até pagamento ou cancelamento explícito.
             (new StockReservationService())->reserve($tx,$tenantId,$orderId,$items,null);
             Auth::audit('order.created_staff','order',(string)$orderId,['channel'=>$channel,'total_cents'=>$total,'items'=>count($items)]);
             return ['id'=>$orderId,'public_token'=>$token,'channel'=>$channel,'status'=>'confirmed','payment_status'=>'unpaid','total_cents'=>$total,'customer_id'=>$customerId,'table_id'=>$validTableId,'tab_id'=>$tabId];
         });
+
+        try{
+            (new NotificationService())->publishToPermission(
+                'orders.kitchen','operation','order.new','Novo pedido #'.$order['id'],
+                'Um novo pedido foi confirmado e entrou na fila da cozinha.','order',(string)$order['id'],
+                'order:'.$order['id'].':kitchen-created','info',gmdate('Y-m-d H:i:s',time()+86400)
+            );
+        }catch(\Throwable){}
+        return $order;
     }
 }
