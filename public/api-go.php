@@ -11,6 +11,7 @@ use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DeliveryCashService;
 use EventMenu\Services\NativePixService;
 use EventMenu\Services\NfcService;
+use EventMenu\Services\OrderService;
 use EventMenu\Services\PosPaymentService;
 use EventMenu\Services\WorkShiftService;
 
@@ -22,12 +23,44 @@ function go_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expec
 
 try{
     $auth=new ApiAuthService();$token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')go_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
-    $user=$auth->authenticate($token,$deviceId);$tenantId=(int)$user['tenant_id'];$action=(string)($_GET['action']??'context');$shift=new WorkShiftService();
+    $user=$auth->authenticate($token,$deviceId);$tenantId=(int)$user['tenant_id'];$userId=(int)$user['id'];$action=(string)($_GET['action']??'context');$shift=new WorkShiftService();
     if($action==='context'){$permissions=Auth::effectivePermissions();go_out(['ok'=>true,'user'=>$user,'permissions'=>PermissionCatalog::appPermissionMap($permissions),'permission_names'=>$permissions,'modes'=>PermissionCatalog::modesForPermissions($permissions),'shift'=>$shift->current()]);}
     if($action==='shift-current')go_out(['ok'=>true,'shift'=>$shift->current()]);
     if($action==='shift-open'){go_method('POST');$body=go_body();go_out(['ok'=>true,'shift'=>$shift->open((string)($body['mode']??''),$deviceId,(string)($body['notes']??''))],201);}
     if($action==='shift-close'){go_method('POST');$body=go_body();go_out(['ok'=>true,'shift'=>$shift->close((string)($body['notes']??''))]);}
     if($action==='shift-summary'){$id=(int)($_GET['shift_id']??0);go_out(['ok'=>true,'summary'=>$shift->summary($id?:null)]);}
+
+    if($action==='orders'){
+        $current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de consultar a operação.');$mode=(string)$current['mode'];
+        $sql='SELECT o.id,o.public_token,o.channel,o.status,o.payment_status,o.total_cents,o.delivery_address,o.assigned_delivery_user_id,o.table_id,o.tab_id,o.created_at,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.tenant_id=?';$args=[$tenantId];
+        if($mode==='delivery'){
+            if(!Auth::can('orders.delivery'))throw new RuntimeException('Sua conta não possui operação de Delivery.');$sql.=' AND o.channel="delivery" AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery","completed")';$args[]=$userId;
+        }elseif($mode==='operation'){
+            if(!Auth::can('orders.view')&&!Auth::can('orders.create')&&!Auth::can('orders.kitchen'))throw new RuntimeException('Sua conta não possui acesso aos pedidos operacionais.');
+            if(Auth::can('orders.kitchen')&&!Auth::can('orders.view')&&!Auth::can('orders.create'))$sql.=' AND o.channel IN ("counter","pickup","table","delivery") AND o.status IN ("confirmed","preparing")';
+        }elseif($mode==='pay'){
+            if(!Auth::can('payments.manage')&&!Auth::can('cash.manage'))throw new RuntimeException('Sua conta não possui acesso ao modo Pay.');$sql.=' AND o.status<>"cancelled"';
+        }else{
+            if(!Auth::can('orders.view')&&!Auth::can('orders.create'))go_out(['ok'=>true,'orders'=>[]]);
+        }
+        $sql.=' ORDER BY o.id DESC LIMIT 200';$s=Database::connection()->prepare($sql);$s->execute($args);go_out(['ok'=>true,'orders'=>$s->fetchAll()]);
+    }
+
+    if($action==='order-status'){
+        go_method('POST');$body=go_body();$orderId=(int)($body['order_id']??0);$target=(string)($body['status']??'');$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de alterar pedidos.');
+        if($current['mode']==='delivery'){
+            if(!Auth::can('orders.delivery'))throw new RuntimeException('Acesso negado.');$q=Database::connection()->prepare('SELECT id FROM orders WHERE id=? AND tenant_id=? AND channel="delivery" AND assigned_delivery_user_id=?');$q->execute([$orderId,$tenantId,$userId]);if(!$q->fetchColumn())throw new RuntimeException('Pedido não está atribuído a este funcionário.');$source='delivery';
+        }elseif($current['mode']==='operation'&&Auth::can('orders.kitchen')&&in_array($target,['preparing','ready'],true))$source='kitchen';
+        else{if(!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode alterar este status.');$source='panel';}
+        go_out(['ok'=>true,'order'=>(new OrderService())->changeStatus($orderId,$target,$source)]);
+    }
+
+    if($action==='kitchen-board'){
+        if(!Auth::can('orders.kitchen'))throw new RuntimeException('Acesso negado à cozinha.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para usar a cozinha.');$pdo=Database::connection();
+        $s=$pdo->prepare('SELECT o.id,o.channel,o.status,o.notes,o.created_at,rt.name table_name,c.name customer_name FROM orders o LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.tenant_id=? AND o.channel IN ("counter","pickup","table","delivery") AND o.status IN ("confirmed","preparing") ORDER BY CASE WHEN o.status="preparing" THEN 0 ELSE 1 END,o.id');$s->execute([$tenantId]);$orders=$s->fetchAll();
+        if($orders){$ids=array_column($orders,'id');$marks=implode(',',array_fill(0,count($ids),'?'));$i=$pdo->prepare('SELECT order_id,name_snapshot,quantity,notes FROM order_items WHERE order_id IN ('.$marks.') ORDER BY id');$i->execute($ids);$group=[];foreach($i->fetchAll() as $row)$group[(int)$row['order_id']][]=$row;foreach($orders as &$order)$order['items']=$group[(int)$order['id']]??[];unset($order);}
+        go_out(['ok'=>true,'tickets'=>$orders]);
+    }
 
     if($action==='catalog'){
         if(!Auth::can('orders.create')&&!Auth::can('catalog.manage'))go_out(['ok'=>false,'error'=>'Acesso negado.'],403);
