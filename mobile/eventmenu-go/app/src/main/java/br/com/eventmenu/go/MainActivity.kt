@@ -43,9 +43,9 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val repository = (application as EventMenuGoApplication).repository
+        val app = application as EventMenuGoApplication
         setContent {
-            val vm: MainViewModel = viewModel(factory = MainViewModel.Factory(repository))
+            val vm: MainViewModel = viewModel(factory = MainViewModel.Factory(app.repository, app.eventRepository))
             EventMenuTheme {
                 EventMenuGoApp(
                     viewModel = vm,
