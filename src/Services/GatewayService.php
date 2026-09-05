@@ -146,7 +146,7 @@ final class GatewayService
     {
         $name=strtolower($name);
         foreach($headers as $k=>$v){
-            if(strtolower((string)$k===$name)) return is_array($v)?(string)reset($v):(string)$v;
+            if(strtolower((string)$k)===$name) return is_array($v)?(string)reset($v):(string)$v;
         }
         return '';
     }
