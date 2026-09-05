@@ -65,12 +65,12 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.HOME->HomeScreen(state,viewModel::refreshOrders)
                 AppScreen.ORDERS->OrdersScreen(state.orders,viewModel::refreshOrders,viewModel::changeOrderStatus)
                 AppScreen.CASH->CashScreen(state.cashOpen,viewModel::openCash,viewModel::closeCash)
-                AppScreen.DELIVERY->DeliveryOperationsScreen(state.orders,state.pixCharge,viewModel::changeOrderStatus,viewModel::requestPix,viewModel::requestNfc,viewModel::pollPixStatus,viewModel::dismissPix)
+                AppScreen.DELIVERY->DeliveryOperationsScreen(state.orders,state.pixCharge,viewModel::changeOrderStatus,viewModel::requestPix,viewModel::requestNfc,viewModel::collectDeliveryCash,viewModel::pollPixStatus,viewModel::dismissPix)
                 AppScreen.EVENTS->EventsScreen(onScan)
-                AppScreen.PROFILE->EmployeeProfileScreen(state,viewModel::savePin,viewModel::setBiometric,viewModel::closeShift,viewModel::logout)
+                AppScreen.PROFILE->EmployeeProfileScreen(state,viewModel::savePin,viewModel::setBiometric,viewModel::closeShift,viewModel::createCashHandoff,viewModel::dismissCashHandoff,viewModel::refreshDeliveryCash,viewModel::logout)
             }
             if(state.loading)CircularProgressIndicator(Modifier.align(Alignment.Center))
         }
     }
-    state.qr?.let{QrResultDialog(it,viewModel::clearQr,viewModel::checkInCurrentQr)}
+    state.qr?.let{QrResultDialog(it,viewModel::clearQr,viewModel::processCurrentQr)}
 }
