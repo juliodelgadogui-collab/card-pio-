@@ -87,13 +87,10 @@ final class CashService
 
         Database::transaction(function (PDO $pdo) use ($tenantId, $userId, $paymentId, $method): void {
             $session = $this->lockedOpenSession($pdo, $tenantId, $userId);
-            $stmt = $pdo->prepare(Database::portableSql($pdo, 'SELECT p.id,p.order_id,p.amount_cents,p.status,p.provider,o.created_by FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=? AND p.tenant_id=? FOR UPDATE'));
+            $stmt = $pdo->prepare(Database::portableSql($pdo, 'SELECT p.id,p.order_id,p.amount_cents,p.status,p.provider FROM payments p WHERE p.id=? AND p.tenant_id=? FOR UPDATE'));
             $stmt->execute([$paymentId, $tenantId]);
             $payment = $stmt->fetch();
             if (!$payment || $payment['status'] !== 'paid') throw new RuntimeException('Pagamento confirmado não encontrado.');
-            if ((int)$payment['created_by'] !== $userId && !in_array(Auth::role(), ['admin', 'manager', 'super_admin'], true)) {
-                throw new RuntimeException('Este pagamento pertence a outro operador.');
-            }
 
             $key = 'payment:' . $paymentId . ':cash-session:' . $session['id'];
             $existing = $pdo->prepare('SELECT id FROM cash_movements WHERE tenant_id=? AND idempotency_key=? LIMIT 1');
@@ -164,8 +161,8 @@ final class CashService
         $byMethod = $by->fetchAll();
 
         $end = $session['closed_at'] ?: gmdate('Y-m-d H:i:s');
-        $digital = $pdo->prepare('SELECT p.provider,COUNT(*) qty,COALESCE(SUM(p.amount_cents),0) total_cents FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.tenant_id=? AND p.status="paid" AND o.created_by=? AND p.verified_at>=? AND p.verified_at<=? GROUP BY p.provider ORDER BY p.provider');
-        $digital->execute([$tenantId, $session['user_id'], $session['opened_at'], $end]);
+        $digital = $pdo->prepare('SELECT p.provider,COUNT(*) qty,COALESCE(SUM(p.amount_cents),0) total_cents FROM payments p WHERE p.tenant_id=? AND p.provider<>"manual" AND p.status="paid" AND p.verified_at>=? AND p.verified_at<=? GROUP BY p.provider ORDER BY p.provider');
+        $digital->execute([$tenantId, $session['opened_at'], $end]);
 
         return [
             'session' => $session,
