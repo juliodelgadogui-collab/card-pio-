@@ -15,9 +15,11 @@ final class ApiAuthService
         $email=mb_strtolower(trim($email));$deviceId=trim($deviceId);$deviceLabel=mb_substr(trim($deviceLabel),0,120);
         if(!filter_var($email,FILTER_VALIDATE_EMAIL)||$password==='') throw new RuntimeException('Credenciais inválidas.');
         if(strlen($deviceId)<8) throw new RuntimeException('Identificador do aparelho inválido.');
+        $throttle=new LoginThrottleService();$throttleKey=$throttle->key($email,$deviceId);$throttle->assertAllowed($throttleKey);
         $pdo=Database::connection();
         $stmt=$pdo->prepare('SELECT u.*,t.status tenant_status FROM users u JOIN tenants t ON t.id=u.tenant_id WHERE u.email=? LIMIT 1');$stmt->execute([$email]);$user=$stmt->fetch();
-        if(!$user||$user['status']!=='active'||$user['tenant_status']!=='active'||$user['role']==='super_admin'||!password_verify($password,(string)$user['password_hash'])) throw new RuntimeException('E-mail ou senha inválidos.');
+        if(!$user||$user['status']!=='active'||$user['tenant_status']!=='active'||$user['role']==='super_admin'||!password_verify($password,(string)$user['password_hash'])){$throttle->failed($throttleKey);throw new RuntimeException('E-mail ou senha inválidos.');}
+        $throttle->succeeded($throttleKey);
         $raw=bin2hex(random_bytes(32));$hash=hash('sha256',$raw);$deviceHash=hash('sha256',$deviceId);$expires=(new \DateTimeImmutable('+30 days'))->format('Y-m-d H:i:s');
         Database::transaction(function(\PDO $tx)use($user,$deviceHash,$deviceLabel,$hash,$expires):void{
             $tx->prepare('UPDATE api_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND device_hash=? AND revoked_at IS NULL')->execute([$user['tenant_id'],$user['id'],$deviceHash]);
