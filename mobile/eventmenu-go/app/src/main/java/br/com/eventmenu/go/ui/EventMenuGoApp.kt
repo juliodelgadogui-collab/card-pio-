@@ -1,5 +1,6 @@
 package br.com.eventmenu.go.ui
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -40,6 +41,7 @@ import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.MainViewModel
 import br.com.eventmenu.go.ManagerActionsViewModel
 import br.com.eventmenu.go.ProfileSummaryViewModel
+import br.com.eventmenu.go.ReceiptViewModel
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.CashOperationsScreen
@@ -64,11 +66,14 @@ import br.com.eventmenu.go.ui.screens.TablesScreen
 fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: () -> Unit, onTapOn: (TapOnRequest) -> Unit) {
     val state by viewModel.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
-    val app = LocalContext.current.applicationContext as EventMenuGoApplication
+    val context = LocalContext.current
+    val app = context.applicationContext as EventMenuGoApplication
     val profileViewModel: ProfileSummaryViewModel = composeViewModel(factory = ProfileSummaryViewModel.Factory(app.repository))
     val profileState by profileViewModel.state.collectAsState()
     val managerActionsViewModel: ManagerActionsViewModel = composeViewModel(factory = ManagerActionsViewModel.Factory(app.managerRepository))
     val managerActionState by managerActionsViewModel.state.collectAsState()
+    val receiptViewModel: ReceiptViewModel = composeViewModel(factory = ReceiptViewModel.Factory(app.receiptRepository))
+    val receiptState by receiptViewModel.state.collectAsState()
 
     LaunchedEffect(state.error, state.message) {
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
@@ -77,6 +82,20 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     LaunchedEffect(managerActionState.error, managerActionState.message) {
         (managerActionState.error ?: managerActionState.message)?.let { snackbar.showSnackbar(it) }
         if (managerActionState.error != null || managerActionState.message != null) managerActionsViewModel.clearFeedback()
+    }
+    LaunchedEffect(receiptState.error) {
+        receiptState.error?.let { snackbar.showSnackbar(it); receiptViewModel.clearError() }
+    }
+    LaunchedEffect(receiptState.shareText) {
+        receiptState.shareText?.let { text ->
+            val share = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_SUBJECT, "Comprovante EventMenu")
+                putExtra(Intent.EXTRA_TEXT, text)
+            }
+            context.startActivity(Intent.createChooser(share, "Enviar comprovante"))
+            receiptViewModel.consumed()
+        }
     }
     LaunchedEffect(state.tapOnRequest) {
         state.tapOnRequest?.let { request -> onTapOn(request); viewModel.tapOnLaunchConsumed() }
@@ -170,14 +189,14 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                         managerActionsViewModel.refresh()
                     },
                 )
-                AppScreen.POS -> PosScreen(state, viewModel::addProduct, viewModel::removeProduct, viewModel::clearCart, viewModel::createPosOrder, viewModel::payPosCash, viewModel::requestPosPix, viewModel::requestPosNfc, viewModel::refreshPosPayment, viewModel::finishPosFlow, viewModel::clearSelectedTable)
+                AppScreen.POS -> PosScreen(state, viewModel::addProduct, viewModel::removeProduct, viewModel::clearCart, viewModel::createPosOrder, viewModel::payPosCash, viewModel::requestPosPix, viewModel::requestPosNfc, receiptViewModel::prepare, viewModel::refreshPosPayment, viewModel::finishPosFlow, viewModel::clearSelectedTable)
                 AppScreen.TABLES -> TablesScreen(state.tables, "orders_create" in permissions, viewModel::refreshTables, viewModel::openTable, viewModel::closeTable, viewModel::orderForTable, viewModel::openTableAccount)
                 AppScreen.TABLE_ACCOUNT -> TableAccountScreen(state.tableAccount, "payments" in permissions, viewModel::receiveTableOrder, viewModel::refreshTableAccount, viewModel::closeTableAccount)
                 AppScreen.ORDERS -> OrdersScreen(state.orders, viewModel::refreshOrders, viewModel::changeOrderStatus)
                 AppScreen.KITCHEN -> KitchenScreen(state.kitchenTickets, viewModel::refreshKitchen, viewModel::kitchenStatus)
                 AppScreen.DISPATCH -> DispatchScreen(state.orders, state.deliveryUsers, "delivery_assign" in permissions, state.dispatchFocusOrderId, viewModel::refreshDispatch, viewModel::dispatchReady, viewModel::assignDelivery)
                 AppScreen.CASH -> CashOperationsScreen(state.cashOpen, state.cashSummary, viewModel::openCash, viewModel::addCashSupply, viewModel::addCashWithdrawal, viewModel::closeCash, viewModel::refreshCash)
-                AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, state.pixCharge, viewModel::changeOrderStatus, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, viewModel::pollPixStatus, viewModel::dismissPix)
+                AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, state.pixCharge, viewModel::changeOrderStatus, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, viewModel::pollPixStatus, viewModel::dismissPix)
                 AppScreen.EVENTS -> EventModeScreen(state.events, state.selectedEventId, state.eventEntries, "tickets" in permissions, "guests" in permissions, viewModel::selectEvent, viewModel::refreshEvents, onScan)
                 AppScreen.PROFILE -> EmployeeProfileScreen(
                     state = state,
@@ -193,7 +212,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                     onLogout = viewModel::logout,
                 )
             }
-            if (state.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            if (state.loading || receiptState.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
         }
     }
     state.qr?.let { QrResultDialog(it, viewModel::clearQr, viewModel::processCurrentQr) }
