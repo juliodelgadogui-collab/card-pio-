@@ -137,4 +137,4 @@ jobs:
           path: ${{ runner.temp }}/EventMenu-Premium-1
           if-no-files-found: error
           include-hidden-files: true
-          retention-days: 14
+          retention-days: 1
