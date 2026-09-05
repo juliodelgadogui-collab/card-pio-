@@ -6,7 +6,6 @@ namespace EventMenu\Services;
 
 use EventMenu\Core\Crypto;
 use EventMenu\Core\Database;
-use PDO;
 use RuntimeException;
 
 final class CheckoutService
@@ -36,22 +35,22 @@ final class CheckoutService
 
     private function stripe(array $order,array $gateway,array $config,string $key): array
     {
-        if(!class_exists('Stripe\\StripeClient'))throw new RuntimeException('Execute composer install para habilitar Stripe.');$secret=(string)($config['secret_key']??'');if($secret==='')throw new RuntimeException('Stripe não configurado.');$client=new \Stripe\StripeClient($secret);$account=$client->accounts->retrieve();if((string)$account->id!==(string)$gateway['account_reference'])throw new RuntimeException('Conta Stripe divergente.');$base=rtrim((string)env('APP_URL',''),'/');$metadata=['tenant_id'=>(string)$order['tenant_id'],'order_id'=>(string)$order['id']];
-        $session=$client->checkout->sessions->create(['mode'=>'payment','line_items'=>[['price_data'=>['currency'=>'brl','unit_amount'=>(int)$order['total_cents'],'product_data'=>['name'=>'Pedido EventMenu #'.$order['id']]],'quantity'=>1]],'client_reference_id'=>(string)$order['id'],'customer_email'=>$order['customer_email']?:null,'metadata'=>$metadata,'payment_intent_data'=>['metadata'=>$metadata],'success_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']).'&retorno=sucesso','cancel_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']).'&retorno=cancelado'],['idempotency_key'=>$key]);
+        if(!class_exists('Stripe\\StripeClient'))throw new RuntimeException('Execute composer install para habilitar Stripe.');$secret=(string)($config['secret_key']??'');if($secret==='')throw new RuntimeException('Stripe não configurado.');$client=new \Stripe\StripeClient($secret);$account=$client->accounts->retrieve();if((string)$account->id!==(string)$gateway['account_reference'])throw new RuntimeException('Conta Stripe divergente.');$metadata=['tenant_id'=>(string)$order['tenant_id'],'order_id'=>(string)$order['id']];
+        $session=$client->checkout->sessions->create(['mode'=>'payment','line_items'=>[['price_data'=>['currency'=>'brl','unit_amount'=>(int)$order['total_cents'],'product_data'=>['name'=>'Pedido EventMenu #'.$order['id']]],'quantity'=>1]],'client_reference_id'=>(string)$order['id'],'customer_email'=>$order['customer_email']?:null,'metadata'=>$metadata,'payment_intent_data'=>['metadata'=>$metadata],'success_url'=>\app_absolute_url('pedido.php?t='.rawurlencode($order['public_token']).'&retorno=sucesso'),'cancel_url'=>\app_absolute_url('pedido.php?t='.rawurlencode($order['public_token']).'&retorno=cancelado')],['idempotency_key'=>$key]);
         return ['url'=>(string)$session->url,'external_id'=>(string)$session->id,'raw'=>$session->toArray()];
     }
 
     private function mercadoPago(array $order,array $gateway,array $config,string $key): array
     {
-        $token=(string)($config['access_token']??'');if($token==='')throw new RuntimeException('Mercado Pago não configurado.');$base=rtrim((string)env('APP_URL',''),'/');$notification=$base.'/webhook.php?provider=mercadopago&tenant='.rawurlencode($order['tenant_slug']);
-        $body=['items'=>[['id'=>'order-'.$order['id'],'title'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'currency_id'=>'BRL','unit_price'=>((int)$order['total_cents'])/100]],'external_reference'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],'back_urls'=>['success'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),'pending'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),'failure'=>$base.'/pedido.php?t='.rawurlencode($order['public_token'])],'notification_url'=>$notification,'metadata'=>['tenant_id'=>$order['tenant_id'],'order_id'=>$order['id']]];
+        $token=(string)($config['access_token']??'');if($token==='')throw new RuntimeException('Mercado Pago não configurado.');$notification=\app_absolute_url('webhook.php?provider=mercadopago&tenant='.rawurlencode($order['tenant_slug']));$return=\app_absolute_url('pedido.php?t='.rawurlencode($order['public_token']));
+        $body=['items'=>[['id'=>'order-'.$order['id'],'title'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'currency_id'=>'BRL','unit_price'=>((int)$order['total_cents'])/100]],'external_reference'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],'back_urls'=>['success'=>$return,'pending'=>$return,'failure'=>$return],'notification_url'=>$notification,'metadata'=>['tenant_id'=>$order['tenant_id'],'order_id'=>$order['id']]];
         $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$key],$body);$url=(string)($data['init_point']??'');if($url==='')throw new RuntimeException('Mercado Pago não retornou URL de pagamento.');return ['url'=>$url,'external_id'=>(string)($data['id']??''),'raw'=>$data];
     }
 
     private function pagBank(array $order,array $gateway,array $config,string $key): array
     {
-        $token=(string)($config['token']??'');if($token==='')throw new RuntimeException('PagBank não configurado.');$api=rtrim((string)($config['api_base']??'https://api.pagseguro.com'),'/');$base=rtrim((string)env('APP_URL',''),'/');$notification=$base.'/webhook.php?provider=pagbank&tenant='.rawurlencode($order['tenant_slug']);
-        $body=['reference_id'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],'items'=>[['reference_id'=>'order-'.$order['id'],'name'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'unit_amount'=>(int)$order['total_cents']]],'payment_methods'=>[['type'=>'CREDIT_CARD'],['type'=>'PIX']], 'redirect_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),'return_url'=>$base.'/pedido.php?t='.rawurlencode($order['public_token']),'redirect_waiting_time'=>5,'notification_urls'=>[$notification],'payment_notification_urls'=>[$notification]];
+        $token=(string)($config['token']??'');if($token==='')throw new RuntimeException('PagBank não configurado.');$api=rtrim((string)($config['api_base']??'https://api.pagseguro.com'),'/');$notification=\app_absolute_url('webhook.php?provider=pagbank&tenant='.rawurlencode($order['tenant_slug']));$return=\app_absolute_url('pedido.php?t='.rawurlencode($order['public_token']));
+        $body=['reference_id'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],'items'=>[['reference_id'=>'order-'.$order['id'],'name'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'unit_amount'=>(int)$order['total_cents']]],'payment_methods'=>[['type'=>'CREDIT_CARD'],['type'=>'PIX']], 'redirect_url'=>$return,'return_url'=>$return,'redirect_waiting_time'=>5,'notification_urls'=>[$notification],'payment_notification_urls'=>[$notification]];
         $data=$this->httpJson('POST',$api.'/checkouts',['Authorization: Bearer '.$token,'x-idempotency-key: '.$key],$body);$url='';foreach(($data['links']??[]) as $link){if(($link['rel']??'')==='PAY'){$url=(string)$link['href'];break;}}if($url==='')throw new RuntimeException('PagBank não retornou link de pagamento.');return ['url'=>$url,'external_id'=>(string)($data['id']??''),'raw'=>$data];
     }
 
