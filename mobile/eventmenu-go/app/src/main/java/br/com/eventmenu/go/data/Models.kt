@@ -19,25 +19,9 @@ data class Order(
     val tableName: String = "",
 )
 
-data class DeliveryUser(
-    val id: Int,
-    val name: String,
-    val email: String,
-    val onShift: Boolean,
-    val startedAt: String = "",
-)
-
+data class DeliveryUser(val id: Int, val name: String, val email: String, val onShift: Boolean, val startedAt: String = "")
 data class KitchenItem(val name: String, val quantity: Double, val notes: String = "")
-data class KitchenTicket(
-    val id: Int,
-    val channel: String,
-    val status: String,
-    val notes: String,
-    val createdAt: String,
-    val tableName: String,
-    val customerName: String,
-    val items: List<KitchenItem>,
-)
+data class KitchenTicket(val id: Int, val channel: String, val status: String, val notes: String, val createdAt: String, val tableName: String, val customerName: String, val items: List<KitchenItem>)
 
 data class RestaurantTable(
     val id: Int,
@@ -66,6 +50,35 @@ data class Product(
 data class CreatedOrder(val id: Int, val publicToken: String, val channel: String, val totalCents: Int)
 data class PaymentPart(val id: Int, val provider: String, val amountCents: Int, val status: String, val verifiedAt: String = "")
 data class PaymentBalance(val orderId: Int, val totalCents: Int, val paidCents: Int, val remainingCents: Int, val paymentStatus: String, val payments: List<PaymentPart> = emptyList())
+
+data class CashSession(
+    val id: Int,
+    val status: String,
+    val openingCashCents: Int,
+    val openedAt: String,
+    val closingCashCents: Int? = null,
+    val expectedCashCents: Int? = null,
+    val differenceCents: Int? = null,
+    val closedAt: String = "",
+)
+data class CashMovement(
+    val id: Int,
+    val type: String,
+    val method: String,
+    val direction: String,
+    val amountCents: Int,
+    val notes: String,
+    val createdAt: String,
+)
+data class CashMethodTotal(val method: String, val direction: String, val totalCents: Int, val qty: Int)
+data class CashDigitalTotal(val provider: String, val totalCents: Int, val qty: Int)
+data class CashSummary(
+    val session: CashSession?,
+    val expectedCashCents: Int,
+    val movements: List<CashMovement>,
+    val byMethod: List<CashMethodTotal>,
+    val digital: List<CashDigitalTotal>,
+)
 
 data class QrResult(
     val type: String,
