@@ -26,7 +26,7 @@ final class OrderService
     public function changeStatus(int $orderId,string $target,string $source='panel'):array
     {
         $tenantId=Auth::tenantId();if(!$tenantId||$orderId<1)throw new RuntimeException('Pedido ou empresa inválidos.');$target=strtolower(trim($target));if(!array_key_exists($target,self::TRANSITIONS))throw new RuntimeException('Status inválido.');
-        return Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$target,$source):array{
+        $result=Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$target,$source):array{
             $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$orderId,$tenantId]);$order=$s->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');$current=(string)$order['status'];if($current===$target)return $order;if(!in_array($target,self::TRANSITIONS[$current]??[],true))throw new RuntimeException("Transição {$current} → {$target} não permitida.");
 
             if($target==='completed'&&$order['payment_status']!=='paid')throw new RuntimeException('Pedido não pago não pode ser finalizado.');
@@ -45,8 +45,9 @@ final class OrderService
                 if(!in_array($order['channel'],['counter','table','delivery','pickup'],true))throw new RuntimeException('Pedido não pertence à operação da cozinha.');
             }
             if($source==='delivery'){
+                if(!Auth::can('orders.delivery'))throw new RuntimeException('Sua conta não possui permissão de entrega.');
                 if(!in_array($target,['out_for_delivery','completed'],true))throw new RuntimeException('A entrega só pode retirar ou concluir o pedido.');
-                if(Auth::role()==='delivery'&&(int)($order['assigned_delivery_user_id']??0)!==(int)Auth::id())throw new RuntimeException('Pedido não está atribuído a este entregador.');
+                if((int)($order['assigned_delivery_user_id']??0)!==(int)Auth::id())throw new RuntimeException('Pedido não está atribuído a este entregador.');
                 if($order['channel']!=='delivery')throw new RuntimeException('Pedido não é de delivery.');
             }
             if($source==='dispatch'){
@@ -62,5 +63,32 @@ final class OrderService
             $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$target,$orderId,$tenantId]);
             Auth::audit('order.status','order',(string)$orderId,['from'=>$current,'to'=>$target,'source'=>$source]);$order['status']=$target;return $order;
         });
+
+        $this->publishOperationalNotification($result,$target);
+        return $result;
+    }
+
+    private function publishOperationalNotification(array $order,string $target):void
+    {
+        if(!in_array((string)($order['channel']??''),['counter','table','delivery','pickup'],true))return;
+        try{
+            $notifications=new NotificationService();$id=(int)$order['id'];$expires=gmdate('Y-m-d H:i:s',time()+86400);
+            if($target==='confirmed'){
+                $notifications->publishToPermission(
+                    'orders.kitchen','operation','order.new','Novo pedido #'.$id,
+                    'Um novo pedido confirmado entrou na fila da cozinha.','order',(string)$id,
+                    'order:'.$id.':kitchen-confirmed','info',$expires
+                );
+            }
+            if($target==='ready'){
+                $notifications->publishToPermission(
+                    'orders.dispatch','operation','order.ready','Pedido #'.$id.' pronto',
+                    'A cozinha marcou o pedido como pronto para despacho.','order',(string)$id,
+                    'order:'.$id.':ready-dispatch','success',$expires
+                );
+            }
+        }catch(\Throwable){
+            // Notificação é auxiliar e nunca pode desfazer uma transição operacional já confirmada.
+        }
     }
 }
