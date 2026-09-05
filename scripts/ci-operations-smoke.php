@@ -44,10 +44,23 @@ try{$cash->open(100);ops_fail('Segundo caixa foi aberto para o mesmo operador.')
 $cash->addManualMovement('supply',2000,'Suprimento CI');
 $cash->addManualMovement('withdrawal',1000,'Sangria CI');
 $cash->addManualMovement('adjustment',500,'Ajuste CI','out');
+
+$cashToken=bin2hex(random_bytes(20));
+$pdo->prepare('INSERT INTO orders (public_token,tenant_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?, ?, "counter", "confirmed", "paid", 3000, 3000, ?)')->execute([$cashToken,$tenantId,$adminId]);
+$cashOrder=(int)$pdo->lastInsertId();
+$providerPaymentId='CASH-CI-'.strtoupper(bin2hex(random_bytes(6)));
+$paymentKey='cash-ci-'.$uid;
+$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,provider_payment_id,idempotency_key,amount_cents,currency,status,verified_at) VALUES (?, ?, "manual", ?, ?, 3000, "BRL", "paid", CURRENT_TIMESTAMP)')->execute([$tenantId,$cashOrder,$providerPaymentId,$paymentKey]);
+$paymentId=(int)$pdo->lastInsertId();
+$cash->recordPaidPayment($paymentId,'cash');
+$cash->recordPaidPayment($paymentId,'cash');
+
 $cashSummary=$cash->summary((int)$cashSession['id']);
-ops_assert((int)$cashSummary['expected_cash_cents']===10500,'Saldo esperado do caixa divergente.');
-$closed=$cash->close(10400,'CI fechamento');
-ops_assert((int)$closed['expected_cash_cents']===10500,'Fechamento calculou esperado incorreto.');
+ops_assert((int)$cashSummary['expected_cash_cents']===13500,'Saldo esperado do caixa divergente.');
+$recorded=0;foreach($cashSummary['movements'] as $movement){if((int)($movement['payment_id']??0)===$paymentId)$recorded++;}
+ops_assert($recorded===1,'Pagamento entrou mais de uma vez no caixa.');
+$closed=$cash->close(13400,'CI fechamento');
+ops_assert((int)$closed['expected_cash_cents']===13500,'Fechamento calculou esperado incorreto.');
 ops_assert((int)$closed['difference_cents']===-100,'Diferença do caixa incorreta.');
 try{$cash->addManualMovement('supply',100,'Após fechar');ops_fail('Caixa fechado aceitou movimento.');}catch(RuntimeException){}
 
