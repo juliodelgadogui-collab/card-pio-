@@ -32,21 +32,17 @@ import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.CashScreen
 import br.com.eventmenu.go.ui.screens.DeliveryScreen
+import br.com.eventmenu.go.ui.screens.EmployeeProfileScreen
 import br.com.eventmenu.go.ui.screens.EventsScreen
 import br.com.eventmenu.go.ui.screens.HomeScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
 import br.com.eventmenu.go.ui.screens.ModePickerScreen
 import br.com.eventmenu.go.ui.screens.OrdersScreen
-import br.com.eventmenu.go.ui.screens.ProfileScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
+import br.com.eventmenu.go.ui.screens.ShiftStartScreen
 
 @Composable
-fun EventMenuGoApp(
-    viewModel: MainViewModel,
-    onScan: () -> Unit,
-    onBiometric: () -> Unit,
-    onTapOn: (TapOnRequest) -> Unit,
-) {
+fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: () -> Unit, onTapOn: (TapOnRequest) -> Unit) {
     val state by viewModel.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
 
@@ -55,23 +51,24 @@ fun EventMenuGoApp(
         if (state.error != null || state.message != null) viewModel.clearFeedback()
     }
     LaunchedEffect(state.tapOnRequest) {
-        state.tapOnRequest?.let { request ->
-            onTapOn(request)
-            viewModel.tapOnLaunchConsumed()
-        }
+        state.tapOnRequest?.let { request -> onTapOn(request); viewModel.tapOnLaunchConsumed() }
     }
 
     if (state.session == null) {
-        LoginScreen(
-            state = state,
-            onLogin = viewModel::login,
-            onPin = viewModel::unlockWithPin,
-            onBiometric = onBiometric,
-        )
+        LoginScreen(state, viewModel::login, viewModel::unlockWithPin, onBiometric)
         return
     }
     if (state.mode == null) {
         ModePickerScreen(state.session!!.user.name, state.modes, viewModel::chooseMode)
+        return
+    }
+    if (state.workShift == null || state.workShift?.status != "open") {
+        ShiftStartScreen(
+            state = state,
+            onStart = viewModel::startShift,
+            onChangeMode = if (state.modes.size > 1) ({ viewModel.chooseMode(state.modes.first { it != state.mode }); }) else null,
+            onLogout = viewModel::logout,
+        )
         return
     }
 
@@ -88,11 +85,7 @@ fun EventMenuGoApp(
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
-        floatingActionButton = {
-            FloatingActionButton(onClick = onScan) {
-                Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear")
-            }
-        },
+        floatingActionButton = { FloatingActionButton(onClick = onScan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear") } },
         bottomBar = {
             NavigationBar {
                 nav.forEach { screen ->
@@ -104,11 +97,7 @@ fun EventMenuGoApp(
                         AppScreen.EVENTS -> Icons.Default.ConfirmationNumber
                         AppScreen.PROFILE -> Icons.Default.Badge
                     }
-                    NavigationBarItem(
-                        selected = state.screen == screen,
-                        onClick = { viewModel.navigate(screen) },
-                        icon = { Icon(icon, contentDescription = screen.name) },
-                    )
+                    NavigationBarItem(selected = state.screen == screen, onClick = { viewModel.navigate(screen) }, icon = { Icon(icon, contentDescription = screen.name) })
                 }
             }
         }
@@ -118,20 +107,13 @@ fun EventMenuGoApp(
                 AppScreen.HOME -> HomeScreen(state, viewModel::refreshOrders)
                 AppScreen.ORDERS -> OrdersScreen(state.orders, viewModel::refreshOrders, viewModel::changeOrderStatus)
                 AppScreen.CASH -> CashScreen(state.cashOpen, viewModel::openCash, viewModel::closeCash)
-                AppScreen.DELIVERY -> DeliveryScreen(
-                    orders = state.orders,
-                    onStatus = viewModel::changeOrderStatus,
-                    onPix = viewModel::requestPix,
-                    onNfc = viewModel::requestNfc,
-                )
+                AppScreen.DELIVERY -> DeliveryScreen(state.orders, viewModel::changeOrderStatus, viewModel::requestPix, viewModel::requestNfc)
                 AppScreen.EVENTS -> EventsScreen(onScan)
-                AppScreen.PROFILE -> ProfileScreen(state, viewModel::savePin, viewModel::setBiometric, viewModel::logout)
+                AppScreen.PROFILE -> EmployeeProfileScreen(state, viewModel::savePin, viewModel::setBiometric, viewModel::closeShift, viewModel::logout)
             }
             if (state.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
         }
     }
 
-    state.qr?.let { qr ->
-        QrResultDialog(qr, onDismiss = viewModel::clearQr, onCheckIn = viewModel::checkInCurrentQr)
-    }
+    state.qr?.let { QrResultDialog(it, viewModel::clearQr, viewModel::checkInCurrentQr) }
 }
