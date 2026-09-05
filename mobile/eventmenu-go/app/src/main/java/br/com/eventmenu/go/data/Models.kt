@@ -30,6 +30,18 @@ data class KitchenTicket(
     val items: List<KitchenItem>,
 )
 
+data class RestaurantTable(
+    val id: Int,
+    val name: String,
+    val seats: Int,
+    val status: String,
+    val tabId: Int?,
+    val tabLabel: String,
+    val openedAt: String,
+    val tabTotalCents: Int,
+    val unpaidCents: Int,
+)
+
 data class Product(
     val id: Int,
     val categoryId: Int?,
