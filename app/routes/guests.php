@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use EventMenu\Core\Auth;
+use EventMenu\Core\Database;
 use EventMenu\Core\Security;
 
 Auth::requirePermission('guests.manage');$tenantId=em_require_tenant();$ownPromoterId=null;if(Auth::role()==='promoter'){$x=$pdo->prepare('SELECT id FROM promoters WHERE tenant_id=? AND user_id=? AND active=1');$x->execute([$tenantId,Auth::id()]);$ownPromoterId=$x->fetchColumn();if(!$ownPromoterId){http_response_code(403);exit('Promotor sem cadastro vinculado.');}}
@@ -13,7 +14,8 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         $s=$pdo->prepare('INSERT INTO event_guests (tenant_id,event_id,promoter_id,name,document,phone,plus_ones,status,checkin_code) VALUES (?,?,?,?,?,?,?,"invited",?)');$s->execute([$tenantId,$eventId,$promoterId,$name,trim((string)($_POST['document']??''))?:null,trim((string)($_POST['phone']??''))?:null,max(0,(int)($_POST['plus_ones']??0)),sprintf('%s-%s',str_pad((string)$eventId,4,'0',STR_PAD_LEFT),strtoupper(bin2hex(random_bytes(6))))]);$id=(int)$pdo->lastInsertId();Auth::audit('guest.created','guest',(string)$id);em_flash('ok','Convidado adicionado.');em_go('guests');
     }
     if($action==='checkin'){
-        $code=trim((string)($_POST['code']??''));$pdo->beginTransaction();try{$sql='SELECT * FROM event_guests WHERE tenant_id=? AND checkin_code=?';$args=[$tenantId,$code];if($ownPromoterId){$sql.=' AND promoter_id=?';$args[]=$ownPromoterId;}$sql.=' LIMIT 1 FOR UPDATE';$s=$pdo->prepare($sql);$s->execute($args);$g=$s->fetch();if(!$g)throw new RuntimeException('Convidado não encontrado.');if($g['status']==='checked_in')throw new RuntimeException('Convidado já realizou check-in.');if($g['status']!=='invited')throw new RuntimeException('Convite não está válido.');$pdo->prepare('UPDATE event_guests SET status="checked_in",checked_in_at=NOW(),checked_in_by=? WHERE id=?')->execute([Auth::id(),$g['id']]);$pdo->commit();Auth::audit('guest.checkin','guest',(string)$g['id']);em_flash('ok','Entrada liberada para '.$g['name'].'.');}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();em_flash('error',$e->getMessage());}em_go('guests');
+        $code=trim((string)($_POST['code']??''));
+        try{$g=Database::transaction(function(PDO $tx)use($tenantId,$code,$ownPromoterId):array{$sql='SELECT * FROM event_guests WHERE tenant_id=? AND checkin_code=?';$args=[$tenantId,$code];if($ownPromoterId){$sql.=' AND promoter_id=?';$args[]=$ownPromoterId;}$sql.=' LIMIT 1 FOR UPDATE';$s=$tx->prepare(Database::portableSql($tx,$sql));$s->execute($args);$g=$s->fetch();if(!$g)throw new RuntimeException('Convidado não encontrado.');if($g['status']==='checked_in')throw new RuntimeException('Convidado já realizou check-in.');if($g['status']!=='invited')throw new RuntimeException('Convite não está válido.');$tx->prepare('UPDATE event_guests SET status="checked_in",checked_in_at=CURRENT_TIMESTAMP,checked_in_by=? WHERE id=?')->execute([Auth::id(),$g['id']]);return $g;});Auth::audit('guest.checkin','guest',(string)$g['id']);em_flash('ok','Entrada liberada para '.$g['name'].'.');}catch(Throwable $e){em_flash('error',$e->getMessage());}em_go('guests');
     }
 }
 $events=$pdo->prepare('SELECT id,name,starts_at FROM events WHERE tenant_id=? AND status IN ("draft","published") ORDER BY starts_at DESC');$events->execute([$tenantId]);$events=$events->fetchAll();$promoters=$pdo->prepare('SELECT id,name,code FROM promoters WHERE tenant_id=? AND active=1 ORDER BY name');$promoters->execute([$tenantId]);$promoters=$promoters->fetchAll();
