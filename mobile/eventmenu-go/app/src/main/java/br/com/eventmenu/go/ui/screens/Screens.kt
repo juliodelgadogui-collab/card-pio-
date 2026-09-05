@@ -151,7 +151,7 @@ fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, Str
         "Preparando" -> order.status == "preparing"
         "Prontos" -> order.status == "ready"
         "Delivery" -> order.channel == "delivery"
-        "Finalizados" -> order.status in setOf("completed", "cancelled")
+        "Finalizados" -> order.status in setOf("served", "completed", "cancelled")
         else -> true
     } }
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -214,11 +214,12 @@ fun QrResultDialog(qr: QrResult, onDismiss: () -> Unit, onAction: () -> Unit) {
     val actionLabel = when (qr.type) {
         "ticket", "guest" -> "REALIZAR CHECK-IN"
         "delivery_handoff" -> "CONFIRMAR RECEBIMENTO"
+        "order" -> "ABRIR DESPACHO"
         else -> null
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(when (qr.type) { "ticket" -> "INGRESSO"; "guest" -> "CONVIDADO"; "table" -> "MESA / COMANDA"; "delivery_handoff" -> "REPASSE DO ENTREGADOR"; else -> "QR IDENTIFICADO" }) },
+        title = { Text(when (qr.type) { "ticket" -> "INGRESSO"; "guest" -> "CONVIDADO"; "table" -> "MESA / COMANDA"; "delivery_handoff" -> "REPASSE DO ENTREGADOR"; "order" -> "PEDIDO"; else -> "QR IDENTIFICADO" }) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(qr.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
@@ -227,6 +228,7 @@ fun QrResultDialog(qr: QrResult, onDismiss: () -> Unit, onAction: () -> Unit) {
                 if (qr.status.isNotBlank()) Text("Status: ${qr.status}")
                 Text("Tipo: ${qr.type}")
                 if (qr.type == "delivery_handoff") Text("Ao confirmar, o valor entra no caixa físico aberto e sai da pendência do turno do entregador.")
+                if (qr.type == "order") Text("Abrir o despacho não altera pagamento, status ou entregador automaticamente. O servidor valida a próxima ação separadamente.")
             }
         },
         confirmButton = { if (actionLabel != null) Button(onClick = onAction) { Text(actionLabel) } else TextButton(onClick = onDismiss) { Text("OK") } },
