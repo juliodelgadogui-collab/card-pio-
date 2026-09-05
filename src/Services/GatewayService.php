@@ -20,7 +20,14 @@ final class GatewayService
         $provider=strtolower(trim($provider));
         if(!$tenantId||!in_array($provider,self::PROVIDERS,true)) throw new RuntimeException('Gateway inválido.');
         if($active&&trim($accountReference)==='') throw new RuntimeException('Informe a conta recebedora do gateway.');
-        $stmt=Database::connection()->prepare('INSERT INTO payment_gateways (tenant_id,provider,account_reference,config_encrypted,webhook_secret_encrypted,active) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE account_reference=VALUES(account_reference),config_encrypted=VALUES(config_encrypted),webhook_secret_encrypted=COALESCE(VALUES(webhook_secret_encrypted),webhook_secret_encrypted),active=VALUES(active)');
+
+        $pdo=Database::connection();
+        if(Database::isSqlite($pdo)){
+            $sql='INSERT INTO payment_gateways (tenant_id,provider,account_reference,config_encrypted,webhook_secret_encrypted,active) VALUES (?,?,?,?,?,?) ON CONFLICT(tenant_id,provider) DO UPDATE SET account_reference=excluded.account_reference,config_encrypted=excluded.config_encrypted,webhook_secret_encrypted=COALESCE(excluded.webhook_secret_encrypted,payment_gateways.webhook_secret_encrypted),active=excluded.active';
+        }else{
+            $sql='INSERT INTO payment_gateways (tenant_id,provider,account_reference,config_encrypted,webhook_secret_encrypted,active) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE account_reference=VALUES(account_reference),config_encrypted=VALUES(config_encrypted),webhook_secret_encrypted=COALESCE(VALUES(webhook_secret_encrypted),webhook_secret_encrypted),active=VALUES(active)';
+        }
+        $stmt=$pdo->prepare($sql);
         $stmt->execute([$tenantId,$provider,$accountReference,Crypto::encrypt($config),$webhookSecret!==''?Crypto::encrypt($webhookSecret):null,$active?1:0]);
         Auth::audit('gateway.saved','gateway',$provider,['active'=>$active]);
     }
@@ -50,16 +57,16 @@ final class GatewayService
             $ins=$pdo->prepare('INSERT INTO webhook_events (tenant_id,provider,external_event_id,signature_valid,payload_hash,status) VALUES (?,?,?,1,?,"received")');
             $ins->execute([$tenantId,$provider,$eventId,$hash]);
         }catch(\PDOException $e){
-            if((string)$e->getCode()==='23000') return ['ok'=>true,'duplicate'=>true];
+            if((string)$e->getCode()==='23000'||str_contains(strtolower($e->getMessage()),'unique')) return ['ok'=>true,'duplicate'=>true];
             throw $e;
         }
         try{
             if(!empty($verified['paid'])){
                 (new PaymentService())->confirmVerified($verified);
-                $pdo->prepare('UPDATE webhook_events SET status="processed",processed_at=NOW() WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
+                $pdo->prepare('UPDATE webhook_events SET status="processed",processed_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
                 return ['ok'=>true,'processed'=>true];
             }
-            $pdo->prepare('UPDATE webhook_events SET status="ignored",processed_at=NOW() WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
+            $pdo->prepare('UPDATE webhook_events SET status="ignored",processed_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
             return ['ok'=>true,'processed'=>false];
         }catch(\Throwable $e){
             $pdo->prepare('UPDATE webhook_events SET status="failed" WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
@@ -139,7 +146,7 @@ final class GatewayService
     {
         $name=strtolower($name);
         foreach($headers as $k=>$v){
-            if(strtolower((string)$k)===$name) return is_array($v)?(string)reset($v):(string)$v;
+            if(strtolower((string)$k===$name)) return is_array($v)?(string)reset($v):(string)$v;
         }
         return '';
     }
