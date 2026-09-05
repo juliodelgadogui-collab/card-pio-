@@ -34,6 +34,7 @@ import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.CashScreen
 import br.com.eventmenu.go.ui.screens.DeliveryOperationsScreen
+import br.com.eventmenu.go.ui.screens.DispatchScreen
 import br.com.eventmenu.go.ui.screens.EmployeeProfileScreen
 import br.com.eventmenu.go.ui.screens.EventsScreen
 import br.com.eventmenu.go.ui.screens.HomeScreen
@@ -61,9 +62,10 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         if("orders_create" in permissions)add(AppScreen.POS)
         if(mode==AppMode.OPERATION&&"tables" in permissions)add(AppScreen.TABLES)
         if(mode==AppMode.OPERATION&&"orders_kitchen" in permissions)add(AppScreen.KITCHEN)
+        if(mode==AppMode.OPERATION&&("orders_dispatch" in permissions||"delivery_assign" in permissions))add(AppScreen.DISPATCH)
         if(mode==AppMode.DELIVERY||("orders_view" in permissions||"orders_create" in permissions||"orders_manage" in permissions))add(AppScreen.ORDERS)
         if("cash" in permissions)add(AppScreen.CASH)
-        if(mode==AppMode.DELIVERY||"delivery_assign" in permissions)add(AppScreen.DELIVERY)
+        if(mode==AppMode.DELIVERY)add(AppScreen.DELIVERY)
         if(mode==AppMode.EVENTS)add(AppScreen.EVENTS)
         add(AppScreen.PROFILE)
     }.distinct()
@@ -77,6 +79,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.TABLES->Icons.Default.Restaurant
                 AppScreen.ORDERS->Icons.Default.ReceiptLong
                 AppScreen.KITCHEN->Icons.Default.Restaurant
+                AppScreen.DISPATCH->Icons.Default.DeliveryDining
                 AppScreen.CASH->Icons.Default.PointOfSale
                 AppScreen.DELIVERY->Icons.Default.DeliveryDining
                 AppScreen.EVENTS->Icons.Default.ConfirmationNumber
@@ -92,6 +95,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.TABLES->TablesScreen(state.tables,"orders_create" in permissions,viewModel::refreshTables,viewModel::openTable,viewModel::closeTable,viewModel::orderForTable)
                 AppScreen.ORDERS->OrdersScreen(state.orders,viewModel::refreshOrders,viewModel::changeOrderStatus)
                 AppScreen.KITCHEN->KitchenScreen(state.kitchenTickets,viewModel::refreshKitchen,viewModel::kitchenStatus)
+                AppScreen.DISPATCH->DispatchScreen(state.orders,state.deliveryUsers,"delivery_assign" in permissions,viewModel::refreshDispatch,viewModel::dispatchReady,viewModel::assignDelivery)
                 AppScreen.CASH->CashScreen(state.cashOpen,viewModel::openCash,viewModel::closeCash)
                 AppScreen.DELIVERY->DeliveryOperationsScreen(state.orders,state.pixCharge,viewModel::changeOrderStatus,viewModel::requestPix,viewModel::requestNfc,viewModel::collectDeliveryCash,viewModel::pollPixStatus,viewModel::dismissPix)
                 AppScreen.EVENTS->EventsScreen(onScan)
