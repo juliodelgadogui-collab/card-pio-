@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
@@ -36,6 +37,7 @@ import br.com.eventmenu.go.ui.screens.DeliveryOperationsScreen
 import br.com.eventmenu.go.ui.screens.EmployeeProfileScreen
 import br.com.eventmenu.go.ui.screens.EventsScreen
 import br.com.eventmenu.go.ui.screens.HomeScreen
+import br.com.eventmenu.go.ui.screens.KitchenScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
 import br.com.eventmenu.go.ui.screens.ModePickerScreen
 import br.com.eventmenu.go.ui.screens.OrdersScreen
@@ -45,21 +47,19 @@ import br.com.eventmenu.go.ui.screens.ShiftStartScreen
 
 @Composable
 fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: () -> Unit, onTapOn: (TapOnRequest) -> Unit) {
-    val state by viewModel.state.collectAsState(); val snackbar=remember{SnackbarHostState()}
+    val state by viewModel.state.collectAsState();val snackbar=remember{SnackbarHostState()}
     LaunchedEffect(state.error,state.message){(state.error?:state.message)?.let{snackbar.showSnackbar(it)};if(state.error!=null||state.message!=null)viewModel.clearFeedback()}
     LaunchedEffect(state.tapOnRequest){state.tapOnRequest?.let{request->onTapOn(request);viewModel.tapOnLaunchConsumed()}}
-
     if(state.session==null){LoginScreen(state,viewModel::login,viewModel::unlockWithPin,onBiometric);return}
     if(state.mode==null){ModePickerScreen(state.session!!.user.name,state.modes,viewModel::chooseMode);return}
-    if(state.workShift==null||state.workShift?.status!="open"){
-        ShiftStartScreen(state,viewModel::startShift,if(state.modes.size>1)({viewModel.chooseMode(state.modes.first{it!=state.mode})})else null,viewModel::logout);return
-    }
+    if(state.workShift==null||state.workShift?.status!="open"){ShiftStartScreen(state,viewModel::startShift,if(state.modes.size>1)({viewModel.chooseMode(state.modes.first{it!=state.mode})})else null,viewModel::logout);return}
 
     val permissions=state.session!!.permissions;val mode=state.mode!!
     val nav=buildList{
         add(AppScreen.HOME)
         if("orders_create" in permissions)add(AppScreen.POS)
-        if(mode==AppMode.OPERATION||mode==AppMode.DELIVERY)add(AppScreen.ORDERS)
+        if(mode==AppMode.OPERATION&&"orders_kitchen" in permissions)add(AppScreen.KITCHEN)
+        if(mode==AppMode.DELIVERY||("orders_view" in permissions||"orders_create" in permissions||"orders_manage" in permissions))add(AppScreen.ORDERS)
         if("cash" in permissions)add(AppScreen.CASH)
         if(mode==AppMode.DELIVERY||"delivery_assign" in permissions)add(AppScreen.DELIVERY)
         if(mode==AppMode.EVENTS)add(AppScreen.EVENTS)
@@ -70,13 +70,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         floatingActionButton={FloatingActionButton(onClick=onScan){Icon(Icons.Default.QrCodeScanner,contentDescription="Escanear")}},
         bottomBar={NavigationBar{nav.forEach{screen->
             val icon=when(screen){
-                AppScreen.HOME->Icons.Default.Home
-                AppScreen.POS->Icons.Default.ShoppingCart
-                AppScreen.ORDERS->Icons.Default.ReceiptLong
-                AppScreen.CASH->Icons.Default.PointOfSale
-                AppScreen.DELIVERY->Icons.Default.DeliveryDining
-                AppScreen.EVENTS->Icons.Default.ConfirmationNumber
-                AppScreen.PROFILE->Icons.Default.Badge
+                AppScreen.HOME->Icons.Default.Home;AppScreen.POS->Icons.Default.ShoppingCart;AppScreen.ORDERS->Icons.Default.ReceiptLong;AppScreen.KITCHEN->Icons.Default.Restaurant;AppScreen.CASH->Icons.Default.PointOfSale;AppScreen.DELIVERY->Icons.Default.DeliveryDining;AppScreen.EVENTS->Icons.Default.ConfirmationNumber;AppScreen.PROFILE->Icons.Default.Badge
             }
             NavigationBarItem(selected=state.screen==screen,onClick={viewModel.navigate(screen)},icon={Icon(icon,contentDescription=screen.name)})
         }}}
@@ -86,6 +80,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.HOME->HomeScreen(state,viewModel::refreshOrders)
                 AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::newPosSale)
                 AppScreen.ORDERS->OrdersScreen(state.orders,viewModel::refreshOrders,viewModel::changeOrderStatus)
+                AppScreen.KITCHEN->KitchenScreen(state.kitchenTickets,viewModel::refreshKitchen,viewModel::kitchenStatus)
                 AppScreen.CASH->CashScreen(state.cashOpen,viewModel::openCash,viewModel::closeCash)
                 AppScreen.DELIVERY->DeliveryOperationsScreen(state.orders,state.pixCharge,viewModel::changeOrderStatus,viewModel::requestPix,viewModel::requestNfc,viewModel::collectDeliveryCash,viewModel::pollPixStatus,viewModel::dismissPix)
                 AppScreen.EVENTS->EventsScreen(onScan)
