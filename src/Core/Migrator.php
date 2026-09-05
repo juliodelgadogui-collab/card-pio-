@@ -33,16 +33,16 @@ final class Migrator
             $sql = file_get_contents($file);
             if ($sql === false) throw new RuntimeException('Não foi possível ler a migração ' . $name);
 
-            $ownsTransaction = !$pdo->inTransaction();
-            if ($ownsTransaction) $pdo->beginTransaction();
+            $transactional = Database::isSqlite($pdo) && !$pdo->inTransaction();
+            if ($transactional) $pdo->beginTransaction();
             try {
                 $pdo->exec($sql);
                 $stmt = $pdo->prepare('INSERT INTO migrations (migration) VALUES (?)');
                 $stmt->execute([$name]);
-                if ($ownsTransaction) $pdo->commit();
+                if ($transactional) $pdo->commit();
                 $applied[] = $name;
             } catch (\Throwable $e) {
-                if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                if ($transactional && $pdo->inTransaction()) $pdo->rollBack();
                 throw $e;
             }
         }
