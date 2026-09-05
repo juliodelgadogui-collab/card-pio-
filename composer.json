@@ -5,7 +5,9 @@
   "require": {
     "php": "^8.2",
     "ext-curl": "*",
+    "ext-mbstring": "*",
     "ext-openssl": "*",
+    "ext-pdo": "*",
     "stripe/stripe-php": "^18.0",
     "mercadopago/dx-php": "^3.8",
     "endroid/qr-code": "^6.0"
