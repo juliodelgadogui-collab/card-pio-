@@ -50,7 +50,7 @@ fun CashOperationsScreen(
             Text(if (open) "🟢 ABERTO" else "⚪ FECHADO")
         }
 
-        if (open && session != null) {
+        if (open && session != null && summary != null) {
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
