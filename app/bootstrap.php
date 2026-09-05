@@ -26,6 +26,63 @@ function env(string $key, mixed $default = null): mixed
     return ($value === false || $value === null || $value === '') ? $default : $value;
 }
 
+function app_base_path(): string
+{
+    static $resolved = null;
+    if ($resolved !== null) return $resolved;
+
+    $configured = trim((string)env('APP_BASE_PATH', ''));
+    if ($configured !== '') {
+        $configured = '/' . trim(str_replace('\\', '/', $configured), '/');
+        return $resolved = ($configured === '/' ? '' : $configured);
+    }
+
+    if (PHP_SAPI !== 'cli') {
+        $script = str_replace('\\', '/', (string)($_SERVER['SCRIPT_NAME'] ?? ''));
+        if ($script !== '' && str_starts_with($script, '/')) {
+            $dir = str_replace('\\', '/', dirname($script));
+            if ($dir !== '/' && $dir !== '.') return $resolved = rtrim($dir, '/');
+        }
+    }
+    return $resolved = '';
+}
+
+function app_url(string $path = ''): string
+{
+    $base = app_base_path();
+    if ($path === '' || $path === '/') return $base === '' ? '/' : $base . '/';
+    if (preg_match('~^https?://~i', $path)) return $path;
+    return ($base === '' ? '' : $base) . '/' . ltrim($path, '/');
+}
+
+function app_absolute_url(string $path = ''): string
+{
+    $origin = rtrim((string)env('APP_URL', ''), '/');
+    if ($origin === '') return app_url($path);
+    $base = app_base_path();
+    $originPath = (string)(parse_url($origin, PHP_URL_PATH) ?? '');
+    if ($base !== '' && !str_ends_with(rtrim($originPath, '/'), $base)) $origin .= $base;
+    if ($path === '' || $path === '/') return $origin . '/';
+    return $origin . '/' . ltrim($path, '/');
+}
+
+function app_redirect(string $path = ''): never
+{
+    header('Location: ' . app_url($path));
+    exit;
+}
+
+function app_rewrite_root_urls(string $html): string
+{
+    $base = app_base_path();
+    if ($base === '') return $html;
+    return preg_replace_callback(
+        '~\b(href|src|action)=("|\')/(?!/)~i',
+        static fn(array $m): string => $m[1] . '=' . $m[2] . $base . '/',
+        $html
+    ) ?? $html;
+}
+
 $vendor = __DIR__ . '/../vendor/autoload.php';
 if (is_file($vendor)) require_once $vendor;
 
@@ -37,14 +94,17 @@ spl_autoload_register(function (string $class): void {
     if (is_file($path)) require $path;
 });
 
+if (PHP_SAPI !== 'cli' && ob_get_level() === 0) ob_start('app_rewrite_root_urls');
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
     $secure = filter_var(env('SESSION_SECURE', 'false'), FILTER_VALIDATE_BOOL);
+    $cookiePath = app_base_path() === '' ? '/' : app_base_path() . '/';
     session_name((string)env('SESSION_NAME', 'eventmenu_session'));
     session_set_cookie_params([
         'httponly' => true,
         'secure' => $secure,
         'samesite' => 'Lax',
-        'path' => '/',
+        'path' => $cookiePath,
     ]);
     session_start();
 }
