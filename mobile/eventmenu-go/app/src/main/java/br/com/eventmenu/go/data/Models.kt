@@ -99,6 +99,31 @@ data class CashSummary(
     val digital: List<CashDigitalTotal>,
 )
 
+data class EventOverview(
+    val id: Int,
+    val name: String,
+    val venue: String,
+    val address: String,
+    val startsAt: String,
+    val endsAt: String,
+    val status: String,
+    val ticketsPaid: Int,
+    val ticketsCheckedIn: Int,
+    val ticketsReserved: Int,
+    val guestsPending: Int,
+    val guestsCheckedIn: Int,
+    val revenueCents: Int,
+)
+
+data class EventEntry(
+    val id: Int,
+    val type: String,
+    val personName: String,
+    val detail: String,
+    val checkedInAt: String,
+    val operatorName: String,
+)
+
 data class QrResult(
     val type: String,
     val title: String,
