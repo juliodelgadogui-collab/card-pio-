@@ -9,11 +9,14 @@ import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.DeliveryDining
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Restaurant
 import androidx.compose.material.icons.filled.ShoppingCart
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -22,6 +25,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -43,6 +47,7 @@ import br.com.eventmenu.go.ui.screens.KitchenScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
 import br.com.eventmenu.go.ui.screens.ManagerScreen
 import br.com.eventmenu.go.ui.screens.ModePickerScreen
+import br.com.eventmenu.go.ui.screens.NotificationsScreen
 import br.com.eventmenu.go.ui.screens.OrdersScreen
 import br.com.eventmenu.go.ui.screens.PosScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
@@ -62,6 +67,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     val permissions=state.session!!.permissions;val mode=state.mode!!
     val nav=buildList{
         add(AppScreen.HOME)
+        add(AppScreen.NOTIFICATIONS)
         if("reports" in permissions&&mode in setOf(AppMode.OPERATION,AppMode.PAY))add(AppScreen.MANAGER)
         if("orders_create" in permissions)add(AppScreen.POS)
         if(mode==AppMode.OPERATION&&"tables" in permissions)add(AppScreen.TABLES)
@@ -79,6 +85,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         bottomBar={NavigationBar{nav.forEach{screen->
             val icon=when(screen){
                 AppScreen.HOME->Icons.Default.Home
+                AppScreen.NOTIFICATIONS->Icons.Default.Notifications
                 AppScreen.MANAGER->Icons.Default.Assessment
                 AppScreen.POS->Icons.Default.ShoppingCart
                 AppScreen.TABLES,AppScreen.TABLE_ACCOUNT->Icons.Default.Restaurant
@@ -90,12 +97,21 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.EVENTS->Icons.Default.ConfirmationNumber
                 AppScreen.PROFILE->Icons.Default.Badge
             }
-            NavigationBarItem(selected=state.screen==screen,onClick={viewModel.navigate(screen)},icon={Icon(icon,contentDescription=screen.name)})
+            NavigationBarItem(
+                selected=state.screen==screen,
+                onClick={viewModel.navigate(screen)},
+                icon={
+                    if(screen==AppScreen.NOTIFICATIONS&&state.unreadNotifications>0){
+                        BadgedBox(badge={Badge{Text(if(state.unreadNotifications>99)"99+" else state.unreadNotifications.toString())}}){Icon(icon,contentDescription=screen.name)}
+                    }else Icon(icon,contentDescription=screen.name)
+                }
+            )
         }}}
     ){padding->
         Box(Modifier.fillMaxSize().padding(padding)){
             when(state.screen){
                 AppScreen.HOME->HomeScreen(state,viewModel::refreshOrders)
+                AppScreen.NOTIFICATIONS->NotificationsScreen(state.notifications,state.unreadNotifications,viewModel::markNotificationRead,viewModel::markAllNotificationsRead,viewModel::refreshNotifications)
                 AppScreen.MANAGER->ManagerScreen(state.managerOverview,viewModel::refreshManager)
                 AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::finishPosFlow,viewModel::clearSelectedTable)
                 AppScreen.TABLES->TablesScreen(state.tables,"orders_create" in permissions,viewModel::refreshTables,viewModel::openTable,viewModel::closeTable,viewModel::orderForTable,viewModel::openTableAccount)
