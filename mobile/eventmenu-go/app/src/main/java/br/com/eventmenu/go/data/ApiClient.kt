@@ -11,15 +11,21 @@ class ApiException(message: String, val status: Int = 0) : RuntimeException(mess
 
 class ApiClient(private val baseUrl: String, private val deviceId: String) {
     suspend fun get(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("GET", action, token, query, null)
+        request("api.php", "GET", action, token, query, null)
 
     suspend fun post(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("POST", action, token, emptyMap(), body)
+        request("api.php", "POST", action, token, emptyMap(), body)
 
-    private suspend fun request(method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun getGo(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
+        request("api-go.php", "GET", action, token, query, null)
+
+    suspend fun postGo(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
+        request("api-go.php", "POST", action, token, emptyMap(), body)
+
+    private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
         val qs = params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}" }
-        val connection = URL(baseUrl.trimEnd('/') + "/api.php?$qs").openConnection() as HttpURLConnection
+        val connection = URL(baseUrl.trimEnd('/') + "/$path?$qs").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = method
             connection.connectTimeout = 12_000
