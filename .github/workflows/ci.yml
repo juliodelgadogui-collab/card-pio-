@@ -58,6 +58,7 @@ jobs:
           rm -f /tmp/eventmenu-ci.sqlite /tmp/eventmenu-ci.sqlite-shm /tmp/eventmenu-ci.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-super-admin-smoke.php
+          php scripts/ci-operations-smoke.php
 
   mysql:
     runs-on: ubuntu-latest
@@ -100,6 +101,7 @@ jobs:
         run: |
           php scripts/ci-db-smoke.php
           php scripts/ci-super-admin-smoke.php
+          php scripts/ci-operations-smoke.php
 
   package:
     if: github.event_name == 'push'
@@ -129,6 +131,7 @@ jobs:
           test -d "$RUNNER_TEMP/EventMenu-Premium-1/vendor"
           grep -q '^APP_BASE_PATH=/1$' "$RUNNER_TEMP/EventMenu-Premium-1/.env.example"
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: EventMenu-Premium-1
           path: ${{ runner.temp }}/EventMenu-Premium-1
