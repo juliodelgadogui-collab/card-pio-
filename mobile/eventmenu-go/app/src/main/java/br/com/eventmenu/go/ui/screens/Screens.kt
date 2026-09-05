@@ -19,7 +19,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -108,13 +107,14 @@ fun HomeScreen(state: GoState, onRefresh: () -> Unit) {
         item {
             Text("Olá, ${session.user.name}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("${roleLabel(session.user.role)} · ${state.mode?.label}")
-            Text("Turno: ${if (state.cashOpen) "Aberto" else "Fechado / não aplicável"}")
+            Text("Turno operacional: ${if (state.workShift?.status == "open") "Aberto" else "Fechado"}")
         }
         when (state.mode) {
             AppMode.DELIVERY -> {
                 item { MetricCard("Entregas pendentes", delivery.count { it.status == "ready" }.toString()) }
                 item { MetricCard("Em andamento", delivery.count { it.status == "out_for_delivery" }.toString()) }
                 item { MetricCard("Recebido nos pedidos visíveis", money(received)) }
+                item { MetricCard("Dinheiro a entregar ao caixa", money(state.deliveryCash?.outstandingCents ?: 0)) }
                 item { MetricCard("Aguardando pagamento", delivery.count { it.paymentStatus != "paid" }.toString()) }
             }
             AppMode.EVENTS -> {
@@ -122,7 +122,7 @@ fun HomeScreen(state: GoState, onRefresh: () -> Unit) {
                 item { Text("Use o botão central ESCANEAR para ingresso ou convidado.") }
             }
             AppMode.PAY -> {
-                item { MetricCard("Caixa", if (state.cashOpen) "ABERTO" else "FECHADO") }
+                item { MetricCard("Caixa financeiro", if (state.cashOpen) "ABERTO" else "FECHADO") }
                 item { MetricCard("Pedidos pagos visíveis", money(received)) }
                 item { MetricCard("Pendentes", pending.toString()) }
             }
@@ -186,41 +186,15 @@ private fun OrderCard(order: Order, onStatus: (Int, String) -> Unit) {
 }
 
 @Composable
-fun DeliveryScreen(orders: List<Order>, onStatus: (Int, String) -> Unit, onPix: (Int) -> Unit, onNfc: (Int) -> Unit) {
-    val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
-    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Text("Minhas entregas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black) }
-        items(deliveries, key = { it.id }) { order ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("#${order.id} · ${order.customerName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text(order.deliveryAddress)
-                    Text(money(order.totalCents), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                    Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
-                    if (order.status == "ready") Button(onClick = { onStatus(order.id, "out_for_delivery") }, modifier = Modifier.fillMaxWidth()) { Text("RETIRAR PEDIDO") }
-                    if (order.status == "out_for_delivery" && order.paymentStatus != "paid") {
-                        OutlinedButton(onClick = { onPix(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("PIX") }
-                        Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO NFC") }
-                        Text("O Tap On retorna um código de transação. A entrega só é liberada depois que a API EventMenu confirma esse código no PagBank.")
-                    }
-                    if (order.status == "out_for_delivery" && order.paymentStatus == "paid") Button(onClick = { onStatus(order.id, "completed") }, modifier = Modifier.fillMaxWidth()) { Text("CONCLUIR ENTREGA") }
-                }
-            }
-        }
-        if (deliveries.isEmpty()) item { Text("Nenhuma entrega atribuída agora.") }
-    }
-}
-
-@Composable
 fun CashScreen(open: Boolean, onOpen: (Int) -> Unit, onClose: (Int) -> Unit) {
     var amount by remember { mutableStateOf("") }
     val cents = ((amount.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).toInt()
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Caixa", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-        Text(if (open) "🟢 Turno aberto" else "⚪ Turno fechado")
+        Text(if (open) "🟢 Caixa financeiro aberto" else "⚪ Caixa financeiro fechado")
         OutlinedTextField(amount, { amount = it }, label = { Text(if (open) "Dinheiro contado ao fechar" else "Fundo inicial") }, modifier = Modifier.fillMaxWidth())
-        if (open) Button(onClick = { onClose(cents) }, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") }
-        else Button(onClick = { onOpen(cents) }, modifier = Modifier.fillMaxWidth()) { Text("INICIAR TURNO") }
+        if (open) Button(onClick = { onClose(cents) }, modifier = Modifier.fillMaxWidth()) { Text("FECHAR CAIXA") }
+        else Button(onClick = { onOpen(cents) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR CAIXA") }
         Text("PIX e cartão são conciliados pelo servidor; este valor representa somente dinheiro físico.")
     }
 }
@@ -236,30 +210,26 @@ fun EventsScreen(onScan: () -> Unit) {
 }
 
 @Composable
-fun ProfileScreen(state: GoState, onSavePin: (String) -> Unit, onBiometric: (Boolean) -> Unit, onLogout: () -> Unit) {
-    val user = state.session?.user ?: return
-    var pin by remember { mutableStateOf("") }
-    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(user.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-        Text(roleLabel(user.role)); Text(user.email); Text("Modo atual: ${state.mode?.label}")
-        HorizontalDivider()
-        Text("Segurança deste aparelho", style = MaterialTheme.typography.titleMedium)
-        OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(8) }, label = { Text("Novo PIN (4 a 8 dígitos)") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        OutlinedButton(onClick = { onSavePin(pin); pin = "" }, enabled = pin.length >= 4, modifier = Modifier.fillMaxWidth()) { Text("SALVAR PIN") }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Entrar com biometria"); Switch(checked = state.biometricEnabled, onCheckedChange = onBiometric) }
-        Text("PIN e biometria desbloqueiam o token local. A API continua validando usuário, empresa, aparelho e permissões.")
-        Spacer(Modifier.weight(1f))
-        OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("SAIR DO APP") }
+fun QrResultDialog(qr: QrResult, onDismiss: () -> Unit, onAction: () -> Unit) {
+    val actionLabel = when (qr.type) {
+        "ticket", "guest" -> "REALIZAR CHECK-IN"
+        "delivery_handoff" -> "CONFIRMAR RECEBIMENTO"
+        else -> null
     }
-}
-
-@Composable
-fun QrResultDialog(qr: QrResult, onDismiss: () -> Unit, onCheckIn: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(when (qr.type) { "ticket" -> "INGRESSO"; "guest" -> "CONVIDADO"; "table" -> "MESA / COMANDA"; else -> "QR IDENTIFICADO" }) },
-        text = { Column { Text(qr.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Tipo: ${qr.type}") } },
-        confirmButton = { if (qr.type in setOf("ticket", "guest")) Button(onClick = onCheckIn) { Text("REALIZAR CHECK-IN") } else TextButton(onClick = onDismiss) { Text("OK") } },
+        title = { Text(when (qr.type) { "ticket" -> "INGRESSO"; "guest" -> "CONVIDADO"; "table" -> "MESA / COMANDA"; "delivery_handoff" -> "REPASSE DO ENTREGADOR"; else -> "QR IDENTIFICADO" }) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(qr.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                if (qr.subtitle.isNotBlank()) Text(qr.subtitle)
+                qr.amountCents?.let { Text(money(it), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black) }
+                if (qr.status.isNotBlank()) Text("Status: ${qr.status}")
+                Text("Tipo: ${qr.type}")
+                if (qr.type == "delivery_handoff") Text("Ao confirmar, o valor entra no caixa físico aberto e sai da pendência do turno do entregador.")
+            }
+        },
+        confirmButton = { if (actionLabel != null) Button(onClick = onAction) { Text(actionLabel) } else TextButton(onClick = onDismiss) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("FECHAR") } },
     )
 }
