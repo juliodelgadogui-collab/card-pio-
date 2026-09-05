@@ -81,7 +81,6 @@ final class PaymentService
                 if ((string)$account !== (string)$verified['account_reference']) throw new RuntimeException('Conta do recebedor divergente.');
             }
 
-            // Inclui failed/cancelled para recuperar cobranças que o provedor confirmou depois de timeout local.
             $find = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND provider=? AND status IN ("created","pending","authorized","paid","duplicate_paid","failed","cancelled") ORDER BY id DESC LIMIT 1 FOR UPDATE'));
             $find->execute([$tenantId, $orderId, $provider]);
             $payment = $find->fetch();
@@ -93,7 +92,6 @@ final class PaymentService
             $dupe->execute([$provider, (string)$verified['provider_payment_id'], $payment['id']]);
             if ($dupe->fetchColumn()) throw new RuntimeException('Transação do provedor já vinculada a outra cobrança.');
 
-            // Se outra cobrança do mesmo pedido já foi paga, registra a chegada tardia sem repetir efeitos do pedido.
             $alreadyPaid = $pdo->prepare(Database::portableSql($pdo, 'SELECT id,provider,provider_payment_id FROM payments WHERE tenant_id=? AND order_id=? AND status="paid" AND id<>? ORDER BY id LIMIT 1 FOR UPDATE'));
             $alreadyPaid->execute([$tenantId, $orderId, $payment['id']]);
             if ($winner = $alreadyPaid->fetch()) {
@@ -113,7 +111,6 @@ final class PaymentService
                 return;
             }
 
-            // Proteção adicional para pedidos marcados pagos por um fluxo que não gerou payment row (ex.: ingresso gratuito).
             if ($order['payment_status'] === 'paid') throw new RuntimeException('Pedido já está pago e não aceita uma nova confirmação financeira.');
 
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="paid",verified_at=CURRENT_TIMESTAMP,raw_payload=? WHERE id=?')->execute([
@@ -123,20 +120,7 @@ final class PaymentService
             ]);
             $pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=?')->execute([$orderId]);
 
-            $items = $pdo->prepare('SELECT oi.product_id,oi.quantity,p.track_stock FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=?');
-            $items->execute([$orderId]);
-            foreach ($items->fetchAll() as $item) {
-                if (!$item['product_id'] || !(int)$item['track_stock']) continue;
-                $key = 'payment:' . $payment['id'] . ':product:' . $item['product_id'];
-                $check = $pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=?');
-                $check->execute([$tenantId, $key]);
-                if ($check->fetchColumn()) continue;
-                $qty = (float)$item['quantity'];
-                $update = $pdo->prepare('UPDATE products SET stock_qty=stock_qty-? WHERE id=? AND tenant_id=? AND stock_qty>=?');
-                $update->execute([$qty, $item['product_id'], $tenantId, $qty]);
-                if ($update->rowCount() !== 1) throw new RuntimeException('Estoque insuficiente.');
-                $pdo->prepare('INSERT INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key) VALUES (?,?,?,"out",?,?)')->execute([$tenantId, $item['product_id'], $orderId, $qty, $key]);
-            }
+            (new StockReservationService())->consumeForPayment($pdo,$tenantId,$orderId,(int)$payment['id']);
 
             $tickets = $pdo->prepare(Database::portableSql($pdo, 'SELECT batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="reserved" GROUP BY batch_id FOR UPDATE'));
             $tickets->execute([$tenantId, $orderId]);
