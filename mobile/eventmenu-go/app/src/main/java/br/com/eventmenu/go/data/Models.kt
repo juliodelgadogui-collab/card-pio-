@@ -1,27 +1,10 @@
 package br.com.eventmenu.go.data
 
-data class AppUser(
-    val id: Int,
-    val tenantId: Int,
-    val name: String,
-    val email: String,
-    val role: String,
-)
+data class AppUser(val id: Int, val tenantId: Int, val name: String, val email: String, val role: String)
 
-data class WorkShift(
-    val id: Int,
-    val mode: String,
-    val status: String,
-    val startedAt: String,
-    val endedAt: String? = null,
-)
+data class WorkShift(val id: Int, val mode: String, val status: String, val startedAt: String, val endedAt: String? = null)
 
-data class Session(
-    val user: AppUser,
-    val permissions: Set<String>,
-    val modes: List<AppMode> = emptyList(),
-    val shift: WorkShift? = null,
-)
+data class Session(val user: AppUser, val permissions: Set<String>, val modes: List<AppMode> = emptyList(), val shift: WorkShift? = null)
 
 data class Order(
     val id: Int,
@@ -35,10 +18,14 @@ data class Order(
     val assignedDeliveryUserId: Int? = null,
 )
 
-data class QrResult(
-    val type: String,
-    val title: String,
-    val raw: String,
+data class QrResult(val type: String, val title: String, val raw: String)
+
+data class PixCharge(
+    val paymentId: Int,
+    val orderId: Int,
+    val amountCents: Int,
+    val copyPaste: String,
+    val expiresAt: String,
 )
 
 data class TapOnRequest(
@@ -56,8 +43,5 @@ enum class AppMode(val wire: String, val label: String, val emoji: String) {
     DELIVERY("delivery", "Delivery", "🛵"),
     EVENTS("events", "Eventos", "🎟"),
     PAY("pay", "Pay", "💳");
-
-    companion object {
-        fun fromWire(value: String): AppMode? = entries.firstOrNull { it.wire == value }
-    }
+    companion object { fun fromWire(value: String): AppMode? = entries.firstOrNull { it.wire == value } }
 }
