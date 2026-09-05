@@ -32,7 +32,7 @@ import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.MainViewModel
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
-import br.com.eventmenu.go.ui.screens.CashScreen
+import br.com.eventmenu.go.ui.screens.CashOperationsScreen
 import br.com.eventmenu.go.ui.screens.DeliveryOperationsScreen
 import br.com.eventmenu.go.ui.screens.DispatchScreen
 import br.com.eventmenu.go.ui.screens.EmployeeProfileScreen
@@ -96,7 +96,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.ORDERS->OrdersScreen(state.orders,viewModel::refreshOrders,viewModel::changeOrderStatus)
                 AppScreen.KITCHEN->KitchenScreen(state.kitchenTickets,viewModel::refreshKitchen,viewModel::kitchenStatus)
                 AppScreen.DISPATCH->DispatchScreen(state.orders,state.deliveryUsers,"delivery_assign" in permissions,state.dispatchFocusOrderId,viewModel::refreshDispatch,viewModel::dispatchReady,viewModel::assignDelivery)
-                AppScreen.CASH->CashScreen(state.cashOpen,viewModel::openCash,viewModel::closeCash)
+                AppScreen.CASH->CashOperationsScreen(state.cashOpen,state.cashSummary,viewModel::openCash,viewModel::addCashSupply,viewModel::addCashWithdrawal,viewModel::closeCash,viewModel::refreshCash)
                 AppScreen.DELIVERY->DeliveryOperationsScreen(state.orders,state.pixCharge,viewModel::changeOrderStatus,viewModel::requestPix,viewModel::requestNfc,viewModel::collectDeliveryCash,viewModel::pollPixStatus,viewModel::dismissPix)
                 AppScreen.EVENTS->EventsScreen(onScan)
                 AppScreen.PROFILE->EmployeeProfileScreen(state,viewModel::savePin,viewModel::setBiometric,viewModel::closeShift,viewModel::createCashHandoff,viewModel::dismissCashHandoff,viewModel::refreshDeliveryCash,viewModel::logout)
