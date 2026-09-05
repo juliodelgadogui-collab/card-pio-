@@ -9,6 +9,7 @@ use EventMenu\Core\PermissionCatalog;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DeliveryCashService;
 use EventMenu\Services\NativePixService;
+use EventMenu\Services\PosPaymentService;
 use EventMenu\Services\WorkShiftService;
 
 header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store, private, max-age=0');header('X-Content-Type-Options: nosniff');header('Referrer-Policy: no-referrer');
@@ -25,7 +26,11 @@ try{
     if($action==='shift-open'){go_method('POST');$body=go_body();go_out(['ok'=>true,'shift'=>$shift->open((string)($body['mode']??''),$deviceId,(string)($body['notes']??''))],201);}
     if($action==='shift-close'){go_method('POST');$body=go_body();go_out(['ok'=>true,'shift'=>$shift->close((string)($body['notes']??''))]);}
     if($action==='shift-summary'){$id=(int)($_GET['shift_id']??0);go_out(['ok'=>true,'summary'=>$shift->summary($id?:null)]);}
-    if($action==='pix-create'){go_method('POST');$body=go_body();$pix=(new NativePixService())->create((int)($body['order_id']??0),(string)($body['tax_id']??''));go_out(['ok'=>true,'pix'=>$pix],201);}
+
+    if($action==='pix-create'){go_method('POST');$body=go_body();$amount=isset($body['amount_cents'])?(int)$body['amount_cents']:null;$pix=(new NativePixService())->create((int)($body['order_id']??0),(string)($body['tax_id']??''),$amount);go_out(['ok'=>true,'pix'=>$pix],201);}
+    $posPayment=new PosPaymentService();
+    if($action==='payment-status'){$id=(int)($_GET['order_id']??0);go_out(['ok'=>true,'payment'=>$posPayment->status($id)]);}
+    if($action==='payment-cash'){go_method('POST');$body=go_body();go_out(['ok'=>true,'payment'=>$posPayment->cash((int)($body['order_id']??0),(int)($body['amount_cents']??0),(string)($body['idempotency_key']??''))]);}
 
     $deliveryCash=new DeliveryCashService();
     if($action==='delivery-cash-collect'){go_method('POST');$body=go_body();go_out(['ok'=>true,'receipt'=>$deliveryCash->collect((int)($body['order_id']??0),(int)($body['received_cents']??0))]);}
