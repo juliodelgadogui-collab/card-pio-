@@ -45,6 +45,7 @@ import br.com.eventmenu.go.ui.screens.OrdersScreen
 import br.com.eventmenu.go.ui.screens.PosScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
 import br.com.eventmenu.go.ui.screens.ShiftStartScreen
+import br.com.eventmenu.go.ui.screens.TableAccountScreen
 import br.com.eventmenu.go.ui.screens.TablesScreen
 
 @Composable
@@ -76,7 +77,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
             val icon=when(screen){
                 AppScreen.HOME->Icons.Default.Home
                 AppScreen.POS->Icons.Default.ShoppingCart
-                AppScreen.TABLES->Icons.Default.Restaurant
+                AppScreen.TABLES,AppScreen.TABLE_ACCOUNT->Icons.Default.Restaurant
                 AppScreen.ORDERS->Icons.Default.ReceiptLong
                 AppScreen.KITCHEN->Icons.Default.Restaurant
                 AppScreen.DISPATCH->Icons.Default.DeliveryDining
@@ -91,8 +92,9 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         Box(Modifier.fillMaxSize().padding(padding)){
             when(state.screen){
                 AppScreen.HOME->HomeScreen(state,viewModel::refreshOrders)
-                AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::newPosSale,viewModel::clearSelectedTable)
-                AppScreen.TABLES->TablesScreen(state.tables,"orders_create" in permissions,viewModel::refreshTables,viewModel::openTable,viewModel::closeTable,viewModel::orderForTable)
+                AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::finishPosFlow,viewModel::clearSelectedTable)
+                AppScreen.TABLES->TablesScreen(state.tables,"orders_create" in permissions,viewModel::refreshTables,viewModel::openTable,viewModel::closeTable,viewModel::orderForTable,viewModel::openTableAccount)
+                AppScreen.TABLE_ACCOUNT->TableAccountScreen(state.tableAccount,"payments" in permissions,viewModel::receiveTableOrder,viewModel::refreshTableAccount,viewModel::closeTableAccount)
                 AppScreen.ORDERS->OrdersScreen(state.orders,viewModel::refreshOrders,viewModel::changeOrderStatus)
                 AppScreen.KITCHEN->KitchenScreen(state.kitchenTickets,viewModel::refreshKitchen,viewModel::kitchenStatus)
                 AppScreen.DISPATCH->DispatchScreen(state.orders,state.deliveryUsers,"delivery_assign" in permissions,state.dispatchFocusOrderId,viewModel::refreshDispatch,viewModel::dispatchReady,viewModel::assignDelivery)
