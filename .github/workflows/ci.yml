@@ -1,0 +1,90 @@
+name: EventMenu CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_mysql, pdo_sqlite
+          coverage: none
+      - name: Validate Composer
+        run: composer validate --strict
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: PHP syntax
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+  sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_sqlite
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: SQLite smoke test
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: ci-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-ci.sqlite
+          SESSION_NAME: eventmenu_ci_sqlite
+        run: |
+          rm -f /tmp/eventmenu-ci.sqlite /tmp/eventmenu-ci.sqlite-shm /tmp/eventmenu-ci.sqlite-wal
+          php scripts/ci-db-smoke.php
+
+  mysql:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: eventmenu
+          MYSQL_USER: eventmenu
+          MYSQL_PASSWORD: eventmenu
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_mysql
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: MySQL smoke test
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: ci-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: eventmenu
+          DB_USERNAME: eventmenu
+          DB_PASSWORD: eventmenu
+          SESSION_NAME: eventmenu_ci_mysql
+        run: php scripts/ci-db-smoke.php
