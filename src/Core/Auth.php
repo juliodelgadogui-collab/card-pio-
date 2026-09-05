@@ -96,8 +96,8 @@ final class Auth
     {
         $role=self::role();if($role==='super_admin')return true;
         $map=[
-            'admin'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','payments.manage','refunds.manage','cash.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage'],
-            'manager'=>['dashboard','catalog.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','payments.manage','refunds.manage','cash.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign'],
+            'admin'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','payments.manage','refunds.manage','cash.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage'],
+            'manager'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','payments.manage','refunds.manage','cash.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign'],
             'cashier'=>['dashboard','orders.manage','orders.view','orders.create','payments.manage','cash.manage','customers.manage','tables.manage'],
             'waiter'=>['dashboard','orders.create','orders.view','tables.manage'],
             'kitchen'=>['dashboard','orders.kitchen'],
