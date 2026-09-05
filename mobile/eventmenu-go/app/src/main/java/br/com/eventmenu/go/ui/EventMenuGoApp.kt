@@ -38,6 +38,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.MainViewModel
+import br.com.eventmenu.go.ManagerActionsViewModel
 import br.com.eventmenu.go.ProfileSummaryViewModel
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
@@ -66,10 +67,16 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     val app = LocalContext.current.applicationContext as EventMenuGoApplication
     val profileViewModel: ProfileSummaryViewModel = composeViewModel(factory = ProfileSummaryViewModel.Factory(app.repository))
     val profileState by profileViewModel.state.collectAsState()
+    val managerActionsViewModel: ManagerActionsViewModel = composeViewModel(factory = ManagerActionsViewModel.Factory(app.managerRepository))
+    val managerActionState by managerActionsViewModel.state.collectAsState()
 
     LaunchedEffect(state.error, state.message) {
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
         if (state.error != null || state.message != null) viewModel.clearFeedback()
+    }
+    LaunchedEffect(managerActionState.error, managerActionState.message) {
+        (managerActionState.error ?: managerActionState.message)?.let { snackbar.showSnackbar(it) }
+        if (managerActionState.error != null || managerActionState.message != null) managerActionsViewModel.clearFeedback()
     }
     LaunchedEffect(state.tapOnRequest) {
         state.tapOnRequest?.let { request -> onTapOn(request); viewModel.tapOnLaunchConsumed() }
@@ -77,6 +84,14 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     LaunchedEffect(state.workShift?.id) { profileViewModel.bindShift(state.workShift?.id) }
     LaunchedEffect(state.screen, state.workShift?.id) {
         if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) profileViewModel.refresh()
+        if (state.screen == AppScreen.MANAGER && state.workShift?.id != null) managerActionsViewModel.refresh()
+    }
+    LaunchedEffect(managerActionState.changeVersion) {
+        if (managerActionState.changeVersion > 0) {
+            viewModel.refreshManager()
+            viewModel.refreshOrders()
+            viewModel.refreshNotifications()
+        }
     }
 
     if (state.session == null) { LoginScreen(state, viewModel::login, viewModel::unlockWithPin, onBiometric); return }
@@ -142,7 +157,19 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
             when (state.screen) {
                 AppScreen.HOME -> HomeScreen(state, viewModel::refreshOrders)
                 AppScreen.NOTIFICATIONS -> NotificationsScreen(state.notifications, state.unreadNotifications, viewModel::markNotificationRead, viewModel::markAllNotificationsRead, viewModel::refreshNotifications)
-                AppScreen.MANAGER -> ManagerScreen(state.managerOverview, viewModel::refreshManager)
+                AppScreen.MANAGER -> ManagerScreen(
+                    overview = state.managerOverview,
+                    details = managerActionState.details,
+                    loading = managerActionState.loading,
+                    canTransferDelivery = "delivery_assign" in permissions,
+                    canCancelOrder = "orders_manage" in permissions,
+                    onTransferDelivery = managerActionsViewModel::transferDelivery,
+                    onCancelOrder = managerActionsViewModel::cancelOrder,
+                    onRefresh = {
+                        viewModel.refreshManager()
+                        managerActionsViewModel.refresh()
+                    },
+                )
                 AppScreen.POS -> PosScreen(state, viewModel::addProduct, viewModel::removeProduct, viewModel::clearCart, viewModel::createPosOrder, viewModel::payPosCash, viewModel::requestPosPix, viewModel::requestPosNfc, viewModel::refreshPosPayment, viewModel::finishPosFlow, viewModel::clearSelectedTable)
                 AppScreen.TABLES -> TablesScreen(state.tables, "orders_create" in permissions, viewModel::refreshTables, viewModel::openTable, viewModel::closeTable, viewModel::orderForTable, viewModel::openTableAccount)
                 AppScreen.TABLE_ACCOUNT -> TableAccountScreen(state.tableAccount, "payments" in permissions, viewModel::receiveTableOrder, viewModel::refreshTableAccount, viewModel::closeTableAccount)
