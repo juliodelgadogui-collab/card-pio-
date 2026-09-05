@@ -53,7 +53,10 @@ final class OrderService
                 if($order['channel']!=='delivery')throw new RuntimeException('Pedido não é de delivery.');
             }
 
-            if($target==='cancelled'){
+            if($target==='confirmed'){
+                // Aceite operacional transforma a reserva temporária do pedido público em reserva sem expiração.
+                $pdo->prepare('UPDATE stock_reservations SET expires_at=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);
+            }elseif($target==='cancelled'){
                 (new StockReservationService())->release($pdo,$tenantId,$orderId);
             }
             $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$target,$orderId,$tenantId]);
