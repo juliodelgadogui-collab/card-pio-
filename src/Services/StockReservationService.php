@@ -27,9 +27,15 @@ final class StockReservationService
 
     public function consumeForPayment(PDO $pdo,int $tenantId,int $orderId,int $paymentId):void
     {
+        $this->consumeForSettlement($pdo,$tenantId,$orderId,'payment:'.$paymentId);
+    }
+
+    public function consumeForSettlement(PDO $pdo,int $tenantId,int $orderId,string $settlementKey):void
+    {
+        $settlementKey=trim($settlementKey);if($settlementKey==='')throw new RuntimeException('Chave de liquidação do estoque inválida.');
         $items=$pdo->prepare('SELECT oi.product_id,oi.quantity,p.track_stock,p.name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=?');$items->execute([$orderId]);
         foreach($items->fetchAll() as $item){
-            if(!$item['product_id']||!(int)$item['track_stock'])continue;$productId=(int)$item['product_id'];$qty=(float)$item['quantity'];$key='payment:'.$paymentId.':product:'.$productId;
+            if(!$item['product_id']||!(int)$item['track_stock'])continue;$productId=(int)$item['product_id'];$qty=(float)$item['quantity'];$key=$settlementKey.':product:'.$productId;
             $check=$pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=?');$check->execute([$tenantId,$key]);if($check->fetchColumn())continue;
             $r=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM stock_reservations WHERE tenant_id=? AND order_id=? AND product_id=? FOR UPDATE'));$r->execute([$tenantId,$orderId,$productId]);$reservation=$r->fetch();
             if($reservation&&in_array($reservation['status'],['reserved','consumed'],true)){if($reservation['status']==='reserved')$pdo->prepare('UPDATE stock_reservations SET status="consumed",expires_at=NULL WHERE id=?')->execute([$reservation['id']]);$movementQty=(float)$reservation['quantity'];}
@@ -55,10 +61,8 @@ final class StockReservationService
                 $o=$pdo->prepare(Database::portableSql($pdo,'SELECT id,table_id,tab_id FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$o->execute([$orderId,$tenantId]);$order=$o->fetch();if(!$order)continue;
                 $total+=$this->release($pdo,$tenantId,$orderId);
                 $pdo->prepare('UPDATE orders SET status="cancelled",payment_status=CASE WHEN payment_status="unpaid" THEN "failed" ELSE payment_status END WHERE id=? AND tenant_id=? AND payment_status IN ("unpaid","failed") AND status IN ("draft","pending")')->execute([$orderId,$tenantId]);
-
                 if(!empty($order['tab_id'])&&!empty($order['table_id'])){
                     $tab=$pdo->prepare(Database::portableSql($pdo,'SELECT id,opened_by,label,status FROM tabs WHERE id=? AND tenant_id=? FOR UPDATE'));$tab->execute([$order['tab_id'],$tenantId]);$tabRow=$tab->fetch();
-                    // Só fecha automaticamente comandas criadas pelo próprio QR (sem opened_by).
                     if($tabRow&&$tabRow['status']==='open'&&$tabRow['opened_by']===null&&str_starts_with((string)($tabRow['label']??''),'QR ')){
                         $active=$pdo->prepare('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND tab_id=? AND status<>"cancelled"');$active->execute([$tenantId,$tabRow['id']]);
                         if((int)$active->fetchColumn()===0){$pdo->prepare('UPDATE tabs SET status="closed",closed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$tabRow['id']]);$pdo->prepare('UPDATE restaurant_tables SET status="available" WHERE id=? AND tenant_id=?')->execute([$order['table_id'],$tenantId]);}
