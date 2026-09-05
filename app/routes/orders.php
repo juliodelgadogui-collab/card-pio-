@@ -4,16 +4,15 @@ declare(strict_types=1);
 
 use EventMenu\Core\Auth;
 use EventMenu\Core\Security;
+use EventMenu\Services\OrderService;
 use EventMenu\Services\PaymentService;
 
 Auth::requirePermission('orders.view');$tenantId=em_require_tenant();
 if($_SERVER['REQUEST_METHOD']==='POST'){
     em_post_csrf();$action=(string)($_POST['action']??'');$id=(int)($_POST['id']??0);
     if($action==='status'){
-        Auth::requirePermission('orders.manage');$status=(string)($_POST['status']??'');$allowed=['pending','confirmed','preparing','ready','out_for_delivery','completed','cancelled'];if(!in_array($status,$allowed,true))exit('Status inválido.');
-        $s=$pdo->prepare('SELECT status,payment_status FROM orders WHERE id=? AND tenant_id=?');$s->execute([$id,$tenantId]);$order=$s->fetch();if(!$order)exit('Pedido não encontrado.');
-        if($status==='completed'&&$order['payment_status']!=='paid')exit('Não é permitido finalizar pedido não pago.');
-        $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$status,$id,$tenantId]);Auth::audit('order.status','order',(string)$id,['status'=>$status]);em_flash('ok','Status atualizado.');em_go('orders');
+        Auth::requirePermission('orders.manage');$status=(string)($_POST['status']??'');
+        try{(new OrderService())->changeStatus($id,$status,'panel');em_flash('ok','Status atualizado.');}catch(Throwable $e){em_flash('error',$e->getMessage());}em_go('orders');
     }
     if($action==='assign-delivery'){
         Auth::requirePermission('delivery.assign');$userId=(int)($_POST['delivery_user_id']??0);if($userId){$u=$pdo->prepare('SELECT id FROM users WHERE id=? AND tenant_id=? AND role="delivery" AND status="active"');$u->execute([$userId,$tenantId]);if(!$u->fetchColumn())exit('Entregador inválido.');}
@@ -21,7 +20,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     }
     if($action==='manual-pay'){
         Auth::requirePermission('payments.manage');$s=$pdo->prepare('SELECT total_cents,status,payment_status FROM orders WHERE id=? AND tenant_id=?');$s->execute([$id,$tenantId]);$o=$s->fetch();if(!$o)exit('Pedido não encontrado.');
-        $service=new PaymentService();$service->create($id,'manual','manual:'.$tenantId.':'.$id.':'.bin2hex(random_bytes(8)));$service->confirmVerified(['tenant_id'=>$tenantId,'order_id'=>$id,'provider'=>'manual','provider_payment_id'=>'MANUAL-'.strtoupper(bin2hex(random_bytes(8))),'amount_cents'=>(int)$o['total_cents'],'currency'=>'BRL','account_reference'=>'manual']);Auth::audit('payment.manual','order',(string)$id);em_flash('ok','Pagamento manual confirmado.');em_go('orders');
+        try{$service=new PaymentService();$service->create($id,'manual','manual:'.$tenantId.':'.$id.':'.bin2hex(random_bytes(8)));$service->confirmVerified(['tenant_id'=>$tenantId,'order_id'=>$id,'provider'=>'manual','provider_payment_id'=>'MANUAL-'.strtoupper(bin2hex(random_bytes(8))),'amount_cents'=>(int)$o['total_cents'],'currency'=>'BRL','account_reference'=>'manual']);Auth::audit('payment.manual','order',(string)$id);em_flash('ok','Pagamento manual confirmado.');}catch(Throwable $e){em_flash('error',$e->getMessage());}em_go('orders');
     }
 }
 $sql='SELECT o.*,c.name customer_name,u.name delivery_name,rt.name table_name,t.label tab_label FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN tabs t ON t.id=o.tab_id WHERE o.tenant_id=?';$args=[$tenantId];if(Auth::role()==='delivery'){$sql.=' AND o.assigned_delivery_user_id=?';$args[]=Auth::id();}$sql.=' ORDER BY o.id DESC LIMIT 150';$s=$pdo->prepare($sql);$s->execute($args);$orders=$s->fetchAll();
