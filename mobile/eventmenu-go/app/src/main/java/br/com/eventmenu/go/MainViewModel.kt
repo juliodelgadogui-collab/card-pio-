@@ -8,6 +8,7 @@ import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.QrResult
 import br.com.eventmenu.go.data.Session
+import br.com.eventmenu.go.data.TapOnRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +31,7 @@ data class GoState(
     val hasStoredSession: Boolean = false,
     val pinConfigured: Boolean = false,
     val biometricEnabled: Boolean = false,
+    val tapOnRequest: TapOnRequest? = null,
 )
 
 class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
@@ -54,9 +56,7 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
         restoreSession()
     }
 
-    fun restoreSession() = launchBusy {
-        establish(repo.me())
-    }
+    fun restoreSession() = launchBusy { establish(repo.me()) }
 
     private suspend fun establish(session: Session) {
         val modes = repo.modes(session)
@@ -84,8 +84,7 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
 
     fun refreshOrders() = launchBusy { refreshOrdersInternal() }
     private suspend fun refreshOrdersInternal() {
-        val orders = repo.orders()
-        _state.update { it.copy(orders = orders) }
+        _state.update { it.copy(orders = repo.orders()) }
     }
 
     fun changeOrderStatus(orderId: Int, status: String) = launchBusy {
@@ -94,10 +93,7 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
         _state.update { it.copy(message = "Pedido #$orderId atualizado.") }
     }
 
-    fun resolveQr(value: String) = launchBusy {
-        _state.update { it.copy(qr = repo.resolveQr(value)) }
-    }
-
+    fun resolveQr(value: String) = launchBusy { _state.update { it.copy(qr = repo.resolveQr(value)) } }
     fun clearQr() = _state.update { it.copy(qr = null) }
 
     fun checkInCurrentQr() {
@@ -135,6 +131,21 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
         val checkout = json.optJSONObject("checkout")
         _state.update { it.copy(message = checkout?.optString("url")?.takeIf(String::isNotBlank) ?: "Cobrança PIX criada.") }
     }
+
+    fun requestNfc(orderId: Int) = launchBusy {
+        val request = repo.nfcIntent(orderId)
+        _state.update { it.copy(tapOnRequest = request) }
+    }
+
+    fun tapOnLaunchConsumed() = _state.update { it.copy(tapOnRequest = null) }
+
+    fun verifyTapOn(request: TapOnRequest, transactionCode: String) = launchBusy {
+        repo.nfcVerify(request.intentToken, transactionCode)
+        refreshOrdersInternal()
+        _state.update { it.copy(tapOnRequest = null, message = "Cartão aprovado e confirmado pelo servidor.") }
+    }
+
+    fun tapOnCancelled() = _state.update { it.copy(tapOnRequest = null, message = "Pagamento NFC cancelado.") }
 
     fun savePin(pin: String) {
         runCatching { repo.sessionStore.setPin(pin) }
