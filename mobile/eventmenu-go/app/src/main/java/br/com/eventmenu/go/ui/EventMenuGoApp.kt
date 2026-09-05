@@ -36,7 +36,7 @@ import br.com.eventmenu.go.ui.screens.CashOperationsScreen
 import br.com.eventmenu.go.ui.screens.DeliveryOperationsScreen
 import br.com.eventmenu.go.ui.screens.DispatchScreen
 import br.com.eventmenu.go.ui.screens.EmployeeProfileScreen
-import br.com.eventmenu.go.ui.screens.EventsScreen
+import br.com.eventmenu.go.ui.screens.EventModeScreen
 import br.com.eventmenu.go.ui.screens.HomeScreen
 import br.com.eventmenu.go.ui.screens.KitchenScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
@@ -100,7 +100,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.DISPATCH->DispatchScreen(state.orders,state.deliveryUsers,"delivery_assign" in permissions,state.dispatchFocusOrderId,viewModel::refreshDispatch,viewModel::dispatchReady,viewModel::assignDelivery)
                 AppScreen.CASH->CashOperationsScreen(state.cashOpen,state.cashSummary,viewModel::openCash,viewModel::addCashSupply,viewModel::addCashWithdrawal,viewModel::closeCash,viewModel::refreshCash)
                 AppScreen.DELIVERY->DeliveryOperationsScreen(state.orders,state.pixCharge,viewModel::changeOrderStatus,viewModel::requestPix,viewModel::requestNfc,viewModel::collectDeliveryCash,viewModel::pollPixStatus,viewModel::dismissPix)
-                AppScreen.EVENTS->EventsScreen(onScan)
+                AppScreen.EVENTS->EventModeScreen(state.events,state.selectedEventId,state.eventEntries,"tickets" in permissions,"guests" in permissions,viewModel::selectEvent,viewModel::refreshEvents,onScan)
                 AppScreen.PROFILE->EmployeeProfileScreen(state,viewModel::savePin,viewModel::setBiometric,viewModel::closeShift,viewModel::createCashHandoff,viewModel::dismissCashHandoff,viewModel::refreshDeliveryCash,viewModel::logout)
             }
             if(state.loading)CircularProgressIndicator(Modifier.align(Alignment.Center))
