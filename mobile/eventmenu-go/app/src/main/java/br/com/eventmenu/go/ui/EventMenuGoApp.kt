@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Badge
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.DeliveryDining
@@ -40,6 +41,7 @@ import br.com.eventmenu.go.ui.screens.EventModeScreen
 import br.com.eventmenu.go.ui.screens.HomeScreen
 import br.com.eventmenu.go.ui.screens.KitchenScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
+import br.com.eventmenu.go.ui.screens.ManagerScreen
 import br.com.eventmenu.go.ui.screens.ModePickerScreen
 import br.com.eventmenu.go.ui.screens.OrdersScreen
 import br.com.eventmenu.go.ui.screens.PosScreen
@@ -60,6 +62,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     val permissions=state.session!!.permissions;val mode=state.mode!!
     val nav=buildList{
         add(AppScreen.HOME)
+        if("reports" in permissions&&mode in setOf(AppMode.OPERATION,AppMode.PAY))add(AppScreen.MANAGER)
         if("orders_create" in permissions)add(AppScreen.POS)
         if(mode==AppMode.OPERATION&&"tables" in permissions)add(AppScreen.TABLES)
         if(mode==AppMode.OPERATION&&"orders_kitchen" in permissions)add(AppScreen.KITCHEN)
@@ -76,6 +79,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         bottomBar={NavigationBar{nav.forEach{screen->
             val icon=when(screen){
                 AppScreen.HOME->Icons.Default.Home
+                AppScreen.MANAGER->Icons.Default.Assessment
                 AppScreen.POS->Icons.Default.ShoppingCart
                 AppScreen.TABLES,AppScreen.TABLE_ACCOUNT->Icons.Default.Restaurant
                 AppScreen.ORDERS->Icons.Default.ReceiptLong
@@ -92,6 +96,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
         Box(Modifier.fillMaxSize().padding(padding)){
             when(state.screen){
                 AppScreen.HOME->HomeScreen(state,viewModel::refreshOrders)
+                AppScreen.MANAGER->ManagerScreen(state.managerOverview,viewModel::refreshManager)
                 AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::finishPosFlow,viewModel::clearSelectedTable)
                 AppScreen.TABLES->TablesScreen(state.tables,"orders_create" in permissions,viewModel::refreshTables,viewModel::openTable,viewModel::closeTable,viewModel::orderForTable,viewModel::openTableAccount)
                 AppScreen.TABLE_ACCOUNT->TableAccountScreen(state.tableAccount,"payments" in permissions,viewModel::receiveTableOrder,viewModel::refreshTableAccount,viewModel::closeTableAccount)
