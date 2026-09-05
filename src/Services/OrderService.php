@@ -37,7 +37,10 @@ final class OrderService
             if(!in_array($target,self::TRANSITIONS[$current]??[],true))throw new RuntimeException("Transição {$current} → {$target} não permitida.");
 
             if($target==='completed'&&$order['payment_status']!=='paid')throw new RuntimeException('Pedido não pago não pode ser finalizado.');
-            if($target==='cancelled'&&$order['payment_status']==='paid')throw new RuntimeException('Pedido pago exige estorno antes do cancelamento.');
+            if($target==='cancelled'){
+                if($order['payment_status']==='paid')throw new RuntimeException('Pedido pago exige estorno antes do cancelamento.');
+                if($order['payment_status']==='pending')throw new RuntimeException('Há uma cobrança em processamento. Aguarde o gateway antes de cancelar.');
+            }
 
             if($source==='kitchen'){
                 if(!in_array($target,['preparing','ready'],true))throw new RuntimeException('A cozinha só pode iniciar preparo ou marcar como pronto.');
@@ -50,6 +53,9 @@ final class OrderService
                 if($order['channel']!=='delivery')throw new RuntimeException('Pedido não é de delivery.');
             }
 
+            if($target==='cancelled'){
+                (new StockReservationService())->release($pdo,$tenantId,$orderId);
+            }
             $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$target,$orderId,$tenantId]);
             Auth::audit('order.status','order',(string)$orderId,['from'=>$current,'to'=>$target,'source'=>$source]);
             $order['status']=$target;
