@@ -125,6 +125,8 @@ data class EventOverview(
     val ticketsReserved: Int,
     val guestsPending: Int,
     val guestsCheckedIn: Int,
+    val ticketRevenueCents: Int,
+    val barRevenueCents: Int,
     val revenueCents: Int,
 )
 
