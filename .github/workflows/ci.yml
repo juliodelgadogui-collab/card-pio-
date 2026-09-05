@@ -29,6 +29,11 @@ jobs:
         run: composer install --no-interaction --no-progress --prefer-dist
       - name: PHP syntax
         run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: /1 URL smoke test
+        env:
+          APP_BASE_PATH: /1
+          APP_URL: https://example.test
+        run: php scripts/ci-url-smoke.php
 
   sqlite:
     runs-on: ubuntu-latest
