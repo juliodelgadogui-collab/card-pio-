@@ -29,7 +29,7 @@ try{
 
     if($action==='logout'){api_method('POST');$auth->revoke($token);api_out(['ok'=>true]);}
     if($action==='me'){
-        api_out(['ok'=>true,'user'=>$user,'permissions'=>['orders_create'=>Auth::can('orders.create'),'orders_kitchen'=>Auth::can('orders.kitchen'),'orders_delivery'=>Auth::can('orders.delivery'),'cash'=>Auth::can('cash.manage'),'nfc_collect'=>Auth::can('nfc.collect'),'tickets'=>Auth::can('tickets.manage')]]);
+        api_out(['ok'=>true,'user'=>$user,'permissions'=>['orders_create'=>Auth::can('orders.create'),'orders_manage'=>Auth::can('orders.manage'),'orders_kitchen'=>Auth::can('orders.kitchen'),'orders_delivery'=>Auth::can('orders.delivery'),'cash'=>Auth::can('cash.manage'),'nfc_collect'=>Auth::can('nfc.collect'),'tickets'=>Auth::can('tickets.manage')]]);
     }
     if($action==='products'){
         if(!Auth::can('orders.create')&&!Auth::can('catalog.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$s=$pdo->prepare('SELECT id,category_id,name,description,sku,price_cents,stock_qty,track_stock,image_url FROM products WHERE tenant_id=? AND active=1 ORDER BY name');$s->execute([$tenantId]);api_out(['ok'=>true,'products'=>$s->fetchAll()]);
@@ -45,13 +45,15 @@ try{
         $id=(int)($_GET['id']??0);$s=$pdo->prepare('SELECT o.*,c.name customer_name,c.phone customer_phone FROM orders o LEFT JOIN customers c ON c.id=o.customer_id WHERE o.id=? AND o.tenant_id=?');$s->execute([$id,$tenantId]);$order=$s->fetch();if(!$order)api_out(['ok'=>false,'error'=>'Pedido não encontrado.'],404);if(!api_order_allowed($order))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$i=$pdo->prepare('SELECT id,product_id,name_snapshot,unit_price_cents,quantity,total_cents,notes FROM order_items WHERE order_id=? ORDER BY id');$i->execute([$id]);api_out(['ok'=>true,'order'=>$order,'items'=>$i->fetchAll()]);
     }
     if($action==='order-status'){
-        api_method('POST');$body=api_body();$id=(int)($body['order_id']??0);$status=(string)($body['status']??'');$s=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=?');$s->execute([$id,$tenantId]);$order=$s->fetch();if(!$order)api_out(['ok'=>false,'error'=>'Pedido não encontrado.'],404);if(!api_order_allowed($order))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$source=Auth::role()==='delivery'?'delivery':(Auth::role()==='kitchen'?'kitchen':'panel');(new OrderService())->changeStatus($id,$status,$source);api_out(['ok'=>true]);
+        api_method('POST');$body=api_body();$id=(int)($body['order_id']??0);$status=(string)($body['status']??'');$s=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=?');$s->execute([$id,$tenantId]);$order=$s->fetch();if(!$order)api_out(['ok'=>false,'error'=>'Pedido não encontrado.'],404);if(!api_order_allowed($order))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);
+        $role=Auth::role();if($role==='delivery')$source='delivery';elseif($role==='kitchen')$source='kitchen';else{if(!Auth::can('orders.manage'))api_out(['ok'=>false,'error'=>'Sua função pode visualizar/criar pedidos, mas não alterar o status operacional.'],403);$source='panel';}
+        (new OrderService())->changeStatus($id,$status,$source);api_out(['ok'=>true]);
     }
     if($action==='nfc-intent'){
-        api_method('POST');$body=api_body();$result=(new NfcService())->createIntent((int)($body['order_id']??0),$deviceId);api_out(['ok'=>true]+$result,201);
+        api_method('POST');if(!Auth::can('nfc.collect'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$result=(new NfcService())->createIntent((int)($body['order_id']??0),$deviceId);api_out(['ok'=>true]+$result,201);
     }
     if($action==='nfc-verify'){
-        api_method('POST');$body=api_body();$result=(new NfcService())->verifyIntent((string)($body['intent_token']??''),(string)($body['transaction_code']??''),$deviceId);api_out($result);
+        api_method('POST');if(!Auth::can('nfc.collect'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$result=(new NfcService())->verifyIntent((string)($body['intent_token']??''),(string)($body['transaction_code']??''),$deviceId);api_out($result);
     }
     if($action==='ticket-checkin'){
         api_method('POST');if(!Auth::can('tickets.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$result=(new TicketService())->checkIn((string)($body['token']??''));api_out(['ok'=>true,'result'=>$result]);
