@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS refunds (
   provider_refund_id VARCHAR(190) NULL,
   amount_cents INT UNSIGNED NOT NULL,
   currency CHAR(3) NOT NULL DEFAULT 'BRL',
-  status ENUM('requested','provider_succeeded','completed','failed') NOT NULL DEFAULT 'requested',
+  status ENUM('requested','provider_pending','provider_succeeded','completed','failed') NOT NULL DEFAULT 'requested',
   reason VARCHAR(500) NOT NULL,
   idempotency_key VARCHAR(190) NOT NULL,
   provider_payload JSON NULL,
