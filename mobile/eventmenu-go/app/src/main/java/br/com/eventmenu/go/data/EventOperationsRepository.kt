@@ -25,6 +25,8 @@ class EventOperationsRepository(baseUrl: String, deviceId: String, private val s
                         ticketsReserved = e.optInt("tickets_reserved"),
                         guestsPending = e.optInt("guests_pending"),
                         guestsCheckedIn = e.optInt("guests_checked_in"),
+                        ticketRevenueCents = e.optInt("ticket_revenue_cents"),
+                        barRevenueCents = e.optInt("bar_revenue_cents"),
                         revenueCents = e.optInt("revenue_cents"),
                     )
                 )
