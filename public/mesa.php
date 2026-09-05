@@ -6,13 +6,14 @@ require __DIR__ . '/../app/bootstrap.php';
 
 use EventMenu\Core\Database;
 use EventMenu\Core\Security;
+use EventMenu\Core\TenantFeatures;
 
 $pdo = Database::connection();
 $token = trim((string)($_GET['t'] ?? ''));
 $stmt = $pdo->prepare('SELECT rt.*,t.name tenant_name,t.slug tenant_slug FROM restaurant_tables rt JOIN tenants t ON t.id=rt.tenant_id WHERE rt.qr_token=? AND rt.status<>"inactive" AND t.status="active" LIMIT 1');
 $stmt->execute([$token]);
 $table = $stmt->fetch();
-if (!$table) {
+if (!$table || !TenantFeatures::menu((int)($table['tenant_id'] ?? 0))) {
     http_response_code(404);
     exit('Mesa não encontrada ou indisponível.');
 }
