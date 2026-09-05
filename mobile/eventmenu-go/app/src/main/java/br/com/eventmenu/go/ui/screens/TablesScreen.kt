@@ -35,6 +35,7 @@ fun TablesScreen(
     onOpen: (Int, String) -> Unit,
     onClose: (Int) -> Unit,
     onOrder: (RestaurantTable) -> Unit,
+    onAccount: (RestaurantTable) -> Unit,
 ) {
     var opening by remember { mutableStateOf<RestaurantTable?>(null) }
     var closing by remember { mutableStateOf<RestaurantTable?>(null) }
@@ -59,6 +60,9 @@ fun TablesScreen(
                         if (table.tabLabel.isNotBlank()) Text(table.tabLabel)
                         Text("Total da comanda: ${tableMoney(table.tabTotalCents)}")
                         Text("Saldo a receber: ${tableMoney(table.unpaidCents)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Button(onClick = { onAccount(table) }, modifier = Modifier.fillMaxWidth()) {
+                            Text(if (table.unpaidCents > 0) "ABRIR CONTA / RECEBER" else "VER CONTA")
+                        }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (canCreateOrder) Button(onClick = { onOrder(table) }, modifier = Modifier.weight(1f)) { Text("LANÇAR PEDIDO") }
                             OutlinedButton(onClick = { closing = table }, modifier = Modifier.weight(1f)) { Text("FECHAR") }
