@@ -14,8 +14,17 @@ data class Order(
     val customerPhone: String = "",
     val deliveryAddress: String = "",
     val assignedDeliveryUserId: Int? = null,
+    val deliveryName: String = "",
     val createdAt: String = "",
     val tableName: String = "",
+)
+
+data class DeliveryUser(
+    val id: Int,
+    val name: String,
+    val email: String,
+    val onShift: Boolean,
+    val startedAt: String = "",
 )
 
 data class KitchenItem(val name: String, val quantity: Double, val notes: String = "")
