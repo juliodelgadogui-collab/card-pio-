@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use EventMenu\Core\Auth;
+use EventMenu\Core\Database;
 use EventMenu\Core\Security;
 
 Auth::requirePermission('customers.manage');$tenantId=em_require_tenant();
@@ -16,7 +17,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     }
     if($action==='points-adjust'){
         $id=(int)($_POST['id']??0);$points=(int)($_POST['points']??0);if($points===0)exit('Informe pontos diferentes de zero.');$key='adjust:'.Auth::id().':'.$id.':'.bin2hex(random_bytes(8));
-        $pdo->beginTransaction();try{$s=$pdo->prepare('SELECT points FROM customers WHERE id=? AND tenant_id=? FOR UPDATE');$s->execute([$id,$tenantId]);$current=$s->fetchColumn();if($current===false)throw new RuntimeException('Cliente não encontrado.');if((int)$current+$points<0)throw new RuntimeException('Saldo não pode ficar negativo.');$pdo->prepare('INSERT INTO customer_points_movements (tenant_id,customer_id,points,type,idempotency_key) VALUES (?,?,?,"adjustment",?)')->execute([$tenantId,$id,$points,$key]);$pdo->prepare('UPDATE customers SET points=points+? WHERE id=?')->execute([$points,$id]);$pdo->commit();Auth::audit('customer.points_adjusted','customer',(string)$id,['points'=>$points]);em_flash('ok','Pontos ajustados.');}catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();em_flash('error',$e->getMessage());}em_go('customers');
+        try{Database::transaction(function(PDO $tx)use($id,$tenantId,$points,$key):void{$s=$tx->prepare(Database::portableSql($tx,'SELECT points FROM customers WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$id,$tenantId]);$current=$s->fetchColumn();if($current===false)throw new RuntimeException('Cliente não encontrado.');if((int)$current+$points<0)throw new RuntimeException('Saldo não pode ficar negativo.');$tx->prepare('INSERT INTO customer_points_movements (tenant_id,customer_id,points,type,idempotency_key) VALUES (?,?,?,"adjustment",?)')->execute([$tenantId,$id,$points,$key]);$tx->prepare('UPDATE customers SET points=points+? WHERE id=?')->execute([$points,$id]);});Auth::audit('customer.points_adjusted','customer',(string)$id,['points'=>$points]);em_flash('ok','Pontos ajustados.');}catch(Throwable $e){em_flash('error',$e->getMessage());}em_go('customers');
     }
 }
 $editId=(int)($_GET['edit']??0);$edit=null;if($editId){$s=$pdo->prepare('SELECT * FROM customers WHERE id=? AND tenant_id=?');$s->execute([$editId,$tenantId]);$edit=$s->fetch()?:null;}
