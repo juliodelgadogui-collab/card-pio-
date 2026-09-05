@@ -47,6 +47,16 @@ try{
         $sql.=' ORDER BY o.id DESC LIMIT 200';$s=Database::connection()->prepare($sql);$s->execute($args);go_out(['ok'=>true,'orders'=>$s->fetchAll()]);
     }
 
+    if($action==='order-qr-resolve'){
+        if(!Auth::can('orders.dispatch')&&!Auth::can('delivery.assign')&&!Auth::can('orders.view'))throw new RuntimeException('Acesso negado ao QR de pedido.');
+        $current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Use o QR de pedido durante um turno de Operação.');
+        $value=trim((string)($_GET['value']??''));if($value==='')throw new RuntimeException('QR de pedido vazio.');
+        if(preg_match('/[A-Fa-f0-9]{40}/',$value,$m))$value=$m[0];
+        $s=Database::connection()->prepare('SELECT o.id,o.public_token,o.channel,o.status,o.payment_status,o.total_cents,o.delivery_address,o.assigned_delivery_user_id,o.created_at,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.tenant_id=? AND o.public_token=? LIMIT 1');
+        $s->execute([$tenantId,$value]);$order=$s->fetch();if(!$order)go_out(['ok'=>false,'error'=>'Pedido não encontrado para este QR.'],404);
+        go_out(['ok'=>true,'order'=>$order]);
+    }
+
     if($action==='order-status'){
         go_method('POST');$body=go_body();$orderId=(int)($body['order_id']??0);$target=(string)($body['status']??'');$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de alterar pedidos.');
         if($current['mode']==='delivery'){
