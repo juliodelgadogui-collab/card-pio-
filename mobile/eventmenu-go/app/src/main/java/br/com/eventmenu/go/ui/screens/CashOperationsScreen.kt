@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
@@ -96,9 +97,7 @@ fun CashOperationsScreen(
                     }
                 }
             }
-            item {
-                Button(onClick = { closeDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("CONFERIR E FECHAR CAIXA") }
-            }
+            item { Button(onClick = { closeDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("CONFERIR E FECHAR CAIXA") } }
         } else {
             item {
                 Card(Modifier.fillMaxWidth()) {
@@ -127,78 +126,25 @@ fun CashOperationsScreen(
         item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR CAIXA") } }
     }
 
-    if (openingDialog) MoneyDialog(
-        title = "Abrir caixa",
-        valueLabel = "Fundo inicial (R$)",
-        notesLabel = "Observação (opcional)",
-        requireNotes = false,
-        onDismiss = { openingDialog = false },
-        onConfirm = { amount, notes -> openingDialog = false; onOpen(amount, notes) },
-    )
-    if (supplyDialog) MoneyDialog(
-        title = "Suprimento",
-        valueLabel = "Valor que entrou (R$)",
-        notesLabel = "Origem/observação (opcional)",
-        requireNotes = false,
-        onDismiss = { supplyDialog = false },
-        onConfirm = { amount, notes -> supplyDialog = false; onSupply(amount, notes) },
-    )
-    if (withdrawalDialog) MoneyDialog(
-        title = "Sangria",
-        valueLabel = "Valor retirado (R$)",
-        notesLabel = "Motivo da sangria *",
-        requireNotes = true,
-        onDismiss = { withdrawalDialog = false },
-        onConfirm = { amount, notes -> withdrawalDialog = false; onWithdrawal(amount, notes) },
-    )
-    if (closeDialog) MoneyDialog(
-        title = "Conferir fechamento",
-        valueLabel = "Dinheiro contado (R$)",
-        notesLabel = "Observação do fechamento (opcional)",
-        requireNotes = false,
-        hint = "Esperado pelo sistema: ${cashMoney(summary?.expectedCashCents ?: 0)}. Informe o valor realmente contado; a diferença será registrada na auditoria.",
-        onDismiss = { closeDialog = false },
-        onConfirm = { amount, notes -> closeDialog = false; onClose(amount, notes) },
-    )
+    if (openingDialog) MoneyDialog("Abrir caixa","Fundo inicial (R$)","Observação (opcional)",false,onDismiss={openingDialog=false},onConfirm={amount,notes->openingDialog=false;onOpen(amount,notes)})
+    if (supplyDialog) MoneyDialog("Suprimento","Valor que entrou (R$)","Origem/observação (opcional)",false,onDismiss={supplyDialog=false},onConfirm={amount,notes->supplyDialog=false;onSupply(amount,notes)})
+    if (withdrawalDialog) MoneyDialog("Sangria","Valor retirado (R$)","Motivo da sangria *",true,onDismiss={withdrawalDialog=false},onConfirm={amount,notes->withdrawalDialog=false;onWithdrawal(amount,notes)})
+    if (closeDialog) MoneyDialog("Conferir fechamento","Dinheiro contado (R$)","Observação do fechamento (opcional)",false,hint="Esperado pelo sistema: ${cashMoney(summary?.expectedCashCents ?: 0)}. Informe o valor realmente contado; a diferença será registrada na auditoria.",onDismiss={closeDialog=false},onConfirm={amount,notes->closeDialog=false;onClose(amount,notes)})
 }
 
 @Composable
-private fun MoneyDialog(
-    title: String,
-    valueLabel: String,
-    notesLabel: String,
-    requireNotes: Boolean,
-    hint: String = "",
-    onDismiss: () -> Unit,
-    onConfirm: (Int, String) -> Unit,
-) {
-    var value by remember { mutableStateOf("") }
-    var notes by remember { mutableStateOf("") }
-    val cents = ((value.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).toInt()
+private fun MoneyDialog(title:String,valueLabel:String,notesLabel:String,requireNotes:Boolean,hint:String="",onDismiss:()->Unit,onConfirm:(Int,String)->Unit) {
+    var value by remember { mutableStateOf("") };var notes by remember { mutableStateOf("") };val cents=((value.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt()
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(title) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (hint.isNotBlank()) Text(hint)
-                OutlinedTextField(value, { value = it }, label = { Text(valueLabel) }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(notes, { notes = it.take(500) }, label = { Text(notesLabel) }, modifier = Modifier.fillMaxWidth())
-            }
-        },
-        confirmButton = { Button(onClick = { onConfirm(cents, notes.trim()) }, enabled = cents >= 0 && (!requireNotes || notes.isNotBlank()) && (title == "Abrir caixa" || title == "Conferir fechamento" || cents > 0)) { Text("CONFIRMAR") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCELAR") } },
+        onDismissRequest=onDismiss,
+        title={Text(title)},
+        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){if(hint.isNotBlank())Text(hint);OutlinedTextField(value,{value=it},label={Text(valueLabel)},singleLine=true,modifier=Modifier.fillMaxWidth());OutlinedTextField(notes,{notes=it.take(500)},label={Text(notesLabel)},modifier=Modifier.fillMaxWidth())}},
+        confirmButton={Button(onClick={onConfirm(cents,notes.trim())},enabled=cents>=0&&(!requireNotes||notes.isNotBlank())&&(title=="Abrir caixa"||title=="Conferir fechamento"||cents>0)){Text("CONFIRMAR")}},
+        dismissButton={TextButton(onClick=onDismiss){Text("CANCELAR")}},
     )
 }
 
-private fun movementLabel(type: String) = when (type) {
-    "sale" -> "Venda"
-    "supply" -> "Suprimento"
-    "withdrawal" -> "Sangria"
-    "refund" -> "Estorno"
-    "delivery_handoff" -> "Repasse do entregador"
-    "adjustment" -> "Ajuste"
-    else -> type
-}
-private fun methodLabel(method: String) = when (method) { "cash" -> "Dinheiro"; "pix" -> "PIX"; "card" -> "Cartão"; else -> method }
-private fun providerLabel(provider: String) = when (provider) { "pagbank" -> "PagBank"; "stripe" -> "Stripe"; "mercadopago" -> "Mercado Pago"; else -> provider }
-private fun cashMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
+private fun movementLabel(type:String)=when(type){"sale"->"Venda";"supply"->"Suprimento";"withdrawal"->"Sangria";"refund"->"Estorno";"delivery_handoff"->"Repasse do entregador";"adjustment"->"Ajuste";else->type}
+private fun methodLabel(method:String)=when(method){"cash"->"Dinheiro";"pix"->"PIX";"card"->"Cartão";else->method}
+private fun providerLabel(provider:String)=when(provider){"pagbank"->"PagBank";"stripe"->"Stripe";"mercadopago"->"Mercado Pago";else->provider}
+private fun cashMoney(cents:Int)="R$ %.2f".format(cents/100.0).replace('.',',')
