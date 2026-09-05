@@ -18,19 +18,21 @@ final class CheckoutService
         if(in_array($order['status'],['cancelled','completed'],true)||$order['payment_status']==='paid')throw new RuntimeException('Pedido não aceita nova cobrança.');
         if((int)$order['total_cents']<=0)throw new RuntimeException('Pedido com valor inválido.');
         $g=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider=? AND active=1');$g->execute([$order['tenant_id'],$provider]);$gateway=$g->fetch();if(!$gateway)throw new RuntimeException('Forma de pagamento indisponível.');$config=Crypto::decryptJson($gateway['config_encrypted']);
+        $stock=new StockReservationService();
 
         $open=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1');$open->execute([$order['tenant_id'],$order['id']]);$existing=$open->fetch();
-        if($existing){$raw=json_decode((string)($existing['raw_payload']??''),true);if(is_array($raw)&&!empty($raw['_eventmenu_checkout_url']))return ['provider'=>$existing['provider'],'url'=>$raw['_eventmenu_checkout_url'],'payment_id'=>$existing['id'],'reused'=>true];throw new RuntimeException('Já existe uma cobrança em andamento para este pedido.');}
+        if($existing){$raw=json_decode((string)($existing['raw_payload']??''),true);if(is_array($raw)&&!empty($raw['_eventmenu_checkout_url'])){$stock->holdForPayment((int)$order['tenant_id'],(int)$order['id']);return ['provider'=>$existing['provider'],'url'=>$raw['_eventmenu_checkout_url'],'payment_id'=>$existing['id'],'reused'=>true];}throw new RuntimeException('Já existe uma cobrança em andamento para este pedido.');}
 
         $key='public:'.$provider.':'.$order['tenant_id'].':'.$order['id'];
-        try{$ins=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")');$ins->execute([$order['tenant_id'],$order['id'],$provider,$key,$order['total_cents']]);$paymentId=(int)$pdo->lastInsertId();}catch(\PDOException $e){$x=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=?');$x->execute([$order['tenant_id'],$key]);$row=$x->fetch();if($row){$raw=json_decode((string)($row['raw_payload']??''),true);if(is_array($raw)&&!empty($raw['_eventmenu_checkout_url']))return ['provider'=>$row['provider'],'url'=>$raw['_eventmenu_checkout_url'],'payment_id'=>$row['id'],'reused'=>true];}throw $e;}
+        try{$ins=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")');$ins->execute([$order['tenant_id'],$order['id'],$provider,$key,$order['total_cents']]);$paymentId=(int)$pdo->lastInsertId();}catch(\PDOException $e){$x=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=?');$x->execute([$order['tenant_id'],$key]);$row=$x->fetch();if($row){$raw=json_decode((string)($row['raw_payload']??''),true);if(is_array($raw)&&!empty($raw['_eventmenu_checkout_url'])){$stock->holdForPayment((int)$order['tenant_id'],(int)$order['id']);return ['provider'=>$row['provider'],'url'=>$raw['_eventmenu_checkout_url'],'payment_id'=>$row['id'],'reused'=>true];}}throw $e;}
         $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=?')->execute([$order['id']]);
+        $stock->holdForPayment((int)$order['tenant_id'],(int)$order['id']);
         try{
             $result=match($provider){'stripe'=>$this->stripe($order,$gateway,$config,$key),'mercadopago'=>$this->mercadoPago($order,$gateway,$config,$key),'pagbank'=>$this->pagBank($order,$gateway,$config,$key)};
             $payload=$result['raw'];$payload['_eventmenu_checkout_url']=$result['url'];
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="pending",raw_payload=? WHERE id=?')->execute([$result['external_id'],json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$paymentId]);
             return ['provider'=>$provider,'url'=>$result['url'],'payment_id'=>$paymentId,'reused'=>false];
-        }catch(\Throwable $e){$pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=?')->execute([json_encode(['error'=>$e->getMessage()],JSON_UNESCAPED_UNICODE),$paymentId]);$pdo->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND payment_status="pending"')->execute([$order['id']]);throw $e;}
+        }catch(\Throwable $e){$pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=?')->execute([json_encode(['error'=>$e->getMessage()],JSON_UNESCAPED_UNICODE),$paymentId]);$pdo->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND payment_status="pending"')->execute([$order['id']]);$stock->rearmAfterPaymentFailure((int)$order['tenant_id'],(int)$order['id']);throw $e;}
     }
 
     private function stripe(array $order,array $gateway,array $config,string $key): array
