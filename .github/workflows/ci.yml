@@ -97,3 +97,35 @@ jobs:
           DB_PASSWORD: eventmenu
           SESSION_NAME: eventmenu_ci_mysql
         run: php scripts/ci-db-smoke.php
+
+  package:
+    if: github.event_name == 'push'
+    needs: [lint, sqlite, mysql]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_mysql, pdo_sqlite
+          coverage: none
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: Build clean /1 package
+        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-1"
+      - name: Verify package entrypoints
+        run: |
+          test -f "$RUNNER_TEMP/EventMenu-Premium-1/index.php"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-1/install.php"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-1/mesa.php"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-1/webhook.php"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-1/manifest.webmanifest"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-1/sw.js"
+          test -d "$RUNNER_TEMP/EventMenu-Premium-1/vendor"
+          grep -q '^APP_BASE_PATH=/1$' "$RUNNER_TEMP/EventMenu-Premium-1/.env.example"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-1
+          path: ${{ runner.temp }}/EventMenu-Premium-1
+          if-no-files-found: error
+          retention-days: 14
