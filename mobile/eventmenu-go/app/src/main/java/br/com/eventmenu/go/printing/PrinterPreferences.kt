@@ -31,6 +31,18 @@ class PrinterPreferences(context: Context) {
     fun setAutoPrint(enabled: Boolean) = prefs.edit().putBoolean("auto_print", enabled).apply()
     fun setPaperWidth(widthMm: Int) = prefs.edit().putInt("paper_width_mm", if (widthMm == 58) 58 else 80).apply()
     fun clearDevice() = prefs.edit().remove("device_name").remove("device_address").putBoolean("enabled", false).apply()
+
+    fun wasAutoPrinted(orderId: Int): Boolean = orderId > 0 && prefs.getStringSet("auto_printed_orders", emptySet()).orEmpty().contains(orderId.toString())
+
+    fun markAutoPrinted(orderId: Int) {
+        if (orderId < 1) return
+        val current = prefs.getStringSet("auto_printed_orders", emptySet()).orEmpty().toMutableSet()
+        current.add(orderId.toString())
+        if (current.size > 500) {
+            val keep = current.mapNotNull(String::toIntOrNull).sortedDescending().take(300).map(Int::toString).toSet()
+            prefs.edit().putStringSet("auto_printed_orders", keep).apply()
+        } else prefs.edit().putStringSet("auto_printed_orders", current).apply()
+    }
 }
 
 data class PrinterDevice(val name: String, val address: String)
