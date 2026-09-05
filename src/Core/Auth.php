@@ -12,112 +12,81 @@ final class Auth
     {
         $email=mb_strtolower(trim($email));$throttle=new \EventMenu\Services\LoginThrottleService();$key=$throttle->key($email);
         try{$throttle->assertAllowed($key);}catch(RuntimeException){return false;}
-        $pdo = Database::connection();
-        $stmt = $pdo->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.email=? AND u.status="active" LIMIT 1');
-        $stmt->execute([$email]);
-        $user = $stmt->fetch();
-        if (!$user || ($user['tenant_id'] !== null && $user['tenant_status'] !== 'active') || !password_verify($password, $user['password_hash'])) {$throttle->failed($key);return false;}
-        $throttle->succeeded($key);
-        session_regenerate_id(true);
-        unset($_SESSION['acting_tenant_id']);
-        self::setSession($user);
-        $pdo->prepare('UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$user['id']]);
-        self::audit('auth.login','user',(string)$user['id']);
-        return true;
+        $pdo=Database::connection();
+        $stmt=$pdo->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.email=? AND u.status="active" LIMIT 1');
+        $stmt->execute([$email]);$user=$stmt->fetch();
+        if(!$user||($user['tenant_id']!==null&&$user['tenant_status']!=='active')||!password_verify($password,$user['password_hash'])){$throttle->failed($key);return false;}
+        $throttle->succeeded($key);session_regenerate_id(true);unset($_SESSION['acting_tenant_id']);self::setSession($user);
+        $pdo->prepare('UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$user['id']]);self::audit('auth.login','user',(string)$user['id']);return true;
     }
 
-    private static function setSession(array $user): void
+    private static function setSession(array $user):void
     {
-        $_SESSION['user_id']=(int)$user['id'];
-        $_SESSION['tenant_id']=$user['tenant_id']!==null?(int)$user['tenant_id']:null;
-        $_SESSION['role']=$user['role'];
-        $_SESSION['name']=$user['name'];
-        if(($user['role']??'')!=='super_admin') unset($_SESSION['acting_tenant_id']);
+        $_SESSION['user_id']=(int)$user['id'];$_SESSION['tenant_id']=$user['tenant_id']!==null?(int)$user['tenant_id']:null;$_SESSION['role']=$user['role'];$_SESSION['name']=$user['name'];
+        if(($user['role']??'')!=='super_admin')unset($_SESSION['acting_tenant_id']);
     }
 
-    public static function enforceCurrentUser(): void
+    public static function enforceCurrentUser():void
     {
-        if (!self::check()) return;
-        $stmt=Database::connection()->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.id=? LIMIT 1');
-        $stmt->execute([self::id()]);$user=$stmt->fetch();
+        if(!self::check())return;
+        $stmt=Database::connection()->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.id=? LIMIT 1');$stmt->execute([self::id()]);$user=$stmt->fetch();
         if(!$user||$user['status']!=='active'||($user['tenant_id']!==null&&$user['tenant_status']!=='active')){self::logout();\app_redirect('?route=login&blocked=1');}
         self::setSession($user);
-
-        if(self::isSuperAdmin() && isset($_SESSION['acting_tenant_id'])){
-            $tenantId=(int)$_SESSION['acting_tenant_id'];
-            $t=Database::connection()->prepare('SELECT status FROM tenants WHERE id=? LIMIT 1');
-            $t->execute([$tenantId]);
-            $status=$t->fetchColumn();
-            if($status!=='active') unset($_SESSION['acting_tenant_id']);
-        }
+        if(self::isSuperAdmin()&&isset($_SESSION['acting_tenant_id'])){$tenantId=(int)$_SESSION['acting_tenant_id'];$t=Database::connection()->prepare('SELECT status FROM tenants WHERE id=? LIMIT 1');$t->execute([$tenantId]);if($t->fetchColumn()!=='active')unset($_SESSION['acting_tenant_id']);}
     }
 
-    public static function logout(): void
+    public static function logout():void
     {
-        if (self::check()) self::audit('auth.logout','user',(string)self::id());
-        $_SESSION=[];
-        if(ini_get('session.use_cookies')){$p=session_get_cookie_params();setcookie(session_name(),'',time()-42000,$p['path'],$p['domain']??'',(bool)$p['secure'],(bool)$p['httponly']);}
-        session_destroy();
+        if(self::check())self::audit('auth.logout','user',(string)self::id());$_SESSION=[];
+        if(ini_get('session.use_cookies')){$p=session_get_cookie_params();setcookie(session_name(),'',time()-42000,$p['path'],$p['domain']??'',(bool)$p['secure'],(bool)$p['httponly']);}session_destroy();
     }
 
-    public static function check(): bool { return !empty($_SESSION['user_id']); }
-    public static function id(): ?int { return self::check()?(int)$_SESSION['user_id']:null; }
-    public static function role(): ?string { return $_SESSION['role']??null; }
-    public static function name(): string { return (string)($_SESSION['name']??''); }
-    public static function isSuperAdmin(): bool { return self::role()==='super_admin'; }
+    public static function check():bool{return !empty($_SESSION['user_id']);}
+    public static function id():?int{return self::check()?(int)$_SESSION['user_id']:null;}
+    public static function role():?string{return $_SESSION['role']??null;}
+    public static function name():string{return(string)($_SESSION['name']??'');}
+    public static function isSuperAdmin():bool{return self::role()==='super_admin';}
 
-    public static function tenantId(): ?int
+    public static function tenantId():?int
     {
-        if(self::isSuperAdmin()) return isset($_SESSION['acting_tenant_id'])?(int)$_SESSION['acting_tenant_id']:null;
+        if(self::isSuperAdmin())return isset($_SESSION['acting_tenant_id'])?(int)$_SESSION['acting_tenant_id']:null;
         return isset($_SESSION['tenant_id'])?(int)$_SESSION['tenant_id']:null;
     }
 
-    public static function actingTenantId(): ?int
+    public static function actingTenantId():?int{return self::isSuperAdmin()&&isset($_SESSION['acting_tenant_id'])?(int)$_SESSION['acting_tenant_id']:null;}
+
+    public static function actAsTenant(int $tenantId):void
     {
-        return self::isSuperAdmin()&&isset($_SESSION['acting_tenant_id'])?(int)$_SESSION['acting_tenant_id']:null;
+        if(!self::isSuperAdmin())throw new RuntimeException('Apenas o Super ADM pode selecionar uma empresa.');
+        $stmt=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? AND status="active" LIMIT 1');$stmt->execute([$tenantId]);if(!$stmt->fetchColumn())throw new RuntimeException('Empresa indisponível para acesso.');
+        $_SESSION['acting_tenant_id']=$tenantId;self::audit('platform.tenant_selected','tenant',(string)$tenantId);
     }
 
-    public static function actAsTenant(int $tenantId): void
+    public static function clearTenantContext():void
     {
-        if(!self::isSuperAdmin()) throw new RuntimeException('Apenas o Super ADM pode selecionar uma empresa.');
-        $stmt=Database::connection()->prepare('SELECT id FROM tenants WHERE id=? AND status="active" LIMIT 1');
-        $stmt->execute([$tenantId]);
-        if(!$stmt->fetchColumn()) throw new RuntimeException('Empresa indisponível para acesso.');
-        $_SESSION['acting_tenant_id']=$tenantId;
-        self::audit('platform.tenant_selected','tenant',(string)$tenantId);
+        if(!self::isSuperAdmin())return;$previous=self::actingTenantId();unset($_SESSION['acting_tenant_id']);if($previous)self::audit('platform.tenant_left','tenant',(string)$previous);
     }
 
-    public static function clearTenantContext(): void
+    public static function effectivePermissions():array
     {
-        if(!self::isSuperAdmin()) return;
-        $previous=self::actingTenantId();
-        unset($_SESSION['acting_tenant_id']);
-        if($previous) self::audit('platform.tenant_left','tenant',(string)$previous);
+        if(self::isSuperAdmin())return PermissionCatalog::all();
+        $tenantId=self::tenantId();$userId=self::id();$role=(string)self::role();if(!$tenantId||!$userId)return [];
+        return PermissionCatalog::effectiveForUser($tenantId,$userId,$role);
     }
 
-    public static function can(string $permission): bool
+    public static function can(string $permission):bool
     {
-        $role=self::role();if($role==='super_admin')return true;
-        $map=[
-            'admin'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','payments.manage','refunds.manage','cash.manage','gateways.manage','events.manage','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect'],
-            'manager'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','payments.manage','refunds.manage','cash.manage','events.manage','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect'],
-            'cashier'=>['dashboard','orders.manage','orders.view','orders.create','payments.manage','cash.manage','customers.manage','tables.manage','nfc.collect'],
-            'attendant'=>['dashboard','orders.view','orders.create','tickets.manage','guests.manage','customers.manage','tables.manage'],
-            'waiter'=>['dashboard','orders.create','orders.view','tables.manage'],
-            'kitchen'=>['dashboard','orders.kitchen'],
-            'delivery'=>['dashboard','orders.delivery','nfc.collect'],
-            'promoter'=>['dashboard','events.promoter','reports.own','guests.manage'],
-        ];
-        return in_array($permission,$map[$role]??[],true);
+        if(self::isSuperAdmin())return true;
+        return in_array($permission,self::effectivePermissions(),true);
     }
 
-    public static function requirePermission(string $permission): void
+    public static function requirePermission(string $permission):void
     {
-        if(!self::check()) \app_redirect('?route=login');
+        if(!self::check())\app_redirect('?route=login');
         if(!self::can($permission)){http_response_code(403);exit('Acesso negado.');}
     }
 
-    public static function audit(string $action,?string $entityType=null,?string $entityId=null,array $metadata=[]): void
+    public static function audit(string $action,?string $entityType=null,?string $entityId=null,array $metadata=[]):void
     {
         try{$stmt=Database::connection()->prepare('INSERT INTO audit_logs (tenant_id,user_id,action,entity_type,entity_id,ip_address,user_agent,metadata) VALUES (?,?,?,?,?,?,?,?)');$stmt->execute([self::tenantId(),self::id(),$action,$entityType,$entityId,Security::clientIp(),substr((string)($_SERVER['HTTP_USER_AGENT']??''),0,500),$metadata?json_encode($metadata,JSON_UNESCAPED_UNICODE):null]);}catch(\Throwable){}
     }
