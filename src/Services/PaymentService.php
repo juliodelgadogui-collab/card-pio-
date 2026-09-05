@@ -81,16 +81,40 @@ final class PaymentService
                 if ((string)$account !== (string)$verified['account_reference']) throw new RuntimeException('Conta do recebedor divergente.');
             }
 
-            $find = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND provider=? AND status IN ("created","pending","authorized","paid") ORDER BY id DESC LIMIT 1 FOR UPDATE'));
+            // Inclui failed/cancelled para recuperar cobranças que o provedor confirmou depois de timeout local.
+            $find = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND provider=? AND status IN ("created","pending","authorized","paid","duplicate_paid","failed","cancelled") ORDER BY id DESC LIMIT 1 FOR UPDATE'));
             $find->execute([$tenantId, $orderId, $provider]);
             $payment = $find->fetch();
             if (!$payment) throw new RuntimeException('Cobrança local não encontrada.');
-            if ($payment['status'] === 'paid') return;
+            if (in_array($payment['status'], ['paid','duplicate_paid'], true)) return;
             if ((int)$payment['amount_cents'] !== (int)$verified['amount_cents'] || strtoupper((string)$payment['currency']) !== 'BRL') throw new RuntimeException('Cobrança divergente.');
 
             $dupe = $pdo->prepare('SELECT id FROM payments WHERE provider=? AND provider_payment_id=? AND id<>? LIMIT 1');
             $dupe->execute([$provider, (string)$verified['provider_payment_id'], $payment['id']]);
             if ($dupe->fetchColumn()) throw new RuntimeException('Transação do provedor já vinculada a outra cobrança.');
+
+            // Se outra cobrança do mesmo pedido já foi paga, registra a chegada tardia sem repetir efeitos do pedido.
+            $alreadyPaid = $pdo->prepare(Database::portableSql($pdo, 'SELECT id,provider,provider_payment_id FROM payments WHERE tenant_id=? AND order_id=? AND status="paid" AND id<>? ORDER BY id LIMIT 1 FOR UPDATE'));
+            $alreadyPaid->execute([$tenantId, $orderId, $payment['id']]);
+            if ($winner = $alreadyPaid->fetch()) {
+                $payload = $verified;
+                $payload['duplicate_of_payment_id'] = (int)$winner['id'];
+                $payload['duplicate_of_provider'] = (string)$winner['provider'];
+                $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="duplicate_paid",verified_at=CURRENT_TIMESTAMP,raw_payload=? WHERE id=?')->execute([
+                    (string)$verified['provider_payment_id'],
+                    json_encode($payload, JSON_UNESCAPED_UNICODE),
+                    $payment['id'],
+                ]);
+                Auth::audit('payment.duplicate_paid', 'payment', (string)$payment['id'], [
+                    'order_id' => $orderId,
+                    'provider' => $provider,
+                    'duplicate_of_payment_id' => (int)$winner['id'],
+                ]);
+                return;
+            }
+
+            // Proteção adicional para pedidos marcados pagos por um fluxo que não gerou payment row (ex.: ingresso gratuito).
+            if ($order['payment_status'] === 'paid') throw new RuntimeException('Pedido já está pago e não aceita uma nova confirmação financeira.');
 
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="paid",verified_at=CURRENT_TIMESTAMP,raw_payload=? WHERE id=?')->execute([
                 (string)$verified['provider_payment_id'],
@@ -118,7 +142,7 @@ final class PaymentService
             $tickets->execute([$tenantId, $orderId]);
             foreach ($tickets->fetchAll() as $row) {
                 $qty = (int)$row['qty'];
-                $pdo->prepare('UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=?')->execute([$qty, $qty, $row['batch_id']]);
+                $pdo->prepare(Database::portableSql($pdo, 'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=?'))->execute([$qty, $qty, $row['batch_id']]);
             }
             $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId, $orderId]);
 
@@ -129,7 +153,7 @@ final class PaymentService
                 $insertRedemption = Database::portableSql($pdo, 'INSERT IGNORE INTO coupon_redemptions (tenant_id,coupon_id,order_id,customer_id,discount_cents,idempotency_key) VALUES (?,?,?,?,?,?)');
                 if ($reservation) {
                     $pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE id=?')->execute([$reservation['id']]);
-                    $pdo->prepare('UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?')->execute([$order['coupon_id'], $tenantId]);
+                    $pdo->prepare(Database::portableSql($pdo, 'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$order['coupon_id'], $tenantId]);
                     $pdo->prepare($insertRedemption)->execute([$tenantId, $order['coupon_id'], $orderId, $order['customer_id'] ?: null, $order['discount_cents'], 'payment:' . $payment['id'] . ':coupon']);
                 } else {
                     $red = $pdo->prepare($insertRedemption);
