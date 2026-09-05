@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
   name VARCHAR(160) NOT NULL,
   email VARCHAR(190) NOT NULL UNIQUE,
   password_hash VARCHAR(255) NOT NULL,
-  role ENUM('super_admin','admin','manager','cashier','waiter','kitchen','delivery','promoter') NOT NULL DEFAULT 'admin',
+  role ENUM('super_admin','admin','manager','cashier','attendant','waiter','kitchen','delivery','promoter') NOT NULL DEFAULT 'admin',
   status ENUM('active','blocked') NOT NULL DEFAULT 'active',
   last_login_at DATETIME NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
