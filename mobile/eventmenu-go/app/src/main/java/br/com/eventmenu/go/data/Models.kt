@@ -18,7 +18,14 @@ data class Order(
     val assignedDeliveryUserId: Int? = null,
 )
 
-data class QrResult(val type: String, val title: String, val raw: String)
+data class QrResult(
+    val type: String,
+    val title: String,
+    val raw: String,
+    val subtitle: String = "",
+    val amountCents: Int? = null,
+    val status: String = "",
+)
 
 data class PixCharge(
     val paymentId: Int,
@@ -26,6 +33,30 @@ data class PixCharge(
     val amountCents: Int,
     val copyPaste: String,
     val expiresAt: String,
+)
+
+data class DeliveryCashReceipt(
+    val orderId: Int,
+    val paymentId: Int?,
+    val totalCents: Int,
+    val receivedCents: Int,
+    val changeCents: Int,
+)
+
+data class DeliveryCashBalance(
+    val shiftId: Int,
+    val cashCollectedCents: Int,
+    val confirmedHandoffCents: Int,
+    val outstandingCents: Int,
+)
+
+data class CashHandoff(
+    val id: Int,
+    val token: String,
+    val qrPayload: String,
+    val amountCents: Int,
+    val status: String,
+    val deliveryName: String = "",
 )
 
 data class TapOnRequest(
