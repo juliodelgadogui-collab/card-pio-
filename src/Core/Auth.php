@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace EventMenu\Core;
 
-use RuntimeException;
-
 final class Auth
 {
     public static function attempt(string $email, string $password): bool
@@ -17,7 +15,7 @@ final class Auth
         if (!$user || ($user['tenant_id'] !== null && $user['tenant_status'] !== 'active') || !password_verify($password, $user['password_hash'])) return false;
         session_regenerate_id(true);
         self::setSession($user);
-        $pdo->prepare('UPDATE users SET last_login_at=NOW() WHERE id=?')->execute([$user['id']]);
+        $pdo->prepare('UPDATE users SET last_login_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$user['id']]);
         self::audit('auth.login','user',(string)$user['id']);
         return true;
     }
@@ -35,7 +33,7 @@ final class Auth
         if (!self::check()) return;
         $stmt=Database::connection()->prepare('SELECT u.*,t.status tenant_status FROM users u LEFT JOIN tenants t ON t.id=u.tenant_id WHERE u.id=? LIMIT 1');
         $stmt->execute([self::id()]);$user=$stmt->fetch();
-        if(!$user||$user['status']!=='active'||($user['tenant_id']!==null&&$user['tenant_status']!=='active')){self::logout();header('Location: /?route=login&blocked=1');exit;}
+        if(!$user||$user['status']!=='active'||($user['tenant_id']!==null&&$user['tenant_status']!=='active')){self::logout();\app_redirect('?route=login&blocked=1');}
         self::setSession($user);
     }
 
@@ -70,7 +68,7 @@ final class Auth
 
     public static function requirePermission(string $permission): void
     {
-        if(!self::check()){header('Location: /?route=login');exit;}
+        if(!self::check()) \app_redirect('?route=login');
         if(!self::can($permission)){http_response_code(403);exit('Acesso negado.');}
     }
 
