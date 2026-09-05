@@ -31,7 +31,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.GoState
+import br.com.eventmenu.go.PrinterState
 import br.com.eventmenu.go.data.ShiftSummary
+import br.com.eventmenu.go.printing.PrinterDevice
 
 @Composable
 fun ShiftStartScreen(state: GoState, onStart: () -> Unit, onChangeMode: (() -> Unit)? = null, onLogout: () -> Unit) {
@@ -54,6 +56,14 @@ fun EmployeeProfileScreen(
     shiftSummary: ShiftSummary?,
     summaryLoading: Boolean,
     onRefreshSummary: () -> Unit,
+    printerState: PrinterState,
+    onPrinterRefresh: () -> Unit,
+    onSelectPrinter: (PrinterDevice) -> Unit,
+    onClearPrinter: () -> Unit,
+    onPrinterEnabled: (Boolean) -> Unit,
+    onPrinterAutoPrint: (Boolean) -> Unit,
+    onPrinterPaperWidth: (Int) -> Unit,
+    onPrinterTest: () -> Unit,
     onSavePin: (String) -> Unit,
     onBiometric: (Boolean) -> Unit,
     onCloseShift: () -> Unit,
@@ -134,6 +144,19 @@ fun EmployeeProfileScreen(
             item {
                 Button(onClick = onCloseShift, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") }
             }
+        }
+
+        item {
+            PrinterSettingsCard(
+                state = printerState,
+                onRefresh = onPrinterRefresh,
+                onSelectDevice = onSelectPrinter,
+                onClearDevice = onClearPrinter,
+                onEnabled = onPrinterEnabled,
+                onAutoPrint = onPrinterAutoPrint,
+                onPaperWidth = onPrinterPaperWidth,
+                onPrintTest = onPrinterTest,
+            )
         }
 
         item { HorizontalDivider() }
