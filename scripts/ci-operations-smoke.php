@@ -5,6 +5,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 
 use EventMenu\Core\Database;
+use EventMenu\Services\CashService;
 use EventMenu\Services\OrderService;
 
 function ops_fail(string $message): never { fwrite(STDERR,"OPS CI FAIL: {$message}\n"); exit(1); }
@@ -35,5 +36,19 @@ $status=$pdo->query('SELECT status FROM orders WHERE id='.(int)$deliveryOrder)->
 $paidCancel=bin2hex(random_bytes(20));$pdo->prepare('INSERT INTO orders (public_token,tenant_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?, ?, "counter", "confirmed", "paid", 500, 500, ?)')->execute([$paidCancel,$tenantId,$adminId]);$paidOrder=(int)$pdo->lastInsertId();
 $_SESSION['user_id']=$adminId;$_SESSION['role']='admin';$_SESSION['name']='Ops Admin';
 try{$service->changeStatus($paidOrder,'cancelled','panel');ops_fail('Pedido pago foi cancelado sem estorno.');}catch(RuntimeException){}
+
+$cash=new CashService();
+$cashSession=$cash->open(10000,'CI abertura');
+ops_assert((int)$cashSession['opening_cash_cents']===10000,'Abertura do caixa falhou.');
+try{$cash->open(100);ops_fail('Segundo caixa foi aberto para o mesmo operador.');}catch(RuntimeException){}
+$cash->addManualMovement('supply',2000,'Suprimento CI');
+$cash->addManualMovement('withdrawal',1000,'Sangria CI');
+$cash->addManualMovement('adjustment',500,'Ajuste CI','out');
+$cashSummary=$cash->summary((int)$cashSession['id']);
+ops_assert((int)$cashSummary['expected_cash_cents']===10500,'Saldo esperado do caixa divergente.');
+$closed=$cash->close(10400,'CI fechamento');
+ops_assert((int)$closed['expected_cash_cents']===10500,'Fechamento calculou esperado incorreto.');
+ops_assert((int)$closed['difference_cents']===-100,'Diferença do caixa incorreta.');
+try{$cash->addManualMovement('supply',100,'Após fechar');ops_fail('Caixa fechado aceitou movimento.');}catch(RuntimeException){}
 
 echo "CI operations smoke OK\n";
