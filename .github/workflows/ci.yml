@@ -57,6 +57,7 @@ jobs:
         run: |
           rm -f /tmp/eventmenu-ci.sqlite /tmp/eventmenu-ci.sqlite-shm /tmp/eventmenu-ci.sqlite-wal
           php scripts/ci-db-smoke.php
+          php scripts/ci-super-admin-smoke.php
 
   mysql:
     runs-on: ubuntu-latest
@@ -96,7 +97,9 @@ jobs:
           DB_USERNAME: eventmenu
           DB_PASSWORD: eventmenu
           SESSION_NAME: eventmenu_ci_mysql
-        run: php scripts/ci-db-smoke.php
+        run: |
+          php scripts/ci-db-smoke.php
+          php scripts/ci-super-admin-smoke.php
 
   package:
     if: github.event_name == 'push'
