@@ -18,6 +18,37 @@ data class Order(
     val assignedDeliveryUserId: Int? = null,
 )
 
+data class Product(
+    val id: Int,
+    val categoryId: Int?,
+    val categoryName: String,
+    val name: String,
+    val description: String,
+    val priceCents: Int,
+    val stockQty: Double,
+    val trackStock: Boolean,
+    val imageUrl: String,
+)
+
+data class CreatedOrder(val id: Int, val publicToken: String, val channel: String, val totalCents: Int)
+
+data class PaymentPart(
+    val id: Int,
+    val provider: String,
+    val amountCents: Int,
+    val status: String,
+    val verifiedAt: String = "",
+)
+
+data class PaymentBalance(
+    val orderId: Int,
+    val totalCents: Int,
+    val paidCents: Int,
+    val remainingCents: Int,
+    val paymentStatus: String,
+    val payments: List<PaymentPart> = emptyList(),
+)
+
 data class QrResult(
     val type: String,
     val title: String,
