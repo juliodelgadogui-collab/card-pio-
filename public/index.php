@@ -12,11 +12,11 @@ $route=(string)($_GET['route']??'dashboard');
 try{$pdo=Database::connection();}catch(Throwable $e){http_response_code(503);$install=Security::e(app_url('install.php'));exit('<h1>EventMenu Premium</h1><p>Banco ainda não configurado. Copie <code>.env.example</code> para <code>.env</code>, configure MySQL ou SQLite e acesse <a href="'.$install.'">instalação</a>.</p>');}
 
 if($route==='login'){
-    if(Auth::check()) app_redirect('');
+    if(Auth::check()) app_redirect(Auth::isSuperAdmin()&&!Auth::tenantId()?'?route=super':'');
     $error=!empty($_GET['blocked'])?'Sua sessão foi encerrada porque o usuário ou a empresa foi bloqueado.':null;
     if($_SERVER['REQUEST_METHOD']==='POST'){
         if(!Security::validateCsrf($_POST['_csrf']??null))$error='Sessão expirada.';
-        elseif(Auth::attempt((string)($_POST['email']??''),(string)($_POST['password']??''))) app_redirect('');
+        elseif(Auth::attempt((string)($_POST['email']??''),(string)($_POST['password']??''))) app_redirect(Auth::isSuperAdmin()?'?route=super':'');
         else $error='E-mail ou senha inválidos.';
     }
     $manifest=Security::e(app_url('manifest.webmanifest'));$css=Security::e(app_url('assets/app.css'));$sw=json_encode(app_url('sw.js'),JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
@@ -26,8 +26,9 @@ if($route==='logout'){Auth::logout();app_redirect('?route=login');}
 if(!Auth::check()) app_redirect('?route=login');
 
 require __DIR__.'/../app/admin_helpers.php';
+if(Auth::isSuperAdmin()&&!Auth::tenantId()&&$route==='dashboard') em_go('super');
 $routes=[
- 'dashboard'=>'dashboard.php','products'=>'products.php','orders'=>'orders.php','restaurant'=>'restaurant.php','customers'=>'customers.php','coupons'=>'coupons.php','events'=>'events.php','tickets'=>'tickets.php','guests'=>'guests.php','promoters'=>'promoters.php','payments'=>'payments.php','gateways'=>'gateways.php','users'=>'users.php','reports'=>'reports.php','audit'=>'audit.php','settings'=>'settings.php'
+ 'super'=>'super.php','dashboard'=>'dashboard.php','products'=>'products.php','orders'=>'orders.php','restaurant'=>'restaurant.php','customers'=>'customers.php','coupons'=>'coupons.php','events'=>'events.php','tickets'=>'tickets.php','guests'=>'guests.php','promoters'=>'promoters.php','payments'=>'payments.php','gateways'=>'gateways.php','users'=>'users.php','reports'=>'reports.php','audit'=>'audit.php','settings'=>'settings.php'
 ];
 $file=$routes[$route]??null;if(!$file){http_response_code(404);em_header('Página não encontrada','');echo '<section class="card"><h2>404</h2><p>A página solicitada não existe.</p><a class="button primary" href="'.Security::e(app_url('')).'">Voltar</a></section>';em_footer();exit;}
 require __DIR__.'/../app/routes/'.$file;
