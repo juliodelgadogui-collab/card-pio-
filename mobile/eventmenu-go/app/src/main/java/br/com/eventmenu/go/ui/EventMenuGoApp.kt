@@ -31,7 +31,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -79,8 +82,10 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     val receiptState by receiptViewModel.state.collectAsState()
     val printerPreferences = remember(app) { PrinterPreferences(app) }
     val bluetoothPrinter = remember(app) { BluetoothEscPosPrinter(app, printerPreferences) }
-    val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter))
+    val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter, app.receiptRepository))
     val printerState by printerViewModel.state.collectAsState()
+    val paymentBaseline = remember { mutableStateMapOf<Int, String>() }
+    var baselineShiftId by remember { mutableStateOf<Int?>(null) }
 
     LaunchedEffect(state.error, state.message) {
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
@@ -111,7 +116,30 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     LaunchedEffect(state.tapOnRequest) {
         state.tapOnRequest?.let { request -> onTapOn(request); viewModel.tapOnLaunchConsumed() }
     }
-    LaunchedEffect(state.workShift?.id) { profileViewModel.bindShift(state.workShift?.id) }
+    LaunchedEffect(state.workShift?.id) {
+        val shiftId = state.workShift?.id
+        baselineShiftId = shiftId
+        paymentBaseline.clear()
+        state.orders.forEach { paymentBaseline[it.id] = it.paymentStatus }
+        profileViewModel.bindShift(shiftId)
+    }
+    LaunchedEffect(state.orders, state.workShift?.id) {
+        val shiftId = state.workShift?.id ?: return@LaunchedEffect
+        if (baselineShiftId != shiftId) return@LaunchedEffect
+        state.orders.forEach { order ->
+            val previous = paymentBaseline[order.id]
+            if (previous != null && previous != "paid" && order.paymentStatus == "paid") {
+                printerViewModel.autoPrintReceipt(order.id)
+            }
+            paymentBaseline[order.id] = order.paymentStatus
+        }
+        val visibleIds = state.orders.mapTo(mutableSetOf()) { it.id }
+        paymentBaseline.keys.toList().filter { it !in visibleIds }.forEach(paymentBaseline::remove)
+    }
+    LaunchedEffect(state.posOrder?.id, state.paymentBalance?.remainingCents) {
+        val orderId = state.posOrder?.id ?: return@LaunchedEffect
+        if (state.paymentBalance?.remainingCents == 0) printerViewModel.autoPrintReceipt(orderId)
+    }
     LaunchedEffect(state.screen, state.workShift?.id) {
         if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) {
             profileViewModel.refresh()
@@ -203,14 +231,14 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                         managerActionsViewModel.refresh()
                     },
                 )
-                AppScreen.POS -> PosScreen(state, viewModel::addProduct, viewModel::removeProduct, viewModel::clearCart, viewModel::createPosOrder, viewModel::payPosCash, viewModel::requestPosPix, viewModel::requestPosNfc, receiptViewModel::prepare, viewModel::refreshPosPayment, viewModel::finishPosFlow, viewModel::clearSelectedTable)
+                AppScreen.POS -> PosScreen(state, viewModel::addProduct, viewModel::removeProduct, viewModel::clearCart, viewModel::createPosOrder, viewModel::payPosCash, viewModel::requestPosPix, viewModel::requestPosNfc, receiptViewModel::prepare, { orderId -> printerViewModel.printReceipt(orderId) }, viewModel::refreshPosPayment, viewModel::finishPosFlow, viewModel::clearSelectedTable)
                 AppScreen.TABLES -> TablesScreen(state.tables, "orders_create" in permissions, viewModel::refreshTables, viewModel::openTable, viewModel::closeTable, viewModel::orderForTable, viewModel::openTableAccount)
                 AppScreen.TABLE_ACCOUNT -> TableAccountScreen(state.tableAccount, "payments" in permissions, viewModel::receiveTableOrder, viewModel::refreshTableAccount, viewModel::closeTableAccount)
                 AppScreen.ORDERS -> OrdersScreen(state.orders, viewModel::refreshOrders, viewModel::changeOrderStatus)
                 AppScreen.KITCHEN -> KitchenScreen(state.kitchenTickets, viewModel::refreshKitchen, viewModel::kitchenStatus)
                 AppScreen.DISPATCH -> DispatchScreen(state.orders, state.deliveryUsers, "delivery_assign" in permissions, state.dispatchFocusOrderId, viewModel::refreshDispatch, viewModel::dispatchReady, viewModel::assignDelivery)
                 AppScreen.CASH -> CashOperationsScreen(state.cashOpen, state.cashSummary, viewModel::openCash, viewModel::addCashSupply, viewModel::addCashWithdrawal, viewModel::closeCash, viewModel::refreshCash)
-                AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, state.pixCharge, viewModel::changeOrderStatus, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, viewModel::pollPixStatus, viewModel::dismissPix)
+                AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, state.pixCharge, viewModel::changeOrderStatus, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, { orderId -> printerViewModel.printReceipt(orderId) }, viewModel::pollPixStatus, viewModel::dismissPix)
                 AppScreen.EVENTS -> EventModeScreen(state.events, state.selectedEventId, state.eventEntries, "tickets" in permissions, "guests" in permissions, viewModel::selectEvent, viewModel::refreshEvents, onScan)
                 AppScreen.PROFILE -> EmployeeProfileScreen(
                     state = state,
