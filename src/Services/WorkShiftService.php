@@ -1,0 +1,69 @@
+<?php
+
+declare(strict_types=1);
+
+namespace EventMenu\Services;
+
+use EventMenu\Core\Auth;
+use EventMenu\Core\Database;
+use EventMenu\Core\PermissionCatalog;
+use PDO;
+use RuntimeException;
+
+final class WorkShiftService
+{
+    private const MODES=['operation','delivery','events','pay'];
+
+    public function current():?array
+    {
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)return null;
+        $s=Database::connection()->prepare('SELECT * FROM work_shifts WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1');$s->execute([$tenantId,$userId]);$row=$s->fetch();return $row?:null;
+    }
+
+    public function open(string $mode,string $deviceId='',string $notes=''):array
+    {
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');
+        $mode=strtolower(trim($mode));if(!in_array($mode,self::MODES,true))throw new RuntimeException('Modo de turno inválido.');
+        $allowed=PermissionCatalog::modesForPermissions(Auth::effectivePermissions());if(!in_array($mode,$allowed,true))throw new RuntimeException('Sua conta não possui permissão para este modo.');
+        $deviceHash=$deviceId!==''?hash('sha256',$deviceId):null;$notes=mb_substr(trim($notes),0,500);
+        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$mode,$deviceHash,$notes):array{
+            $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM work_shifts WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$s->execute([$tenantId,$userId]);
+            if($existing=$s->fetch())return $existing;
+            $i=$pdo->prepare('INSERT INTO work_shifts (tenant_id,user_id,mode,status,device_hash,opening_notes) VALUES (?, ?, ?,"open",?,?)');$i->execute([$tenantId,$userId,$mode,$deviceHash,$notes?:null]);$id=(int)$pdo->lastInsertId();
+            Auth::audit('work_shift.opened','work_shift',(string)$id,['mode'=>$mode]);$q=$pdo->prepare('SELECT * FROM work_shifts WHERE id=?');$q->execute([$id]);return $q->fetch()?:throw new RuntimeException('Falha ao iniciar turno.');
+        });
+    }
+
+    public function close(string $notes=''):array
+    {
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');$notes=mb_substr(trim($notes),0,500);
+        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$notes):array{
+            $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM work_shifts WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$s->execute([$tenantId,$userId]);$shift=$s->fetch();if(!$shift)throw new RuntimeException('Não há turno operacional aberto.');
+            if($shift['mode']==='delivery'){
+                $pending=$pdo->prepare('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND assigned_delivery_user_id=? AND status IN ("ready","out_for_delivery")');$pending->execute([$tenantId,$userId]);if((int)$pending->fetchColumn()>0)throw new RuntimeException('Finalize ou transfira suas entregas antes de encerrar o turno.');
+            }
+            $pdo->prepare('UPDATE work_shifts SET status="closed",closing_notes=?,ended_at=CURRENT_TIMESTAMP WHERE id=? AND status="open"')->execute([$notes?:null,$shift['id']]);
+            $shift['status']='closed';$shift['closing_notes']=$notes?:null;$shift['ended_at']=gmdate('Y-m-d H:i:s');Auth::audit('work_shift.closed','work_shift',(string)$shift['id'],['mode'=>$shift['mode']]);return $shift;
+        });
+    }
+
+    public function summary(?int $shiftId=null):array
+    {
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');$pdo=Database::connection();
+        if($shiftId){$s=$pdo->prepare('SELECT ws.*,u.name user_name FROM work_shifts ws JOIN users u ON u.id=ws.user_id WHERE ws.id=? AND ws.tenant_id=?');$s->execute([$shiftId,$tenantId]);}
+        else{$s=$pdo->prepare('SELECT ws.*,u.name user_name FROM work_shifts ws JOIN users u ON u.id=ws.user_id WHERE ws.tenant_id=? AND ws.user_id=? ORDER BY ws.id DESC LIMIT 1');$s->execute([$tenantId,$userId]);}
+        $shift=$s->fetch();if(!$shift)return ['shift'=>null,'movements'=>[],'by_method'=>[],'orders'=>[]];
+        if((int)$shift['user_id']!==$userId&&!in_array(Auth::role(),['admin','manager','super_admin'],true))throw new RuntimeException('Acesso negado ao turno de outro funcionário.');
+        $m=$pdo->prepare('SELECT * FROM work_shift_movements WHERE tenant_id=? AND work_shift_id=? ORDER BY id DESC');$m->execute([$tenantId,$shift['id']]);
+        $b=$pdo->prepare('SELECT method,direction,COUNT(*) qty,COALESCE(SUM(amount_cents),0) total_cents FROM work_shift_movements WHERE tenant_id=? AND work_shift_id=? GROUP BY method,direction ORDER BY method,direction');$b->execute([$tenantId,$shift['id']]);
+        $end=$shift['ended_at']?:gmdate('Y-m-d H:i:s');$o=$pdo->prepare('SELECT COUNT(*) qty,COALESCE(SUM(total_cents),0) total_cents FROM orders WHERE tenant_id=? AND (created_by=? OR assigned_delivery_user_id=?) AND created_at>=? AND created_at<=?');$o->execute([$tenantId,$shift['user_id'],$shift['user_id'],$shift['started_at'],$end]);
+        return ['shift'=>$shift,'movements'=>$m->fetchAll(),'by_method'=>$b->fetchAll(),'orders'=>$o->fetch()?:['qty'=>0,'total_cents'=>0]];
+    }
+
+    public function recordMovement(PDO $pdo,int $tenantId,int $userId,int $orderId,?int $paymentId,string $type,string $method,string $direction,int $amountCents,string $idempotencyKey,string $notes=''):void
+    {
+        $s=$pdo->prepare(Database::portableSql($pdo,'SELECT id FROM work_shifts WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$s->execute([$tenantId,$userId]);$shiftId=$s->fetchColumn();if(!$shiftId)return;
+        $sql=Database::portableSql($pdo,'INSERT IGNORE INTO work_shift_movements (tenant_id,work_shift_id,user_id,order_id,payment_id,type,method,direction,amount_cents,notes,idempotency_key) VALUES (?,?,?,?,?,?,?,?,?,?,?)');
+        $pdo->prepare($sql)->execute([$tenantId,$shiftId,$userId,$orderId,$paymentId,$type,$method,$direction,$amountCents,$notes?:null,$idempotencyKey]);
+    }
+}
