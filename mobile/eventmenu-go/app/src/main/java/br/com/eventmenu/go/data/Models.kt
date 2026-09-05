@@ -124,6 +124,19 @@ data class EventEntry(
     val operatorName: String,
 )
 
+data class ManagerAlert(val level: String, val title: String, val message: String)
+data class ManagerOverview(
+    val ordersNow: Int,
+    val kitchenDelayed: Int,
+    val readyOrders: Int,
+    val unassignedDelivery: Int,
+    val deliveryOnline: Int,
+    val cashOpen: Int,
+    val pendingPayments: Int,
+    val revenueTodayCents: Int,
+    val alerts: List<ManagerAlert>,
+)
+
 data class QrResult(
     val type: String,
     val title: String,
