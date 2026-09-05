@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import br.com.eventmenu.go.DeviceStatusState
 import br.com.eventmenu.go.GoState
 import br.com.eventmenu.go.PrinterState
 import br.com.eventmenu.go.data.ShiftSummary
@@ -56,6 +57,8 @@ fun EmployeeProfileScreen(
     shiftSummary: ShiftSummary?,
     summaryLoading: Boolean,
     onRefreshSummary: () -> Unit,
+    deviceState: DeviceStatusState,
+    onRefreshDevice: () -> Unit,
     printerState: PrinterState,
     onPrinterRefresh: () -> Unit,
     onSelectPrinter: (PrinterDevice) -> Unit,
@@ -145,6 +148,8 @@ fun EmployeeProfileScreen(
                 Button(onClick = onCloseShift, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") }
             }
         }
+
+        item { DeviceStatusCard(deviceState, onRefreshDevice) }
 
         item {
             PrinterSettingsCard(
