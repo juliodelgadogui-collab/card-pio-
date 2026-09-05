@@ -6,6 +6,7 @@ namespace EventMenu\Services;
 
 use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
+use EventMenu\Core\TenantFeatures;
 use PDO;
 use RuntimeException;
 
@@ -18,7 +19,7 @@ final class TicketService
             $stmt = $pdo->prepare(Database::portableSql($pdo, 'SELECT e.*,t.status tenant_status FROM events e JOIN tenants t ON t.id=e.tenant_id WHERE e.id=? AND e.status="published" FOR UPDATE'));
             $stmt->execute([$eventId]);
             $event = $stmt->fetch();
-            if (!$event || $event['tenant_status'] !== 'active') throw new RuntimeException('Evento indisponível.');
+            if (!$event || $event['tenant_status'] !== 'active' || !TenantFeatures::events((int)$event['tenant_id'])) throw new RuntimeException('Evento indisponível.');
 
             $stmt = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM ticket_batches WHERE id=? AND event_id=? AND active=1 FOR UPDATE'));
             $stmt->execute([$batchId, $eventId]);
@@ -132,10 +133,18 @@ final class TicketService
         $token = $this->normalizeScannedToken($token);
 
         return Database::transaction(function (PDO $pdo) use ($tenantId, $token): array {
-            $s = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM tickets WHERE tenant_id=? AND (qr_token=? OR code=?) LIMIT 1 FOR UPDATE'));
+            $s = $pdo->prepare(Database::portableSql($pdo, 'SELECT t.*,e.status event_status,tn.status tenant_status FROM tickets t JOIN events e ON e.id=t.event_id JOIN tenants tn ON tn.id=t.tenant_id WHERE t.tenant_id=? AND (t.qr_token=? OR t.code=?) LIMIT 1 FOR UPDATE'));
             $s->execute([$tenantId, $token, $token]);
             $ticket = $s->fetch();
             if (!$ticket) throw new RuntimeException('Ingresso não encontrado.');
+            if ($ticket['tenant_status'] !== 'active' || !TenantFeatures::events($tenantId)) {
+                $this->logCheckin($pdo, $tenantId, (int)$ticket['id'], 'blocked', ['reason' => 'tenant_unavailable']);
+                return ['ok' => false, 'result' => 'blocked', 'ticket' => $ticket];
+            }
+            if ($ticket['event_status'] !== 'published') {
+                $this->logCheckin($pdo, $tenantId, (int)$ticket['id'], 'blocked', ['reason' => 'event_' . $ticket['event_status']]);
+                return ['ok' => false, 'result' => 'blocked', 'ticket' => $ticket];
+            }
             if ($ticket['status'] === 'checked_in') {
                 $this->logCheckin($pdo, $tenantId, (int)$ticket['id'], 'duplicate');
                 return ['ok' => false, 'result' => 'duplicate', 'ticket' => $ticket];
@@ -146,6 +155,7 @@ final class TicketService
             }
             $pdo->prepare('UPDATE tickets SET status="checked_in",checked_in_at=CURRENT_TIMESTAMP,checked_in_by=? WHERE id=?')->execute([Auth::id(), $ticket['id']]);
             $this->logCheckin($pdo, $tenantId, (int)$ticket['id'], 'accepted');
+            $ticket['status'] = 'checked_in';
             return ['ok' => true, 'result' => 'accepted', 'ticket' => $ticket];
         });
     }
