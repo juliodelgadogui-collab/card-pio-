@@ -42,8 +42,23 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
         return CreatedOrder(o.getInt("id"),o.optString("public_token"),o.optString("channel"),o.getInt("total_cents"))
     }
 
-    suspend fun orders():List<Order>{val a=api.get("orders",requireToken()).optJSONArray("orders")?:JSONArray();return buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(o.getInt("id"),o.optString("channel"),o.optString("status"),o.optString("payment_status"),o.optInt("total_cents"),o.optString("customer_name","Consumidor"),o.optString("customer_phone"),o.optString("delivery_address"),if(o.isNull("assigned_delivery_user_id"))null else o.optInt("assigned_delivery_user_id")))}}}
-    suspend fun changeOrderStatus(orderId:Int,status:String)=api.post("order-status",requireToken(),JSONObject().put("order_id",orderId).put("status",status))
+    suspend fun orders():List<Order>{
+        val a=api.getGo("orders",requireToken()).optJSONArray("orders")?:JSONArray()
+        return buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(
+            id=o.getInt("id"),channel=o.optString("channel"),status=o.optString("status"),paymentStatus=o.optString("payment_status"),totalCents=o.optInt("total_cents"),
+            customerName=o.optString("customer_name","Consumidor"),customerPhone=o.optString("customer_phone"),deliveryAddress=o.optString("delivery_address"),
+            assignedDeliveryUserId=if(o.isNull("assigned_delivery_user_id"))null else o.optInt("assigned_delivery_user_id"),createdAt=o.optString("created_at"),tableName=o.optString("table_name")
+        ))}}
+    }
+    suspend fun changeOrderStatus(orderId:Int,status:String)=api.postGo("order-status",requireToken(),JSONObject().put("order_id",orderId).put("status",status))
+
+    suspend fun kitchenBoard():List<KitchenTicket>{
+        val a=api.getGo("kitchen-board",requireToken()).optJSONArray("tickets")?:JSONArray()
+        return buildList{for(i in 0 until a.length()){
+            val t=a.getJSONObject(i);val itemArray=t.optJSONArray("items")?:JSONArray();val items=buildList{for(j in 0 until itemArray.length()){val x=itemArray.getJSONObject(j);add(KitchenItem(x.optString("name_snapshot"),x.optDouble("quantity",1.0),x.optString("notes")))}}
+            add(KitchenTicket(t.getInt("id"),t.optString("channel"),t.optString("status"),t.optString("notes"),t.optString("created_at"),t.optString("table_name"),t.optString("customer_name"),items))
+        }}
+    }
 
     suspend fun paymentBalance(orderId:Int):PaymentBalance=parsePaymentBalance(api.getGo("payment-status",requireToken(),mapOf("order_id" to orderId.toString())).getJSONObject("payment"))
     suspend fun payCashPart(orderId:Int,amountCents:Int):PaymentBalance{
