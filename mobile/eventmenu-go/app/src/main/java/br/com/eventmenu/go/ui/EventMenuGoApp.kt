@@ -5,12 +5,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.DeliveryDining
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ReceiptLong
-import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.MainViewModel
 import br.com.eventmenu.go.data.AppMode
+import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.CashScreen
 import br.com.eventmenu.go.ui.screens.DeliveryScreen
 import br.com.eventmenu.go.ui.screens.EventsScreen
@@ -40,12 +41,24 @@ import br.com.eventmenu.go.ui.screens.ProfileScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
 
 @Composable
-fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: () -> Unit) {
+fun EventMenuGoApp(
+    viewModel: MainViewModel,
+    onScan: () -> Unit,
+    onBiometric: () -> Unit,
+    onTapOn: (TapOnRequest) -> Unit,
+) {
     val state by viewModel.state.collectAsState()
     val snackbar = remember { SnackbarHostState() }
+
     LaunchedEffect(state.error, state.message) {
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
         if (state.error != null || state.message != null) viewModel.clearFeedback()
+    }
+    LaunchedEffect(state.tapOnRequest) {
+        state.tapOnRequest?.let { request ->
+            onTapOn(request)
+            viewModel.tapOnLaunchConsumed()
+        }
     }
 
     if (state.session == null) {
@@ -76,7 +89,9 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            FloatingActionButton(onClick = onScan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear") }
+            FloatingActionButton(onClick = onScan) {
+                Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear")
+            }
         },
         bottomBar = {
             NavigationBar {
@@ -103,7 +118,12 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                 AppScreen.HOME -> HomeScreen(state, viewModel::refreshOrders)
                 AppScreen.ORDERS -> OrdersScreen(state.orders, viewModel::refreshOrders, viewModel::changeOrderStatus)
                 AppScreen.CASH -> CashScreen(state.cashOpen, viewModel::openCash, viewModel::closeCash)
-                AppScreen.DELIVERY -> DeliveryScreen(state.orders, viewModel::changeOrderStatus, viewModel::requestPix)
+                AppScreen.DELIVERY -> DeliveryScreen(
+                    orders = state.orders,
+                    onStatus = viewModel::changeOrderStatus,
+                    onPix = viewModel::requestPix,
+                    onNfc = viewModel::requestNfc,
+                )
                 AppScreen.EVENTS -> EventsScreen(onScan)
                 AppScreen.PROFILE -> ProfileScreen(state, viewModel::savePin, viewModel::setBiometric, viewModel::logout)
             }
