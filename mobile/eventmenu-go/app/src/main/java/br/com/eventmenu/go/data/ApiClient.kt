@@ -31,6 +31,9 @@ class ApiClient(private val baseUrl: String, private val deviceId: String) {
     suspend fun getManager(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-manager.php", "GET", action, token, query, null)
 
+    suspend fun postManager(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
+        request("api-go-manager.php", "POST", action, token, emptyMap(), body)
+
     suspend fun getNotifications(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-notifications.php", "GET", action, token, query, null)
 
