@@ -37,8 +37,8 @@ try{
         if($mode==='delivery'){
             if(!Auth::can('orders.delivery'))throw new RuntimeException('Sua conta não possui operação de Delivery.');$sql.=' AND o.channel="delivery" AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery","completed")';$args[]=$userId;
         }elseif($mode==='operation'){
-            if(!Auth::can('orders.view')&&!Auth::can('orders.create')&&!Auth::can('orders.kitchen'))throw new RuntimeException('Sua conta não possui acesso aos pedidos operacionais.');
-            if(Auth::can('orders.kitchen')&&!Auth::can('orders.view')&&!Auth::can('orders.create'))$sql.=' AND o.channel IN ("counter","pickup","table","delivery") AND o.status IN ("confirmed","preparing")';
+            if(!Auth::can('orders.view')&&!Auth::can('orders.create')&&!Auth::can('orders.kitchen')&&!Auth::can('orders.dispatch'))throw new RuntimeException('Sua conta não possui acesso aos pedidos operacionais.');
+            if(Auth::can('orders.kitchen')&&!Auth::can('orders.view')&&!Auth::can('orders.create')&&!Auth::can('orders.dispatch'))$sql.=' AND o.channel IN ("counter","pickup","table","delivery") AND o.status IN ("confirmed","preparing")';
         }elseif($mode==='pay'){
             if(!Auth::can('payments.manage')&&!Auth::can('cash.manage'))throw new RuntimeException('Sua conta não possui acesso ao modo Pay.');$sql.=' AND o.status<>"cancelled"';
         }else{
@@ -51,9 +51,29 @@ try{
         go_method('POST');$body=go_body();$orderId=(int)($body['order_id']??0);$target=(string)($body['status']??'');$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de alterar pedidos.');
         if($current['mode']==='delivery'){
             if(!Auth::can('orders.delivery'))throw new RuntimeException('Acesso negado.');$q=Database::connection()->prepare('SELECT id FROM orders WHERE id=? AND tenant_id=? AND channel="delivery" AND assigned_delivery_user_id=?');$q->execute([$orderId,$tenantId,$userId]);if(!$q->fetchColumn())throw new RuntimeException('Pedido não está atribuído a este funcionário.');$source='delivery';
-        }elseif($current['mode']==='operation'&&Auth::can('orders.kitchen')&&in_array($target,['preparing','ready'],true))$source='kitchen';
-        else{if(!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode alterar este status.');$source='panel';}
+        }elseif($current['mode']==='operation'&&Auth::can('orders.kitchen')&&in_array($target,['preparing','ready'],true)){
+            $source='kitchen';
+        }elseif($current['mode']==='operation'&&Auth::can('orders.dispatch')&&in_array($target,['served','completed'],true)){
+            $source='dispatch';
+        }else{
+            if(!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode alterar este status.');$source='panel';
+        }
         go_out(['ok'=>true,'order'=>(new OrderService())->changeStatus($orderId,$target,$source)]);
+    }
+
+    if($action==='delivery-users'){
+        if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');
+        $s=Database::connection()->prepare('SELECT u.id,u.name,u.email,CASE WHEN ws.id IS NULL THEN 0 ELSE 1 END on_shift,ws.started_at FROM users u LEFT JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.tenant_id=? AND u.role="delivery" AND u.status="active" ORDER BY on_shift DESC,u.name');$s->execute([$tenantId]);go_out(['ok'=>true,'delivery_users'=>$s->fetchAll()]);
+    }
+    if($action==='delivery-assign'){
+        go_method('POST');if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');$body=go_body();$orderId=(int)($body['order_id']??0);$deliveryId=(int)($body['delivery_user_id']??0);
+        Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$deliveryId):void{
+            $o=$pdo->prepare(Database::portableSql($pdo,'SELECT id,channel,status,assigned_delivery_user_id FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$o->execute([$orderId,$tenantId]);$order=$o->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');
+            if($order['channel']!=='delivery')throw new RuntimeException('Somente pedido de Delivery pode ser atribuído.');if($order['status']!=='ready')throw new RuntimeException('O pedido precisa estar pronto para ser atribuído.');if($deliveryId<1)throw new RuntimeException('Escolha um entregador.');
+            $d=$pdo->prepare('SELECT u.id FROM users u JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.id=? AND u.tenant_id=? AND u.role="delivery" AND u.status="active" LIMIT 1');$d->execute([$deliveryId,$tenantId]);if(!$d->fetchColumn())throw new RuntimeException('Entregador sem turno de Delivery aberto.');
+            $pdo->prepare('UPDATE orders SET assigned_delivery_user_id=? WHERE id=? AND tenant_id=?')->execute([$deliveryId,$orderId,$tenantId]);
+        });
+        Auth::audit('order.delivery_assigned','order',(string)$orderId,['delivery_user_id'=>$deliveryId,'source'=>'eventmenu_go']);go_out(['ok'=>true]);
     }
 
     if($action==='kitchen-board'){
