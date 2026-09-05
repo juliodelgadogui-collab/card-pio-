@@ -4,6 +4,7 @@ import br.com.eventmenu.go.security.SecureSessionStore
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLDecoder
+import java.util.UUID
 
 class EventMenuRepository(baseUrl: String, private val deviceId: String, val sessionStore: SecureSessionStore) {
     private val api = ApiClient(baseUrl, deviceId)
@@ -25,20 +26,35 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
     suspend fun currentShift():WorkShift?=parseShift(api.getGo("shift-current",requireToken()).optJSONObject("shift"))
     suspend fun shiftSummary():JSONObject=api.getGo("shift-summary",requireToken()).getJSONObject("summary")
 
+    suspend fun products():List<Product>{
+        val a=api.getGo("catalog",requireToken()).optJSONArray("products")?:JSONArray()
+        return buildList{for(i in 0 until a.length()){val p=a.getJSONObject(i);add(Product(
+            id=p.getInt("id"),categoryId=if(p.isNull("category_id"))null else p.optInt("category_id"),categoryName=p.optString("category_name").ifBlank{"Sem categoria"},
+            name=p.optString("name"),description=p.optString("description"),priceCents=p.optInt("price_cents"),stockQty=p.optDouble("stock_qty",0.0),trackStock=p.optInt("track_stock",0)==1,imageUrl=p.optString("image_url")
+        ))}}
+    }
+
+    suspend fun createOrder(channel:String,cart:Map<Int,Int>,customerName:String="",phone:String="",address:String="",notes:String=""):CreatedOrder{
+        if(cart.isEmpty())throw ApiException("Carrinho vazio.")
+        val items=JSONArray();cart.filterValues{it>0}.forEach{(id,qty)->items.put(JSONObject().put("product_id",id).put("quantity",qty))}
+        val body=JSONObject().put("channel",channel).put("customer_name",customerName).put("customer_phone",phone).put("delivery_address",address).put("notes",notes).put("items",items)
+        val o=api.post("order-create",requireToken(),body).getJSONObject("order")
+        return CreatedOrder(o.getInt("id"),o.optString("public_token"),o.optString("channel"),o.getInt("total_cents"))
+    }
+
     suspend fun orders():List<Order>{val a=api.get("orders",requireToken()).optJSONArray("orders")?:JSONArray();return buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(o.getInt("id"),o.optString("channel"),o.optString("status"),o.optString("payment_status"),o.optInt("total_cents"),o.optString("customer_name","Consumidor"),o.optString("customer_phone"),o.optString("delivery_address"),if(o.isNull("assigned_delivery_user_id"))null else o.optInt("assigned_delivery_user_id")))}}}
     suspend fun changeOrderStatus(orderId:Int,status:String)=api.post("order-status",requireToken(),JSONObject().put("order_id",orderId).put("status",status))
+
+    suspend fun paymentBalance(orderId:Int):PaymentBalance=parsePaymentBalance(api.getGo("payment-status",requireToken(),mapOf("order_id" to orderId.toString())).getJSONObject("payment"))
+    suspend fun payCashPart(orderId:Int,amountCents:Int):PaymentBalance{
+        val body=JSONObject().put("order_id",orderId).put("amount_cents",amountCents).put("idempotency_key","go-cash-${UUID.randomUUID()}")
+        return parsePaymentBalance(api.postGo("payment-cash",requireToken(),body).getJSONObject("payment"))
+    }
 
     suspend fun resolveQr(value:String):QrResult{
         extractHandoffToken(value)?.let { token ->
             val h=api.getGo("handoff-resolve",requireToken(),mapOf("token" to token)).getJSONObject("handoff")
-            return QrResult(
-                type="delivery_handoff",
-                title="Repasse de ${h.optString("delivery_name","Entregador")}",
-                raw=token,
-                subtitle="Dinheiro do turno de Delivery",
-                amountCents=h.optInt("amount_cents"),
-                status=h.optString("status"),
-            )
+            return QrResult(type="delivery_handoff",title="Repasse de ${h.optString("delivery_name","Entregador")}",raw=token,subtitle="Dinheiro do turno de Delivery",amountCents=h.optInt("amount_cents"),status=h.optString("status"))
         }
         val json=api.get("qr-resolve",requireToken(),mapOf("value" to value));val data=json.optJSONObject("data")?:JSONObject();val type=json.optString("type")
         val title=when(type){"table"->data.optString("name","Mesa");"ticket"->data.optString("event_name","Ingresso");"guest"->data.optString("name","Convidado");else->"Código identificado"}
@@ -51,12 +67,17 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
     suspend fun openCash(openingCents:Int,notes:String="")=api.post("cash-open",requireToken(),JSONObject().put("opening_cash_cents",openingCents).put("notes",notes))
     suspend fun closeCash(countedCents:Int,notes:String="")=api.post("cash-close",requireToken(),JSONObject().put("counted_cash_cents",countedCents).put("notes",notes))
 
-    suspend fun nativePix(orderId:Int,taxId:String):PixCharge{
-        val p=api.postGo("pix-create",requireToken(),JSONObject().put("order_id",orderId).put("tax_id",taxId)).getJSONObject("pix")
+    suspend fun nativePix(orderId:Int,taxId:String,amountCents:Int?=null):PixCharge{
+        val body=JSONObject().put("order_id",orderId).put("tax_id",taxId);amountCents?.let{body.put("amount_cents",it)}
+        val p=api.postGo("pix-create",requireToken(),body).getJSONObject("pix")
         return PixCharge(p.getInt("payment_id"),p.getInt("order_id"),p.getInt("amount_cents"),p.getString("copy_paste"),p.optString("expires_at"))
     }
-    suspend fun nfcIntent(orderId:Int):TapOnRequest{val j=api.post("nfc-intent",requireToken(),JSONObject().put("order_id",orderId));val t=j.getJSONObject("tap_on");return TapOnRequest(j.getString("intent_token"),j.getInt("order_id"),j.getInt("amount_cents"),t.getString("app_key"),t.optString("app_name","EventMenu GO"),t.optString("app_version","1.0.0"),t.optBoolean("enable_tax_pass_through",false))}
-    suspend fun nfcVerify(intentToken:String,transactionCode:String):JSONObject=api.post("nfc-verify",requireToken(),JSONObject().put("intent_token",intentToken).put("transaction_code",transactionCode))
+    suspend fun nfcIntent(orderId:Int,amountCents:Int?=null):TapOnRequest{
+        val body=JSONObject().put("order_id",orderId);amountCents?.let{body.put("amount_cents",it)}
+        val j=api.postGo("nfc-intent",requireToken(),body);val t=j.getJSONObject("tap_on")
+        return TapOnRequest(j.getString("intent_token"),j.getInt("order_id"),j.getInt("amount_cents"),t.getString("app_key"),t.optString("app_name","EventMenu GO"),t.optString("app_version","1.0.0"),t.optBoolean("enable_tax_pass_through",false))
+    }
+    suspend fun nfcVerify(intentToken:String,transactionCode:String):JSONObject=api.postGo("nfc-verify",requireToken(),JSONObject().put("intent_token",intentToken).put("transaction_code",transactionCode))
 
     suspend fun collectDeliveryCash(orderId:Int,receivedCents:Int):DeliveryCashReceipt{
         val r=api.postGo("delivery-cash-collect",requireToken(),JSONObject().put("order_id",orderId).put("received_cents",receivedCents)).getJSONObject("receipt")
@@ -66,21 +87,15 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
         val c=api.getGo("delivery-cash-outstanding",requireToken()).getJSONObject("cash")
         return DeliveryCashBalance(c.getInt("shift_id"),c.optInt("cash_collected_cents"),c.optInt("confirmed_handoff_cents"),c.optInt("outstanding_cents"))
     }
-    suspend fun createDeliveryHandoff():CashHandoff{
-        val h=api.postGo("handoff-create",requireToken()).getJSONObject("handoff")
-        return CashHandoff(h.getInt("id"),h.getString("token"),h.getString("qr_payload"),h.getInt("amount_cents"),h.optString("status"))
-    }
-    suspend fun confirmDeliveryHandoff(token:String):CashHandoff{
-        val h=api.postGo("handoff-confirm",requireToken(),JSONObject().put("token",token)).getJSONObject("handoff")
-        return CashHandoff(h.getInt("id"),token,"",h.getInt("amount_cents"),h.optString("status"),h.optString("delivery_name"))
-    }
+    suspend fun createDeliveryHandoff():CashHandoff{val h=api.postGo("handoff-create",requireToken()).getJSONObject("handoff");return CashHandoff(h.getInt("id"),h.getString("token"),h.getString("qr_payload"),h.getInt("amount_cents"),h.optString("status"))}
+    suspend fun confirmDeliveryHandoff(token:String):CashHandoff{val h=api.postGo("handoff-confirm",requireToken(),JSONObject().put("token",token)).getJSONObject("handoff");return CashHandoff(h.getInt("id"),token,"",h.getInt("amount_cents"),h.optString("status"),h.optString("delivery_name"))}
 
     fun modes(session:Session):List<AppMode> = session.modes.ifEmpty{listOf(AppMode.OPERATION)}
     private fun parseShift(json:JSONObject?):WorkShift?{if(json==null)return null;return WorkShift(json.optInt("id"),json.optString("mode"),json.optString("status"),json.optString("started_at"),json.optString("ended_at").takeIf{it.isNotBlank()})}
-    private fun extractHandoffToken(value:String):String?{
-        if(!value.contains("api-go.php")||!value.contains("handoff-view"))return null
-        val encoded=Regex("[?&]t=([^&]+)").find(value)?.groupValues?.getOrNull(1)?:return null
-        return URLDecoder.decode(encoded,"UTF-8").takeIf{it.length>=32}
+    private fun parsePaymentBalance(p:JSONObject):PaymentBalance{
+        val a=p.optJSONArray("payments")?:JSONArray();val parts=buildList{for(i in 0 until a.length()){val x=a.getJSONObject(i);add(PaymentPart(x.getInt("id"),x.optString("provider"),x.optInt("amount_cents"),x.optString("status"),x.optString("verified_at")))}}
+        return PaymentBalance(p.getInt("order_id"),p.getInt("total_cents"),p.optInt("paid_cents"),p.optInt("remaining_cents"),p.optString("payment_status"),parts)
     }
+    private fun extractHandoffToken(value:String):String?{if(!value.contains("api-go.php")||!value.contains("handoff-view"))return null;val encoded=Regex("[?&]t=([^&]+)").find(value)?.groupValues?.getOrNull(1)?:return null;return URLDecoder.decode(encoded,"UTF-8").takeIf{it.length>=32}}
     private fun requireToken():String=sessionStore.token()?:throw ApiException("Sessão não encontrada.",401)
 }
