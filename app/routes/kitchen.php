@@ -1,0 +1,15 @@
+<?php
+
+declare(strict_types=1);
+
+use EventMenu\Core\Auth;
+use EventMenu\Core\Security;
+use EventMenu\Services\OrderService;
+
+Auth::requirePermission('orders.kitchen');$tenantId=em_require_tenant();
+if($_SERVER['REQUEST_METHOD']==='POST'){
+    em_post_csrf();$id=(int)($_POST['id']??0);$action=(string)($_POST['action']??'');$target=$action==='start'?'preparing':($action==='ready'?'ready':'');if($target==='')exit('Ação inválida.');try{(new OrderService())->changeStatus($id,$target,'kitchen');em_flash('ok','Pedido #'.$id.' atualizado.');}catch(Throwable $e){em_flash('error',$e->getMessage());}em_go('kitchen');
+}
+$s=$pdo->prepare('SELECT o.id,o.channel,o.status,o.notes,o.created_at,rt.name table_name,c.name customer_name FROM orders o LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.tenant_id=? AND o.channel IN ("counter","table","delivery","pickup") AND o.status IN ("confirmed","preparing") ORDER BY CASE WHEN o.status="preparing" THEN 0 ELSE 1 END,o.id');$s->execute([$tenantId]);$orders=$s->fetchAll();$items=[];if($orders){$ids=array_column($orders,'id');$marks=implode(',',array_fill(0,count($ids),'?'));$i=$pdo->prepare('SELECT order_id,name_snapshot,quantity,notes FROM order_items WHERE order_id IN ('.$marks.') ORDER BY id');$i->execute($ids);foreach($i->fetchAll() as $row)$items[(int)$row['order_id']][]=$row;}
+em_header('Cozinha / KDS','kitchen');
+?><div class="section-head"><p class="muted">Fila ativa · atualização automática a cada 15 segundos</p><span class="badge"><?= count($orders) ?> pedidos</span></div><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr))"><?php foreach($orders as $o):?><article class="card"><div class="section-head"><div><h2>#<?= (int)$o['id'] ?></h2><span class="muted"><?= Security::e($o['table_name']??$o['customer_name']??$o['channel']) ?></span></div><span class="badge"><?= Security::e($o['status']) ?></span></div><p class="muted"><?= Security::e($o['created_at']) ?></p><hr style="border-color:var(--line)"><?php foreach($items[(int)$o['id']]??[] as $i):?><p><strong><?= Security::e((string)$i['quantity']) ?>× <?= Security::e($i['name_snapshot']) ?></strong><?php if(!empty($i['notes'])):?><br><span class="muted"><?= Security::e($i['notes']) ?></span><?php endif;?></p><?php endforeach;?><?php if($o['notes']):?><div class="alert">Obs.: <?= Security::e($o['notes']) ?></div><?php endif;?><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="id" value="<?= (int)$o['id'] ?>"><?php if($o['status']==='confirmed'):?><input type="hidden" name="action" value="start"><button class="primary" style="width:100%">Iniciar preparo</button><?php else:?><input type="hidden" name="action" value="ready"><button class="primary" style="width:100%">Marcar pronto</button><?php endif;?></form></article><?php endforeach;?></div><?php if(!$orders):?><section class="card"><h2>Fila limpa</h2><p class="muted">Nenhum pedido aguardando a cozinha.</p></section><?php endif;?><script>setTimeout(()=>location.reload(),15000);</script><?php em_footer();
