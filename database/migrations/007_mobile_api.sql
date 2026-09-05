@@ -1,0 +1,40 @@
+CREATE TABLE api_tokens (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  token_hash CHAR(64) NOT NULL,
+  device_hash CHAR(64) NULL,
+  device_label VARCHAR(120) NULL,
+  expires_at DATETIME NOT NULL,
+  last_used_at DATETIME NULL,
+  revoked_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_api_tokens_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_api_tokens_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_api_token_hash (token_hash),
+  INDEX idx_api_tokens_user (tenant_id,user_id,revoked_at,expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE nfc_payment_intents (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  nfc_device_id BIGINT UNSIGNED NOT NULL,
+  intent_token_hash CHAR(64) NOT NULL,
+  amount_cents INT UNSIGNED NOT NULL,
+  status ENUM('created','verified','expired','failed') NOT NULL DEFAULT 'created',
+  provider_transaction_code VARCHAR(190) NULL,
+  payment_id BIGINT UNSIGNED NULL,
+  expires_at DATETIME NOT NULL,
+  verified_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_nfc_intent_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_nfc_intent_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_nfc_intent_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_nfc_intent_device FOREIGN KEY (nfc_device_id) REFERENCES nfc_devices(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_nfc_intent_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE SET NULL,
+  UNIQUE KEY uq_nfc_intent_token (intent_token_hash),
+  UNIQUE KEY uq_nfc_transaction_code (provider_transaction_code),
+  INDEX idx_nfc_intent_order (tenant_id,order_id,status,expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
