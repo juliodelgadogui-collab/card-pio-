@@ -22,6 +22,12 @@ class ApiClient(private val baseUrl: String, private val deviceId: String) {
     suspend fun postGo(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go.php", "POST", action, token, emptyMap(), body)
 
+    suspend fun getEvents(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
+        request("api-go-events.php", "GET", action, token, query, null)
+
+    suspend fun postEvents(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
+        request("api-go-events.php", "POST", action, token, emptyMap(), body)
+
     private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
         val qs = params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}" }
