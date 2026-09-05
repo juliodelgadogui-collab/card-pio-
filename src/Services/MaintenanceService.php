@@ -12,6 +12,7 @@ final class MaintenanceService
     {
         $pdo=Database::connection();$result=[];
         $result['released_ticket_reservations']=(new TicketService())->releaseExpired();
+        $result['released_stock_reservations']=(new StockReservationService())->releaseExpired();
         $stmt=$pdo->prepare('UPDATE nfc_payment_intents SET status="expired" WHERE status="created" AND expires_at<CURRENT_TIMESTAMP');$stmt->execute();$result['expired_nfc_intents']=$stmt->rowCount();
         $stmt=$pdo->prepare('UPDATE api_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE revoked_at IS NULL AND expires_at<CURRENT_TIMESTAMP');$stmt->execute();$result['expired_api_tokens']=$stmt->rowCount();
         try{$stmt=$pdo->prepare('UPDATE events SET status="closed" WHERE status="published" AND ends_at IS NOT NULL AND ends_at<CURRENT_TIMESTAMP');$stmt->execute();$result['closed_events']=$stmt->rowCount();}catch(\Throwable){$result['closed_events']=0;}
