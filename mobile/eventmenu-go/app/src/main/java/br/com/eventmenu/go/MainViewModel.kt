@@ -37,6 +37,7 @@ data class GoState(
     val orders: List<Order> = emptyList(),
     val kitchenTickets: List<KitchenTicket> = emptyList(),
     val deliveryUsers: List<DeliveryUser> = emptyList(),
+    val dispatchFocusOrderId: Int? = null,
     val tables: List<RestaurantTable> = emptyList(),
     val selectedTable: RestaurantTable? = null,
     val products: List<Product> = emptyList(),
@@ -78,8 +79,8 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
         if("tables" in (_state.value.session?.permissions?:emptySet())&&mode==AppMode.OPERATION)refreshTablesInternal()
         if("delivery_assign" in (_state.value.session?.permissions?:emptySet())&&mode==AppMode.OPERATION)refreshDeliveryUsersInternal()
     }}
-    fun closeShift()=launchBusy{repo.closeShift();val refreshed=repo.context();_state.update{it.copy(session=refreshed,workShift=refreshed.shift,deliveryCash=null,cashHandoff=null,kitchenTickets=emptyList(),deliveryUsers=emptyList(),tables=emptyList(),selectedTable=null,message="Turno encerrado.")}}
-    fun navigate(screen:AppScreen)=_state.update{state->state.copy(screen=screen,selectedTable=if(screen==AppScreen.POS)null else state.selectedTable,error=null,message=null)}
+    fun closeShift()=launchBusy{repo.closeShift();val refreshed=repo.context();_state.update{it.copy(session=refreshed,workShift=refreshed.shift,deliveryCash=null,cashHandoff=null,kitchenTickets=emptyList(),deliveryUsers=emptyList(),dispatchFocusOrderId=null,tables=emptyList(),selectedTable=null,message="Turno encerrado.")}}
+    fun navigate(screen:AppScreen)=_state.update{state->state.copy(screen=screen,selectedTable=if(screen==AppScreen.POS)null else state.selectedTable,dispatchFocusOrderId=if(screen==AppScreen.DISPATCH)state.dispatchFocusOrderId else null,error=null,message=null)}
 
     fun refreshOrders()=launchBusy{refreshOrdersInternal();refreshDeliveryCashInternal()}
     private suspend fun refreshOrdersInternal(){if(_state.value.workShift?.status=="open")_state.update{it.copy(orders=repo.orders())}}
@@ -92,9 +93,9 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
     private suspend fun refreshDeliveryUsersInternal(){if(_state.value.workShift?.mode=="operation"&&"delivery_assign" in (_state.value.session?.permissions?:emptySet()))_state.update{it.copy(deliveryUsers=repo.deliveryUsers())}}
     fun dispatchReady(order:Order)=launchBusy{
         val target=when(order.channel){"table"->"served";"counter","pickup"->"completed";else->throw IllegalStateException("Este pedido precisa ser atribuído ao Delivery.")}
-        repo.changeOrderStatus(order.id,target);refreshOrdersInternal();if("tables" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshTablesInternal()};_state.update{it.copy(message=if(target=="served")"Pedido #${order.id} servido na mesa."else"Pedido #${order.id} entregue ao cliente.")}
+        repo.changeOrderStatus(order.id,target);refreshOrdersInternal();if("tables" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshTablesInternal()};_state.update{it.copy(dispatchFocusOrderId=null,message=if(target=="served")"Pedido #${order.id} servido na mesa."else"Pedido #${order.id} entregue ao cliente.")}
     }
-    fun assignDelivery(orderId:Int,deliveryUserId:Int)=launchBusy{repo.assignDelivery(orderId,deliveryUserId);refreshOrdersInternal();refreshDeliveryUsersInternal();val name=_state.value.deliveryUsers.firstOrNull{it.id==deliveryUserId}?.name?:"entregador";_state.update{it.copy(message="Pedido #$orderId atribuído a $name.")}}
+    fun assignDelivery(orderId:Int,deliveryUserId:Int)=launchBusy{repo.assignDelivery(orderId,deliveryUserId);refreshOrdersInternal();refreshDeliveryUsersInternal();val name=_state.value.deliveryUsers.firstOrNull{it.id==deliveryUserId}?.name?:"entregador";_state.update{it.copy(dispatchFocusOrderId=null,message="Pedido #$orderId atribuído a $name.")}}
 
     fun refreshTables()=launchBusy{refreshTablesInternal()}
     private suspend fun refreshTablesInternal(){if(_state.value.workShift?.mode=="operation"&&"tables" in (_state.value.session?.permissions?:emptySet()))_state.update{it.copy(tables=repo.tables())}}
@@ -126,7 +127,28 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
 
     fun resolveQr(value:String)=launchBusy{_state.update{it.copy(qr=repo.resolveQr(value))}}
     fun clearQr()=_state.update{it.copy(qr=null)}
-    fun processCurrentQr(){val qr=_state.value.qr?:return;launchBusy{when(qr.type){"ticket"->repo.ticketCheckIn(qr.raw);"guest"->repo.guestCheckIn(qr.raw);"delivery_handoff"->{repo.confirmDeliveryHandoff(qr.raw);refreshCashInternal()};else->throw IllegalStateException("Este QR não possui ação disponível para sua função.")};_state.update{it.copy(message=if(qr.type=="delivery_handoff")"✅ Repasse recebido e lançado no caixa."else"Entrada validada com sucesso.",qr=null)}}}
+    fun processCurrentQr(){
+        val qr=_state.value.qr?:return
+        launchBusy{
+            when(qr.type){
+                "ticket"->repo.ticketCheckIn(qr.raw)
+                "guest"->repo.guestCheckIn(qr.raw)
+                "delivery_handoff"->{repo.confirmDeliveryHandoff(qr.raw);refreshCashInternal()}
+                "order"->{
+                    val id=qr.orderId?:throw IllegalStateException("Pedido lido sem identificador.")
+                    if(qr.status!="ready"){
+                        _state.update{it.copy(qr=null,message="Pedido #$id está em ${qr.status}. Nenhuma ação de despacho foi executada.")}
+                        return@launchBusy
+                    }
+                    refreshOrdersInternal();if("delivery_assign" in (_state.value.session?.permissions?:emptySet()))refreshDeliveryUsersInternal()
+                    _state.update{it.copy(qr=null,screen=AppScreen.DISPATCH,dispatchFocusOrderId=id,message="Pedido #$id localizado pelo QR.")}
+                    return@launchBusy
+                }
+                else->throw IllegalStateException("Este QR não possui ação disponível para sua função.")
+            }
+            _state.update{it.copy(message=if(qr.type=="delivery_handoff")"✅ Repasse recebido e lançado no caixa."else"Entrada validada com sucesso.",qr=null)}
+        }
+    }
 
     fun openCash(openingCents:Int)=launchBusy{repo.openCash(openingCents);refreshCashInternal();_state.update{it.copy(message="Caixa iniciado.")}}
     fun closeCash(countedCents:Int)=launchBusy{repo.closeCash(countedCents);refreshCashInternal();_state.update{it.copy(message="Caixa encerrado.")}}
