@@ -34,10 +34,25 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
         ))}}
     }
 
-    suspend fun createOrder(channel:String,cart:Map<Int,Int>,customerName:String="",phone:String="",address:String="",notes:String=""):CreatedOrder{
+    suspend fun tables():List<RestaurantTable>{
+        val a=api.getGo("tables-list",requireToken()).optJSONArray("tables")?:JSONArray()
+        return buildList{for(i in 0 until a.length()){
+            val t=a.getJSONObject(i)
+            add(RestaurantTable(
+                id=t.getInt("id"),name=t.optString("name"),seats=t.optInt("seats"),status=t.optString("status"),
+                tabId=if(t.isNull("tab_id"))null else t.optInt("tab_id"),tabLabel=t.optString("tab_label"),openedAt=t.optString("opened_at"),
+                tabTotalCents=t.optInt("tab_total_cents"),unpaidCents=t.optInt("unpaid_cents")
+            ))
+        }}
+    }
+    suspend fun openTable(tableId:Int,label:String="")=api.postGo("table-open",requireToken(),JSONObject().put("table_id",tableId).put("label",label))
+    suspend fun closeTab(tabId:Int)=api.postGo("table-close",requireToken(),JSONObject().put("tab_id",tabId))
+
+    suspend fun createOrder(channel:String,cart:Map<Int,Int>,customerName:String="",phone:String="",address:String="",notes:String="",tableId:Int?=null):CreatedOrder{
         if(cart.isEmpty())throw ApiException("Carrinho vazio.")
         val items=JSONArray();cart.filterValues{it>0}.forEach{(id,qty)->items.put(JSONObject().put("product_id",id).put("quantity",qty))}
         val body=JSONObject().put("channel",channel).put("customer_name",customerName).put("customer_phone",phone).put("delivery_address",address).put("notes",notes).put("items",items)
+        tableId?.let{body.put("table_id",it)}
         val o=api.post("order-create",requireToken(),body).getJSONObject("order")
         return CreatedOrder(o.getInt("id"),o.optString("public_token"),o.optString("channel"),o.getInt("total_cents"))
     }
