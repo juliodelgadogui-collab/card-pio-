@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS refunds (
   provider_refund_id TEXT NULL,
   amount_cents INTEGER NOT NULL,
   currency TEXT NOT NULL DEFAULT 'BRL',
-  status TEXT NOT NULL DEFAULT 'requested' CHECK(status IN ('requested','provider_succeeded','completed','failed')),
+  status TEXT NOT NULL DEFAULT 'requested' CHECK(status IN ('requested','provider_pending','provider_succeeded','completed','failed')),
   reason TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
   provider_payload TEXT NULL,
