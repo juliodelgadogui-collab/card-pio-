@@ -11,6 +11,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -38,6 +39,7 @@ import br.com.eventmenu.go.ui.screens.HomeScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
 import br.com.eventmenu.go.ui.screens.ModePickerScreen
 import br.com.eventmenu.go.ui.screens.OrdersScreen
+import br.com.eventmenu.go.ui.screens.PosScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
 import br.com.eventmenu.go.ui.screens.ShiftStartScreen
 
@@ -54,15 +56,35 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     }
 
     val permissions=state.session!!.permissions;val mode=state.mode!!
-    val nav=buildList{add(AppScreen.HOME);if(mode==AppMode.OPERATION||mode==AppMode.DELIVERY)add(AppScreen.ORDERS);if("cash" in permissions)add(AppScreen.CASH);if(mode==AppMode.DELIVERY||"delivery_assign" in permissions)add(AppScreen.DELIVERY);if(mode==AppMode.EVENTS)add(AppScreen.EVENTS);add(AppScreen.PROFILE)}.distinct()
+    val nav=buildList{
+        add(AppScreen.HOME)
+        if("orders_create" in permissions)add(AppScreen.POS)
+        if(mode==AppMode.OPERATION||mode==AppMode.DELIVERY)add(AppScreen.ORDERS)
+        if("cash" in permissions)add(AppScreen.CASH)
+        if(mode==AppMode.DELIVERY||"delivery_assign" in permissions)add(AppScreen.DELIVERY)
+        if(mode==AppMode.EVENTS)add(AppScreen.EVENTS)
+        add(AppScreen.PROFILE)
+    }.distinct()
     Scaffold(
         snackbarHost={SnackbarHost(snackbar)},
         floatingActionButton={FloatingActionButton(onClick=onScan){Icon(Icons.Default.QrCodeScanner,contentDescription="Escanear")}},
-        bottomBar={NavigationBar{nav.forEach{screen->val icon=when(screen){AppScreen.HOME->Icons.Default.Home;AppScreen.ORDERS->Icons.Default.ReceiptLong;AppScreen.CASH->Icons.Default.PointOfSale;AppScreen.DELIVERY->Icons.Default.DeliveryDining;AppScreen.EVENTS->Icons.Default.ConfirmationNumber;AppScreen.PROFILE->Icons.Default.Badge};NavigationBarItem(selected=state.screen==screen,onClick={viewModel.navigate(screen)},icon={Icon(icon,contentDescription=screen.name)})}}}
+        bottomBar={NavigationBar{nav.forEach{screen->
+            val icon=when(screen){
+                AppScreen.HOME->Icons.Default.Home
+                AppScreen.POS->Icons.Default.ShoppingCart
+                AppScreen.ORDERS->Icons.Default.ReceiptLong
+                AppScreen.CASH->Icons.Default.PointOfSale
+                AppScreen.DELIVERY->Icons.Default.DeliveryDining
+                AppScreen.EVENTS->Icons.Default.ConfirmationNumber
+                AppScreen.PROFILE->Icons.Default.Badge
+            }
+            NavigationBarItem(selected=state.screen==screen,onClick={viewModel.navigate(screen)},icon={Icon(icon,contentDescription=screen.name)})
+        }}}
     ){padding->
         Box(Modifier.fillMaxSize().padding(padding)){
             when(state.screen){
                 AppScreen.HOME->HomeScreen(state,viewModel::refreshOrders)
+                AppScreen.POS->PosScreen(state,viewModel::addProduct,viewModel::removeProduct,viewModel::clearCart,viewModel::createPosOrder,viewModel::payPosCash,viewModel::requestPosPix,viewModel::requestPosNfc,viewModel::refreshPosPayment,viewModel::newPosSale)
                 AppScreen.ORDERS->OrdersScreen(state.orders,viewModel::refreshOrders,viewModel::changeOrderStatus)
                 AppScreen.CASH->CashScreen(state.cashOpen,viewModel::openCash,viewModel::closeCash)
                 AppScreen.DELIVERY->DeliveryOperationsScreen(state.orders,state.pixCharge,viewModel::changeOrderStatus,viewModel::requestPix,viewModel::requestNfc,viewModel::collectDeliveryCash,viewModel::pollPixStatus,viewModel::dismissPix)
