@@ -8,6 +8,7 @@ import br.com.eventmenu.go.data.ApiException
 import br.com.eventmenu.go.data.CashHandoff
 import br.com.eventmenu.go.data.CreatedOrder
 import br.com.eventmenu.go.data.DeliveryCashBalance
+import br.com.eventmenu.go.data.DeliveryUser
 import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.KitchenTicket
 import br.com.eventmenu.go.data.Order
@@ -25,7 +26,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class AppScreen { HOME, POS, TABLES, ORDERS, KITCHEN, CASH, DELIVERY, EVENTS, PROFILE }
+enum class AppScreen { HOME, POS, TABLES, ORDERS, KITCHEN, DISPATCH, CASH, DELIVERY, EVENTS, PROFILE }
 
 data class GoState(
     val session: Session? = null,
@@ -35,6 +36,7 @@ data class GoState(
     val screen: AppScreen = AppScreen.HOME,
     val orders: List<Order> = emptyList(),
     val kitchenTickets: List<KitchenTicket> = emptyList(),
+    val deliveryUsers: List<DeliveryUser> = emptyList(),
     val tables: List<RestaurantTable> = emptyList(),
     val selectedTable: RestaurantTable? = null,
     val products: List<Product> = emptyList(),
@@ -67,14 +69,16 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
         if("orders_create" in session.permissions)refreshCatalogInternal()
         if("orders_kitchen" in session.permissions&&session.shift?.mode=="operation")refreshKitchenInternal()
         if("tables" in session.permissions&&session.shift?.mode=="operation")refreshTablesInternal()
+        if("delivery_assign" in session.permissions&&session.shift?.mode=="operation")refreshDeliveryUsersInternal()
     }
     fun chooseMode(mode:AppMode){if(mode!in _state.value.modes)return;val open=_state.value.workShift;if(open!=null&&open.mode!=mode.wire){_state.update{it.copy(error="Encerre o turno ${open.mode} antes de trocar de modo.")};return};_state.update{it.copy(mode=mode,screen=AppScreen.HOME,error=null)}}
     fun startShift(){val mode=_state.value.mode?:return;launchBusy{
         val shift=repo.openShift(mode);_state.update{it.copy(workShift=shift,message="Turno iniciado.")};refreshOrdersInternal();refreshDeliveryCashInternal()
         if("orders_kitchen" in (_state.value.session?.permissions?:emptySet())&&mode==AppMode.OPERATION)refreshKitchenInternal()
         if("tables" in (_state.value.session?.permissions?:emptySet())&&mode==AppMode.OPERATION)refreshTablesInternal()
+        if("delivery_assign" in (_state.value.session?.permissions?:emptySet())&&mode==AppMode.OPERATION)refreshDeliveryUsersInternal()
     }}
-    fun closeShift()=launchBusy{repo.closeShift();val refreshed=repo.context();_state.update{it.copy(session=refreshed,workShift=refreshed.shift,deliveryCash=null,cashHandoff=null,kitchenTickets=emptyList(),tables=emptyList(),selectedTable=null,message="Turno encerrado.")}}
+    fun closeShift()=launchBusy{repo.closeShift();val refreshed=repo.context();_state.update{it.copy(session=refreshed,workShift=refreshed.shift,deliveryCash=null,cashHandoff=null,kitchenTickets=emptyList(),deliveryUsers=emptyList(),tables=emptyList(),selectedTable=null,message="Turno encerrado.")}}
     fun navigate(screen:AppScreen)=_state.update{state->state.copy(screen=screen,selectedTable=if(screen==AppScreen.POS)null else state.selectedTable,error=null,message=null)}
 
     fun refreshOrders()=launchBusy{refreshOrdersInternal();refreshDeliveryCashInternal()}
@@ -83,6 +87,14 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
     fun refreshKitchen()=launchBusy{refreshKitchenInternal()}
     private suspend fun refreshKitchenInternal(){if(_state.value.workShift?.mode=="operation"&&"orders_kitchen" in (_state.value.session?.permissions?:emptySet()))_state.update{it.copy(kitchenTickets=repo.kitchenBoard())}}
     fun kitchenStatus(orderId:Int,status:String)=launchBusy{repo.changeOrderStatus(orderId,status);refreshKitchenInternal();refreshOrdersInternal()}
+
+    fun refreshDispatch()=launchBusy{refreshOrdersInternal();if("delivery_assign" in (_state.value.session?.permissions?:emptySet()))refreshDeliveryUsersInternal()}
+    private suspend fun refreshDeliveryUsersInternal(){if(_state.value.workShift?.mode=="operation"&&"delivery_assign" in (_state.value.session?.permissions?:emptySet()))_state.update{it.copy(deliveryUsers=repo.deliveryUsers())}}
+    fun dispatchReady(order:Order)=launchBusy{
+        val target=when(order.channel){"table"->"served";"counter","pickup"->"completed";else->throw IllegalStateException("Este pedido precisa ser atribuído ao Delivery.")}
+        repo.changeOrderStatus(order.id,target);refreshOrdersInternal();if("tables" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshTablesInternal()};_state.update{it.copy(message=if(target=="served")"Pedido #${order.id} servido na mesa."else"Pedido #${order.id} entregue ao cliente.")}
+    }
+    fun assignDelivery(orderId:Int,deliveryUserId:Int)=launchBusy{repo.assignDelivery(orderId,deliveryUserId);refreshOrdersInternal();refreshDeliveryUsersInternal();val name=_state.value.deliveryUsers.firstOrNull{it.id==deliveryUserId}?.name?:"entregador";_state.update{it.copy(message="Pedido #$orderId atribuído a $name.")}}
 
     fun refreshTables()=launchBusy{refreshTablesInternal()}
     private suspend fun refreshTablesInternal(){if(_state.value.workShift?.mode=="operation"&&"tables" in (_state.value.session?.permissions?:emptySet()))_state.update{it.copy(tables=repo.tables())}}
