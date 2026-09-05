@@ -20,8 +20,9 @@ final class ManagerOperationsService
             $s=$pdo->prepare($sql);$s->execute(array_merge([$tenantId],$args));return (int)$s->fetchColumn();
         };
 
+        $cutoff=gmdate('Y-m-d H:i:s',time()-900);
         $ordersNow=$scalar('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND status IN ("pending","confirmed","preparing","ready","out_for_delivery")');
-        $kitchenDelayed=$scalar('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND status="preparing" AND updated_at < CURRENT_TIMESTAMP - INTERVAL 15 MINUTE');
+        $kitchenDelayed=$scalar('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND status="preparing" AND updated_at < ?',[$cutoff]);
         $readyOrders=$scalar('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND status="ready"');
         $unassignedDelivery=$scalar('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND channel="delivery" AND status="ready" AND assigned_delivery_user_id IS NULL');
         $deliveryOnline=$scalar('SELECT COUNT(*) FROM work_shifts WHERE tenant_id=? AND mode="delivery" AND status="open"');
