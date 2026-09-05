@@ -95,9 +95,24 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
             val h=api.getGo("handoff-resolve",requireToken(),mapOf("token" to token)).getJSONObject("handoff")
             return QrResult(type="delivery_handoff",title="Repasse de ${h.optString("delivery_name","Entregador")}",raw=token,subtitle="Dinheiro do turno de Delivery",amountCents=h.optInt("amount_cents"),status=h.optString("status"))
         }
-        val json=api.get("qr-resolve",requireToken(),mapOf("value" to value));val data=json.optJSONObject("data")?:JSONObject();val type=json.optString("type")
-        val title=when(type){"table"->data.optString("name","Mesa");"ticket"->data.optString("event_name","Ingresso");"guest"->data.optString("name","Convidado");else->"Código identificado"}
-        return QrResult(type,title,value)
+
+        val known=runCatching{api.get("qr-resolve",requireToken(),mapOf("value" to value))}.getOrNull()
+        if(known!=null){
+            val data=known.optJSONObject("data")?:JSONObject();val type=known.optString("type")
+            val title=when(type){"table"->data.optString("name","Mesa");"ticket"->data.optString("event_name","Ingresso");"guest"->data.optString("name","Convidado");else->"Código identificado"}
+            return QrResult(type,title,value)
+        }
+
+        val token=Regex("[A-Fa-f0-9]{40}").find(value)?.value?:value.trim()
+        val o=api.getGo("order-qr-resolve",requireToken(),mapOf("value" to token)).getJSONObject("order")
+        val channel=o.optString("channel")
+        val where=when(channel){"table"->o.optString("table_name").ifBlank{"Mesa"};"delivery"->"Delivery";"pickup"->"Retirada";else->"Balcão"}
+        val customer=o.optString("customer_name").takeIf{it.isNotBlank()&&it!="Consumidor"}
+        val subtitle=listOfNotNull(where,customer).joinToString(" · ")
+        return QrResult(
+            type="order",title="Pedido #${o.getInt("id")}",raw=token,subtitle=subtitle,
+            amountCents=o.optInt("total_cents"),status=o.optString("status"),orderId=o.getInt("id"),channel=channel,
+        )
     }
     suspend fun ticketCheckIn(value:String)=api.post("ticket-checkin",requireToken(),JSONObject().put("token",value))
     suspend fun guestCheckIn(value:String)=api.post("guest-checkin",requireToken(),JSONObject().put("code",value))
