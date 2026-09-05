@@ -8,9 +8,19 @@ data class AppUser(
     val role: String,
 )
 
+data class WorkShift(
+    val id: Int,
+    val mode: String,
+    val status: String,
+    val startedAt: String,
+    val endedAt: String? = null,
+)
+
 data class Session(
     val user: AppUser,
     val permissions: Set<String>,
+    val modes: List<AppMode> = emptyList(),
+    val shift: WorkShift? = null,
 )
 
 data class Order(
@@ -41,9 +51,13 @@ data class TapOnRequest(
     val enableTaxPassThrough: Boolean,
 )
 
-enum class AppMode(val label: String, val emoji: String) {
-    OPERATION("Operação", "🍽"),
-    DELIVERY("Delivery", "🛵"),
-    EVENTS("Eventos", "🎟"),
-    PAY("Pay", "💳"),
+enum class AppMode(val wire: String, val label: String, val emoji: String) {
+    OPERATION("operation", "Operação", "🍽"),
+    DELIVERY("delivery", "Delivery", "🛵"),
+    EVENTS("events", "Eventos", "🎟"),
+    PAY("pay", "Pay", "💳");
+
+    companion object {
+        fun fromWire(value: String): AppMode? = entries.firstOrNull { it.wire == value }
+    }
 }
