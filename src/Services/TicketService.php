@@ -103,7 +103,24 @@ final class TicketService
                 $tickets[] = ['id' => (int)$pdo->lastInsertId(), 'code' => $code, 'qr_token' => $qr];
             }
             $pdo->prepare('UPDATE ticket_batches SET quantity_reserved=quantity_reserved+? WHERE id=?')->execute([$quantity, $batchId]);
-            return ['order_id' => $orderId, 'public_token' => $publicToken, 'total_cents' => $total, 'expires_at' => $expires, 'tickets' => $tickets];
+
+            $paid = false;
+            if ($total === 0) {
+                $pdo->prepare('UPDATE orders SET status="confirmed",payment_status="paid" WHERE id=? AND tenant_id=?')->execute([$orderId, $event['tenant_id']]);
+                $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$event['tenant_id'], $orderId]);
+                $pdo->prepare(Database::portableSql($pdo, 'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=?'))->execute([$quantity, $quantity, $batchId]);
+
+                if ($couponId) {
+                    $pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$event['tenant_id'], $orderId]);
+                    $pdo->prepare(Database::portableSql($pdo, 'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$couponId, $event['tenant_id']]);
+                    $sql = Database::portableSql($pdo, 'INSERT IGNORE INTO coupon_redemptions (tenant_id,coupon_id,order_id,customer_id,discount_cents,idempotency_key) VALUES (?,?,?,?,?,?)');
+                    $pdo->prepare($sql)->execute([$event['tenant_id'], $couponId, $orderId, $customerId ?: null, $discount, 'free-ticket:order:' . $orderId . ':coupon']);
+                }
+                $expires = null;
+                $paid = true;
+            }
+
+            return ['order_id' => $orderId, 'public_token' => $publicToken, 'total_cents' => $total, 'expires_at' => $expires, 'paid' => $paid, 'tickets' => $tickets];
         });
     }
 
@@ -140,14 +157,14 @@ final class TicketService
             $groups = $s->fetchAll();
             $total = 0;
             foreach ($groups as $g) {
-                $pdo->prepare('UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?) WHERE id=?')->execute([(int)$g['qty'], $g['batch_id']]);
+                $pdo->prepare(Database::portableSql($pdo, 'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?) WHERE id=?'))->execute([(int)$g['qty'], $g['batch_id']]);
                 $total += (int)$g['qty'];
             }
 
             $couponRows = $pdo->query(Database::portableSql($pdo, 'SELECT id,coupon_id FROM coupon_reservations WHERE status="reserved" AND expires_at<CURRENT_TIMESTAMP FOR UPDATE'))->fetchAll();
             foreach ($couponRows as $row) {
                 $pdo->prepare('UPDATE coupon_reservations SET status="released" WHERE id=?')->execute([$row['id']]);
-                $pdo->prepare('UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1) WHERE id=?')->execute([$row['coupon_id']]);
+                $pdo->prepare(Database::portableSql($pdo, 'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1) WHERE id=?'))->execute([$row['coupon_id']]);
             }
 
             $pdo->exec('UPDATE tickets SET status="cancelled" WHERE status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP');
