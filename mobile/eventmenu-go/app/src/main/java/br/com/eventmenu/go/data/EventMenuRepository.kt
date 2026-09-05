@@ -84,8 +84,23 @@ class EventMenuRepository(
     suspend fun closeCash(countedCents: Int, notes: String = "") = api.post("cash-close", requireToken(), JSONObject().put("counted_cash_cents", countedCents).put("notes", notes))
 
     suspend fun pixCheckout(orderId: Int): JSONObject = api.post("pix-checkout", requireToken(), JSONObject().put("order_id", orderId))
-    suspend fun nfcIntent(orderId: Int): JSONObject = api.post("nfc-intent", requireToken(), JSONObject().put("order_id", orderId))
-    suspend fun nfcVerify(intentToken: String, transactionCode: String): JSONObject = api.post("nfc-verify", requireToken(), JSONObject().put("intent_token", intentToken).put("transaction_code", transactionCode))
+
+    suspend fun nfcIntent(orderId: Int): TapOnRequest {
+        val json = api.post("nfc-intent", requireToken(), JSONObject().put("order_id", orderId))
+        val tap = json.getJSONObject("tap_on")
+        return TapOnRequest(
+            intentToken = json.getString("intent_token"),
+            orderId = json.getInt("order_id"),
+            amountCents = json.getInt("amount_cents"),
+            appKey = tap.getString("app_key"),
+            appName = tap.optString("app_name", "EventMenu GO"),
+            appVersion = tap.optString("app_version", "1.0.0"),
+            enableTaxPassThrough = tap.optBoolean("enable_tax_pass_through", false),
+        )
+    }
+
+    suspend fun nfcVerify(intentToken: String, transactionCode: String): JSONObject =
+        api.post("nfc-verify", requireToken(), JSONObject().put("intent_token", intentToken).put("transaction_code", transactionCode))
 
     fun modes(session: Session): List<AppMode> = buildList {
         val p = session.permissions
