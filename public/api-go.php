@@ -13,6 +13,7 @@ use EventMenu\Services\NativePixService;
 use EventMenu\Services\NfcService;
 use EventMenu\Services\OrderService;
 use EventMenu\Services\PosPaymentService;
+use EventMenu\Services\TableService;
 use EventMenu\Services\WorkShiftService;
 
 header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store, private, max-age=0');header('X-Content-Type-Options: nosniff');header('Referrer-Policy: no-referrer');
@@ -60,6 +61,19 @@ try{
         $s=$pdo->prepare('SELECT o.id,o.channel,o.status,o.notes,o.created_at,rt.name table_name,c.name customer_name FROM orders o LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.tenant_id=? AND o.channel IN ("counter","pickup","table","delivery") AND o.status IN ("confirmed","preparing") ORDER BY CASE WHEN o.status="preparing" THEN 0 ELSE 1 END,o.id');$s->execute([$tenantId]);$orders=$s->fetchAll();
         if($orders){$ids=array_column($orders,'id');$marks=implode(',',array_fill(0,count($ids),'?'));$i=$pdo->prepare('SELECT order_id,name_snapshot,quantity,notes FROM order_items WHERE order_id IN ('.$marks.') ORDER BY id');$i->execute($ids);$group=[];foreach($i->fetchAll() as $row)$group[(int)$row['order_id']][]=$row;foreach($orders as &$order)$order['items']=$group[(int)$order['id']]??[];unset($order);}
         go_out(['ok'=>true,'tickets'=>$orders]);
+    }
+
+    if($action==='tables-list'){
+        $current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para acessar o salão.');
+        go_out(['ok'=>true,'tables'=>(new TableService())->list()]);
+    }
+    if($action==='table-open'){
+        go_method('POST');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para abrir comanda.');$body=go_body();
+        go_out(['ok'=>true,'tab'=>(new TableService())->open((int)($body['table_id']??0),(string)($body['label']??''))],201);
+    }
+    if($action==='table-close'){
+        go_method('POST');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para fechar comanda.');$body=go_body();
+        go_out(['ok'=>true,'tab'=>(new TableService())->close((int)($body['tab_id']??0))]);
     }
 
     if($action==='catalog'){
