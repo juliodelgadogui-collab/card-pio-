@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import br.com.eventmenu.go.AppScreen
+import br.com.eventmenu.go.DeviceStatusViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.MainViewModel
 import br.com.eventmenu.go.ManagerActionsViewModel
@@ -80,6 +81,8 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     val managerActionState by managerActionsViewModel.state.collectAsState()
     val receiptViewModel: ReceiptViewModel = composeViewModel(factory = ReceiptViewModel.Factory(app.receiptRepository))
     val receiptState by receiptViewModel.state.collectAsState()
+    val deviceViewModel: DeviceStatusViewModel = composeViewModel(factory = DeviceStatusViewModel.Factory(app.deviceStatusRepository))
+    val deviceState by deviceViewModel.state.collectAsState()
     val printerPreferences = remember(app) { PrinterPreferences(app) }
     val bluetoothPrinter = remember(app) { BluetoothEscPosPrinter(app, printerPreferences) }
     val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter, app.receiptRepository))
@@ -97,6 +100,9 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     }
     LaunchedEffect(receiptState.error) {
         receiptState.error?.let { snackbar.showSnackbar(it); receiptViewModel.clearError() }
+    }
+    LaunchedEffect(deviceState.error) {
+        deviceState.error?.let { snackbar.showSnackbar(it); deviceViewModel.clearError() }
     }
     LaunchedEffect(printerState.error, printerState.message) {
         (printerState.error ?: printerState.message)?.let { snackbar.showSnackbar(it) }
@@ -143,6 +149,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     LaunchedEffect(state.screen, state.workShift?.id) {
         if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) {
             profileViewModel.refresh()
+            deviceViewModel.refresh()
             printerViewModel.refresh()
         }
         if (state.screen == AppScreen.MANAGER && state.workShift?.id != null) managerActionsViewModel.refresh()
@@ -245,6 +252,8 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                     shiftSummary = profileState.summary,
                     summaryLoading = profileState.loading,
                     onRefreshSummary = profileViewModel::refresh,
+                    deviceState = deviceState,
+                    onRefreshDevice = deviceViewModel::refresh,
                     printerState = printerState,
                     onPrinterRefresh = printerViewModel::refresh,
                     onSelectPrinter = printerViewModel::selectDevice,
@@ -262,7 +271,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                     onLogout = viewModel::logout,
                 )
             }
-            if (state.loading || receiptState.loading || printerState.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            if (state.loading || receiptState.loading || printerState.loading || deviceState.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
         }
     }
     state.qr?.let { QrResultDialog(it, viewModel::clearQr, viewModel::processCurrentQr) }
