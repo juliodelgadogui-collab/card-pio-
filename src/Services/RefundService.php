@@ -33,7 +33,7 @@ final class RefundService
             $stmt = $pdo->prepare('INSERT INTO refunds (tenant_id,payment_id,order_id,requested_by,provider,amount_cents,currency,status,reason,idempotency_key) VALUES (?,?,?,?,?,?,?,"requested",?,?)');
             $stmt->execute([$tenantId, $payment['id'], $payment['order_id'], $userId, $payment['provider'], $payment['amount_cents'], $payment['currency'], $reason, $key]);
             $id = (int)$pdo->lastInsertId();
-            Auth::audit('refund.requested', 'refund', (string)$id, ['payment_id' => (int)$payment['id'], 'order_id' => (int)$payment['order_id']]);
+            Auth::audit('refund.requested', 'refund', (string)$id, ['payment_id' => (int)$payment['id'], 'order_id' => (int)$payment['order_id'], 'duplicate_payment' => $payment['status']==='duplicate_paid']);
             $s = $pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$id]);
             return $s->fetch() ?: throw new RuntimeException('Falha ao criar solicitação de estorno.');
         });
@@ -86,7 +86,12 @@ final class RefundService
 
     private function preflight(array $payment,int $userId): void
     {
-        if($payment['status']!=='paid'||$payment['order_payment_status']!=='paid') throw new RuntimeException('Somente pagamento integralmente confirmado pode ser estornado.');
+        $duplicate=$payment['status']==='duplicate_paid';
+        if(!$duplicate&&($payment['status']!=='paid'||$payment['order_payment_status']!=='paid')) throw new RuntimeException('Somente pagamento integralmente confirmado pode ser estornado.');
+        if($duplicate){
+            if($payment['provider']==='manual') throw new RuntimeException('Pagamento duplicado manual exige conferência do caixa.');
+            return;
+        }
         if($payment['order_status']==='cancelled') throw new RuntimeException('Pedido já está cancelado.');
         $pdo=Database::connection();
         $t=$pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND order_id=? AND status="checked_in"');$t->execute([$payment['tenant_id'],$payment['order_id']]);
@@ -110,6 +115,14 @@ final class RefundService
             $p=$pdo->prepare(Database::portableSql($pdo,'SELECT p.*,o.customer_id,o.coupon_id,o.promoter_id,o.payment_status order_payment_status FROM payments p JOIN orders o ON o.id=p.order_id WHERE p.id=? AND p.tenant_id=? FOR UPDATE'));$p->execute([$refund['payment_id'],$tenantId]);$payment=$p->fetch();
             if(!$payment)throw new RuntimeException('Pagamento do estorno não encontrado.');
 
+            // Cobrança duplicada nunca gerou efeitos de negócio; ao estornar, não altera o pedido vencedor.
+            if($payment['status']==='duplicate_paid'){
+                $pdo->prepare('UPDATE payments SET status="refunded" WHERE id=? AND tenant_id=?')->execute([$refund['payment_id'],$tenantId]);
+                $pdo->prepare('UPDATE refunds SET status="completed",completed_at=CURRENT_TIMESTAMP,error_message=NULL WHERE id=? AND tenant_id=?')->execute([$refundId,$tenantId]);
+                Auth::audit('refund.duplicate_completed','refund',(string)$refundId,['payment_id'=>(int)$refund['payment_id'],'order_id'=>(int)$refund['order_id'],'amount_cents'=>(int)$refund['amount_cents']]);
+                $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$refundId]);return $s->fetch();
+            }
+
             $checked=$pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND order_id=? AND status="checked_in"');$checked->execute([$tenantId,$refund['order_id']]);if((int)$checked->fetchColumn()>0)throw new RuntimeException('Ingresso utilizado impede a conclusão do estorno.');
             $paidCommission=$pdo->prepare('SELECT COUNT(*) FROM promoter_commissions WHERE tenant_id=? AND order_id=? AND status="paid"');$paidCommission->execute([$tenantId,$refund['order_id']]);if((int)$paidCommission->fetchColumn()>0)throw new RuntimeException('Comissão paga impede a conclusão automática do estorno.');
 
@@ -117,10 +130,10 @@ final class RefundService
             foreach($stocks->fetchAll() as $row){$key='refund:'.$refundId.':product:'.$row['product_id'];$ins=$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key) VALUES (?,?,?,"reversal",?,?)'));$ins->execute([$tenantId,$row['product_id'],$refund['order_id'],$row['qty'],$key]);if($ins->rowCount()===1)$pdo->prepare('UPDATE products SET stock_qty=stock_qty+? WHERE id=? AND tenant_id=?')->execute([$row['qty'],$row['product_id'],$tenantId]);}
 
             $tickets=$pdo->prepare(Database::portableSql($pdo,'SELECT batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="paid" GROUP BY batch_id FOR UPDATE'));$tickets->execute([$tenantId,$refund['order_id']]);
-            foreach($tickets->fetchAll() as $row){$pdo->prepare('UPDATE ticket_batches SET quantity_sold=GREATEST(0,quantity_sold-?) WHERE id=?')->execute([(int)$row['qty'],$row['batch_id']]);}
+            foreach($tickets->fetchAll() as $row){$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_sold=GREATEST(0,quantity_sold-?) WHERE id=?'))->execute([(int)$row['qty'],$row['batch_id']]);}
             $pdo->prepare('UPDATE tickets SET status="refunded" WHERE tenant_id=? AND order_id=? AND status="paid"')->execute([$tenantId,$refund['order_id']]);
 
-            if(!empty($payment['coupon_id'])){$r=$pdo->prepare('SELECT id FROM coupon_redemptions WHERE tenant_id=? AND order_id=? LIMIT 1');$r->execute([$tenantId,$refund['order_id']]);if($r->fetchColumn())$pdo->prepare('UPDATE coupons SET uses_count=GREATEST(0,uses_count-1) WHERE id=? AND tenant_id=?')->execute([$payment['coupon_id'],$tenantId]);}
+            if(!empty($payment['coupon_id'])){$r=$pdo->prepare('SELECT id FROM coupon_redemptions WHERE tenant_id=? AND order_id=? LIMIT 1');$r->execute([$tenantId,$refund['order_id']]);if($r->fetchColumn())$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET uses_count=GREATEST(0,uses_count-1) WHERE id=? AND tenant_id=?'))->execute([$payment['coupon_id'],$tenantId]);}
 
             if(!empty($payment['customer_id'])){$earn=$pdo->prepare('SELECT COALESCE(SUM(points),0) FROM customer_points_movements WHERE tenant_id=? AND customer_id=? AND order_id=? AND type="earn"');$earn->execute([$tenantId,$payment['customer_id'],$refund['order_id']]);$points=(int)$earn->fetchColumn();if($points>0){$key='refund:'.$refundId.':points';$ins=$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO customer_points_movements (tenant_id,customer_id,order_id,points,type,idempotency_key) VALUES (?,?,?, ?,"reversal",?)'));$ins->execute([$tenantId,$payment['customer_id'],$refund['order_id'],-$points,$key]);if($ins->rowCount()===1)$pdo->prepare('UPDATE customers SET points=points-? WHERE id=? AND tenant_id=?')->execute([$points,$payment['customer_id'],$tenantId]);}}
 
