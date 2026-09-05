@@ -11,6 +11,7 @@ use Throwable;
 final class Database
 {
     private static ?PDO $pdo = null;
+    private static bool $sqliteImmediateTransaction = false;
 
     public static function connection(): PDO
     {
@@ -95,17 +96,35 @@ final class Database
     public static function transaction(callable $callback): mixed
     {
         $pdo = self::connection();
-        if ($pdo->inTransaction()) return $callback($pdo);
+        if ($pdo->inTransaction() || self::$sqliteImmediateTransaction) return $callback($pdo);
 
-        if (self::isSqlite($pdo)) $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
-        else $pdo->beginTransaction();
+        $sqlite = self::isSqlite($pdo);
+        if ($sqlite) {
+            $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+            self::$sqliteImmediateTransaction = true;
+        } else {
+            $pdo->beginTransaction();
+        }
 
         try {
             $result = $callback($pdo);
-            $pdo->commit();
+            if ($sqlite) {
+                $pdo->exec('COMMIT');
+                self::$sqliteImmediateTransaction = false;
+            } else {
+                $pdo->commit();
+            }
             return $result;
         } catch (Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($sqlite && self::$sqliteImmediateTransaction) {
+                try {
+                    $pdo->exec('ROLLBACK');
+                } finally {
+                    self::$sqliteImmediateTransaction = false;
+                }
+            } elseif ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             throw $e;
         }
     }
