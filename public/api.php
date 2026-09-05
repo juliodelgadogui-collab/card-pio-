@@ -1,0 +1,60 @@
+<?php
+
+declare(strict_types=1);
+
+require __DIR__.'/../app/bootstrap.php';
+
+use EventMenu\Core\Auth;
+use EventMenu\Core\Database;
+use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\NfcService;
+use EventMenu\Services\OrderService;
+use EventMenu\Services\TicketService;
+
+header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store, private, max-age=0');header('X-Content-Type-Options: nosniff');
+if($_SERVER['REQUEST_METHOD']==='OPTIONS'){header('Allow: GET, POST, OPTIONS');http_response_code(204);exit;}
+
+function api_out(array $data,int $status=200):never{http_response_code($status);echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
+function api_body():array{$raw=file_get_contents('php://input');if($raw===false||trim($raw)==='')return $_POST?:[];try{$data=json_decode($raw,true,512,JSON_THROW_ON_ERROR);return is_array($data)?$data:[];}catch(Throwable){api_out(['ok'=>false,'error'=>'JSON inválido.'],400);}}
+function api_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)api_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
+function api_order_allowed(array $order):bool{$role=Auth::role();$uid=Auth::id();if($role==='delivery')return (int)($order['assigned_delivery_user_id']??0)===(int)$uid;if($role==='kitchen')return in_array($order['status'],['confirmed','preparing','ready'],true);return Auth::can('orders.view')||Auth::can('orders.create');}
+
+$action=(string)($_GET['action']??'me');$auth=new ApiAuthService();
+try{
+    if($action==='login'){
+        api_method('POST');$body=api_body();$result=$auth->login((string)($body['email']??''),(string)($body['password']??''),(string)($body['device_id']??''),(string)($body['device_label']??''));api_out(['ok'=>true]+$result);
+    }
+
+    $token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')api_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);$user=$auth->authenticate($token,$deviceId);$pdo=Database::connection();$tenantId=(int)$user['tenant_id'];
+
+    if($action==='logout'){api_method('POST');$auth->revoke($token);api_out(['ok'=>true]);}
+    if($action==='me'){
+        api_out(['ok'=>true,'user'=>$user,'permissions'=>['orders_create'=>Auth::can('orders.create'),'orders_kitchen'=>Auth::can('orders.kitchen'),'orders_delivery'=>Auth::can('orders.delivery'),'cash'=>Auth::can('cash.manage'),'nfc_collect'=>Auth::can('nfc.collect'),'tickets'=>Auth::can('tickets.manage')]]);
+    }
+    if($action==='products'){
+        if(!Auth::can('orders.create')&&!Auth::can('catalog.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$s=$pdo->prepare('SELECT id,category_id,name,description,sku,price_cents,stock_qty,track_stock,image_url FROM products WHERE tenant_id=? AND active=1 ORDER BY name');$s->execute([$tenantId]);api_out(['ok'=>true,'products'=>$s->fetchAll()]);
+    }
+    if($action==='orders'){
+        $role=Auth::role();$sql='SELECT o.id,o.public_token,o.channel,o.status,o.payment_status,o.total_cents,o.delivery_address,o.assigned_delivery_user_id,o.table_id,o.tab_id,o.created_at,c.name customer_name,c.phone customer_phone FROM orders o LEFT JOIN customers c ON c.id=o.customer_id WHERE o.tenant_id=?';$args=[$tenantId];
+        if($role==='delivery'){$sql.=' AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery")';$args[]=Auth::id();}
+        elseif($role==='kitchen'){$sql.=' AND o.status IN ("confirmed","preparing")';}
+        elseif(!Auth::can('orders.view')&&!Auth::can('orders.create'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);
+        $sql.=' ORDER BY o.id DESC LIMIT 200';$s=$pdo->prepare($sql);$s->execute($args);api_out(['ok'=>true,'orders'=>$s->fetchAll()]);
+    }
+    if($action==='order'){
+        $id=(int)($_GET['id']??0);$s=$pdo->prepare('SELECT o.*,c.name customer_name,c.phone customer_phone FROM orders o LEFT JOIN customers c ON c.id=o.customer_id WHERE o.id=? AND o.tenant_id=?');$s->execute([$id,$tenantId]);$order=$s->fetch();if(!$order)api_out(['ok'=>false,'error'=>'Pedido não encontrado.'],404);if(!api_order_allowed($order))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$i=$pdo->prepare('SELECT id,product_id,name_snapshot,unit_price_cents,quantity,total_cents,notes FROM order_items WHERE order_id=? ORDER BY id');$i->execute([$id]);api_out(['ok'=>true,'order'=>$order,'items'=>$i->fetchAll()]);
+    }
+    if($action==='order-status'){
+        api_method('POST');$body=api_body();$id=(int)($body['order_id']??0);$status=(string)($body['status']??'');$s=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=?');$s->execute([$id,$tenantId]);$order=$s->fetch();if(!$order)api_out(['ok'=>false,'error'=>'Pedido não encontrado.'],404);if(!api_order_allowed($order))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$source=Auth::role()==='delivery'?'delivery':(Auth::role()==='kitchen'?'kitchen':'panel');(new OrderService())->changeStatus($id,$status,$source);api_out(['ok'=>true]);
+    }
+    if($action==='nfc-intent'){
+        api_method('POST');$body=api_body();$result=(new NfcService())->createIntent((int)($body['order_id']??0),$deviceId);api_out(['ok'=>true]+$result,201);
+    }
+    if($action==='nfc-verify'){
+        api_method('POST');$body=api_body();$result=(new NfcService())->verifyIntent((string)($body['intent_token']??''),(string)($body['transaction_code']??''),$deviceId);api_out($result);
+    }
+    if($action==='ticket-checkin'){
+        api_method('POST');if(!Auth::can('tickets.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$result=(new TicketService())->checkIn((string)($body['token']??''));api_out(['ok'=>true,'result'=>$result]);
+    }
+    api_out(['ok'=>false,'error'=>'Endpoint não encontrado.'],404);
+}catch(RuntimeException $e){api_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))api_out(['ok'=>false,'error'=>$e->getMessage()],500);api_out(['ok'=>false,'error'=>'Erro interno.'],500);}
