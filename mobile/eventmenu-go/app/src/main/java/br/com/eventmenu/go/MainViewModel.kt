@@ -19,6 +19,8 @@ import br.com.eventmenu.go.data.Product
 import br.com.eventmenu.go.data.QrResult
 import br.com.eventmenu.go.data.RestaurantTable
 import br.com.eventmenu.go.data.Session
+import br.com.eventmenu.go.data.TableAccount
+import br.com.eventmenu.go.data.TableAccountOrder
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.data.WorkShift
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,7 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
-enum class AppScreen { HOME, POS, TABLES, ORDERS, KITCHEN, DISPATCH, CASH, DELIVERY, EVENTS, PROFILE }
+enum class AppScreen { HOME, POS, TABLES, TABLE_ACCOUNT, ORDERS, KITCHEN, DISPATCH, CASH, DELIVERY, EVENTS, PROFILE }
 
 data class GoState(
     val session: Session? = null,
@@ -41,10 +43,12 @@ data class GoState(
     val dispatchFocusOrderId: Int? = null,
     val tables: List<RestaurantTable> = emptyList(),
     val selectedTable: RestaurantTable? = null,
+    val tableAccount: TableAccount? = null,
     val products: List<Product> = emptyList(),
     val cart: Map<Int,Int> = emptyMap(),
     val posOrder: CreatedOrder? = null,
     val paymentBalance: PaymentBalance? = null,
+    val posReturnScreen: AppScreen? = null,
     val cashOpen: Boolean = false,
     val cashSummary: CashSummary? = null,
     val loading: Boolean = false,
@@ -81,7 +85,7 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
         if("tables" in (_state.value.session?.permissions?:emptySet())&&mode==AppMode.OPERATION)refreshTablesInternal()
         if("delivery_assign" in (_state.value.session?.permissions?:emptySet())&&mode==AppMode.OPERATION)refreshDeliveryUsersInternal()
     }}
-    fun closeShift()=launchBusy{repo.closeShift();val refreshed=repo.context();_state.update{it.copy(session=refreshed,workShift=refreshed.shift,deliveryCash=null,cashHandoff=null,kitchenTickets=emptyList(),deliveryUsers=emptyList(),dispatchFocusOrderId=null,tables=emptyList(),selectedTable=null,message="Turno encerrado.")}}
+    fun closeShift()=launchBusy{repo.closeShift();val refreshed=repo.context();_state.update{it.copy(session=refreshed,workShift=refreshed.shift,deliveryCash=null,cashHandoff=null,kitchenTickets=emptyList(),deliveryUsers=emptyList(),dispatchFocusOrderId=null,tables=emptyList(),selectedTable=null,tableAccount=null,posOrder=null,paymentBalance=null,posReturnScreen=null,message="Turno encerrado.")}}
     fun navigate(screen:AppScreen)=_state.update{state->state.copy(screen=screen,selectedTable=if(screen==AppScreen.POS)null else state.selectedTable,dispatchFocusOrderId=if(screen==AppScreen.DISPATCH)state.dispatchFocusOrderId else null,error=null,message=null)}
 
     fun refreshOrders()=launchBusy{refreshOrdersInternal();refreshDeliveryCashInternal()}
@@ -99,17 +103,29 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
     fun refreshTables()=launchBusy{refreshTablesInternal()}
     private suspend fun refreshTablesInternal(){if(_state.value.workShift?.mode=="operation"&&"tables" in (_state.value.session?.permissions?:emptySet()))_state.update{it.copy(tables=repo.tables())}}
     fun openTable(tableId:Int,label:String)=launchBusy{repo.openTable(tableId,label);refreshTablesInternal();_state.update{it.copy(message="Comanda aberta.")}}
-    fun closeTable(tabId:Int)=launchBusy{repo.closeTab(tabId);refreshTablesInternal();refreshOrdersInternal();_state.update{it.copy(selectedTable=null,message="Comanda encerrada e mesa liberada.")}}
-    fun orderForTable(table:RestaurantTable){if(table.tabId==null){_state.update{it.copy(error="Abra a comanda desta mesa antes de lançar pedido.")};return};_state.update{it.copy(selectedTable=table,screen=AppScreen.POS,posOrder=null,paymentBalance=null,cart=emptyMap(),error=null)}}
-    fun clearSelectedTable()=_state.update{it.copy(selectedTable=null,screen=AppScreen.TABLES,cart=emptyMap(),posOrder=null,paymentBalance=null)}
+    fun closeTable(tabId:Int)=launchBusy{repo.closeTab(tabId);refreshTablesInternal();refreshOrdersInternal();_state.update{it.copy(selectedTable=null,tableAccount=null,screen=AppScreen.TABLES,message="Comanda encerrada e mesa liberada.")}}
+    fun orderForTable(table:RestaurantTable){if(table.tabId==null){_state.update{it.copy(error="Abra a comanda desta mesa antes de lançar pedido.")};return};_state.update{it.copy(selectedTable=table,tableAccount=null,screen=AppScreen.POS,posOrder=null,paymentBalance=null,posReturnScreen=null,cart=emptyMap(),error=null)}}
+    fun clearSelectedTable()=_state.update{it.copy(selectedTable=null,screen=AppScreen.TABLES,cart=emptyMap(),posOrder=null,paymentBalance=null,posReturnScreen=null)}
+    fun openTableAccount(table:RestaurantTable)=launchBusy{if(table.tabId==null)throw IllegalStateException("Abra a comanda antes de consultar a conta.");refreshOrdersInternal();val account=repo.tableAccount(table,_state.value.orders);_state.update{it.copy(tableAccount=account,selectedTable=table,screen=AppScreen.TABLE_ACCOUNT,error=null)}}
+    fun refreshTableAccount()=launchBusy{refreshTableAccountInternal()}
+    private suspend fun refreshTableAccountInternal(){val table=_state.value.tableAccount?.table?:_state.value.selectedTable?:return;refreshOrdersInternal();_state.update{it.copy(tableAccount=repo.tableAccount(table,_state.value.orders))}}
+    fun closeTableAccount()=_state.update{it.copy(tableAccount=null,selectedTable=null,screen=AppScreen.TABLES,posReturnScreen=null)}
+    fun receiveTableOrder(order:TableAccountOrder)=launchBusy{
+        val balance=repo.paymentBalance(order.orderId)
+        _state.update{it.copy(posOrder=CreatedOrder(order.orderId,"","table",balance.totalCents),paymentBalance=balance,posReturnScreen=AppScreen.TABLE_ACCOUNT,screen=AppScreen.POS,message="Recebimento do pedido #${order.orderId}.")}
+    }
 
     fun refreshCatalog()=launchBusy{refreshCatalogInternal()}
     private suspend fun refreshCatalogInternal(){_state.update{it.copy(products=repo.products())}}
     fun addProduct(productId:Int){val p=_state.value.products.firstOrNull{it.id==productId}?:return;val current=_state.value.cart[productId]?:0;if(p.trackStock&&current+1>p.stockQty.toInt()){_state.update{it.copy(error="Estoque disponível insuficiente para ${p.name}.")};return};_state.update{it.copy(cart=it.cart+(productId to current+1))}}
     fun removeProduct(productId:Int){val current=_state.value.cart[productId]?:return;_state.update{s->if(current<=1)s.copy(cart=s.cart-productId)else s.copy(cart=s.cart+(productId to current-1))}}
     fun clearCart()=_state.update{it.copy(cart=emptyMap())}
-    fun createPosOrder(channel:String,customerName:String,phone:String,address:String,notes:String)=launchBusy{val table=_state.value.selectedTable;val effectiveChannel=if(table!=null)"table"else channel;val order=repo.createOrder(effectiveChannel,_state.value.cart,customerName,phone,address,notes,table?.id);if(effectiveChannel=="table"){_state.update{it.copy(cart=emptyMap(),posOrder=null,paymentBalance=null,selectedTable=null,screen=AppScreen.TABLES,message="Pedido #${order.id} lançado na ${table?.name?:"mesa"}.")};refreshOrdersInternal();refreshTablesInternal();refreshCatalogInternal();if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))refreshKitchenInternal()}else{val balance=repo.paymentBalance(order.id);_state.update{it.copy(cart=emptyMap(),posOrder=order,paymentBalance=balance,message="Pedido #${order.id} criado. Escolha o pagamento.")};refreshOrdersInternal();refreshCatalogInternal();if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))refreshKitchenInternal()}}
-    fun newPosSale()=_state.update{it.copy(posOrder=null,paymentBalance=null,pixCharge=null,tapOnRequest=null,cart=emptyMap(),selectedTable=null)}
+    fun createPosOrder(channel:String,customerName:String,phone:String,address:String,notes:String)=launchBusy{val table=_state.value.selectedTable;val effectiveChannel=if(table!=null)"table"else channel;val order=repo.createOrder(effectiveChannel,_state.value.cart,customerName,phone,address,notes,table?.id);if(effectiveChannel=="table"){_state.update{it.copy(cart=emptyMap(),posOrder=null,paymentBalance=null,selectedTable=null,screen=AppScreen.TABLES,message="Pedido #${order.id} lançado na ${table?.name?:"mesa"}.")};refreshOrdersInternal();refreshTablesInternal();refreshCatalogInternal();if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))refreshKitchenInternal()}else{val balance=repo.paymentBalance(order.id);_state.update{it.copy(cart=emptyMap(),posOrder=order,paymentBalance=balance,posReturnScreen=null,message="Pedido #${order.id} criado. Escolha o pagamento.")};refreshOrdersInternal();refreshCatalogInternal();if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))refreshKitchenInternal()}}
+    fun finishPosFlow()=launchBusy{
+        val back=_state.value.posReturnScreen
+        _state.update{it.copy(posOrder=null,paymentBalance=null,pixCharge=null,tapOnRequest=null,cart=emptyMap(),selectedTable=if(back==AppScreen.TABLE_ACCOUNT)it.selectedTable else null,posReturnScreen=null,screen=back?:AppScreen.POS)}
+        if(back==AppScreen.TABLE_ACCOUNT){refreshTablesInternal();refreshTableAccountInternal()}else refreshCatalogInternal()
+    }
     fun refreshPosPayment()=launchBusy{val id=_state.value.posOrder?.id?:return@launchBusy;_state.update{it.copy(paymentBalance=repo.paymentBalance(id))}}
     fun payPosCash(amountCents:Int)=launchBusy{val id=_state.value.posOrder?.id?:throw IllegalStateException("Pedido do PDV não encontrado.");val balance=repo.payCashPart(id,amountCents);_state.update{it.copy(paymentBalance=balance,message="Parcela em dinheiro recebida: ${money(amountCents)}")};refreshOrdersInternal();refreshCashInternal()}
     fun requestPosPix(amountCents:Int,taxId:String)=launchBusy{val id=_state.value.posOrder?.id?:throw IllegalStateException("Pedido do PDV não encontrado.");_state.update{it.copy(pixCharge=repo.nativePix(id,taxId,amountCents))}}
@@ -121,8 +137,8 @@ class MainViewModel(private val repo: EventMenuRepository) : ViewModel() {
 
     fun refreshCash()=launchBusy{refreshCashInternal()}
     fun openCash(openingCents:Int,notes:String="")=launchBusy{repo.openCash(openingCents,notes);refreshCashInternal();_state.update{it.copy(message="Caixa financeiro aberto.")}}
-    fun addCashSupply(amountCents:Int,notes:String="")=launchBusy{repo.addCashMovement("supply",amountCents,notes);refreshCashInternal();_state.update{it.copy(message="Suprimento lançado: ${money(amountCents)}")}}
-    fun addCashWithdrawal(amountCents:Int,notes:String)=launchBusy{repo.addCashMovement("withdrawal",amountCents,notes);refreshCashInternal();_state.update{it.copy(message="Sangria lançada: ${money(amountCents)}")}}
+    fun addCashSupply(amountCents:Int,notes:String="")=launchBusy{repo.cashMovement("supply",amountCents,notes);refreshCashInternal();_state.update{it.copy(message="Suprimento lançado: ${money(amountCents)}")}}
+    fun addCashWithdrawal(amountCents:Int,notes:String)=launchBusy{repo.cashMovement("withdrawal",amountCents,notes,"out");refreshCashInternal();_state.update{it.copy(message="Sangria lançada: ${money(amountCents)}")}}
     fun closeCash(countedCents:Int,notes:String="")=launchBusy{val result=repo.closeCash(countedCents,notes).getJSONObject("session");val expected=result.optInt("expected_cash_cents");val diff=result.optInt("difference_cents");refreshCashInternal();_state.update{it.copy(message="Caixa fechado. Esperado ${money(expected)} · Diferença ${money(diff)}")}}
     private suspend fun refreshCashInternal(){if(_state.value.session?.permissions?.contains("cash")!=true)return;val current=repo.currentCash().optJSONObject("session");val summary=runCatching{repo.cashSummary()}.getOrNull();_state.update{it.copy(cashOpen=current!=null,cashSummary=summary)}}
 
