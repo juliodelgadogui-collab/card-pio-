@@ -2,6 +2,7 @@
   "name": "eventmenu/premium",
   "description": "EventMenu Premium - eventos, cardápio, delivery e pagamentos multiempresa",
   "type": "project",
+  "license": "proprietary",
   "require": {
     "php": "^8.2",
     "ext-curl": "*",
