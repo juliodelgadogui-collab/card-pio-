@@ -1,5 +1,6 @@
 package br.com.eventmenu.go.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -15,6 +17,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -22,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -48,6 +52,9 @@ fun EmployeeProfileScreen(
     onSavePin: (String) -> Unit,
     onBiometric: (Boolean) -> Unit,
     onCloseShift: () -> Unit,
+    onCreateHandoff: () -> Unit,
+    onDismissHandoff: () -> Unit,
+    onRefreshDeliveryCash: () -> Unit,
     onLogout: () -> Unit,
 ) {
     val user = state.session?.user ?: return
@@ -57,12 +64,29 @@ fun EmployeeProfileScreen(
         Text("${state.mode?.label ?: user.role} · ${user.email}")
         state.workShift?.let { shift ->
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Turno aberto", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Text("Iniciado: ${shift.startedAt}")
                     Text("Modo: ${shift.mode}")
                 }
             }
+
+            if (shift.mode == "delivery") {
+                val cash=state.deliveryCash
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("Fechamento do entregador", style=MaterialTheme.typography.titleMedium, fontWeight=FontWeight.Bold)
+                        Text("Dinheiro recebido: ${moneyDelivery(cash?.cashCollectedCents ?: 0)}")
+                        Text("Já entregue ao caixa: ${moneyDelivery(cash?.confirmedHandoffCents ?: 0)}")
+                        Text("Dinheiro a entregar: ${moneyDelivery(cash?.outstandingCents ?: 0)}", style=MaterialTheme.typography.titleLarge, fontWeight=FontWeight.Black)
+                        if ((cash?.outstandingCents ?: 0) > 0) {
+                            Button(onClick=onCreateHandoff,modifier=Modifier.fillMaxWidth()) { Text("GERAR QR PARA O CAIXA") }
+                        }
+                        OutlinedButton(onClick=onRefreshDeliveryCash,modifier=Modifier.fillMaxWidth()) { Text("ATUALIZAR VALORES") }
+                    }
+                }
+            }
+
             Button(onClick = onCloseShift, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") }
         }
         HorizontalDivider()
@@ -76,5 +100,19 @@ fun EmployeeProfileScreen(
         Text("PIN e biometria só desbloqueiam a sessão local. A API revalida usuário, empresa, aparelho e permissões em todas as ações.")
         Spacer(Modifier.weight(1f))
         OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("SAIR DO APP") }
+    }
+
+    state.cashHandoff?.let { handoff ->
+        val bitmap=remember(handoff.qrPayload){qrBitmap(handoff.qrPayload)}
+        AlertDialog(
+            onDismissRequest=onDismissHandoff,
+            title={Text("Entregar dinheiro ao caixa")},
+            text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
+                Text("Valor: ${moneyDelivery(handoff.amountCents)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
+                bitmap?.let{Image(it.asImageBitmap(),contentDescription="QR do repasse",modifier=Modifier.fillMaxWidth())}
+                Text("O caixa deve ler este QR no EventMenu GO. O turno só poderá ser encerrado depois da confirmação do recebimento.")
+            }},
+            confirmButton={TextButton(onClick=onDismissHandoff){Text("FECHAR")}},
+        )
     }
 }
