@@ -1,6 +1,7 @@
 package br.com.eventmenu.go
 
 import android.app.Application
+import br.com.eventmenu.go.data.DeviceStatusRepository
 import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.EventOperationsRepository
 import br.com.eventmenu.go.data.ManagerOperationsRepository
@@ -20,6 +21,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var receiptRepository: ReceiptRepository
         private set
+    lateinit var deviceStatusRepository: DeviceStatusRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -31,5 +34,6 @@ class EventMenuGoApplication : Application() {
         managerRepository = ManagerOperationsRepository(baseUrl, deviceId, store)
         notificationRepository = NotificationRepository(baseUrl, deviceId, store)
         receiptRepository = ReceiptRepository(baseUrl, deviceId, store)
+        deviceStatusRepository = DeviceStatusRepository(baseUrl, deviceId, store)
     }
 }
