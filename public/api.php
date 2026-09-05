@@ -9,6 +9,7 @@ use EventMenu\Core\Database;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\CashService;
 use EventMenu\Services\CheckoutService;
+use EventMenu\Services\GuestService;
 use EventMenu\Services\NfcService;
 use EventMenu\Services\OrderCreationService;
 use EventMenu\Services\OrderService;
@@ -90,16 +91,15 @@ try{
     if($action==='qr-resolve'){
         $raw=(string)($_GET['value']??'');$value=api_scanned_token($raw);if($value==='')api_out(['ok'=>false,'error'=>'Código vazio.'],400);
         if(Auth::can('tables.manage')||Auth::can('orders.create')){$s=$pdo->prepare('SELECT rt.id,rt.name,rt.seats,rt.status,rt.qr_token,t.id tab_id,t.label tab_label FROM restaurant_tables rt LEFT JOIN tabs t ON t.table_id=rt.id AND t.status="open" WHERE rt.tenant_id=? AND rt.qr_token=? LIMIT 1');$s->execute([$tenantId,$value]);if($row=$s->fetch())api_out(['ok'=>true,'type'=>'table','data'=>$row]);}
-        if(Auth::can('tickets.manage')){$s=$pdo->prepare('SELECT t.id,t.code,t.status,t.event_id,e.name event_name,c.name customer_name FROM tickets t JOIN events e ON e.id=t.event_id LEFT JOIN customers c ON c.id=t.customer_id WHERE t.tenant_id=? AND (t.qr_token=? OR t.code=?) LIMIT 1');$s->execute([$tenantId,$value,$value]);if($row=$s->fetch())api_out(['ok'=>true,'type'=>'ticket','data'=>$row]);}
-        if(Auth::can('guests.manage')){$s=$pdo->prepare('SELECT g.id,g.name,g.status,g.plus_ones,g.event_id,e.name event_name,g.checkin_code FROM event_guests g JOIN events e ON e.id=g.event_id WHERE g.tenant_id=? AND g.checkin_code=? LIMIT 1');$s->execute([$tenantId,$value]);if($row=$s->fetch())api_out(['ok'=>true,'type'=>'guest','data'=>$row]);}
+        if(Auth::can('tickets.manage')){$s=$pdo->prepare('SELECT t.id,t.code,t.status,t.event_id,e.name event_name,e.status event_status,c.name customer_name FROM tickets t JOIN events e ON e.id=t.event_id LEFT JOIN customers c ON c.id=t.customer_id WHERE t.tenant_id=? AND (t.qr_token=? OR t.code=?) LIMIT 1');$s->execute([$tenantId,$value,$value]);if($row=$s->fetch())api_out(['ok'=>true,'type'=>'ticket','data'=>$row]);}
+        if(Auth::can('guests.manage')){$s=$pdo->prepare('SELECT g.id,g.name,g.status,g.plus_ones,g.event_id,e.name event_name,e.status event_status,g.checkin_code FROM event_guests g JOIN events e ON e.id=g.event_id WHERE g.tenant_id=? AND g.checkin_code=? LIMIT 1');$s->execute([$tenantId,$value]);if($row=$s->fetch())api_out(['ok'=>true,'type'=>'guest','data'=>$row]);}
         api_out(['ok'=>false,'error'=>'QR/código não reconhecido para sua função.'],404);
     }
     if($action==='ticket-checkin'){
         api_method('POST');if(!Auth::can('tickets.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$result=(new TicketService())->checkIn((string)($body['token']??''));api_out(['ok'=>true,'result'=>$result]);
     }
     if($action==='guest-checkin'){
-        api_method('POST');if(!Auth::can('guests.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$code=api_scanned_token((string)($body['code']??''));if($code==='')api_out(['ok'=>false,'error'=>'Código obrigatório.'],400);$ownPromoterId=null;if(Auth::role()==='promoter'){$p=$pdo->prepare('SELECT id FROM promoters WHERE tenant_id=? AND user_id=? AND active=1');$p->execute([$tenantId,Auth::id()]);$ownPromoterId=$p->fetchColumn();if(!$ownPromoterId)api_out(['ok'=>false,'error'=>'Promotor sem vínculo.'],403);}
-        $guest=Database::transaction(function(PDO $tx)use($tenantId,$code,$ownPromoterId):array{$sql='SELECT * FROM event_guests WHERE tenant_id=? AND checkin_code=?';$args=[$tenantId,$code];if($ownPromoterId){$sql.=' AND promoter_id=?';$args[]=$ownPromoterId;}$sql.=' LIMIT 1 FOR UPDATE';$s=$tx->prepare(Database::portableSql($tx,$sql));$s->execute($args);$g=$s->fetch();if(!$g)throw new RuntimeException('Convidado não encontrado.');if($g['status']==='checked_in')throw new RuntimeException('Convidado já realizou check-in.');if($g['status']!=='invited')throw new RuntimeException('Convite não está válido.');$tx->prepare('UPDATE event_guests SET status="checked_in",checked_in_at=CURRENT_TIMESTAMP,checked_in_by=? WHERE id=?')->execute([Auth::id(),$g['id']]);return $g;});Auth::audit('guest.checkin','guest',(string)$guest['id'],['source'=>'api']);api_out(['ok'=>true,'guest'=>$guest]);
+        api_method('POST');if(!Auth::can('guests.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$guest=(new GuestService())->checkIn((string)($body['code']??''));api_out(['ok'=>true,'guest'=>$guest]);
     }
     api_out(['ok'=>false,'error'=>'Endpoint não encontrado.'],404);
 }catch(RuntimeException $e){api_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))api_out(['ok'=>false,'error'=>$e->getMessage()],500);api_out(['ok'=>false,'error'=>'Erro interno.'],500);}
