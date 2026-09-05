@@ -22,8 +22,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         try {
             $pdo = Database::connection();
-            $schema = file_get_contents(__DIR__ . '/../database/schema.sql');
-            if ($schema === false) throw new RuntimeException('Schema principal não encontrado.');
+            $schemaPath = Database::schemaPath($pdo);
+            $schema = file_get_contents($schemaPath);
+            if ($schema === false) throw new RuntimeException('Schema principal não encontrado para ' . Database::driver($pdo) . '.');
             $pdo->exec($schema);
             Migrator::run($pdo);
 
@@ -36,19 +37,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!filter_var($email, FILTER_VALIDATE_EMAIL)) throw new RuntimeException('Informe um e-mail válido.');
             if (strlen($password) < 10) throw new RuntimeException('A senha precisa ter pelo menos 10 caracteres.');
 
-            $pdo->beginTransaction();
-            $stmt = $pdo->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,?,"premium","active")');
-            $stmt->execute([$tenantName, $tenantSlug . '-' . substr(bin2hex(random_bytes(4)), 0, 6)]);
-            $tenantId = (int)$pdo->lastInsertId();
-            $stmt = $pdo->prepare('INSERT INTO users (tenant_id,name,email,password_hash,role,status) VALUES (?,?,?,?,"admin","active")');
-            $stmt->execute([$tenantId, $name, $email, password_hash($password, PASSWORD_DEFAULT)]);
-            $pdo->commit();
+            Database::transaction(function(\PDO $pdo) use ($tenantName, $tenantSlug, $email, $name, $password): void {
+                $stmt = $pdo->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,?,"premium","active")');
+                $stmt->execute([$tenantName, $tenantSlug . '-' . substr(bin2hex(random_bytes(4)), 0, 6)]);
+                $tenantId = (int)$pdo->lastInsertId();
+                $stmt = $pdo->prepare('INSERT INTO users (tenant_id,name,email,password_hash,role,status) VALUES (?,?,?,?,"admin","active")');
+                $stmt->execute([$tenantId, $name, $email, password_hash($password, PASSWORD_DEFAULT)]);
+            });
 
             if (!is_dir(dirname($lock))) mkdir(dirname($lock), 0775, true);
             file_put_contents($lock, date(DATE_ATOM));
             $success = true;
         } catch (Throwable $e) {
-            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             $error = $e->getMessage();
         }
     }
