@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS app_notifications (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  mode VARCHAR(20) NULL,
+  type VARCHAR(60) NOT NULL,
+  priority ENUM('info','success','warning','critical') NOT NULL DEFAULT 'info',
+  title VARCHAR(180) NOT NULL,
+  message VARCHAR(500) NOT NULL,
+  entity_type VARCHAR(80) NULL,
+  entity_id VARCHAR(80) NULL,
+  dedupe_key VARCHAR(190) NOT NULL,
+  read_at DATETIME NULL,
+  expires_at DATETIME NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_app_notifications_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_app_notifications_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_app_notification_dedupe (tenant_id,user_id,dedupe_key),
+  INDEX idx_app_notifications_inbox (tenant_id,user_id,read_at,created_at),
+  INDEX idx_app_notifications_expiry (tenant_id,expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
