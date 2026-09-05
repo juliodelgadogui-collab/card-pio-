@@ -51,31 +51,18 @@ private fun roleLabel(role: String) = when (role) {
 }
 
 @Composable
-fun LoginScreen(
-    state: GoState,
-    onLogin: (String, String, String) -> Unit,
-    onPin: (String) -> Unit,
-    onBiometric: () -> Unit,
-) {
+fun LoginScreen(state: GoState, onLogin: (String, String, String) -> Unit, onPin: (String) -> Unit, onBiometric: () -> Unit) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
-    Column(
-        modifier = Modifier.fillMaxSize().padding(28.dp),
-        verticalArrangement = Arrangement.Center,
-    ) {
+    Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center) {
         Text("EVENTMENU GO", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black)
         Text("Operação · Delivery · Eventos · Pay", color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.height(28.dp))
         Text("Entrar com e-mail e senha", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(email, { email = it }, label = { Text("E-mail") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(password, { password = it }, label = { Text("Senha") }, singleLine = true, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        Button(
-            onClick = { onLogin(email, password, "${Build.MANUFACTURER} ${Build.MODEL}") },
-            enabled = email.isNotBlank() && password.isNotBlank() && !state.loading,
-            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-        ) { Text("ENTRAR") }
-
+        Button(onClick = { onLogin(email, password, "${Build.MANUFACTURER} ${Build.MODEL}") }, enabled = email.isNotBlank() && password.isNotBlank() && !state.loading, modifier = Modifier.fillMaxWidth().padding(top = 12.dp)) { Text("ENTRAR") }
         if (state.hasStoredSession) {
             HorizontalDivider(Modifier.padding(vertical = 22.dp))
             Text("Acesso rápido neste aparelho", style = MaterialTheme.typography.titleMedium)
@@ -83,9 +70,7 @@ fun LoginScreen(
                 OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(8) }, label = { Text("PIN do funcionário") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
                 OutlinedButton(onClick = { onPin(pin) }, enabled = pin.length >= 4, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("ENTRAR COM PIN") }
             }
-            if (state.biometricEnabled) {
-                OutlinedButton(onClick = onBiometric, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("ENTRAR COM BIOMETRIA") }
-            }
+            if (state.biometricEnabled) OutlinedButton(onClick = onBiometric, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("ENTRAR COM BIOMETRIA") }
         }
     }
 }
@@ -94,7 +79,7 @@ fun LoginScreen(
 fun ModePickerScreen(name: String, modes: List<AppMode>, onSelect: (AppMode) -> Unit) {
     Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center) {
         Text("Olá, $name", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Text("Escolha o modo de trabalho permitido pelo servidor")
+        Text("Escolha o modo permitido pelo servidor")
         Spacer(Modifier.height(20.dp))
         modes.forEach { mode ->
             Card(onClick = { onSelect(mode) }, modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
@@ -134,7 +119,7 @@ fun HomeScreen(state: GoState, onRefresh: () -> Unit) {
             }
             AppMode.EVENTS -> {
                 item { MetricCard("Modo", "Check-in e lista") }
-                item { Text("Use o botão central ESCANEAR para ingresso, convidado ou código do evento.") }
+                item { Text("Use o botão central ESCANEAR para ingresso ou convidado.") }
             }
             AppMode.PAY -> {
                 item { MetricCard("Caixa", if (state.cashOpen) "ABERTO" else "FECHADO") }
@@ -154,37 +139,26 @@ fun HomeScreen(state: GoState, onRefresh: () -> Unit) {
 
 @Composable
 private fun MetricCard(label: String, value: String) {
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(18.dp)) {
-            Text(label)
-            Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-        }
-    }
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(18.dp)) { Text(label); Text(value, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black) } }
 }
 
 @Composable
 fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, String) -> Unit) {
     val filters = listOf("Todos", "Novos", "Preparando", "Prontos", "Delivery", "Finalizados")
     var filter by remember { mutableStateOf("Todos") }
-    val visible = orders.filter { order ->
-        when (filter) {
-            "Novos" -> order.status in setOf("pending", "confirmed")
-            "Preparando" -> order.status == "preparing"
-            "Prontos" -> order.status == "ready"
-            "Delivery" -> order.channel == "delivery"
-            "Finalizados" -> order.status in setOf("completed", "cancelled")
-            else -> true
-        }
-    }
+    val visible = orders.filter { order -> when (filter) {
+        "Novos" -> order.status in setOf("pending", "confirmed")
+        "Preparando" -> order.status == "preparing"
+        "Prontos" -> order.status == "ready"
+        "Delivery" -> order.channel == "delivery"
+        "Finalizados" -> order.status in setOf("completed", "cancelled")
+        else -> true
+    } }
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Pedidos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                filters.take(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                filters.drop(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) }
-            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { filters.take(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) } }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { filters.drop(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) } }
         }
         items(visible, key = { it.id }) { order -> OrderCard(order, onStatus) }
         item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR") } }
@@ -202,19 +176,17 @@ private fun OrderCard(order: Order, onStatus: (Int, String) -> Unit) {
             Text("${order.customerName} · ${order.channel.uppercase()}")
             Text("Status: ${order.status} · Pagamento: ${order.paymentStatus}")
             if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                when (order.status) {
-                    "confirmed" -> Button(onClick = { onStatus(order.id, "preparing") }) { Text("INICIAR") }
-                    "preparing" -> Button(onClick = { onStatus(order.id, "ready") }) { Text("PRONTO") }
-                    "ready" -> if (order.channel != "delivery" && order.paymentStatus == "paid") Button(onClick = { onStatus(order.id, "completed") }) { Text("ENTREGAR") }
-                }
+            when (order.status) {
+                "confirmed" -> Button(onClick = { onStatus(order.id, "preparing") }) { Text("INICIAR") }
+                "preparing" -> Button(onClick = { onStatus(order.id, "ready") }) { Text("PRONTO") }
+                "ready" -> if (order.channel != "delivery" && order.paymentStatus == "paid") Button(onClick = { onStatus(order.id, "completed") }) { Text("ENTREGAR") }
             }
         }
     }
 }
 
 @Composable
-fun DeliveryScreen(orders: List<Order>, onStatus: (Int, String) -> Unit, onPix: (Int) -> Unit) {
+fun DeliveryScreen(orders: List<Order>, onStatus: (Int, String) -> Unit, onPix: (Int) -> Unit, onNfc: (Int) -> Unit) {
     val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item { Text("Minhas entregas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black) }
@@ -227,8 +199,9 @@ fun DeliveryScreen(orders: List<Order>, onStatus: (Int, String) -> Unit, onPix: 
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
                     if (order.status == "ready") Button(onClick = { onStatus(order.id, "out_for_delivery") }, modifier = Modifier.fillMaxWidth()) { Text("RETIRAR PEDIDO") }
                     if (order.status == "out_for_delivery" && order.paymentStatus != "paid") {
-                        OutlinedButton(onClick = { onPix(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("GERAR PIX") }
-                        Text("Cartão NFC é iniciado pelo botão Pay/NFC quando o aparelho estiver autorizado.")
+                        OutlinedButton(onClick = { onPix(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("PIX") }
+                        Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO NFC") }
+                        Text("O Tap On retorna um código de transação. A entrega só é liberada depois que a API EventMenu confirma esse código no PagBank.")
                     }
                     if (order.status == "out_for_delivery" && order.paymentStatus == "paid") Button(onClick = { onStatus(order.id, "completed") }, modifier = Modifier.fillMaxWidth()) { Text("CONCLUIR ENTREGA") }
                 }
@@ -268,18 +241,13 @@ fun ProfileScreen(state: GoState, onSavePin: (String) -> Unit, onBiometric: (Boo
     var pin by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(user.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-        Text(roleLabel(user.role))
-        Text(user.email)
-        Text("Modo atual: ${state.mode?.label}")
+        Text(roleLabel(user.role)); Text(user.email); Text("Modo atual: ${state.mode?.label}")
         HorizontalDivider()
         Text("Segurança deste aparelho", style = MaterialTheme.typography.titleMedium)
         OutlinedTextField(pin, { pin = it.filter(Char::isDigit).take(8) }, label = { Text("Novo PIN (4 a 8 dígitos)") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         OutlinedButton(onClick = { onSavePin(pin); pin = "" }, enabled = pin.length >= 4, modifier = Modifier.fillMaxWidth()) { Text("SALVAR PIN") }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("Entrar com biometria")
-            Switch(checked = state.biometricEnabled, onCheckedChange = onBiometric)
-        }
-        Text("PIN e biometria apenas desbloqueiam o token deste aparelho. A API continua validando usuário, empresa, dispositivo e permissões a cada acesso.")
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) { Text("Entrar com biometria"); Switch(checked = state.biometricEnabled, onCheckedChange = onBiometric) }
+        Text("PIN e biometria desbloqueiam o token local. A API continua validando usuário, empresa, aparelho e permissões.")
         Spacer(Modifier.weight(1f))
         OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("SAIR DO APP") }
     }
@@ -291,10 +259,7 @@ fun QrResultDialog(qr: QrResult, onDismiss: () -> Unit, onCheckIn: () -> Unit) {
         onDismissRequest = onDismiss,
         title = { Text(when (qr.type) { "ticket" -> "INGRESSO"; "guest" -> "CONVIDADO"; "table" -> "MESA / COMANDA"; else -> "QR IDENTIFICADO" }) },
         text = { Column { Text(qr.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold); Text("Tipo: ${qr.type}") } },
-        confirmButton = {
-            if (qr.type in setOf("ticket", "guest")) Button(onClick = onCheckIn) { Text("REALIZAR CHECK-IN") }
-            else TextButton(onClick = onDismiss) { Text("OK") }
-        },
+        confirmButton = { if (qr.type in setOf("ticket", "guest")) Button(onClick = onCheckIn) { Text("REALIZAR CHECK-IN") } else TextButton(onClick = onDismiss) { Text("OK") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("FECHAR") } },
     )
 }
