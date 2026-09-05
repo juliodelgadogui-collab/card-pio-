@@ -42,13 +42,14 @@ fun PosScreen(
     onPix: (Int,String) -> Unit,
     onNfc: (Int) -> Unit,
     onReceipt: (Int) -> Unit,
+    onPrintReceipt: (Int) -> Unit,
     onRefreshPayment: () -> Unit,
     onFinishFlow: () -> Unit,
     onClearTable: () -> Unit,
 ) {
     val order=state.posOrder
     if(order!=null){
-        PosPaymentScreen(state,onCash,onPix,onNfc,onReceipt,onRefreshPayment,onFinishFlow)
+        PosPaymentScreen(state,onCash,onPix,onNfc,onReceipt,onPrintReceipt,onRefreshPayment,onFinishFlow)
         return
     }
 
@@ -150,6 +151,7 @@ private fun PosPaymentScreen(
     onPix: (Int,String) -> Unit,
     onNfc: (Int) -> Unit,
     onReceipt: (Int) -> Unit,
+    onPrintReceipt: (Int) -> Unit,
     onRefresh: () -> Unit,
     onFinishFlow: () -> Unit,
 ){
@@ -200,7 +202,10 @@ private fun PosPaymentScreen(
                     Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(10.dp)){
                         Text("✅ PAGAMENTO CONCLUÍDO",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
                         Text("O servidor confirmou que a soma das parcelas atingiu exatamente o total do pedido.")
-                        OutlinedButton(onClick={onReceipt(order.id)},modifier=Modifier.fillMaxWidth()){Text("ENVIAR COMPROVANTE")}
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                            OutlinedButton(onClick={onReceipt(order.id)},modifier=Modifier.weight(1f)){Text("ENVIAR")}
+                            OutlinedButton(onClick={onPrintReceipt(order.id)},modifier=Modifier.weight(1f)){Text("IMPRIMIR")}
+                        }
                         Button(onClick=onFinishFlow,modifier=Modifier.fillMaxWidth()){
                             Text(if(state.posReturnScreen==AppScreen.TABLE_ACCOUNT)"VOLTAR À CONTA" else "NOVO PEDIDO")
                         }
