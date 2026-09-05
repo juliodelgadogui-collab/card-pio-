@@ -11,6 +11,7 @@ use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DeliveryCashService;
 use EventMenu\Services\NativePixService;
 use EventMenu\Services\NfcService;
+use EventMenu\Services\NotificationService;
 use EventMenu\Services\OrderService;
 use EventMenu\Services\PosPaymentService;
 use EventMenu\Services\TableService;
@@ -73,17 +74,22 @@ try{
 
     if($action==='delivery-users'){
         if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');
-        $s=Database::connection()->prepare('SELECT u.id,u.name,u.email,CASE WHEN ws.id IS NULL THEN 0 ELSE 1 END on_shift,ws.started_at FROM users u LEFT JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.tenant_id=? AND u.role="delivery" AND u.status="active" ORDER BY on_shift DESC,u.name');$s->execute([$tenantId]);go_out(['ok'=>true,'delivery_users'=>$s->fetchAll()]);
+        $s=Database::connection()->prepare('SELECT u.id,u.name,u.email,u.role,CASE WHEN ws.id IS NULL THEN 0 ELSE 1 END on_shift,ws.started_at FROM users u LEFT JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.tenant_id=? AND u.status="active" ORDER BY on_shift DESC,u.name');$s->execute([$tenantId]);$eligible=[];
+        foreach($s->fetchAll() as $candidate){$effective=PermissionCatalog::effectiveForUser($tenantId,(int)$candidate['id'],(string)$candidate['role']);if(!in_array('orders.delivery',$effective,true))continue;unset($candidate['role']);$eligible[]=$candidate;}
+        go_out(['ok'=>true,'delivery_users'=>$eligible]);
     }
     if($action==='delivery-assign'){
         go_method('POST');if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');$body=go_body();$orderId=(int)($body['order_id']??0);$deliveryId=(int)($body['delivery_user_id']??0);
-        Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$deliveryId):void{
-            $o=$pdo->prepare(Database::portableSql($pdo,'SELECT id,channel,status,assigned_delivery_user_id FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$o->execute([$orderId,$tenantId]);$order=$o->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');
+        $assignedOrder=Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$deliveryId):array{
+            $o=$pdo->prepare(Database::portableSql($pdo,'SELECT id,channel,status,assigned_delivery_user_id,total_cents,delivery_address FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$o->execute([$orderId,$tenantId]);$order=$o->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');
             if($order['channel']!=='delivery')throw new RuntimeException('Somente pedido de Delivery pode ser atribuído.');if($order['status']!=='ready')throw new RuntimeException('O pedido precisa estar pronto para ser atribuído.');if($deliveryId<1)throw new RuntimeException('Escolha um entregador.');
-            $d=$pdo->prepare('SELECT u.id FROM users u JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.id=? AND u.tenant_id=? AND u.role="delivery" AND u.status="active" LIMIT 1');$d->execute([$deliveryId,$tenantId]);if(!$d->fetchColumn())throw new RuntimeException('Entregador sem turno de Delivery aberto.');
-            $pdo->prepare('UPDATE orders SET assigned_delivery_user_id=? WHERE id=? AND tenant_id=?')->execute([$deliveryId,$orderId,$tenantId]);
+            $d=$pdo->prepare('SELECT u.id,u.role FROM users u JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.id=? AND u.tenant_id=? AND u.status="active" LIMIT 1');$d->execute([$deliveryId,$tenantId]);$deliveryUser=$d->fetch();if(!$deliveryUser)throw new RuntimeException('Funcionário sem turno de Delivery aberto.');
+            $effective=PermissionCatalog::effectiveForUser($tenantId,$deliveryId,(string)$deliveryUser['role']);if(!in_array('orders.delivery',$effective,true))throw new RuntimeException('Funcionário não possui permissão de Delivery.');
+            $pdo->prepare('UPDATE orders SET assigned_delivery_user_id=? WHERE id=? AND tenant_id=?')->execute([$deliveryId,$orderId,$tenantId]);$order['assigned_delivery_user_id']=$deliveryId;return $order;
         });
-        Auth::audit('order.delivery_assigned','order',(string)$orderId,['delivery_user_id'=>$deliveryId,'source'=>'eventmenu_go']);go_out(['ok'=>true]);
+        Auth::audit('order.delivery_assigned','order',(string)$orderId,['delivery_user_id'=>$deliveryId,'source'=>'eventmenu_go']);
+        try{(new NotificationService())->publishToUser($deliveryId,'delivery','delivery.assigned','Nova entrega #'.$orderId,'Um pedido pronto foi atribuído a você. Retire no balcão e inicie a rota.','order',(string)$orderId,'delivery:'.$orderId.':assigned:'.$deliveryId,'success',gmdate('Y-m-d H:i:s',time()+86400));}catch(Throwable){}
+        go_out(['ok'=>true,'order'=>$assignedOrder]);
     }
 
     if($action==='kitchen-board'){
