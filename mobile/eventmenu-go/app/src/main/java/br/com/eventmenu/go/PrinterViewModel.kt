@@ -3,6 +3,7 @@ package br.com.eventmenu.go
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import br.com.eventmenu.go.data.ReceiptRepository
 import br.com.eventmenu.go.printing.BluetoothEscPosPrinter
 import br.com.eventmenu.go.printing.PrinterDevice
 import br.com.eventmenu.go.printing.PrinterPreferences
@@ -27,6 +28,7 @@ data class PrinterState(
 class PrinterViewModel(
     private val preferences: PrinterPreferences,
     private val printer: BluetoothEscPosPrinter,
+    private val receipts: ReceiptRepository,
 ) : ViewModel() {
     private val _state = MutableStateFlow(PrinterState(preferences.load(), hasPermission = printer.hasConnectPermission()))
     val state: StateFlow<PrinterState> = _state.asStateFlow()
@@ -70,6 +72,27 @@ class PrinterViewModel(
         _state.update { it.copy(loading = false) }
     }
 
+    fun printReceipt(orderId: Int, automatic: Boolean = false) = viewModelScope.launch {
+        if (orderId < 1) return@launch
+        val settings = preferences.load()
+        if (automatic) {
+            if (!settings.enabled || !settings.autoPrint || !printer.hasConnectPermission() || preferences.wasAutoPrinted(orderId)) return@launch
+        }
+        _state.update { it.copy(loading = true, error = null) }
+        runCatching {
+            val text = receipts.shareText(receipts.order(orderId))
+            withContext(Dispatchers.IO) { printer.print(text) }
+        }.onSuccess {
+            if (automatic) preferences.markAutoPrinted(orderId)
+            _state.update { it.copy(message = if (automatic) "Comprovante #$orderId impresso automaticamente." else "Comprovante #$orderId impresso.") }
+        }.onFailure { error ->
+            _state.update { it.copy(error = error.message ?: "Falha ao imprimir comprovante.") }
+        }
+        _state.update { it.copy(loading = false) }
+    }
+
+    fun autoPrintReceipt(orderId: Int) = printReceipt(orderId, automatic = true)
+
     fun printTest() = printText(
         "EVENTMENU GO\nTESTE DE IMPRESSAO\n----------------\nImpressora configurada com sucesso.\n",
         "Teste enviado para a impressora.",
@@ -77,8 +100,12 @@ class PrinterViewModel(
 
     fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
 
-    class Factory(private val preferences: PrinterPreferences, private val printer: BluetoothEscPosPrinter) : ViewModelProvider.Factory {
+    class Factory(
+        private val preferences: PrinterPreferences,
+        private val printer: BluetoothEscPosPrinter,
+        private val receipts: ReceiptRepository,
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
-        override fun <T : ViewModel> create(modelClass: Class<T>): T = PrinterViewModel(preferences, printer) as T
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = PrinterViewModel(preferences, printer, receipts) as T
     }
 }
