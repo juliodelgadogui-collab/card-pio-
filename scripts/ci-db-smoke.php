@@ -35,7 +35,8 @@ try {
         'events','ticket_batches','tickets','payment_gateways','payments','webhook_events',
         'stock_movements','audit_logs','restaurant_tables','tabs','coupons',
         'coupon_redemptions','coupon_reservations','customer_points_movements','promoters',
-        'promoter_commissions','event_guests','ticket_checkin_logs','nfc_devices','migrations',
+        'promoter_commissions','event_guests','ticket_checkin_logs','nfc_devices',
+        'cash_sessions','cash_movements','migrations',
     ];
     foreach ($requiredTables as $table) {
         try {
