@@ -40,10 +40,13 @@ import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.MainViewModel
 import br.com.eventmenu.go.ManagerActionsViewModel
+import br.com.eventmenu.go.PrinterViewModel
 import br.com.eventmenu.go.ProfileSummaryViewModel
 import br.com.eventmenu.go.ReceiptViewModel
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
+import br.com.eventmenu.go.printing.BluetoothEscPosPrinter
+import br.com.eventmenu.go.printing.PrinterPreferences
 import br.com.eventmenu.go.ui.screens.CashOperationsScreen
 import br.com.eventmenu.go.ui.screens.DeliveryOperationsScreen
 import br.com.eventmenu.go.ui.screens.DispatchScreen
@@ -74,6 +77,10 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     val managerActionState by managerActionsViewModel.state.collectAsState()
     val receiptViewModel: ReceiptViewModel = composeViewModel(factory = ReceiptViewModel.Factory(app.receiptRepository))
     val receiptState by receiptViewModel.state.collectAsState()
+    val printerPreferences = remember(app) { PrinterPreferences(app) }
+    val bluetoothPrinter = remember(app) { BluetoothEscPosPrinter(app, printerPreferences) }
+    val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter))
+    val printerState by printerViewModel.state.collectAsState()
 
     LaunchedEffect(state.error, state.message) {
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
@@ -85,6 +92,10 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     }
     LaunchedEffect(receiptState.error) {
         receiptState.error?.let { snackbar.showSnackbar(it); receiptViewModel.clearError() }
+    }
+    LaunchedEffect(printerState.error, printerState.message) {
+        (printerState.error ?: printerState.message)?.let { snackbar.showSnackbar(it) }
+        if (printerState.error != null || printerState.message != null) printerViewModel.clearFeedback()
     }
     LaunchedEffect(receiptState.shareText) {
         receiptState.shareText?.let { text ->
@@ -102,7 +113,10 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
     }
     LaunchedEffect(state.workShift?.id) { profileViewModel.bindShift(state.workShift?.id) }
     LaunchedEffect(state.screen, state.workShift?.id) {
-        if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) profileViewModel.refresh()
+        if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) {
+            profileViewModel.refresh()
+            printerViewModel.refresh()
+        }
         if (state.screen == AppScreen.MANAGER && state.workShift?.id != null) managerActionsViewModel.refresh()
     }
     LaunchedEffect(managerActionState.changeVersion) {
@@ -203,6 +217,14 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                     shiftSummary = profileState.summary,
                     summaryLoading = profileState.loading,
                     onRefreshSummary = profileViewModel::refresh,
+                    printerState = printerState,
+                    onPrinterRefresh = printerViewModel::refresh,
+                    onSelectPrinter = printerViewModel::selectDevice,
+                    onClearPrinter = printerViewModel::clearDevice,
+                    onPrinterEnabled = printerViewModel::setEnabled,
+                    onPrinterAutoPrint = printerViewModel::setAutoPrint,
+                    onPrinterPaperWidth = printerViewModel::setPaperWidth,
+                    onPrinterTest = printerViewModel::printTest,
                     onSavePin = viewModel::savePin,
                     onBiometric = viewModel::setBiometric,
                     onCloseShift = viewModel::closeShift,
@@ -212,7 +234,7 @@ fun EventMenuGoApp(viewModel: MainViewModel, onScan: () -> Unit, onBiometric: ()
                     onLogout = viewModel::logout,
                 )
             }
-            if (state.loading || receiptState.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
+            if (state.loading || receiptState.loading || printerState.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
         }
     }
     state.qr?.let { QrResultDialog(it, viewModel::clearQr, viewModel::processCurrentQr) }
