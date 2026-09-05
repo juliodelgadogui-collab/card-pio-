@@ -17,6 +17,8 @@ data class Order(
     val deliveryName: String = "",
     val createdAt: String = "",
     val tableName: String = "",
+    val tableId: Int? = null,
+    val tabId: Int? = null,
 )
 
 data class DeliveryUser(val id: Int, val name: String, val email: String, val onShift: Boolean, val startedAt: String = "")
@@ -33,6 +35,23 @@ data class RestaurantTable(
     val openedAt: String,
     val tabTotalCents: Int,
     val unpaidCents: Int,
+)
+
+data class TableAccountOrder(
+    val orderId: Int,
+    val status: String,
+    val paymentStatus: String,
+    val totalCents: Int,
+    val paidCents: Int,
+    val remainingCents: Int,
+)
+
+data class TableAccount(
+    val table: RestaurantTable,
+    val orders: List<TableAccountOrder>,
+    val totalCents: Int,
+    val paidCents: Int,
+    val remainingCents: Int,
 )
 
 data class Product(
