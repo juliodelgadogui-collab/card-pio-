@@ -31,11 +31,14 @@ fun DispatchScreen(
     orders: List<Order>,
     deliveryUsers: List<DeliveryUser>,
     canAssignDelivery: Boolean,
+    focusOrderId: Int?,
     onRefresh: () -> Unit,
     onDispatch: (Order) -> Unit,
     onAssignDelivery: (Int, Int) -> Unit,
 ) {
-    val ready = orders.filter { it.status == "ready" && it.channel in setOf("counter", "pickup", "table", "delivery") }
+    val ready = orders
+        .filter { it.status == "ready" && it.channel in setOf("counter", "pickup", "table", "delivery") }
+        .sortedWith(compareByDescending<Order> { focusOrderId != null && it.id == focusOrderId }.thenBy { it.id })
     var assigning by remember { mutableStateOf<Order?>(null) }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -45,8 +48,10 @@ fun DispatchScreen(
         }
 
         items(ready, key = { it.id }) { order ->
+            val focused = focusOrderId == order.id
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (focused) Text("📷 LIDO NO QR", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column {
                             Text("#${order.id} · ${dispatchChannel(order)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
