@@ -62,10 +62,19 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
         return buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(
             id=o.getInt("id"),channel=o.optString("channel"),status=o.optString("status"),paymentStatus=o.optString("payment_status"),totalCents=o.optInt("total_cents"),
             customerName=o.optString("customer_name","Consumidor"),customerPhone=o.optString("customer_phone"),deliveryAddress=o.optString("delivery_address"),
-            assignedDeliveryUserId=if(o.isNull("assigned_delivery_user_id"))null else o.optInt("assigned_delivery_user_id"),createdAt=o.optString("created_at"),tableName=o.optString("table_name")
+            assignedDeliveryUserId=if(o.isNull("assigned_delivery_user_id"))null else o.optInt("assigned_delivery_user_id"),deliveryName=o.optString("delivery_name"),createdAt=o.optString("created_at"),tableName=o.optString("table_name")
         ))}}
     }
     suspend fun changeOrderStatus(orderId:Int,status:String)=api.postGo("order-status",requireToken(),JSONObject().put("order_id",orderId).put("status",status))
+
+    suspend fun deliveryUsers():List<DeliveryUser>{
+        val a=api.getGo("delivery-users",requireToken()).optJSONArray("delivery_users")?:JSONArray()
+        return buildList{for(i in 0 until a.length()){
+            val u=a.getJSONObject(i)
+            add(DeliveryUser(u.getInt("id"),u.optString("name"),u.optString("email"),u.optInt("on_shift",0)==1,u.optString("started_at")))
+        }}
+    }
+    suspend fun assignDelivery(orderId:Int,deliveryUserId:Int)=api.postGo("delivery-assign",requireToken(),JSONObject().put("order_id",orderId).put("delivery_user_id",deliveryUserId))
 
     suspend fun kitchenBoard():List<KitchenTicket>{
         val a=api.getGo("kitchen-board",requireToken()).optJSONArray("tickets")?:JSONArray()
