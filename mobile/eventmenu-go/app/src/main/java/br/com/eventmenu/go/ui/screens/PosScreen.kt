@@ -42,6 +42,7 @@ fun PosScreen(
     onNfc: (Int) -> Unit,
     onRefreshPayment: () -> Unit,
     onNewSale: () -> Unit,
+    onClearTable: () -> Unit,
 ) {
     val order=state.posOrder
     if(order!=null){
@@ -49,8 +50,9 @@ fun PosScreen(
         return
     }
 
+    val table=state.selectedTable
     var category by remember { mutableStateOf("Todos") }
-    var channel by remember { mutableStateOf("counter") }
+    var channel by remember(table?.id) { mutableStateOf(if(table!=null)"table" else "counter") }
     var customer by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
@@ -62,8 +64,12 @@ fun PosScreen(
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         item{
-            Text("Caixa / PDV",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Black)
-            Text("Valores exibidos são uma prévia; o servidor recalcula preço e estoque ao finalizar.")
+            Text(if(table!=null)"PDV · ${table.name}" else "Caixa / PDV",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Black)
+            if(table!=null){
+                Text("Comanda #${table.tabId} · ${table.tabLabel.ifBlank{"Sem identificação"}}")
+                Text("O pedido será lançado na comanda e seguirá para a operação sem exigir pagamento imediato.")
+                OutlinedButton(onClick=onClearTable,modifier=Modifier.fillMaxWidth().padding(top=8.dp)){Text("VOLTAR AO SALÃO")}
+            }else Text("Valores exibidos são uma prévia; o servidor recalcula preço e estoque ao finalizar.")
         }
         item{
             LazyRow(horizontalArrangement=Arrangement.spacedBy(7.dp)){
@@ -77,7 +83,7 @@ fun PosScreen(
                         Text(product.name,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
                         Text(product.categoryName)
                         if(product.description.isNotBlank())Text(product.description,maxLines=2)
-                        Text(moneyDelivery(product.priceCents),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)
+                        Text(posMoney(product.priceCents),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)
                         if(product.trackStock)Text("Disponível: ${product.stockQty}")
                     }
                     Button(onClick={onAdd(product.id)},enabled=!product.trackStock||product.stockQty>0){Text("+")}
@@ -96,35 +102,39 @@ fun PosScreen(
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                             Text("${qty}× ${product.name}")
                             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                                Text(moneyDelivery(product.priceCents*qty),fontWeight=FontWeight.Bold)
+                                Text(posMoney(product.priceCents*qty),fontWeight=FontWeight.Bold)
                                 OutlinedButton(onClick={onRemove(product.id)}){Text("−")}
                                 OutlinedButton(onClick={onAdd(product.id)}){Text("+")}
                             }
                         }
                     }
                     HorizontalDivider()
-                    Text("TOTAL ${moneyDelivery(previewTotal)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
+                    Text("TOTAL ${posMoney(previewTotal)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
                 }
             }
         }
         item{
             Card(Modifier.fillMaxWidth()){
                 Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(9.dp)){
-                    Text("Origem do pedido",fontWeight=FontWeight.Bold)
-                    Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
-                        FilterChip(selected=channel=="counter",onClick={channel="counter"},label={Text("Balcão")})
-                        FilterChip(selected=channel=="pickup",onClick={channel="pickup"},label={Text("Retirada")})
-                        FilterChip(selected=channel=="delivery",onClick={channel="delivery"},label={Text("Delivery")})
+                    if(table==null){
+                        Text("Origem do pedido",fontWeight=FontWeight.Bold)
+                        Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){
+                            FilterChip(selected=channel=="counter",onClick={channel="counter"},label={Text("Balcão")})
+                            FilterChip(selected=channel=="pickup",onClick={channel="pickup"},label={Text("Retirada")})
+                            FilterChip(selected=channel=="delivery",onClick={channel="delivery"},label={Text("Delivery")})
+                        }
+                    }else{
+                        Text("Pedido para ${table.name}",fontWeight=FontWeight.Bold)
                     }
-                    OutlinedTextField(customer,{customer=it},label={Text(if(channel=="delivery")"Cliente *" else "Cliente")},modifier=Modifier.fillMaxWidth())
-                    OutlinedTextField(phone,{phone=it},label={Text(if(channel=="delivery")"Telefone *" else "Telefone")},modifier=Modifier.fillMaxWidth())
+                    OutlinedTextField(customer,{customer=it},label={Text(if(channel=="delivery")"Cliente *" else "Cliente (opcional)")},modifier=Modifier.fillMaxWidth())
+                    OutlinedTextField(phone,{phone=it},label={Text(if(channel=="delivery")"Telefone *" else "Telefone (opcional)")},modifier=Modifier.fillMaxWidth())
                     if(channel=="delivery")OutlinedTextField(address,{address=it},label={Text("Endereço *")},modifier=Modifier.fillMaxWidth())
                     OutlinedTextField(notes,{notes=it},label={Text("Observações")},modifier=Modifier.fillMaxWidth())
                     Button(
                         onClick={onCreate(channel,customer,phone,address,notes)},
                         enabled=cartLines.isNotEmpty()&&(channel!="delivery"||(customer.isNotBlank()&&phone.isNotBlank()&&address.isNotBlank())),
                         modifier=Modifier.fillMaxWidth(),
-                    ){Text("FINALIZAR PEDIDO")}
+                    ){Text(if(table!=null)"LANÇAR NA MESA" else "FINALIZAR PEDIDO")}
                 }
             }
         }
@@ -150,9 +160,9 @@ private fun PosPaymentScreen(
     LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         item{
             Text("Pagamento · Pedido #${order.id}",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Black)
-            Text("Total: ${moneyDelivery(balance?.totalCents?:order.totalCents)}")
-            Text("Pago: ${moneyDelivery(balance?.paidCents?:0)}")
-            Text("Restante: ${moneyDelivery(remaining)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
+            Text("Total: ${posMoney(balance?.totalCents?:order.totalCents)}")
+            Text("Pago: ${posMoney(balance?.paidCents?:0)}")
+            Text("Restante: ${posMoney(remaining)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
         }
         if(balance?.payments?.isNotEmpty()==true){
             item{Text("Parcelas",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)}
@@ -160,7 +170,7 @@ private fun PosPaymentScreen(
                 Card(Modifier.fillMaxWidth()){
                     Row(Modifier.fillMaxWidth().padding(14.dp),horizontalArrangement=Arrangement.SpaceBetween){
                         Column{Text("${paymentLabel(part.provider)} · #${part.id}",fontWeight=FontWeight.Bold);Text(part.status)}
-                        Text(moneyDelivery(part.amountCents),fontWeight=FontWeight.Black)
+                        Text(posMoney(part.amountCents),fontWeight=FontWeight.Black)
                     }
                 }
             }
@@ -172,7 +182,7 @@ private fun PosPaymentScreen(
                         Text("Adicionar pagamento",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)
                         Text("Para pagamento dividido, informe o valor desta parcela.")
                         OutlinedTextField(amountText,{amountText=it},label={Text("Valor da parcela (R$)")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                        Text("Saldo máximo: ${moneyDelivery(remaining)}")
+                        Text("Saldo máximo: ${posMoney(remaining)}")
                         Button(onClick={onCash(amount)},enabled=state.cashOpen&&amount in 1..remaining,modifier=Modifier.fillMaxWidth()){Text("DINHEIRO")}
                         if(!state.cashOpen)Text("Abra o caixa financeiro para receber dinheiro.")
                         Button(onClick={pixTaxDialog=true},enabled=amount in 1..remaining,modifier=Modifier.fillMaxWidth()){Text("PIX")}
@@ -198,7 +208,7 @@ private fun PosPaymentScreen(
         var taxId by remember{mutableStateOf("")}
         AlertDialog(
             onDismissRequest={pixTaxDialog=false},
-            title={Text("PIX · ${moneyDelivery(amount)}")},
+            title={Text("PIX · ${posMoney(amount)}")},
             text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("CPF/CNPJ é exigido pelo PagBank para emitir o QR PIX e não é salvo pelo app.");OutlinedTextField(taxId,{taxId=it.filter(Char::isDigit).take(14)},label={Text("CPF ou CNPJ")},singleLine=true)}},
             confirmButton={Button(onClick={pixTaxDialog=false;onPix(amount,taxId)},enabled=taxId.length in setOf(11,14)){Text("GERAR PIX")}},
             dismissButton={TextButton(onClick={pixTaxDialog=false}){Text("CANCELAR")}},
@@ -207,3 +217,4 @@ private fun PosPaymentScreen(
 }
 
 private fun paymentLabel(provider:String)=when(provider){"manual"->"Dinheiro";"pagbank"->"PagBank";"stripe"->"Stripe";"mercadopago"->"Mercado Pago";else->provider}
+private fun posMoney(cents:Int)="R$ %.2f".format(cents/100.0).replace('.',',')
