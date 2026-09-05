@@ -45,7 +45,7 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         val app = application as EventMenuGoApplication
         setContent {
-            val vm: MainViewModel = viewModel(factory = MainViewModel.Factory(app.repository, app.eventRepository))
+            val vm: MainViewModel = viewModel(factory = MainViewModel.Factory(app.repository, app.eventRepository, app.managerRepository))
             EventMenuTheme {
                 EventMenuGoApp(
                     viewModel = vm,
