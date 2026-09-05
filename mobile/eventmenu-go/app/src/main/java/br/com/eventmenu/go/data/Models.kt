@@ -149,6 +149,25 @@ data class ManagerOverview(
     val revenueTodayCents: Int,
     val alerts: List<ManagerAlert>,
 )
+data class ManagerCashSession(val id: Int, val userId: Int, val userName: String, val openingCashCents: Int, val openedAt: String)
+data class ManagerDeliveryShift(val shiftId: Int, val userId: Int, val userName: String, val startedAt: String, val activeOrders: Int)
+data class ManagerProblemOrder(
+    val id: Int,
+    val channel: String,
+    val status: String,
+    val paymentStatus: String,
+    val totalCents: Int,
+    val customerName: String,
+    val deliveryUserId: Int?,
+    val deliveryName: String,
+    val updatedAt: String,
+    val problemType: String,
+)
+data class ManagerDetails(
+    val cashSessions: List<ManagerCashSession>,
+    val deliveryShifts: List<ManagerDeliveryShift>,
+    val problemOrders: List<ManagerProblemOrder>,
+)
 
 data class QrResult(
     val type: String,
