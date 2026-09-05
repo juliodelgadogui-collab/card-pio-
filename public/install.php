@@ -11,7 +11,7 @@ use EventMenu\Core\Security;
 $lock = __DIR__ . '/../storage/installed.lock';
 if (is_file($lock)) {
     http_response_code(403);
-    exit('O EventMenu já está instalado. Use /update.php para aplicar atualizações de banco.');
+    exit('O EventMenu já está instalado. Use ' . app_url('update.php') . ' para aplicar atualizações de banco.');
 }
 
 $error = null;
@@ -53,4 +53,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
-?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Instalar EventMenu Premium</title><link rel="stylesheet" href="assets/app.css"></head><body class="auth-page"><main class="auth-card"><div class="brand">EventMenu <span>Premium</span></div><h1>Instalação inicial</h1><?php if ($success): ?><div class="alert ok">Instalado com sucesso. <a href="/">Entrar no sistema</a>.</div><?php else: ?><?php if ($error): ?><div class="alert error"><?= Security::e($error) ?></div><?php endif; ?><form method="post"><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><label>Empresa<input name="tenant_name" required></label><label>Seu nome<input name="name" required></label><label>E-mail do administrador<input name="email" type="email" required></label><label>Senha<input name="password" type="password" minlength="10" required></label><button class="primary" type="submit">Instalar EventMenu</button></form><?php endif; ?></main></body></html>
+?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Instalar EventMenu Premium</title><link rel="stylesheet" href="<?= Security::e(app_url('assets/app.css')) ?>"></head><body class="auth-page"><main class="auth-card"><div class="brand">EventMenu <span>Premium</span></div><h1>Instalação inicial</h1><?php if ($success): ?><div class="alert ok">Instalado com sucesso. <a href="<?= Security::e(app_url('')) ?>">Entrar no sistema</a>.</div><?php else: ?><?php if ($error): ?><div class="alert error"><?= Security::e($error) ?></div><?php endif; ?><form method="post"><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><label>Empresa<input name="tenant_name" required></label><label>Seu nome<input name="name" required></label><label>E-mail do administrador<input name="email" type="email" required></label><label>Senha<input name="password" type="password" minlength="10" required></label><button class="primary" type="submit">Instalar EventMenu</button></form><?php endif; ?></main></body></html>
