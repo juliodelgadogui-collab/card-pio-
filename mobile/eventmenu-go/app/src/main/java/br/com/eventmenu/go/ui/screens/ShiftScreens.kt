@@ -42,6 +42,7 @@ fun ShiftStartScreen(state: GoState, onStart: () -> Unit, onChangeMode: (() -> U
     val mode = state.mode ?: return
     Column(Modifier.fillMaxSize().padding(28.dp), verticalArrangement = Arrangement.Center) {
         Text("Olá, ${user.name}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+        if (user.tenantName.isNotBlank()) Text("Empresa: ${user.tenantName}")
         Text(mode.label, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge)
         Text("Turno: Fechado", modifier = Modifier.padding(top = 8.dp))
         Button(onClick = onStart, enabled = !state.loading, modifier = Modifier.fillMaxWidth().padding(top = 24.dp)) { Text("INICIAR TURNO") }
@@ -83,6 +84,8 @@ fun EmployeeProfileScreen(
         item {
             Text(user.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("${state.mode?.label ?: user.role} · ${user.email}")
+            Text("Empresa: ${user.tenantName.ifBlank { "Empresa #${user.tenantId}" }}")
+            Text("Unidade: ${state.workShift?.unitName?.ifBlank { "Principal" } ?: "Principal"}")
             OutlinedButton(onClick = onGenerateMyQr, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
                 Text(if (state.workShift?.mode == "delivery") "MOSTRAR MEU QR DE ENTREGADOR" else "MOSTRAR MEU QR DE FUNCIONÁRIO")
             }
@@ -96,6 +99,7 @@ fun EmployeeProfileScreen(
                         Text("Turno aberto", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                         Text("Iniciado: ${shift.startedAt}")
                         Text("Modo: ${modeLabel(shift.mode)}")
+                        Text("Unidade: ${shift.unitName.ifBlank { "Principal" }}")
                         if (summaryLoading) CircularProgressIndicator()
                     }
                 }
@@ -137,6 +141,7 @@ fun EmployeeProfileScreen(
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                             Text("Fechamento do entregador", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Unidade: ${shift.unitName.ifBlank { "Principal" }}")
                             Text("Dinheiro recebido: ${profileMoney(cash?.cashCollectedCents ?: 0)}")
                             Text("Já entregue ao caixa: ${profileMoney(cash?.confirmedHandoffCents ?: 0)}")
                             Text("Dinheiro a entregar: ${profileMoney(cash?.outstandingCents ?: 0)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
@@ -201,8 +206,9 @@ fun EmployeeProfileScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Valor: ${profileMoney(handoff.amountCents)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    Text("Unidade: ${state.workShift?.unitName?.ifBlank { "Principal" } ?: "Principal"}")
                     bitmap?.let { Image(it.asImageBitmap(), contentDescription = "QR do repasse", modifier = Modifier.fillMaxWidth()) }
-                    Text("O caixa deve ler este QR no EventMenu GO. O turno só poderá ser encerrado depois da confirmação do recebimento.")
+                    Text("O caixa deve ler este QR no EventMenu GO na mesma unidade. O turno só poderá ser encerrado depois da confirmação do recebimento.")
                 }
             },
             confirmButton = { TextButton(onClick = onDismissHandoff) { Text("FECHAR") } },
