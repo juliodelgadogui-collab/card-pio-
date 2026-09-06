@@ -58,7 +58,11 @@ class DiscountViewModel(private val repository: DiscountRepository) : ViewModel(
             .onFailure { e -> _state.update { it.copy(error = e.message ?: "Falha ao consultar desconto.") } }
     }
 
-    fun request(orderId: Int, discountType: String, value: Int, reason: String) = viewModelScope.launch {
+    // Mantém o contrato usado hoje pelo PDV: pedido + valor em centavos + motivo.
+    fun request(orderId: Int, amountCents: Int, reason: String) =
+        requestAdvanced(orderId, "fixed", amountCents, reason)
+
+    fun requestAdvanced(orderId: Int, discountType: String, value: Int, reason: String) = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null, message = null) }
         runCatching { repository.request(orderId, discountType, value, reason) }
             .onSuccess { request ->
