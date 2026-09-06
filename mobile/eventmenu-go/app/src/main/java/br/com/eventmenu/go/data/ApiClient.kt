@@ -17,59 +17,32 @@ class ApiClient(
     private val deviceId: String,
     private val sessionStore: SecureSessionStore? = null,
 ) {
-    suspend fun get(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api.php", "GET", action, token, query, null)
-    suspend fun post(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api.php", "POST", action, token, emptyMap(), body)
-    suspend fun getGo(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go.php", "GET", action, token, query, null)
-    suspend fun postGo(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go.php", "POST", action, token, emptyMap(), body)
-    suspend fun getOrderOps(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-orders.php", "GET", action, token, query, null)
-    suspend fun postOrderOps(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-orders.php", "POST", action, token, emptyMap(), body)
-    suspend fun getDelivery(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-delivery.php", "GET", action, token, query, null)
-    suspend fun postDelivery(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-delivery.php", "POST", action, token, emptyMap(), body)
-    suspend fun getEvents(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-events.php", "GET", action, token, query, null)
-    suspend fun postEvents(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-events.php", "POST", action, token, emptyMap(), body)
-    suspend fun getManager(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-manager.php", "GET", action, token, query, null)
-    suspend fun postManager(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-manager.php", "POST", action, token, emptyMap(), body)
-    suspend fun getNotifications(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-notifications.php", "GET", action, token, query, null)
-    suspend fun postNotifications(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-notifications.php", "POST", action, token, emptyMap(), body)
-    suspend fun getReceipt(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-receipts.php", "GET", action, token, query, null)
-    suspend fun getDevice(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-device.php", "GET", action, token, query, null)
-    suspend fun getQr(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-qr.php", "GET", action, token, query, null)
-    suspend fun postQr(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-qr.php", "POST", action, token, emptyMap(), body)
-    suspend fun getTabPayments(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-tab-payments.php", "GET", action, token, query, null)
-    suspend fun postTabPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-tab-payments.php", "POST", action, token, emptyMap(), body)
-    suspend fun getUnits(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
-        request("api-go-units.php", "GET", action, token, query, null)
-    suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
-        request("api-go-units.php", "POST", action, token, emptyMap(), body)
+    suspend fun get(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api.php", "GET", action, token, query, null)
+    suspend fun post(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api.php", "POST", action, token, emptyMap(), body)
+    suspend fun getGo(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go.php", "GET", action, token, query, null)
+    suspend fun postGo(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go.php", "POST", action, token, emptyMap(), body)
+    suspend fun getOrderOps(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-orders.php", "GET", action, token, query, null)
+    suspend fun postOrderOps(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-orders.php", "POST", action, token, emptyMap(), body)
+    suspend fun getDelivery(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-delivery.php", "GET", action, token, query, null)
+    suspend fun postDelivery(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-delivery.php", "POST", action, token, emptyMap(), body)
+    suspend fun getDiscounts(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-discounts.php", "GET", action, token, query, null)
+    suspend fun postDiscounts(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-discounts.php", "POST", action, token, emptyMap(), body)
+    suspend fun getEvents(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-events.php", "GET", action, token, query, null)
+    suspend fun postEvents(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-events.php", "POST", action, token, emptyMap(), body)
+    suspend fun getManager(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-manager.php", "GET", action, token, query, null)
+    suspend fun postManager(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-manager.php", "POST", action, token, emptyMap(), body)
+    suspend fun getNotifications(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-notifications.php", "GET", action, token, query, null)
+    suspend fun postNotifications(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-notifications.php", "POST", action, token, emptyMap(), body)
+    suspend fun getReceipt(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-receipts.php", "GET", action, token, query, null)
+    suspend fun getDevice(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-device.php", "GET", action, token, query, null)
+    suspend fun getQr(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-qr.php", "GET", action, token, query, null)
+    suspend fun postQr(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-qr.php", "POST", action, token, emptyMap(), body)
+    suspend fun getTabPayments(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-tab-payments.php", "GET", action, token, query, null)
+    suspend fun postTabPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-tab-payments.php", "POST", action, token, emptyMap(), body)
+    suspend fun getUnits(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-units.php", "GET", action, token, query, null)
+    suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-units.php", "POST", action, token, emptyMap(), body)
 
-    private suspend fun request(
-        path: String,
-        method: String,
-        action: String,
-        token: String?,
-        query: Map<String, String>,
-        body: JSONObject?,
-    ): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
         val store = sessionStore ?: sharedSessionStore
         try {
             execute(path, method, action, token, query, body).also { result ->
@@ -82,14 +55,7 @@ class ApiClient(
         }
     }
 
-    private fun execute(
-        path: String,
-        method: String,
-        action: String,
-        token: String?,
-        query: Map<String, String>,
-        body: JSONObject?,
-    ): JSONObject {
+    private fun execute(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
         val qs = params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}" }
         val connection = URL(baseUrl.trimEnd('/') + "/$path?$qs").openConnection() as HttpURLConnection
@@ -116,10 +82,7 @@ class ApiClient(
 
     private fun shouldRefresh(error: ApiException): Boolean {
         val message = error.message.orEmpty()
-        return error.status == 401 || (error.status == 422 && (
-            message.contains("Sessão do app expirada", ignoreCase = true) ||
-                message.contains("Token inválido", ignoreCase = true)
-            ))
+        return error.status == 401 || (error.status == 422 && (message.contains("Sessão do app expirada", ignoreCase = true) || message.contains("Token inválido", ignoreCase = true)))
     }
 
     private suspend fun refreshAccessToken(store: SecureSessionStore, failedToken: String): String = refreshMutex.withLock {
@@ -127,14 +90,7 @@ class ApiClient(
         if (!current.isNullOrBlank() && current != failedToken) return@withLock current
         val refresh = store.refreshToken() ?: throw ApiException("Faça login novamente.", 401)
         try {
-            val root = execute(
-                path = "api.php",
-                method = "POST",
-                action = "refresh",
-                token = null,
-                query = emptyMap(),
-                body = JSONObject().put("refresh_token", refresh).put("device_id", deviceId),
-            )
+            val root = execute("api.php", "POST", "refresh", null, emptyMap(), JSONObject().put("refresh_token", refresh).put("device_id", deviceId))
             saveTokenPair(store, root)
             root.getString("token")
         } catch (error: Throwable) {
@@ -145,12 +101,7 @@ class ApiClient(
 
     private fun saveTokenPair(store: SecureSessionStore?, root: JSONObject) {
         if (store == null || !root.has("token") || !root.has("refresh_token")) return
-        store.saveSessionTokens(
-            accessToken = root.getString("token"),
-            refreshToken = root.getString("refresh_token"),
-            accessExpiresAt = root.optString("expires_at"),
-            refreshExpiresAt = root.optString("refresh_expires_at"),
-        )
+        store.saveSessionTokens(root.getString("token"), root.getString("refresh_token"), root.optString("expires_at"), root.optString("refresh_expires_at"))
     }
 
     companion object {
