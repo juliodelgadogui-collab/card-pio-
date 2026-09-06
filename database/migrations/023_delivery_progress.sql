@@ -1,0 +1,20 @@
+CREATE TABLE delivery_progress (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  delivery_user_id BIGINT UNSIGNED NOT NULL,
+  unit_id BIGINT UNSIGNED NULL,
+  picked_up_at DATETIME NULL,
+  route_started_at DATETIME NULL,
+  arrived_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_delivery_progress_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_delivery_progress_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_delivery_progress_user FOREIGN KEY (delivery_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_delivery_progress_unit FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE SET NULL,
+  UNIQUE KEY uq_delivery_progress_order (tenant_id,order_id),
+  INDEX idx_delivery_progress_user (tenant_id,delivery_user_id,completed_at),
+  INDEX idx_delivery_progress_unit (tenant_id,unit_id,completed_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
