@@ -43,13 +43,14 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 
                 if($status==='blocked'){
                     $tx->prepare('UPDATE api_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND revoked_at IS NULL')->execute([$tenantId,$id]);
+                    try{$tx->prepare('UPDATE api_refresh_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND revoked_at IS NULL')->execute([$tenantId,$id]);}catch(Throwable){}
                     $tx->prepare('UPDATE nfc_devices SET status="revoked",revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND status<>"revoked"')->execute([$tenantId,$id]);
                     $tx->prepare('UPDATE nfc_payment_intents SET status="failed" WHERE tenant_id=? AND user_id=? AND status="created"')->execute([$tenantId,$id]);
                     $tx->prepare('UPDATE work_shifts SET status="closed",ended_at=CURRENT_TIMESTAMP,closing_notes="Usuário bloqueado" WHERE tenant_id=? AND user_id=? AND status="open"')->execute([$tenantId,$id]);
                 }
             });
             Auth::audit('user.saved','user',(string)$id,['role'=>$role,'status'=>$status,'effective_permissions'=>$selected,'unit_ids'=>$selectedUnits,'default_unit_id'=>$defaultUnitId?:null]);
-            em_flash('ok',$status==='blocked'?'Usuário bloqueado; app, NFC e turno foram encerrados.':'Usuário, permissões e unidades salvos.');
+            em_flash('ok',$status==='blocked'?'Usuário bloqueado; app, refresh, NFC e turno foram encerrados.':'Usuário, permissões e unidades salvos.');
         }catch(Throwable $e){em_flash('error',$e->getMessage());}
         em_go('users');
     }
