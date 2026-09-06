@@ -43,3 +43,17 @@ CREATE TABLE payment_group_allocations (
   UNIQUE (payment_id)
 );
 CREATE INDEX idx_payment_group_alloc_order ON payment_group_allocations(tenant_id,order_id,payment_group_id);
+
+CREATE TABLE payment_group_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  tenant_id INTEGER NOT NULL,
+  payment_group_id INTEGER NOT NULL,
+  order_item_id INTEGER NOT NULL,
+  amount_cents INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (payment_group_id) REFERENCES payment_groups(id) ON DELETE CASCADE,
+  FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE RESTRICT,
+  UNIQUE (payment_group_id,order_item_id)
+);
+CREATE INDEX idx_payment_group_item_lookup ON payment_group_items(tenant_id,order_item_id,payment_group_id);
