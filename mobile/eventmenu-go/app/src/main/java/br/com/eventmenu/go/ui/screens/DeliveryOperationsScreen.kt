@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.OrderOperationsViewModel
 import br.com.eventmenu.go.data.DeliveryProgress
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.PixCharge
@@ -47,7 +51,6 @@ fun DeliveryOperationsScreen(
     progress: Map<Int, DeliveryProgress>,
     pixCharge: PixCharge?,
     onRefreshProgress: () -> Unit,
-    onOpenOrder: (Int) -> Unit,
     onPickup: (Int) -> Unit,
     onStartRoute: (Int) -> Unit,
     onArrive: (Int) -> Unit,
@@ -61,6 +64,9 @@ fun DeliveryOperationsScreen(
     onDismissPix: () -> Unit,
 ) {
     val context = LocalContext.current
+    val app = context.applicationContext as EventMenuGoApplication
+    val detailViewModel: OrderOperationsViewModel = viewModel(factory = OrderOperationsViewModel.Factory(app.orderOperationsRepository))
+    val detailState by detailViewModel.state.collectAsState()
     var pixOrder by remember { mutableStateOf<Order?>(null) }
     var cashOrder by remember { mutableStateOf<Order?>(null) }
     val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
@@ -93,7 +99,7 @@ fun DeliveryOperationsScreen(
                         }
                     }
 
-                    OutlinedButton(onClick = { onOpenOrder(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
+                    OutlinedButton(onClick = { detailViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
                     DeliveryStepIndicator(pickedUp, routeStarted, arrived)
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
 
@@ -133,6 +139,17 @@ fun DeliveryOperationsScreen(
         item { OutlinedButton(onClick = onRefreshProgress, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR ETAPAS") } }
     }
 
+    detailState.detail?.let { detail ->
+        OrderDetailDialog(detail = detail, canAccept = false, onAccept = {}, onDismiss = detailViewModel::close)
+    }
+    detailState.error?.let { error ->
+        AlertDialog(
+            onDismissRequest = detailViewModel::clearFeedback,
+            title = { Text("Não foi possível abrir o pedido") },
+            text = { Text(error) },
+            confirmButton = { TextButton(onClick = detailViewModel::clearFeedback) { Text("FECHAR") } },
+        )
+    }
     pixOrder?.let { order ->
         TaxIdDialog(orderId = order.id, amountCents = order.totalCents, onDismiss = { pixOrder = null }, onConfirm = { taxId -> pixOrder = null; onPix(order.id, taxId) })
     }
