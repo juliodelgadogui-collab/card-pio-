@@ -22,7 +22,6 @@ final class UniversalQrService
         $label=mb_substr(trim($label),0,160);$expiresAt=$ttlHours&&$ttlHours>0?(new \DateTimeImmutable('+'.min($ttlHours,8760).' hours'))->format('Y-m-d H:i:s'):null;
         $raw=bin2hex(random_bytes(32));$hash=hash('sha256',$raw);
         Database::transaction(function(PDO $pdo)use($tenantId,$userId,$type,$entityId,$label,$expiresAt,$hash):void{
-            // Um QR novo substitui o anterior da mesma entidade; crachás perdidos deixam de funcionar.
             $pdo->prepare('UPDATE entity_qr_tokens SET status="revoked" WHERE tenant_id=? AND entity_type=? AND entity_id=? AND status="active"')->execute([$tenantId,$type,$entityId]);
             $pdo->prepare('INSERT INTO entity_qr_tokens (tenant_id,entity_type,entity_id,token_hash,label,status,expires_at,created_by) VALUES (?,?,?,?,?,"active",?,?)')->execute([$tenantId,$type,$entityId,$hash,$label?:null,$expiresAt,$userId]);
         });
@@ -78,7 +77,7 @@ final class UniversalQrService
             return ['id'=>(int)$user['id'],'name'=>(string)$user['name'],'email'=>(string)$user['email'],'role'=>(string)$user['role'],'status'=>(string)$user['status'],'shift'=>$open?:null];
         }
         if($type==='customer'){
-            if(!Auth::can('customers.manage')&&!Auth::can('orders.create'))throw new RuntimeException('Acesso negado ao cliente.');$s=$pdo->prepare('SELECT id,name,phone,email,points_balance FROM customers WHERE id=? AND tenant_id=?');$s->execute([$entityId,$tenantId]);$row=$s->fetch();if(!$row)throw new RuntimeException('Cliente não encontrado.');return $row;
+            if(!Auth::can('customers.manage')&&!Auth::can('orders.create'))throw new RuntimeException('Acesso negado ao cliente.');$s=$pdo->prepare('SELECT id,name,phone,email,points FROM customers WHERE id=? AND tenant_id=?');$s->execute([$entityId,$tenantId]);$row=$s->fetch();if(!$row)throw new RuntimeException('Cliente não encontrado.');return $row;
         }
         if($type==='event'){
             if(!Auth::can('events.manage')&&!Auth::can('tickets.manage')&&!Auth::can('guests.manage')&&!Auth::can('events.bar'))throw new RuntimeException('Acesso negado ao evento.');$s=$pdo->prepare('SELECT id,name,status,venue,address,starts_at,ends_at FROM events WHERE id=? AND tenant_id=?');$s->execute([$entityId,$tenantId]);$row=$s->fetch();if(!$row)throw new RuntimeException('Evento não encontrado.');return $row;
