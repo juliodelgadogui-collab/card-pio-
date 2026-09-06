@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS production_print_queue (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  station_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  queue_type VARCHAR(20) NOT NULL DEFAULT 'auto',
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  requested_by BIGINT UNSIGNED NULL,
+  reason VARCHAR(500) NULL,
+  payload_hash CHAR(64) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  printed_at DATETIME NULL,
+  failed_at DATETIME NULL,
+  CONSTRAINT fk_print_queue_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_print_queue_station FOREIGN KEY (station_id) REFERENCES production_stations(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_print_queue_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_print_queue_user FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_prod_print_queue_pending (tenant_id,station_id,status,created_at),
+  UNIQUE KEY uq_prod_auto_print_order_station (tenant_id,station_id,order_id,queue_type)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
