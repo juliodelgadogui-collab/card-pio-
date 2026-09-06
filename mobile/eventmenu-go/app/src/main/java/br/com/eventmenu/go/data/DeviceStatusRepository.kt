@@ -1,6 +1,7 @@
 package br.com.eventmenu.go.data
 
 import br.com.eventmenu.go.security.SecureSessionStore
+import org.json.JSONObject
 
 data class MobileSessionStatus(
     val tokenId: Int,
@@ -31,8 +32,15 @@ data class DeviceStatus(
 class DeviceStatusRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
     private val api = ApiClient(baseUrl, deviceId)
 
-    suspend fun status(): DeviceStatus {
-        val d = api.getDevice("status", requireToken()).getJSONObject("device")
+    suspend fun status(): DeviceStatus = parseDevice(
+        api.getDevice("status", requireToken()).getJSONObject("device")
+    )
+
+    suspend fun requestNfcAuthorization(): DeviceStatus = parseDevice(
+        api.postDevice("request-nfc", requireToken()).getJSONObject("device")
+    )
+
+    private fun parseDevice(d: JSONObject): DeviceStatus {
         val sessionJson = d.getJSONObject("session")
         val nfcJson = d.optJSONObject("nfc")
         return DeviceStatus(
