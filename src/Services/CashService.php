@@ -11,188 +11,34 @@ use RuntimeException;
 
 final class CashService
 {
-    public function currentSession(?int $userId = null): ?array
-    {
-        Auth::requirePermission('cash.manage');
-        $tenantId = Auth::tenantId();
-        $userId ??= Auth::id();
-        if (!$tenantId || !$userId) return null;
+    public function currentSession(?int$userId=null):?array{Auth::requirePermission('cash.manage');$tenantId=Auth::tenantId();$userId??=Auth::id();if(!$tenantId||!$userId)return null;$stmt=Database::connection()->prepare('SELECT cs.*,ou.name unit_name,ou.code unit_code FROM cash_sessions cs LEFT JOIN operating_units ou ON ou.id=cs.unit_id AND ou.tenant_id=cs.tenant_id WHERE cs.tenant_id=? AND cs.user_id=? AND cs.status="open" ORDER BY cs.id DESC LIMIT 1');$stmt->execute([$tenantId,$userId]);$row=$stmt->fetch();return$row?:null;}
 
-        $stmt = Database::connection()->prepare('SELECT cs.*,ou.name unit_name,ou.code unit_code FROM cash_sessions cs LEFT JOIN operating_units ou ON ou.id=cs.unit_id AND ou.tenant_id=cs.tenant_id WHERE cs.tenant_id=? AND cs.user_id=? AND cs.status="open" ORDER BY cs.id DESC LIMIT 1');
-        $stmt->execute([$tenantId, $userId]);
-        $row = $stmt->fetch();
-        return $row ?: null;
+    public function open(int$openingCashCents,string$notes=''):array
+    {
+        Auth::requirePermission('cash.manage');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');if($openingCashCents<0)throw new RuntimeException('Valor inicial inválido.');$notes=mb_substr(trim($notes),0,500);$shift=(new WorkShiftService())->current();if($shift&&$shift['unit_id']!==null)$unitId=(int)$shift['unit_id'];else$unitId=(int)(new OperatingUnitService())->requireCurrent()['id'];
+        return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$unitId,$openingCashCents,$notes):array{$check=$pdo->prepare(Database::portableSql($pdo,'SELECT id FROM cash_sessions WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$check->execute([$tenantId,$userId]);if($check->fetchColumn())throw new RuntimeException('Você já possui um caixa aberto.');$stmt=$pdo->prepare('INSERT INTO cash_sessions (tenant_id,user_id,unit_id,status,opening_cash_cents,opening_notes) VALUES (?, ?, ?, "open", ?, ?)');$stmt->execute([$tenantId,$userId,$unitId,$openingCashCents,$notes!==''?$notes:null]);$id=(int)$pdo->lastInsertId();Auth::audit('cash.opened','cash_session',(string)$id,['opening_cash_cents'=>$openingCashCents,'unit_id'=>$unitId]);$s=$pdo->prepare('SELECT cs.*,ou.name unit_name,ou.code unit_code FROM cash_sessions cs LEFT JOIN operating_units ou ON ou.id=cs.unit_id WHERE cs.id=? AND cs.tenant_id=?');$s->execute([$id,$tenantId]);$session=$s->fetch();if(!$session)throw new RuntimeException('Falha ao abrir o caixa.');return$session;});
     }
 
-    public function open(int $openingCashCents, string $notes = ''): array
+    public function addManualMovement(string$type,int$amountCents,string$notes='',string$direction='in'):int
     {
-        Auth::requirePermission('cash.manage');
-        $tenantId = Auth::tenantId();
-        $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Operador ou empresa inválidos.');
-        if ($openingCashCents < 0) throw new RuntimeException('Valor inicial inválido.');
-        $notes = mb_substr(trim($notes), 0, 500);
-        $shift=(new WorkShiftService())->current();$unitId=$shift&&$shift['unit_id']!==null?(int)$shift['unit_id']:null;
-
-        return Database::transaction(function (PDO $pdo) use ($tenantId, $userId, $unitId, $openingCashCents, $notes): array {
-            $check = $pdo->prepare(Database::portableSql($pdo, 'SELECT id FROM cash_sessions WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));
-            $check->execute([$tenantId, $userId]);
-            if ($check->fetchColumn()) throw new RuntimeException('Você já possui um caixa aberto.');
-
-            $stmt = $pdo->prepare('INSERT INTO cash_sessions (tenant_id,user_id,unit_id,status,opening_cash_cents,opening_notes) VALUES (?, ?, ?, "open", ?, ?)');
-            $stmt->execute([$tenantId, $userId, $unitId, $openingCashCents, $notes !== '' ? $notes : null]);
-            $id = (int)$pdo->lastInsertId();
-            Auth::audit('cash.opened', 'cash_session', (string)$id, ['opening_cash_cents' => $openingCashCents,'unit_id'=>$unitId]);
-
-            $s = $pdo->prepare('SELECT cs.*,ou.name unit_name,ou.code unit_code FROM cash_sessions cs LEFT JOIN operating_units ou ON ou.id=cs.unit_id WHERE cs.id=? AND cs.tenant_id=?');
-            $s->execute([$id, $tenantId]);
-            $session = $s->fetch();
-            if (!$session) throw new RuntimeException('Falha ao abrir o caixa.');
-            return $session;
-        });
+        Auth::requirePermission('cash.manage');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');if($amountCents<=0)throw new RuntimeException('Informe um valor maior que zero.');if(!in_array($type,['supply','withdrawal','adjustment'],true))throw new RuntimeException('Movimento inválido.');if($type==='supply')$direction='in';if($type==='withdrawal')$direction='out';if(!in_array($direction,['in','out'],true))throw new RuntimeException('Direção inválida.');$notes=mb_substr(trim($notes),0,500);if(($type==='withdrawal'||$type==='adjustment')&&$notes==='')throw new RuntimeException('Informe o motivo do movimento.');return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$type,$amountCents,$notes,$direction):int{$session=$this->lockedOpenSession($pdo,$tenantId,$userId);$key='cash:'.$session['id'].':'.$type.':'.bin2hex(random_bytes(12));$stmt=$pdo->prepare('INSERT INTO cash_movements (tenant_id,cash_session_id,user_id,type,method,direction,amount_cents,notes,idempotency_key) VALUES (?,?,?, ?,"cash",?,?,?,?)');$stmt->execute([$tenantId,$session['id'],$userId,$type,$direction,$amountCents,$notes!==''?$notes:null,$key]);$id=(int)$pdo->lastInsertId();Auth::audit('cash.'.$type,'cash_movement',(string)$id,['amount_cents'=>$amountCents,'direction'=>$direction,'unit_id'=>$session['unit_id']??null]);return$id;});
     }
 
-    public function addManualMovement(string $type, int $amountCents, string $notes = '', string $direction = 'in'): int
+    public function recordPaidPayment(int$paymentId,string$method):void
     {
-        Auth::requirePermission('cash.manage');
-        $tenantId = Auth::tenantId();
-        $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Operador ou empresa inválidos.');
-        if ($amountCents <= 0) throw new RuntimeException('Informe um valor maior que zero.');
-        if (!in_array($type, ['supply', 'withdrawal', 'adjustment'], true)) throw new RuntimeException('Movimento inválido.');
-        if ($type === 'supply') $direction = 'in';
-        if ($type === 'withdrawal') $direction = 'out';
-        if (!in_array($direction, ['in', 'out'], true)) throw new RuntimeException('Direção inválida.');
-        $notes = mb_substr(trim($notes), 0, 500);
-        if (($type === 'withdrawal' || $type === 'adjustment') && $notes === '') throw new RuntimeException('Informe o motivo do movimento.');
-
-        return Database::transaction(function (PDO $pdo) use ($tenantId, $userId, $type, $amountCents, $notes, $direction): int {
-            $session = $this->lockedOpenSession($pdo, $tenantId, $userId);
-            $key = 'cash:' . $session['id'] . ':' . $type . ':' . bin2hex(random_bytes(12));
-            $stmt = $pdo->prepare('INSERT INTO cash_movements (tenant_id,cash_session_id,user_id,type,method,direction,amount_cents,notes,idempotency_key) VALUES (?,?,?, ?,"cash",?,?,?,?)');
-            $stmt->execute([$tenantId, $session['id'], $userId, $type, $direction, $amountCents, $notes !== '' ? $notes : null, $key]);
-            $id = (int)$pdo->lastInsertId();
-            Auth::audit('cash.' . $type, 'cash_movement', (string)$id, ['amount_cents' => $amountCents, 'direction' => $direction]);
-            return $id;
-        });
+        Auth::requirePermission('cash.manage');$tenantId=Auth::tenantId();$userId=Auth::id();$method=strtolower(trim($method));if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');if(!in_array($method,['cash','pix','card','other'],true))throw new RuntimeException('Forma de recebimento inválida.');Database::transaction(function(PDO$pdo)use($tenantId,$userId,$paymentId,$method):void{$session=$this->lockedOpenSession($pdo,$tenantId,$userId);$stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT p.id,p.order_id,p.amount_cents,p.status,p.provider,o.unit_id FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.id=? AND p.tenant_id=? FOR UPDATE'));$stmt->execute([$paymentId,$tenantId]);$payment=$stmt->fetch();if(!$payment||$payment['status']!=='paid')throw new RuntimeException('Pagamento confirmado não encontrado.');if($session['unit_id']!==null&&$payment['unit_id']!==null&&(int)$session['unit_id']!==(int)$payment['unit_id'])throw new RuntimeException('Este pagamento pertence a outra unidade.');$key='payment:'.$paymentId.':cash-session:'.$session['id'];$existing=$pdo->prepare('SELECT id FROM cash_movements WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$existing->execute([$tenantId,$key]);if($existing->fetchColumn())return;$insert=$pdo->prepare('INSERT INTO cash_movements (tenant_id,cash_session_id,user_id,order_id,payment_id,type,method,direction,amount_cents,idempotency_key) VALUES (?,?,?,?,?,"sale",?,"in",?,?)');$insert->execute([$tenantId,$session['id'],$userId,$payment['order_id'],$paymentId,$method,$payment['amount_cents'],$key]);Auth::audit('cash.sale_recorded','payment',(string)$paymentId,['cash_session_id'=>(int)$session['id'],'method'=>$method,'unit_id'=>$session['unit_id']??null]);});
     }
 
-    public function recordPaidPayment(int $paymentId, string $method): void
+    public function close(int$countedCashCents,string$notes=''):array
     {
-        Auth::requirePermission('cash.manage');
-        $tenantId = Auth::tenantId();
-        $userId = Auth::id();
-        $method = strtolower(trim($method));
-        if (!$tenantId || !$userId) throw new RuntimeException('Operador ou empresa inválidos.');
-        if (!in_array($method, ['cash', 'pix', 'card', 'other'], true)) throw new RuntimeException('Forma de recebimento inválida.');
-
-        Database::transaction(function (PDO $pdo) use ($tenantId, $userId, $paymentId, $method): void {
-            $session = $this->lockedOpenSession($pdo, $tenantId, $userId);
-            $stmt = $pdo->prepare(Database::portableSql($pdo, 'SELECT p.id,p.order_id,p.amount_cents,p.status,p.provider,o.unit_id FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.id=? AND p.tenant_id=? FOR UPDATE'));
-            $stmt->execute([$paymentId, $tenantId]);
-            $payment = $stmt->fetch();
-            if (!$payment || $payment['status'] !== 'paid') throw new RuntimeException('Pagamento confirmado não encontrado.');
-            if($session['unit_id']!==null&&$payment['unit_id']!==null&&(int)$session['unit_id']!==(int)$payment['unit_id'])throw new RuntimeException('Este pagamento pertence a outra unidade.');
-
-            $key = 'payment:' . $paymentId . ':cash-session:' . $session['id'];
-            $existing = $pdo->prepare('SELECT id FROM cash_movements WHERE tenant_id=? AND idempotency_key=? LIMIT 1');
-            $existing->execute([$tenantId, $key]);
-            if ($existing->fetchColumn()) return;
-
-            $insert = $pdo->prepare('INSERT INTO cash_movements (tenant_id,cash_session_id,user_id,order_id,payment_id,type,method,direction,amount_cents,idempotency_key) VALUES (?,?,?,?,?,"sale",?,"in",?,?)');
-            $insert->execute([$tenantId, $session['id'], $userId, $payment['order_id'], $paymentId, $method, $payment['amount_cents'], $key]);
-            Auth::audit('cash.sale_recorded', 'payment', (string)$paymentId, ['cash_session_id' => (int)$session['id'], 'method' => $method]);
-        });
+        Auth::requirePermission('cash.manage');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');if($countedCashCents<0)throw new RuntimeException('Valor contado inválido.');$notes=mb_substr(trim($notes),0,500);return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$countedCashCents,$notes):array{$session=$this->lockedOpenSession($pdo,$tenantId,$userId);$expected=$this->expectedCash($pdo,$session);$difference=$countedCashCents-$expected;$stmt=$pdo->prepare('UPDATE cash_sessions SET status="closed",closing_cash_cents=?,expected_cash_cents=?,difference_cents=?,closing_notes=?,closed_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="open"');$stmt->execute([$countedCashCents,$expected,$difference,$notes!==''?$notes:null,$session['id'],$tenantId]);if($stmt->rowCount()!==1)throw new RuntimeException('O caixa já foi fechado por outra operação.');Auth::audit('cash.closed','cash_session',(string)$session['id'],['expected_cash_cents'=>$expected,'closing_cash_cents'=>$countedCashCents,'difference_cents'=>$difference,'unit_id'=>$session['unit_id']??null]);$session['status']='closed';$session['closing_cash_cents']=$countedCashCents;$session['expected_cash_cents']=$expected;$session['difference_cents']=$difference;return$session;});
     }
 
-    public function close(int $countedCashCents, string $notes = ''): array
+    public function summary(?int$sessionId=null):array
     {
-        Auth::requirePermission('cash.manage');
-        $tenantId = Auth::tenantId();
-        $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Operador ou empresa inválidos.');
-        if ($countedCashCents < 0) throw new RuntimeException('Valor contado inválido.');
-        $notes = mb_substr(trim($notes), 0, 500);
-
-        return Database::transaction(function (PDO $pdo) use ($tenantId, $userId, $countedCashCents, $notes): array {
-            $session = $this->lockedOpenSession($pdo, $tenantId, $userId);
-            $expected = $this->expectedCash($pdo, $session);
-            $difference = $countedCashCents - $expected;
-
-            $stmt = $pdo->prepare('UPDATE cash_sessions SET status="closed",closing_cash_cents=?,expected_cash_cents=?,difference_cents=?,closing_notes=?,closed_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="open"');
-            $stmt->execute([$countedCashCents, $expected, $difference, $notes !== '' ? $notes : null, $session['id'], $tenantId]);
-            if ($stmt->rowCount() !== 1) throw new RuntimeException('O caixa já foi fechado por outra operação.');
-            Auth::audit('cash.closed', 'cash_session', (string)$session['id'], ['expected_cash_cents' => $expected, 'closing_cash_cents' => $countedCashCents, 'difference_cents' => $difference,'unit_id'=>$session['unit_id']??null]);
-
-            $session['status'] = 'closed';
-            $session['closing_cash_cents'] = $countedCashCents;
-            $session['expected_cash_cents'] = $expected;
-            $session['difference_cents'] = $difference;
-            return $session;
-        });
+        Auth::requirePermission('cash.manage');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');$pdo=Database::connection();if($sessionId){$stmt=$pdo->prepare('SELECT cs.*,u.name user_name,ou.name unit_name,ou.code unit_code FROM cash_sessions cs JOIN users u ON u.id=cs.user_id LEFT JOIN operating_units ou ON ou.id=cs.unit_id WHERE cs.id=? AND cs.tenant_id=? LIMIT 1');$stmt->execute([$sessionId,$tenantId]);}else{$stmt=$pdo->prepare('SELECT cs.*,u.name user_name,ou.name unit_name,ou.code unit_code FROM cash_sessions cs JOIN users u ON u.id=cs.user_id LEFT JOIN operating_units ou ON ou.id=cs.unit_id WHERE cs.tenant_id=? AND cs.user_id=? ORDER BY cs.id DESC LIMIT 1');$stmt->execute([$tenantId,$userId]);}$session=$stmt->fetch();if(!$session)return['session'=>null,'movements'=>[],'by_method'=>[],'digital'=>[],'expected_cash_cents'=>0];if((int)$session['user_id']!==$userId&&!in_array(Auth::role(),['admin','manager','super_admin'],true))throw new RuntimeException('Você não pode consultar o caixa de outro operador.');$m=$pdo->prepare('SELECT cm.* FROM cash_movements cm WHERE cm.tenant_id=? AND cm.cash_session_id=? ORDER BY cm.id DESC');$m->execute([$tenantId,$session['id']]);$movements=$m->fetchAll();$by=$pdo->prepare('SELECT method,direction,COALESCE(SUM(amount_cents),0) total_cents,COUNT(*) qty FROM cash_movements WHERE tenant_id=? AND cash_session_id=? GROUP BY method,direction ORDER BY method,direction');$by->execute([$tenantId,$session['id']]);$byMethod=$by->fetchAll();$end=$session['closed_at']?:gmdate('Y-m-d H:i:s');if($session['unit_id']!==null){$digital=$pdo->prepare('SELECT p.provider,COUNT(*) qty,COALESCE(SUM(p.amount_cents),0) total_cents FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.tenant_id=? AND o.unit_id=? AND p.provider<>"manual" AND p.status="paid" AND p.verified_at>=? AND p.verified_at<=? GROUP BY p.provider ORDER BY p.provider');$digital->execute([$tenantId,$session['unit_id'],$session['opened_at'],$end]);}else{$digital=$pdo->prepare('SELECT p.provider,COUNT(*) qty,COALESCE(SUM(p.amount_cents),0) total_cents FROM payments p WHERE p.tenant_id=? AND p.provider<>"manual" AND p.status="paid" AND p.verified_at>=? AND p.verified_at<=? GROUP BY p.provider ORDER BY p.provider');$digital->execute([$tenantId,$session['opened_at'],$end]);}return['session'=>$session,'movements'=>$movements,'by_method'=>$byMethod,'digital'=>$digital->fetchAll(),'expected_cash_cents'=>$session['status']==='closed'&&$session['expected_cash_cents']!==null?(int)$session['expected_cash_cents']:$this->expectedCash($pdo,$session)];
     }
 
-    public function summary(?int $sessionId = null): array
-    {
-        Auth::requirePermission('cash.manage');
-        $tenantId = Auth::tenantId();
-        $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Operador ou empresa inválidos.');
-
-        $pdo = Database::connection();
-        if ($sessionId) {
-            $stmt = $pdo->prepare('SELECT cs.*,u.name user_name,ou.name unit_name,ou.code unit_code FROM cash_sessions cs JOIN users u ON u.id=cs.user_id LEFT JOIN operating_units ou ON ou.id=cs.unit_id WHERE cs.id=? AND cs.tenant_id=? LIMIT 1');
-            $stmt->execute([$sessionId, $tenantId]);
-        } else {
-            $stmt = $pdo->prepare('SELECT cs.*,u.name user_name,ou.name unit_name,ou.code unit_code FROM cash_sessions cs JOIN users u ON u.id=cs.user_id LEFT JOIN operating_units ou ON ou.id=cs.unit_id WHERE cs.tenant_id=? AND cs.user_id=? ORDER BY cs.id DESC LIMIT 1');
-            $stmt->execute([$tenantId, $userId]);
-        }
-        $session = $stmt->fetch();
-        if (!$session) return ['session' => null, 'movements' => [], 'by_method' => [], 'digital' => [], 'expected_cash_cents' => 0];
-
-        if ((int)$session['user_id'] !== $userId && !in_array(Auth::role(), ['admin', 'manager', 'super_admin'], true)) {
-            throw new RuntimeException('Você não pode consultar o caixa de outro operador.');
-        }
-
-        $m = $pdo->prepare('SELECT cm.* FROM cash_movements cm WHERE cm.tenant_id=? AND cm.cash_session_id=? ORDER BY cm.id DESC');
-        $m->execute([$tenantId, $session['id']]);
-        $movements = $m->fetchAll();
-
-        $by = $pdo->prepare('SELECT method,direction,COALESCE(SUM(amount_cents),0) total_cents,COUNT(*) qty FROM cash_movements WHERE tenant_id=? AND cash_session_id=? GROUP BY method,direction ORDER BY method,direction');
-        $by->execute([$tenantId, $session['id']]);
-        $byMethod = $by->fetchAll();
-
-        $end = $session['closed_at'] ?: gmdate('Y-m-d H:i:s');
-        if($session['unit_id']!==null){
-            $digital=$pdo->prepare('SELECT p.provider,COUNT(*) qty,COALESCE(SUM(p.amount_cents),0) total_cents FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.tenant_id=? AND o.unit_id=? AND p.provider<>"manual" AND p.status="paid" AND p.verified_at>=? AND p.verified_at<=? GROUP BY p.provider ORDER BY p.provider');
-            $digital->execute([$tenantId,$session['unit_id'],$session['opened_at'],$end]);
-        }else{
-            $digital = $pdo->prepare('SELECT p.provider,COUNT(*) qty,COALESCE(SUM(p.amount_cents),0) total_cents FROM payments p WHERE p.tenant_id=? AND p.provider<>"manual" AND p.status="paid" AND p.verified_at>=? AND p.verified_at<=? GROUP BY p.provider ORDER BY p.provider');
-            $digital->execute([$tenantId, $session['opened_at'], $end]);
-        }
-
-        return [
-            'session' => $session,
-            'movements' => $movements,
-            'by_method' => $byMethod,
-            'digital' => $digital->fetchAll(),
-            'expected_cash_cents' => $session['status'] === 'closed' && $session['expected_cash_cents'] !== null ? (int)$session['expected_cash_cents'] : $this->expectedCash($pdo, $session),
-        ];
-    }
-
-    private function lockedOpenSession(PDO $pdo, int $tenantId, int $userId): array
-    {
-        $stmt = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM cash_sessions WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));
-        $stmt->execute([$tenantId, $userId]);
-        $session = $stmt->fetch();
-        if (!$session) throw new RuntimeException('Abra o caixa antes de continuar.');
-        return $session;
-    }
-
-    private function expectedCash(PDO $pdo, array $session): int
-    {
-        $stmt = $pdo->prepare('SELECT COALESCE(SUM(CASE WHEN method="cash" AND direction="in" THEN amount_cents WHEN method="cash" AND direction="out" THEN -amount_cents ELSE 0 END),0) FROM cash_movements WHERE tenant_id=? AND cash_session_id=?');
-        $stmt->execute([(int)$session['tenant_id'], (int)$session['id']]);
-        return (int)$session['opening_cash_cents'] + (int)$stmt->fetchColumn();
-    }
+    private function lockedOpenSession(PDO$pdo,int$tenantId,int$userId):array{$stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM cash_sessions WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$stmt->execute([$tenantId,$userId]);$session=$stmt->fetch();if(!$session)throw new RuntimeException('Abra o caixa antes de continuar.');return$session;}
+    private function expectedCash(PDO$pdo,array$session):int{$stmt=$pdo->prepare('SELECT COALESCE(SUM(CASE WHEN method="cash" AND direction="in" THEN amount_cents WHEN method="cash" AND direction="out" THEN -amount_cents ELSE 0 END),0) FROM cash_movements WHERE tenant_id=? AND cash_session_id=?');$stmt->execute([(int)$session['tenant_id'],(int)$session['id']]);return(int)$session['opening_cash_cents']+(int)$stmt->fetchColumn();}
 }
