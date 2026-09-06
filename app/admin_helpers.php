@@ -26,6 +26,7 @@ function em_nav():array{return[
     ['super','Plataforma','platform.manage'],
     ['dashboard','Visão geral','dashboard'],
     ['pos','Caixa / PDV','orders.create'],
+    ['pickup','Retirada / QR','orders.fulfill'],
     ['cash','Turno de caixa','cash.manage'],
     ['kitchen','Cozinha / KDS','orders.kitchen'],
     ['delivery','Entregas','orders.delivery'],
