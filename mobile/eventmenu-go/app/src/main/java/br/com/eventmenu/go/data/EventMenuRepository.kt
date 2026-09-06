@@ -18,7 +18,7 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
         val json = api.getGo("context", token); val u = json.getJSONObject("user"); val p = json.optJSONObject("permissions") ?: JSONObject()
         val permissions = p.keys().asSequence().filter { p.optBoolean(it, false) }.toSet(); val modesJson = json.optJSONArray("modes") ?: JSONArray()
         val modes = buildList { for (i in 0 until modesJson.length()) AppMode.fromWire(modesJson.optString(i))?.let(::add) }.distinct()
-        return Session(AppUser(u.getInt("id"),u.getInt("tenant_id"),u.getString("name"),u.getString("email"),u.getString("role")),permissions,modes,parseShift(json.optJSONObject("shift")))
+        return Session(AppUser(u.getInt("id"),u.getInt("tenant_id"),u.getString("name"),u.getString("email"),u.getString("role"),u.optString("tenant_name")),permissions,modes,parseShift(json.optJSONObject("shift")))
     }
     suspend fun logout(){sessionStore.token()?.let{runCatching{api.post("logout",it)}};sessionStore.clear()}
     suspend fun openShift(mode: AppMode, notes: String=""):WorkShift=parseShift(api.postGo("shift-open",requireToken(),JSONObject().put("mode",mode.wire).put("notes",notes)).getJSONObject("shift"))?:throw ApiException("Turno inválido.")
