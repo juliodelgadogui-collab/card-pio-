@@ -16,233 +16,70 @@ use RuntimeException;
 
 final class OrderFulfillmentService
 {
-    private const QR_CHANNELS = ['counter','pickup','delivery'];
-    private const EPSILON = 0.0005;
+    private const QR_CHANNELS=['counter','pickup','delivery'];
+    private const EPSILON=.0005;
 
-    public function supportsChannel(string $channel): bool
+    public function supportsChannel(string$channel):bool{return in_array(strtolower(trim($channel)),self::QR_CHANNELS,true);}
+    public function qrPayload(string$publicToken):string{$token=$this->normalizeToken($publicToken);return \app_absolute_url('?route=pickup&token='.rawurlencode($token));}
+    public function qrDataUri(string$publicToken,int$size=320):string{$size=max(180,min(700,$size));$qr=new QrCode(data:$this->qrPayload($publicToken),encoding:new Encoding('ISO-8859-1'),errorCorrectionLevel:ErrorCorrectionLevel::Medium,size:$size,margin:12,roundBlockSizeMode:RoundBlockSizeMode::Margin);return(new SvgWriter())->write($qr)->getDataUri();}
+
+    public function normalizeToken(string$raw):string
     {
-        return in_array(strtolower(trim($channel)), self::QR_CHANNELS, true);
+        $raw=trim($raw);if($raw==='')throw new RuntimeException('QR do pedido vazio.');if(preg_match('/^[a-f0-9]{40}$/i',$raw))return strtolower($raw);if(preg_match('/EVENTMENU:ORDER:([a-f0-9]{40})/i',$raw,$m))return strtolower($m[1]);$query=(string)(parse_url($raw,PHP_URL_QUERY)??'');if($query!==''){parse_str($query,$params);foreach(['token','t','order']as$key){$candidate=trim((string)($params[$key]??''));if(preg_match('/^[a-f0-9]{40}$/i',$candidate))return strtolower($candidate);}}if(preg_match('/(?:token|t|order)=([a-f0-9]{40})/i',$raw,$m))return strtolower($m[1]);throw new RuntimeException('QR de pedido inválido.');
     }
 
-    public function qrPayload(string $publicToken): string
+    public function detailsByToken(string$rawToken):array
     {
-        $token = $this->normalizeToken($publicToken);
-        return \app_absolute_url('?route=pickup&token='.rawurlencode($token));
+        $tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa não selecionada.');$pdo=Database::connection();$order=$this->fetchOrderByToken($pdo,$tenantId,$this->normalizeToken($rawToken),false);$this->assertCanView($order);$this->assertUnitContext($order);return$this->composeDetails($pdo,$order);
     }
 
-    public function qrDataUri(string $publicToken, int $size = 320): string
+    public function search(string$query,int$limit=20):array
     {
-        $size = max(180, min(700, $size));
-        $qr = new QrCode(
-            data: $this->qrPayload($publicToken),
-            encoding: new Encoding('ISO-8859-1'),
-            errorCorrectionLevel: ErrorCorrectionLevel::Medium,
-            size: $size,
-            margin: 12,
-            roundBlockSizeMode: RoundBlockSizeMode::Margin,
-        );
-        return (new SvgWriter())->write($qr)->getDataUri();
+        $tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa não selecionada.');if(!Auth::can('orders.fulfill')&&!Auth::can('orders.view'))throw new RuntimeException('Sem permissão para localizar pedidos.');$q=trim($query);if($q==='')return[];$unitId=(new OperatingUnitService())->currentId();$pdo=Database::connection();$where='o.tenant_id=? AND o.channel IN ("counter","pickup","delivery")';$args=[$tenantId];if($unitId){$where.=' AND o.unit_id=?';$args[]=$unitId;}if(ctype_digit(ltrim($q,'#'))){$where.=' AND o.id=?';$args[]=(int)ltrim($q,'#');}else{$where.=' AND (c.name LIKE ? OR c.phone LIKE ? OR o.public_token LIKE ?)';$like='%'.$q.'%';$args[]=$like;$args[]=$like;$args[]=$like;}$s=$pdo->prepare('SELECT o.id,o.public_token,o.channel,o.status,o.payment_status,o.total_cents,o.created_at,c.name customer_name,c.phone customer_phone,ou.name unit_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN operating_units ou ON ou.id=o.unit_id WHERE '.$where.' ORDER BY o.id DESC LIMIT '.max(1,min(50,$limit)));$s->execute($args);return$s->fetchAll();
     }
 
-    public function normalizeToken(string $raw): string
+    public function publicProgress(int$tenantId,int$orderId):array{if($tenantId<1||$orderId<1)return$this->emptyProgress();$pdo=Database::connection();$items=$this->fetchItems($pdo,$tenantId,$orderId);return$this->progressFromItems($items);}
+
+    public function fulfill(string$rawToken,array$quantities,string$batchKey='',string$notes=''):array
     {
-        $raw = trim($raw);
-        if ($raw === '') throw new RuntimeException('QR do pedido vazio.');
-        if (preg_match('/^[a-f0-9]{40}$/i', $raw)) return strtolower($raw);
-        if (preg_match('/EVENTMENU:ORDER:([a-f0-9]{40})/i', $raw, $m)) return strtolower($m[1]);
-
-        $query = (string)(parse_url($raw, PHP_URL_QUERY) ?? '');
-        if ($query !== '') {
-            parse_str($query, $params);
-            foreach (['token','t','order'] as $key) {
-                $candidate = trim((string)($params[$key] ?? ''));
-                if (preg_match('/^[a-f0-9]{40}$/i', $candidate)) return strtolower($candidate);
-            }
-        }
-        if (preg_match('/(?:token|t|order)=([a-f0-9]{40})/i', $raw, $m)) return strtolower($m[1]);
-        throw new RuntimeException('QR de pedido inválido.');
-    }
-
-    public function detailsByToken(string $rawToken): array
-    {
-        $tenantId = Auth::tenantId();
-        if (!$tenantId) throw new RuntimeException('Empresa não selecionada.');
-        $pdo = Database::connection();
-        $order = $this->fetchOrderByToken($pdo, $tenantId, $this->normalizeToken($rawToken), false);
-        $this->assertCanView($order);
-        return $this->composeDetails($pdo, $order);
-    }
-
-    public function publicProgress(int $tenantId, int $orderId): array
-    {
-        if ($tenantId < 1 || $orderId < 1) return $this->emptyProgress();
-        $pdo = Database::connection();
-        $items = $this->fetchItems($pdo, $orderId);
-        return $this->progressFromItems($items);
-    }
-
-    public function fulfill(string $rawToken, array $quantities, string $batchKey = '', string $notes = ''): array
-    {
-        $tenantId = Auth::tenantId();
-        $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Sessão inválida.');
-        $token = $this->normalizeToken($rawToken);
-        $batchKey = preg_replace('/[^A-Za-z0-9:_-]/', '', trim($batchKey)) ?: bin2hex(random_bytes(16));
-        $batchKey = mb_substr($batchKey, 0, 80);
-        $notes = mb_substr(trim($notes), 0, 500);
-
-        $requested = [];
-        foreach ($quantities as $itemId => $rawQty) {
-            $id = (int)$itemId;
-            $qty = round((float)str_replace(',', '.', (string)$rawQty), 3);
-            if ($id > 0 && is_finite($qty) && $qty > self::EPSILON) $requested[$id] = $qty;
-        }
-        if (!$requested) throw new RuntimeException('Informe pelo menos um item retirado.');
-
-        return Database::transaction(function (PDO $pdo) use ($tenantId, $userId, $token, $batchKey, $notes, $requested): array {
-            $order = $this->fetchOrderByToken($pdo, $tenantId, $token, true);
-            $this->assertCanFulfill($order);
-            if (!$this->supportsChannel((string)$order['channel'])) throw new RuntimeException('Pedido de mesa/comanda não usa retirada por QR.');
-            if ((string)$order['status'] === 'cancelled') throw new RuntimeException('Pedido cancelado não pode ter itens retirados.');
-
-            $before = $this->composeDetails($pdo, $order);
-            if ((string)$order['status'] === 'completed') {
-                if (($before['progress']['status'] ?? '') === 'fulfilled') return $before;
-                throw new RuntimeException('Pedido encerrado possui itens pendentes. Solicite revisão de um gerente.');
-            }
-            if ((int)$order['total_cents'] > 0 && (string)$order['payment_status'] !== 'paid') {
-                throw new RuntimeException('Pagamento ainda não confirmado. Receba o pedido antes de liberar produtos.');
-            }
-
-            $dup = $pdo->prepare('SELECT id FROM order_item_fulfillments WHERE tenant_id=? AND batch_key=? LIMIT 1');
-            $dup->execute([$tenantId, $batchKey]);
-            if ($dup->fetchColumn()) return $this->composeDetails($pdo, $order);
-
-            $currentStatus = (string)$order['status'];
-            if ($currentStatus === 'pending') {
-                $pdo->prepare('UPDATE orders SET status="confirmed" WHERE id=? AND tenant_id=?')->execute([(int)$order['id'], $tenantId]);
-                $pdo->prepare('UPDATE stock_reservations SET expires_at=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId, (int)$order['id']]);
-                (new OrderHistoryService())->record($pdo, $tenantId, (int)$order['id'], 'pending', 'confirmed', 'fulfillment', 'Pedido aceito ao iniciar retirada por QR.', $userId);
-                $currentStatus = 'confirmed';
-                $order['status'] = 'confirmed';
-            }
-
-            $insert = $pdo->prepare('INSERT INTO order_item_fulfillments (tenant_id,order_id,order_item_id,quantity,fulfilled_by,source,batch_key,notes) VALUES (?,?,?,?,?,"qr",?,?)');
-            foreach ($requested as $itemId => $qty) {
-                $itemStmt = $pdo->prepare(Database::portableSql($pdo, 'SELECT id,name_snapshot,quantity FROM order_items WHERE id=? AND order_id=? FOR UPDATE'));
-                $itemStmt->execute([$itemId, (int)$order['id']]);
-                $item = $itemStmt->fetch();
-                if (!$item) throw new RuntimeException('Um item selecionado não pertence a este pedido.');
-
-                $sum = $pdo->prepare('SELECT COALESCE(SUM(quantity),0) FROM order_item_fulfillments WHERE tenant_id=? AND order_item_id=?');
-                $sum->execute([$tenantId, $itemId]);
-                $already = (float)$sum->fetchColumn();
-                $remaining = max(0.0, (float)$item['quantity'] - $already);
-                if ($qty - $remaining > self::EPSILON) {
-                    throw new RuntimeException('Quantidade de '.$item['name_snapshot'].' maior que o saldo restante ('.$this->formatQty($remaining).').');
-                }
-                $insert->execute([$tenantId, (int)$order['id'], $itemId, $qty, $userId, $batchKey, $notes ?: null]);
-            }
-
-            $details = $this->composeDetails($pdo, $order);
-            if (($details['progress']['status'] ?? '') === 'fulfilled' && in_array((string)$order['channel'], ['counter','pickup'], true)) {
-                if ($currentStatus !== 'completed') {
-                    $pdo->prepare('UPDATE orders SET status="completed" WHERE id=? AND tenant_id=?')->execute([(int)$order['id'], $tenantId]);
-                    (new OrderHistoryService())->record($pdo, $tenantId, (int)$order['id'], $currentStatus, 'completed', 'fulfillment', 'Todos os itens foram entregues por retirada QR.', $userId);
-                    $details['order']['status'] = 'completed';
-                }
-            }
-
-            Auth::audit('order.fulfillment', 'order', (string)$order['id'], [
-                'batch_key' => $batchKey,
-                'items' => $requested,
-                'fulfillment_status' => $details['progress']['status'] ?? 'pending',
-            ]);
-            return $details;
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');$token=$this->normalizeToken($rawToken);$batchKey=preg_replace('/[^A-Za-z0-9:_-]/','',trim($batchKey))?:bin2hex(random_bytes(16));$batchKey=mb_substr($batchKey,0,80);$notes=mb_substr(trim($notes),0,500);$requested=[];foreach($quantities as$itemId=>$rawQty){$id=(int)$itemId;$qty=round((float)str_replace(',','.',(string)$rawQty),3);if($id>0&&is_finite($qty)&&$qty>self::EPSILON)$requested[$id]=$qty;}if(!$requested)throw new RuntimeException('Informe pelo menos um item retirado.');
+        return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$token,$batchKey,$notes,$requested):array{
+            $order=$this->fetchOrderByToken($pdo,$tenantId,$token,true);$this->assertCanFulfill($order);$this->assertUnitContext($order);if(!$this->supportsChannel((string)$order['channel']))throw new RuntimeException('Pedido de mesa/comanda não usa retirada por QR.');if((string)$order['status']==='cancelled')throw new RuntimeException('Pedido cancelado não pode ter itens retirados.');if((int)$order['total_cents']>0&&(string)$order['payment_status']!=='paid')throw new RuntimeException('Pagamento ainda não confirmado. Receba o pedido antes de liberar produtos.');
+            $currentStatus=(string)$order['status'];if($currentStatus==='pending'){$pdo->prepare('UPDATE orders SET status="confirmed" WHERE id=? AND tenant_id=?')->execute([(int)$order['id'],$tenantId]);$pdo->prepare('UPDATE stock_reservations SET expires_at=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,(int)$order['id']]);(new ProductionService())->ensureOrderJobs($pdo,$tenantId,(int)$order['id'],$userId);(new OrderHistoryService())->record($pdo,$tenantId,(int)$order['id'],'pending','confirmed','fulfillment','Pedido aceito ao iniciar retirada por QR.',$userId);$currentStatus='confirmed';$order['status']='confirmed';}
+            $before=$this->composeDetails($pdo,$order);if((string)$order['status']==='completed'){if(($before['progress']['status']??'')==='fulfilled')return$before;throw new RuntimeException('Pedido encerrado possui itens pendentes. Solicite revisão de um gerente.');}
+            $dup=$pdo->prepare('SELECT id FROM order_item_fulfillments WHERE tenant_id=? AND batch_key=? LIMIT 1');$dup->execute([$tenantId,$batchKey]);if($dup->fetchColumn())return$this->composeDetails($pdo,$order);$itemMap=[];foreach($before['items']as$item)$itemMap[(int)$item['id']]=$item;
+            $insert=$pdo->prepare('INSERT INTO order_item_fulfillments (tenant_id,order_id,order_item_id,quantity,fulfilled_by,source,batch_key,notes) VALUES (?,?,?,?,?,"qr",?,?)');
+            foreach($requested as$itemId=>$qty){$item=$itemMap[$itemId]??null;if(!$item)throw new RuntimeException('Um item selecionado não pertence a este pedido.');$available=(float)$item['available_quantity'];if($qty-$available>self::EPSILON){$reason=(float)$item['production_ready_quantity']+self::EPSILON<(float)$item['ordered_quantity']?'Ainda não está liberado pela produção':'Quantidade maior que o saldo disponível';throw new RuntimeException($reason.' para '.$item['name_snapshot'].'. Disponível agora: '.$this->formatQty($available).'.');}$insert->execute([$tenantId,(int)$order['id'],$itemId,$qty,$userId,$batchKey,$notes?:null]);}
+            $details=$this->composeDetails($pdo,$order);if(($details['progress']['status']??'')==='fulfilled'&&in_array((string)$order['channel'],['counter','pickup'],true)&&$currentStatus!=='completed'){$pdo->prepare('UPDATE orders SET status="completed" WHERE id=? AND tenant_id=?')->execute([(int)$order['id'],$tenantId]);(new OrderHistoryService())->record($pdo,$tenantId,(int)$order['id'],$currentStatus,'completed','fulfillment','Todos os itens foram entregues por retirada QR.',$userId);$details['order']['status']='completed';}
+            Auth::audit('order.fulfillment','order',(string)$order['id'],['batch_key'=>$batchKey,'items'=>$requested,'fulfillment_status'=>$details['progress']['status']??'pending','unit_id'=>$order['unit_id']??null]);return$details;
         });
     }
 
-    private function fetchOrderByToken(PDO $pdo, int $tenantId, string $token, bool $lock): array
+    public function correct(int$fulfillmentId,float$quantity,string$reason):array
     {
-        $sql = 'SELECT o.*,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name,ou.name unit_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN operating_units ou ON ou.id=o.unit_id WHERE o.tenant_id=? AND o.public_token=? LIMIT 1';
-        if ($lock) $sql = Database::portableSql($pdo, str_replace(' LIMIT 1', ' LIMIT 1 FOR UPDATE', $sql));
-        $s = $pdo->prepare($sql);
-        $s->execute([$tenantId, $token]);
-        $order = $s->fetch();
-        if (!$order) throw new RuntimeException('Pedido não encontrado para este QR.');
-        return $order;
+        if(!Auth::can('orders.fulfillment_correct'))throw new RuntimeException('Somente gerente ou administrador autorizado pode corrigir uma retirada.');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');$quantity=round($quantity,3);if(!is_finite($quantity)||$quantity<=self::EPSILON)throw new RuntimeException('Quantidade de correção inválida.');$reason=mb_substr(trim($reason),0,500);if($reason==='')throw new RuntimeException('Informe o motivo da correção.');
+        return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$fulfillmentId,$quantity,$reason):array{$s=$pdo->prepare(Database::portableSql($pdo,'SELECT f.*,o.public_token,o.status order_status,o.unit_id,o.channel,o.tenant_id FROM order_item_fulfillments f JOIN orders o ON o.id=f.order_id AND o.tenant_id=f.tenant_id WHERE f.id=? AND f.tenant_id=? FOR UPDATE'));$s->execute([$fulfillmentId,$tenantId]);$f=$s->fetch();if(!$f)throw new RuntimeException('Registro de retirada não encontrado.');$this->assertUnitContext($f);$c=$pdo->prepare('SELECT COALESCE(SUM(quantity),0) FROM order_item_fulfillment_corrections WHERE tenant_id=? AND fulfillment_id=?');$c->execute([$tenantId,$fulfillmentId]);$corrected=(float)$c->fetchColumn();$available=max(0,(float)$f['quantity']-$corrected);if($quantity-$available>self::EPSILON)throw new RuntimeException('A correção excede a quantidade ainda válida deste registro ('.$this->formatQty($available).').');$pdo->prepare('INSERT INTO order_item_fulfillment_corrections (tenant_id,order_id,order_item_id,fulfillment_id,quantity,reason,requested_by,approved_by) VALUES (?,?,?,?,?,?,?,?)')->execute([$tenantId,$f['order_id'],$f['order_item_id'],$fulfillmentId,$quantity,$f['fulfilled_by']?:null,$userId,$reason]);
+            $order=$this->fetchOrderByToken($pdo,$tenantId,(string)$f['public_token'],true);$details=$this->composeDetails($pdo,$order);if((string)$f['order_status']==='completed'&&($details['progress']['status']??'')!=='fulfilled'){$next=$this->productionStateForReopen($pdo,$tenantId,(int)$f['order_id']);$pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$next,$f['order_id'],$tenantId]);(new OrderHistoryService())->record($pdo,$tenantId,(int)$f['order_id'],'completed',$next,'fulfillment_correction','Retirada corrigida: '.$reason,$userId);$details['order']['status']=$next;}Auth::audit('order.fulfillment_corrected','order',(string)$f['order_id'],['fulfillment_id'=>$fulfillmentId,'quantity'=>$quantity,'reason'=>$reason,'unit_id'=>$f['unit_id']??null]);return$details;});
     }
 
-    private function fetchItems(PDO $pdo, int $orderId): array
+    private function fetchOrderByToken(PDO$pdo,int$tenantId,string$token,bool$lock):array{$sql='SELECT o.*,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name,ou.name unit_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN operating_units ou ON ou.id=o.unit_id WHERE o.tenant_id=? AND o.public_token=? LIMIT 1';if($lock)$sql=Database::portableSql($pdo,str_replace(' LIMIT 1',' LIMIT 1 FOR UPDATE',$sql));$s=$pdo->prepare($sql);$s->execute([$tenantId,$token]);$order=$s->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado para este QR.');return$order;}
+
+    private function fetchItems(PDO$pdo,int$tenantId,int$orderId):array
     {
-        $s = $pdo->prepare('SELECT oi.*,COALESCE((SELECT SUM(f.quantity) FROM order_item_fulfillments f WHERE f.order_item_id=oi.id),0) fulfilled_quantity FROM order_items oi WHERE oi.order_id=? ORDER BY oi.id');
-        $s->execute([$orderId]);
-        $items = $s->fetchAll();
-        foreach ($items as &$item) {
-            $ordered = (float)$item['quantity'];
-            $fulfilled = min($ordered, max(0.0, (float)$item['fulfilled_quantity']));
-            $item['ordered_quantity'] = $ordered;
-            $item['fulfilled_quantity'] = $fulfilled;
-            $item['remaining_quantity'] = max(0.0, $ordered - $fulfilled);
-        }
-        unset($item);
-        return $items;
+        $s=$pdo->prepare('SELECT oi.* FROM order_items oi WHERE oi.order_id=? ORDER BY oi.id');$s->execute([$orderId]);$items=$s->fetchAll();if(!$items)return[];$map=[];foreach($items as$i)$map[(int)$i['id']]=['fulfill'=>0.0,'correct'=>0.0,'mods'=>[],'job_all'=>0,'job_active'=>0,'job_ready'=>0];
+        $f=$pdo->prepare('SELECT order_item_id,SUM(quantity) qty FROM order_item_fulfillments WHERE tenant_id=? AND order_id=? GROUP BY order_item_id');$f->execute([$tenantId,$orderId]);foreach($f->fetchAll()as$row)if(isset($map[(int)$row['order_item_id']]))$map[(int)$row['order_item_id']]['fulfill']=(float)$row['qty'];
+        try{$c=$pdo->prepare('SELECT c.order_item_id,SUM(c.quantity) qty FROM order_item_fulfillment_corrections c WHERE c.tenant_id=? AND c.order_id=? GROUP BY c.order_item_id');$c->execute([$tenantId,$orderId]);foreach($c->fetchAll()as$row)if(isset($map[(int)$row['order_item_id']]))$map[(int)$row['order_item_id']]['correct']=(float)$row['qty'];}catch(\Throwable){}
+        try{$m=$pdo->prepare('SELECT order_item_id,group_name_snapshot,option_name_snapshot,quantity FROM order_item_modifiers WHERE tenant_id=? AND order_id=? ORDER BY id');$m->execute([$tenantId,$orderId]);foreach($m->fetchAll()as$row)if(isset($map[(int)$row['order_item_id']]))$map[(int)$row['order_item_id']]['mods'][]=$row;}catch(\Throwable){}
+        try{$j=$pdo->prepare('SELECT pj.status,COALESCE(pj.order_item_id,m.order_item_id) mapped_item_id FROM production_jobs pj LEFT JOIN order_item_modifiers m ON m.id=pj.order_item_modifier_id WHERE pj.tenant_id=? AND pj.order_id=?');$j->execute([$tenantId,$orderId]);foreach($j->fetchAll()as$row){$id=(int)$row['mapped_item_id'];if(!$id||!isset($map[$id]))continue;$map[$id]['job_all']++;if($row['status']!=='cancelled'){$map[$id]['job_active']++;if(in_array((string)$row['status'],['ready','expedited','delivered'],true))$map[$id]['job_ready']++;}}}catch(\Throwable){}
+        foreach($items as&$item){$id=(int)$item['id'];$meta=$map[$id];$ordered=(float)$item['quantity'];$fulfilled=min($ordered,max(0,$meta['fulfill']-$meta['correct']));$hasJobs=$meta['job_all']>0;$productionReady=!$hasJobs||($meta['job_active']>0&&$meta['job_ready']>=$meta['job_active']);$readyQty=$productionReady?$ordered:0.0;$item['ordered_quantity']=$ordered;$item['fulfilled_quantity']=$fulfilled;$item['remaining_quantity']=max(0,$ordered-$fulfilled);$item['production_ready_quantity']=$readyQty;$item['available_quantity']=max(0,min($item['remaining_quantity'],$readyQty-$fulfilled));$item['production_status']=!$hasJobs?'not_required':($productionReady?'ready':'waiting');$item['production_jobs_total']=$meta['job_active'];$item['production_jobs_ready']=$meta['job_ready'];$item['modifiers']=$meta['mods'];}unset($item);return$items;
     }
 
-    private function composeDetails(PDO $pdo, array $order): array
-    {
-        $items = $this->fetchItems($pdo, (int)$order['id']);
-        $historyStmt = $pdo->prepare('SELECT f.id,f.quantity,f.source,f.notes,f.created_at,oi.name_snapshot,u.name fulfilled_by_name FROM order_item_fulfillments f JOIN order_items oi ON oi.id=f.order_item_id LEFT JOIN users u ON u.id=f.fulfilled_by WHERE f.tenant_id=? AND f.order_id=? ORDER BY f.id DESC LIMIT 80');
-        $historyStmt->execute([(int)$order['tenant_id'], (int)$order['id']]);
-        return [
-            'order' => $order,
-            'items' => $items,
-            'progress' => $this->progressFromItems($items),
-            'history' => $historyStmt->fetchAll(),
-            'qr_payload' => $this->qrPayload((string)$order['public_token']),
-        ];
-    }
-
-    private function progressFromItems(array $items): array
-    {
-        $ordered = 0.0;
-        $fulfilled = 0.0;
-        foreach ($items as $item) {
-            $ordered += (float)($item['ordered_quantity'] ?? $item['quantity'] ?? 0);
-            $fulfilled += (float)($item['fulfilled_quantity'] ?? 0);
-        }
-        $remaining = max(0.0, $ordered - $fulfilled);
-        $status = $fulfilled <= self::EPSILON ? 'pending' : ($remaining <= self::EPSILON ? 'fulfilled' : 'partial');
-        return [
-            'status' => $status,
-            'ordered_quantity' => round($ordered, 3),
-            'fulfilled_quantity' => round($fulfilled, 3),
-            'remaining_quantity' => round($remaining, 3),
-        ];
-    }
-
-    private function emptyProgress(): array
-    {
-        return ['status'=>'pending','ordered_quantity'=>0.0,'fulfilled_quantity'=>0.0,'remaining_quantity'=>0.0];
-    }
-
-    private function assertCanView(array $order): void
-    {
-        $allowed = Auth::can('orders.view') || Auth::can('orders.manage') || Auth::can('orders.dispatch') || Auth::can('orders.fulfill');
-        if (!$allowed && Auth::can('orders.delivery') && (string)$order['channel'] === 'delivery' && (int)($order['assigned_delivery_user_id'] ?? 0) === (int)Auth::id()) $allowed = true;
-        if (!$allowed) throw new RuntimeException('Sua função não pode visualizar esta retirada.');
-    }
-
-    private function assertCanFulfill(array $order): void
-    {
-        if (Auth::can('orders.fulfill')) return;
-        if (Auth::can('orders.delivery') && (string)$order['channel'] === 'delivery' && (int)($order['assigned_delivery_user_id'] ?? 0) === (int)Auth::id()) return;
-        throw new RuntimeException('Sua função não pode entregar itens deste pedido.');
-    }
-
-    private function formatQty(float $qty): string
-    {
-        if (abs($qty - round($qty)) < self::EPSILON) return (string)(int)round($qty);
-        return rtrim(rtrim(number_format($qty, 3, ',', '.'), '0'), ',');
-    }
+    private function composeDetails(PDO$pdo,array$order):array{$items=$this->fetchItems($pdo,(int)$order['tenant_id'],(int)$order['id']);$history=$pdo->prepare('SELECT f.id,f.quantity,f.source,f.notes,f.created_at,oi.name_snapshot,u.name fulfilled_by_name,COALESCE((SELECT SUM(c.quantity) FROM order_item_fulfillment_corrections c WHERE c.fulfillment_id=f.id),0) corrected_quantity FROM order_item_fulfillments f JOIN order_items oi ON oi.id=f.order_item_id LEFT JOIN users u ON u.id=f.fulfilled_by WHERE f.tenant_id=? AND f.order_id=? ORDER BY f.id DESC LIMIT 100');$history->execute([(int)$order['tenant_id'],(int)$order['id']]);$corrections=[];try{$c=$pdo->prepare('SELECT c.*,oi.name_snapshot,ua.name approved_by_name,ur.name requested_by_name FROM order_item_fulfillment_corrections c JOIN order_items oi ON oi.id=c.order_item_id JOIN users ua ON ua.id=c.approved_by LEFT JOIN users ur ON ur.id=c.requested_by WHERE c.tenant_id=? AND c.order_id=? ORDER BY c.id DESC LIMIT 100');$c->execute([(int)$order['tenant_id'],(int)$order['id']]);$corrections=$c->fetchAll();}catch(\Throwable){}return['order'=>$order,'items'=>$items,'progress'=>$this->progressFromItems($items),'history'=>$history->fetchAll(),'corrections'=>$corrections,'qr_payload'=>$this->qrPayload((string)$order['public_token'])];}
+    private function progressFromItems(array$items):array{$ordered=0.;$fulfilled=0.;$ready=0.;$available=0.;foreach($items as$item){$ordered+=(float)($item['ordered_quantity']??$item['quantity']??0);$fulfilled+=(float)($item['fulfilled_quantity']??0);$ready+=(float)($item['production_ready_quantity']??0);$available+=(float)($item['available_quantity']??0);}$remaining=max(0,$ordered-$fulfilled);$status=$fulfilled<=self::EPSILON?'pending':($remaining<=self::EPSILON?'fulfilled':'partial');return['status'=>$status,'ordered_quantity'=>round($ordered,3),'fulfilled_quantity'=>round($fulfilled,3),'remaining_quantity'=>round($remaining,3),'production_ready_quantity'=>round($ready,3),'available_quantity'=>round($available,3)];}
+    private function emptyProgress():array{return['status'=>'pending','ordered_quantity'=>0.,'fulfilled_quantity'=>0.,'remaining_quantity'=>0.,'production_ready_quantity'=>0.,'available_quantity'=>0.];}
+    private function productionStateForReopen(PDO$pdo,int$tenantId,int$orderId):string{$s=$pdo->prepare('SELECT status,COUNT(*) qty FROM production_jobs WHERE tenant_id=? AND order_id=? AND status<>"cancelled" GROUP BY status');$s->execute([$tenantId,$orderId]);$rows=$s->fetchAll();if(!$rows)return'confirmed';$active=0;$ready=0;$preparing=0;foreach($rows as$r){$qty=(int)$r['qty'];$active+=$qty;if(in_array($r['status'],['ready','expedited','delivered'],true))$ready+=$qty;if($r['status']==='preparing')$preparing+=$qty;}return$active>0&&$ready>=$active?'ready':($preparing>0?'preparing':'confirmed');}
+    private function assertCanView(array$order):void{$allowed=Auth::can('orders.view')||Auth::can('orders.manage')||Auth::can('orders.dispatch')||Auth::can('orders.fulfill');if(!$allowed&&Auth::can('orders.delivery')&&(string)$order['channel']==='delivery'&&(int)($order['assigned_delivery_user_id']??0)===(int)Auth::id())$allowed=true;if(!$allowed)throw new RuntimeException('Sua função não pode visualizar esta retirada.');}
+    private function assertCanFulfill(array$order):void{if(Auth::can('orders.fulfill'))return;if(Auth::can('orders.delivery')&&(string)$order['channel']==='delivery'&&(int)($order['assigned_delivery_user_id']??0)===(int)Auth::id())return;throw new RuntimeException('Sua função não pode entregar itens deste pedido.');}
+    private function assertUnitContext(array$order):void{$orderUnit=(int)($order['unit_id']??0);if($orderUnit<1)return;$current=(new OperatingUnitService())->currentId();if($current&&$current!==$orderUnit&&!Auth::isSuperAdmin())throw new RuntimeException('Este pedido pertence a outra unidade. Troque a unidade de operação antes de continuar.');}
+    private function formatQty(float$qty):string{if(abs($qty-round($qty))<self::EPSILON)return(string)(int)round($qty);return rtrim(rtrim(number_format($qty,3,',','.'),'0'),',');}
 }
