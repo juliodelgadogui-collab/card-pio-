@@ -29,6 +29,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var managerRepository: ManagerOperationsRepository
         private set
+    val managerOperationsRepository: ManagerOperationsRepository
+        get() = managerRepository
     lateinit var notificationRepository: NotificationRepository
         private set
     lateinit var receiptRepository: ReceiptRepository
