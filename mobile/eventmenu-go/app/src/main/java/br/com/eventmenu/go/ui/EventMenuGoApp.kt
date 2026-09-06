@@ -52,6 +52,7 @@ import br.com.eventmenu.go.TabSplitPaymentViewModel
 import br.com.eventmenu.go.UniversalQrViewModel
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
+import br.com.eventmenu.go.notifications.OperationNotificationScheduler
 import br.com.eventmenu.go.printing.BluetoothEscPosPrinter
 import br.com.eventmenu.go.printing.PrinterPreferences
 import br.com.eventmenu.go.ui.screens.CashOperationsScreen
@@ -60,7 +61,6 @@ import br.com.eventmenu.go.ui.screens.DispatchScreen
 import br.com.eventmenu.go.ui.screens.EmployeeProfileScreen
 import br.com.eventmenu.go.ui.screens.EventBarScreen
 import br.com.eventmenu.go.ui.screens.EventModeScreen
-import br.com.eventmenu.go.ui.screens.HomeScreen
 import br.com.eventmenu.go.ui.screens.KitchenScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
 import br.com.eventmenu.go.ui.screens.ManagerScreen
@@ -70,11 +70,13 @@ import br.com.eventmenu.go.ui.screens.NotificationsScreen
 import br.com.eventmenu.go.ui.screens.OrdersScreen
 import br.com.eventmenu.go.ui.screens.PosScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
+import br.com.eventmenu.go.ui.screens.RoleDashboardScreen
 import br.com.eventmenu.go.ui.screens.ShiftStartScreen
 import br.com.eventmenu.go.ui.screens.TabSplitPaymentScreen
 import br.com.eventmenu.go.ui.screens.TableAccountScreen
 import br.com.eventmenu.go.ui.screens.TablesScreen
 import br.com.eventmenu.go.ui.screens.UniversalQrResultDialog
+import kotlinx.coroutines.delay
 
 @Composable
 fun EventMenuGoApp(
@@ -158,6 +160,16 @@ fun EventMenuGoApp(
             }
             context.startActivity(Intent.createChooser(share, "Enviar comprovante"))
             receiptViewModel.consumed()
+        }
+    }
+    LaunchedEffect(state.notifications) {
+        OperationNotificationScheduler.showUnread(context, state.notifications)
+    }
+    LaunchedEffect(state.workShift?.id) {
+        if (state.workShift?.status != "open") return@LaunchedEffect
+        while (true) {
+            delay(10_000)
+            viewModel.refreshNotifications()
         }
     }
     LaunchedEffect(state.tapOnRequest) {
@@ -339,7 +351,20 @@ fun EventMenuGoApp(
                     },
                 )
                 else -> when (state.screen) {
-                    AppScreen.HOME -> HomeScreen(state, viewModel::refreshOrders)
+                    AppScreen.HOME -> RoleDashboardScreen(
+                        state = state,
+                        onNavigate = viewModel::navigate,
+                        onScan = ::startScan,
+                        onRefresh = {
+                            viewModel.refreshOrders()
+                            viewModel.refreshCash()
+                            viewModel.refreshNotifications()
+                            if (mode == AppMode.EVENTS) viewModel.refreshEvents()
+                            if (mode == AppMode.DELIVERY) viewModel.refreshDeliveryCash()
+                            if ("orders_kitchen" in permissions) viewModel.refreshKitchen()
+                            if ("reports" in permissions) viewModel.refreshManager()
+                        },
+                    )
                     AppScreen.NOTIFICATIONS -> NotificationsScreen(state.notifications, state.unreadNotifications, viewModel::markNotificationRead, viewModel::markAllNotificationsRead, viewModel::refreshNotifications)
                     AppScreen.MANAGER -> ManagerScreen(
                         overview = state.managerOverview,
