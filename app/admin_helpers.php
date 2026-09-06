@@ -65,6 +65,8 @@ function em_header(string $title,string $active):void{
 }
 function em_footer():void{
     $sw=json_encode(app_url('sw.js?v='.em_asset_version('sw.js')),JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
+    $receiptBase=json_encode(app_url('?route=receipt&id='),JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
+    $receiptSettings=json_encode(app_url('?route=receipt-settings'),JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
     ?><script>
     (()=>{
       const sidebar=document.querySelector('.sidebar');
@@ -73,6 +75,15 @@ function em_footer():void{
       toggle?.addEventListener('click',()=>{const open=!sidebar?.classList.contains('nav-open');sidebar?.classList.toggle('nav-open',open);toggle.setAttribute('aria-expanded',open?'true':'false');document.body.classList.toggle('menu-open',open)});
       document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click',closeMenu));
       window.addEventListener('resize',()=>{if(window.innerWidth>950)closeMenu()});
+      const params=new URLSearchParams(location.search),route=params.get('route')||'dashboard';
+      if(route==='orders'&&/^\d+$/.test(params.get('view')||'')){
+        const id=params.get('view'),host=document.querySelector('.page-hero .hero-actions');
+        if(host&&!host.querySelector('[data-receipt-action]')){const a=document.createElement('a');a.className='button primary';a.target='_blank';a.rel='noopener';a.dataset.receiptAction='1';a.href=<?= $receiptBase ?>+encodeURIComponent(id);a.textContent='Imprimir cupom #'+id;host.prepend(a);}
+      }
+      if(route==='settings'){
+        const host=document.querySelector('.page-hero .hero-actions');
+        if(host&&!host.querySelector('[data-receipt-settings]')){const a=document.createElement('a');a.className='button secondary';a.dataset.receiptSettings='1';a.href=<?= $receiptSettings ?>;a.textContent='Impressão térmica';host.append(a);}
+      }
       if('serviceWorker'in navigator){navigator.serviceWorker.register(<?= $sw ?>).catch(()=>{});}
     })();
     </script></main></div></body></html><?php
