@@ -12,12 +12,24 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.CancellationViewModel
+import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.data.OrderOperationalDetail
 import br.com.eventmenu.go.data.OrderTimelineEntry
 
@@ -28,6 +40,13 @@ fun OrderDetailDialog(
     onAccept: (Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val app = LocalContext.current.applicationContext as EventMenuGoApplication
+    val cancellationViewModel: CancellationViewModel = viewModel(factory = CancellationViewModel.Factory(app.cancellationRepository))
+    val cancellationState by cancellationViewModel.state.collectAsState()
+    var requestCancellation by remember(detail.orderId) { mutableStateOf(false) }
+
+    LaunchedEffect(detail.orderId) { cancellationViewModel.watchOrder(detail.orderId) }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Pedido #${detail.orderId}") },
@@ -75,10 +94,45 @@ fun OrderDetailDialog(
                         }
                     }
                 }
+                if (detail.status !in setOf("completed", "cancelled") && detail.paymentStatus != "paid") {
+                    val cancellation = cancellationState.orderRequest?.takeIf { it.orderId == detail.orderId }
+                    item {
+                        when (cancellation?.status) {
+                            "pending" -> {
+                                Text("⏳ Cancelamento aguardando autorização", fontWeight = FontWeight.Bold)
+                                if (cancellation.reason.isNotBlank()) Text("Motivo: ${cancellation.reason}")
+                            }
+                            "approved" -> Text("✅ Cancelamento autorizado pelo servidor.", fontWeight = FontWeight.Bold)
+                            "rejected" -> {
+                                Text("⚠️ Solicitação anterior não foi aprovada.", fontWeight = FontWeight.Bold)
+                                OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("SOLICITAR NOVAMENTE") }
+                            }
+                            else -> OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("SOLICITAR CANCELAMENTO") }
+                        }
+                        cancellationState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        cancellationState.message?.let { Text(it, fontWeight = FontWeight.Bold) }
+                    }
+                }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("FECHAR") } },
     )
+
+    if (requestCancellation) {
+        var reason by remember(detail.orderId) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { requestCancellation = false },
+            title = { Text("Solicitar cancelamento · Pedido #${detail.orderId}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("O pedido só será cancelado depois de autorização do Gerente/ADM no servidor.")
+                    OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("Motivo *") }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = { Button(onClick = { requestCancellation = false; cancellationViewModel.request(detail.orderId, reason) }, enabled = reason.isNotBlank()) { Text("ENVIAR") } },
+            dismissButton = { TextButton(onClick = { requestCancellation = false }) { Text("VOLTAR") } },
+        )
+    }
 }
 
 @Composable
@@ -122,6 +176,7 @@ private fun sourceLabel(source: String) = when (source) {
     "kitchen" -> "Cozinha"
     "dispatch" -> "Balcão"
     "delivery" -> "Delivery"
+    "cancellation_approved" -> "Gerência"
     "panel" -> "Painel"
     "migration" -> "Histórico importado"
     else -> source
