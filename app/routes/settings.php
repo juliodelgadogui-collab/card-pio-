@@ -43,10 +43,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         'whatsapp' => mb_substr(trim((string)($_POST['whatsapp'] ?? '')), 0, 30),
         'menu_public_title' => mb_substr(trim((string)($_POST['menu_public_title'] ?? '')), 0, 90),
         'menu_subtitle' => mb_substr(trim((string)($_POST['menu_subtitle'] ?? '')), 0, 180),
-        'menu_primary_color' => $validColor($_POST['menu_primary_color'] ?? '', '#f4b942'),
-        'menu_background_color' => $validColor($_POST['menu_background_color'] ?? '', '#0b0d12'),
-        'menu_surface_color' => $validColor($_POST['menu_surface_color'] ?? '', '#141821'),
-        'menu_text_color' => $validColor($_POST['menu_text_color'] ?? '', '#f5f7fb'),
+        'menu_primary_color' => $validColor($_POST['menu_primary_color'] ?? '', '#6236df'),
+        'menu_background_color' => $validColor($_POST['menu_background_color'] ?? '', '#f7f7fb'),
+        'menu_surface_color' => $validColor($_POST['menu_surface_color'] ?? '', '#ffffff'),
+        'menu_text_color' => $validColor($_POST['menu_text_color'] ?? '', '#242136'),
         'menu_layout' => $layout,
         'menu_header_style' => $headerStyle,
         'menu_show_images' => isset($_POST['menu_show_images']),
@@ -62,11 +62,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     em_go('settings');
 }
 
-$publicMenuUrl = app_url('menu.php?empresa='.rawurlencode((string)$tenant['slug']));
-$primary = $validColor($settings['menu_primary_color'] ?? '', '#f4b942');
-$background = $validColor($settings['menu_background_color'] ?? '', '#0b0d12');
-$surface = $validColor($settings['menu_surface_color'] ?? '', '#141821');
-$text = $validColor($settings['menu_text_color'] ?? '', '#f5f7fb');
+$publicMenuUrl = app_url('loja.php?empresa='.rawurlencode((string)$tenant['slug']));
+$primary = $validColor($settings['menu_primary_color'] ?? '', '#6236df');
+$background = $validColor($settings['menu_background_color'] ?? '', '#f7f7fb');
+$surface = $validColor($settings['menu_surface_color'] ?? '', '#ffffff');
+$text = $validColor($settings['menu_text_color'] ?? '', '#242136');
 
 em_header('Configurações','settings');
 ?>
