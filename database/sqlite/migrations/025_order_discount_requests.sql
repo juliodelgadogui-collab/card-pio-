@@ -4,6 +4,7 @@ CREATE TABLE order_discount_requests (
   order_id INTEGER NOT NULL,
   requested_by INTEGER NOT NULL,
   approved_by INTEGER NULL,
+  base_discount_cents INTEGER NOT NULL DEFAULT 0,
   requested_cents INTEGER NOT NULL,
   reason TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'pending',
