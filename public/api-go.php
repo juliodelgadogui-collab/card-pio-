@@ -22,19 +22,26 @@ if($_SERVER['REQUEST_METHOD']==='OPTIONS'){header('Allow: GET, POST, OPTIONS');h
 function go_out(array $data,int $status=200):never{http_response_code($status);echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
 function go_body():array{$raw=file_get_contents('php://input');if($raw===false||trim($raw)==='')return $_POST?:[];try{$data=json_decode($raw,true,512,JSON_THROW_ON_ERROR);return is_array($data)?$data:[];}catch(Throwable){go_out(['ok'=>false,'error'=>'JSON inválido.'],400);}}
 function go_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)go_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
+function go_unit_id(?array $shift):?int{return $shift&&array_key_exists('unit_id',$shift)&&$shift['unit_id']!==null&&$shift['unit_id']!==''?(int)$shift['unit_id']:null;}
+function go_assert_order_unit(int $tenantId,int $orderId,?array $shift):void{
+    if($orderId<1)throw new RuntimeException('Pedido inválido.');$unitId=go_unit_id($shift);if($unitId===null)return;
+    $s=Database::connection()->prepare('SELECT unit_id FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$s->execute([$orderId,$tenantId]);$orderUnit=$s->fetchColumn();
+    if($orderUnit===false)throw new RuntimeException('Pedido não encontrado.');if($orderUnit===null||(int)$orderUnit!==$unitId)throw new RuntimeException('Este pedido pertence a outra unidade.');
+}
 
 try{
     $auth=new ApiAuthService();$token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')go_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
     $user=$auth->authenticate($token,$deviceId);$tenantId=(int)$user['tenant_id'];$userId=(int)$user['id'];$action=(string)($_GET['action']??'context');$shift=new WorkShiftService();
     if($action==='context'){$permissions=Auth::effectivePermissions();go_out(['ok'=>true,'user'=>$user,'permissions'=>PermissionCatalog::appPermissionMap($permissions),'permission_names'=>$permissions,'modes'=>PermissionCatalog::modesForPermissions($permissions),'shift'=>$shift->current()]);}
     if($action==='shift-current')go_out(['ok'=>true,'shift'=>$shift->current()]);
-    if($action==='shift-open'){go_method('POST');$body=go_body();go_out(['ok'=>true,'shift'=>$shift->open((string)($body['mode']??''),$deviceId,(string)($body['notes']??''))],201);}
+    if($action==='shift-open'){go_method('POST');$body=go_body();$unitId=isset($body['unit_id'])&&(int)$body['unit_id']>0?(int)$body['unit_id']:null;go_out(['ok'=>true,'shift'=>$shift->open((string)($body['mode']??''),$deviceId,(string)($body['notes']??''),$unitId)],201);}
     if($action==='shift-close'){go_method('POST');$body=go_body();go_out(['ok'=>true,'shift'=>$shift->close((string)($body['notes']??''))]);}
     if($action==='shift-summary'){$id=(int)($_GET['shift_id']??0);go_out(['ok'=>true,'summary'=>$shift->summary($id?:null)]);}
 
     if($action==='orders'){
-        $current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de consultar a operação.');$mode=(string)$current['mode'];
-        $sql='SELECT o.id,o.public_token,o.channel,o.status,o.payment_status,o.total_cents,o.delivery_address,o.assigned_delivery_user_id,o.table_id,o.tab_id,o.created_at,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.tenant_id=?';$args=[$tenantId];
+        $current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de consultar a operação.');$mode=(string)$current['mode'];$unitId=go_unit_id($current);
+        $sql='SELECT o.id,o.public_token,o.unit_id,o.channel,o.status,o.payment_status,o.total_cents,o.delivery_address,o.assigned_delivery_user_id,o.table_id,o.tab_id,o.created_at,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.tenant_id=?';$args=[$tenantId];
+        if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}
         if($mode==='delivery'){
             if(!Auth::can('orders.delivery'))throw new RuntimeException('Sua conta não possui operação de Delivery.');$sql.=' AND o.channel="delivery" AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery","completed")';$args[]=$userId;
         }elseif($mode==='operation'){
@@ -50,83 +57,68 @@ try{
 
     if($action==='order-qr-resolve'){
         if(!Auth::can('orders.dispatch')&&!Auth::can('delivery.assign')&&!Auth::can('orders.view'))throw new RuntimeException('Acesso negado ao QR de pedido.');
-        $current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Use o QR de pedido durante um turno de Operação.');
-        $value=trim((string)($_GET['value']??''));if($value==='')throw new RuntimeException('QR de pedido vazio.');
-        if(preg_match('/[A-Fa-f0-9]{40}/',$value,$m))$value=$m[0];
-        $s=Database::connection()->prepare('SELECT o.id,o.public_token,o.channel,o.status,o.payment_status,o.total_cents,o.delivery_address,o.assigned_delivery_user_id,o.created_at,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.tenant_id=? AND o.public_token=? LIMIT 1');
-        $s->execute([$tenantId,$value]);$order=$s->fetch();if(!$order)go_out(['ok'=>false,'error'=>'Pedido não encontrado para este QR.'],404);
-        go_out(['ok'=>true,'order'=>$order]);
+        $current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Use o QR de pedido durante um turno de Operação.');$unitId=go_unit_id($current);
+        $value=trim((string)($_GET['value']??''));if($value==='')throw new RuntimeException('QR de pedido vazio.');if(preg_match('/[A-Fa-f0-9]{40}/',$value,$m))$value=$m[0];
+        $sql='SELECT o.id,o.public_token,o.unit_id,o.channel,o.status,o.payment_status,o.total_cents,o.delivery_address,o.assigned_delivery_user_id,o.created_at,c.name customer_name,c.phone customer_phone,u.name delivery_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.tenant_id=? AND o.public_token=?';$args=[$tenantId,$value];if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' LIMIT 1';
+        $s=Database::connection()->prepare($sql);$s->execute($args);$order=$s->fetch();if(!$order)go_out(['ok'=>false,'error'=>'Pedido não encontrado nesta unidade para este QR.'],404);go_out(['ok'=>true,'order'=>$order]);
     }
 
     if($action==='order-status'){
-        go_method('POST');$body=go_body();$orderId=(int)($body['order_id']??0);$target=(string)($body['status']??'');$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de alterar pedidos.');
+        go_method('POST');$body=go_body();$orderId=(int)($body['order_id']??0);$target=(string)($body['status']??'');$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de alterar pedidos.');go_assert_order_unit($tenantId,$orderId,$current);
         if($current['mode']==='delivery'){
             if(!Auth::can('orders.delivery'))throw new RuntimeException('Acesso negado.');$q=Database::connection()->prepare('SELECT id FROM orders WHERE id=? AND tenant_id=? AND channel="delivery" AND assigned_delivery_user_id=?');$q->execute([$orderId,$tenantId,$userId]);if(!$q->fetchColumn())throw new RuntimeException('Pedido não está atribuído a este funcionário.');$source='delivery';
-        }elseif($current['mode']==='operation'&&Auth::can('orders.kitchen')&&in_array($target,['preparing','ready'],true)){
-            $source='kitchen';
-        }elseif($current['mode']==='operation'&&Auth::can('orders.dispatch')&&in_array($target,['served','completed'],true)){
-            $source='dispatch';
-        }else{
-            if(!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode alterar este status.');$source='panel';
-        }
+        }elseif($current['mode']==='operation'&&Auth::can('orders.kitchen')&&in_array($target,['preparing','ready'],true)){$source='kitchen';}
+        elseif($current['mode']==='operation'&&Auth::can('orders.dispatch')&&in_array($target,['served','completed'],true)){$source='dispatch';}
+        else{if(!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode alterar este status.');$source='panel';}
         go_out(['ok'=>true,'order'=>(new OrderService())->changeStatus($orderId,$target,$source)]);
     }
 
     if($action==='delivery-users'){
-        if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');
-        $s=Database::connection()->prepare('SELECT u.id,u.name,u.email,u.role,CASE WHEN ws.id IS NULL THEN 0 ELSE 1 END on_shift,ws.started_at FROM users u LEFT JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.tenant_id=? AND u.status="active" ORDER BY on_shift DESC,u.name');$s->execute([$tenantId]);$eligible=[];
-        foreach($s->fetchAll() as $candidate){$effective=PermissionCatalog::effectiveForUser($tenantId,(int)$candidate['id'],(string)$candidate['role']);if(!in_array('orders.delivery',$effective,true))continue;unset($candidate['role']);$eligible[]=$candidate;}
-        go_out(['ok'=>true,'delivery_users'=>$eligible]);
+        if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');$unitId=go_unit_id($current);
+        $join='ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open"';$args=[];if($unitId!==null){$join.=' AND ws.unit_id=?';$args[]=$unitId;}
+        $sql='SELECT u.id,u.name,u.email,u.role,CASE WHEN ws.id IS NULL THEN 0 ELSE 1 END on_shift,ws.started_at,ws.unit_id FROM users u LEFT JOIN work_shifts ws ON '.$join.' WHERE u.tenant_id=? AND u.status="active" ORDER BY on_shift DESC,u.name';$args[]=$tenantId;
+        $s=Database::connection()->prepare($sql);$s->execute($args);$eligible=[];foreach($s->fetchAll() as $candidate){$effective=PermissionCatalog::effectiveForUser($tenantId,(int)$candidate['id'],(string)$candidate['role']);if(!in_array('orders.delivery',$effective,true))continue;unset($candidate['role']);$eligible[]=$candidate;}go_out(['ok'=>true,'delivery_users'=>$eligible]);
     }
+
     if($action==='delivery-assign'){
-        go_method('POST');if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');$body=go_body();$orderId=(int)($body['order_id']??0);$deliveryId=(int)($body['delivery_user_id']??0);
-        $assignedOrder=Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$deliveryId):array{
-            $o=$pdo->prepare(Database::portableSql($pdo,'SELECT id,channel,status,assigned_delivery_user_id,total_cents,delivery_address FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$o->execute([$orderId,$tenantId]);$order=$o->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');
+        go_method('POST');if(!Auth::can('delivery.assign'))throw new RuntimeException('Acesso negado.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Atribuição de entrega é feita no turno de Operação.');$unitId=go_unit_id($current);$body=go_body();$orderId=(int)($body['order_id']??0);$deliveryId=(int)($body['delivery_user_id']??0);go_assert_order_unit($tenantId,$orderId,$current);
+        $assignedOrder=Database::transaction(function(PDO $pdo)use($tenantId,$unitId,$orderId,$deliveryId):array{
+            $o=$pdo->prepare(Database::portableSql($pdo,'SELECT id,unit_id,channel,status,assigned_delivery_user_id,total_cents,delivery_address FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$o->execute([$orderId,$tenantId]);$order=$o->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');
             if($order['channel']!=='delivery')throw new RuntimeException('Somente pedido de Delivery pode ser atribuído.');if($order['status']!=='ready')throw new RuntimeException('O pedido precisa estar pronto para ser atribuído.');if($deliveryId<1)throw new RuntimeException('Escolha um entregador.');
-            $d=$pdo->prepare('SELECT u.id,u.role FROM users u JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.id=? AND u.tenant_id=? AND u.status="active" LIMIT 1');$d->execute([$deliveryId,$tenantId]);$deliveryUser=$d->fetch();if(!$deliveryUser)throw new RuntimeException('Funcionário sem turno de Delivery aberto.');
-            $effective=PermissionCatalog::effectiveForUser($tenantId,$deliveryId,(string)$deliveryUser['role']);if(!in_array('orders.delivery',$effective,true))throw new RuntimeException('Funcionário não possui permissão de Delivery.');
+            $sql='SELECT u.id,u.role,ws.unit_id FROM users u JOIN work_shifts ws ON ws.user_id=u.id AND ws.tenant_id=u.tenant_id AND ws.mode="delivery" AND ws.status="open" WHERE u.id=? AND u.tenant_id=? AND u.status="active"';$args=[$deliveryId,$tenantId];if($unitId!==null){$sql.=' AND ws.unit_id=?';$args[]=$unitId;}$sql.=' LIMIT 1';
+            $d=$pdo->prepare($sql);$d->execute($args);$deliveryUser=$d->fetch();if(!$deliveryUser)throw new RuntimeException('Funcionário sem turno de Delivery aberto nesta unidade.');$effective=PermissionCatalog::effectiveForUser($tenantId,$deliveryId,(string)$deliveryUser['role']);if(!in_array('orders.delivery',$effective,true))throw new RuntimeException('Funcionário não possui permissão de Delivery.');
+            if($order['unit_id']!==null&&$deliveryUser['unit_id']!==null&&(int)$order['unit_id']!==(int)$deliveryUser['unit_id'])throw new RuntimeException('Pedido e entregador estão em unidades diferentes.');
             $pdo->prepare('UPDATE orders SET assigned_delivery_user_id=? WHERE id=? AND tenant_id=?')->execute([$deliveryId,$orderId,$tenantId]);$order['assigned_delivery_user_id']=$deliveryId;return $order;
         });
-        Auth::audit('order.delivery_assigned','order',(string)$orderId,['delivery_user_id'=>$deliveryId,'source'=>'eventmenu_go']);
+        Auth::audit('order.delivery_assigned','order',(string)$orderId,['delivery_user_id'=>$deliveryId,'unit_id'=>$unitId,'source'=>'eventmenu_go']);
         try{(new NotificationService())->publishToUser($deliveryId,'delivery','delivery.assigned','Nova entrega #'.$orderId,'Um pedido pronto foi atribuído a você. Retire no balcão e inicie a rota.','order',(string)$orderId,'delivery:'.$orderId.':assigned:'.$deliveryId,'success',gmdate('Y-m-d H:i:s',time()+86400));}catch(Throwable){}
         go_out(['ok'=>true,'order'=>$assignedOrder]);
     }
 
     if($action==='kitchen-board'){
-        if(!Auth::can('orders.kitchen'))throw new RuntimeException('Acesso negado à cozinha.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para usar a cozinha.');$pdo=Database::connection();
-        $s=$pdo->prepare('SELECT o.id,o.channel,o.status,o.notes,o.created_at,rt.name table_name,c.name customer_name FROM orders o LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.tenant_id=? AND o.channel IN ("counter","pickup","table","delivery") AND o.status IN ("confirmed","preparing") ORDER BY CASE WHEN o.status="preparing" THEN 0 ELSE 1 END,o.id');$s->execute([$tenantId]);$orders=$s->fetchAll();
-        if($orders){$ids=array_column($orders,'id');$marks=implode(',',array_fill(0,count($ids),'?'));$i=$pdo->prepare('SELECT order_id,name_snapshot,quantity,notes FROM order_items WHERE order_id IN ('.$marks.') ORDER BY id');$i->execute($ids);$group=[];foreach($i->fetchAll() as $row)$group[(int)$row['order_id']][]=$row;foreach($orders as &$order)$order['items']=$group[(int)$order['id']]??[];unset($order);}
-        go_out(['ok'=>true,'tickets'=>$orders]);
+        if(!Auth::can('orders.kitchen'))throw new RuntimeException('Acesso negado à cozinha.');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para usar a cozinha.');$unitId=go_unit_id($current);$pdo=Database::connection();
+        $sql='SELECT o.id,o.unit_id,o.channel,o.status,o.notes,o.created_at,rt.name table_name,c.name customer_name FROM orders o LEFT JOIN restaurant_tables rt ON rt.id=o.table_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.tenant_id=? AND o.channel IN ("counter","pickup","table","delivery") AND o.status IN ("confirmed","preparing")';$args=[$tenantId];if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' ORDER BY CASE WHEN o.status="preparing" THEN 0 ELSE 1 END,o.id';
+        $s=$pdo->prepare($sql);$s->execute($args);$orders=$s->fetchAll();if($orders){$ids=array_column($orders,'id');$marks=implode(',',array_fill(0,count($ids),'?'));$i=$pdo->prepare('SELECT order_id,name_snapshot,quantity,notes FROM order_items WHERE order_id IN ('.$marks.') ORDER BY id');$i->execute($ids);$group=[];foreach($i->fetchAll() as $row)$group[(int)$row['order_id']][]=$row;foreach($orders as &$order)$order['items']=$group[(int)$order['id']]??[];unset($order);}go_out(['ok'=>true,'tickets'=>$orders]);
     }
 
-    if($action==='tables-list'){
-        $current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para acessar o salão.');
-        go_out(['ok'=>true,'tables'=>(new TableService())->list()]);
-    }
-    if($action==='table-open'){
-        go_method('POST');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para abrir comanda.');$body=go_body();
-        go_out(['ok'=>true,'tab'=>(new TableService())->open((int)($body['table_id']??0),(string)($body['label']??''))],201);
-    }
-    if($action==='table-close'){
-        go_method('POST');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para fechar comanda.');$body=go_body();
-        go_out(['ok'=>true,'tab'=>(new TableService())->close((int)($body['tab_id']??0))]);
-    }
+    if($action==='tables-list'){$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para acessar o salão.');go_out(['ok'=>true,'tables'=>(new TableService())->list()]);}
+    if($action==='table-open'){go_method('POST');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para abrir comanda.');$body=go_body();go_out(['ok'=>true,'tab'=>(new TableService())->open((int)($body['table_id']??0),(string)($body['label']??''))],201);}
+    if($action==='table-close'){go_method('POST');$current=$shift->current();if(!$current||$current['mode']!=='operation')throw new RuntimeException('Inicie um turno de Operação para fechar comanda.');$body=go_body();go_out(['ok'=>true,'tab'=>(new TableService())->close((int)($body['tab_id']??0))]);}
 
     if($action==='catalog'){
-        if(!Auth::can('orders.create')&&!Auth::can('catalog.manage'))go_out(['ok'=>false,'error'=>'Acesso negado.'],403);
-        $s=Database::connection()->prepare('SELECT p.id,p.category_id,c.name category_name,p.name,p.description,p.sku,p.price_cents,p.stock_qty,p.track_stock,p.image_url FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.tenant_id=? AND p.active=1 ORDER BY COALESCE(c.sort_order,999999),c.name,p.name');$s->execute([$tenantId]);go_out(['ok'=>true,'products'=>$s->fetchAll()]);
+        if(!Auth::can('orders.create')&&!Auth::can('catalog.manage'))go_out(['ok'=>false,'error'=>'Acesso negado.'],403);$s=Database::connection()->prepare('SELECT p.id,p.category_id,c.name category_name,p.name,p.description,p.sku,p.price_cents,p.stock_qty,p.track_stock,p.image_url FROM products p LEFT JOIN categories c ON c.id=p.category_id WHERE p.tenant_id=? AND p.active=1 ORDER BY COALESCE(c.sort_order,999999),c.name,p.name');$s->execute([$tenantId]);go_out(['ok'=>true,'products'=>$s->fetchAll()]);
     }
 
-    if($action==='pix-create'){go_method('POST');$body=go_body();$amount=isset($body['amount_cents'])?(int)$body['amount_cents']:null;$pix=(new NativePixService())->create((int)($body['order_id']??0),(string)($body['tax_id']??''),$amount);go_out(['ok'=>true,'pix'=>$pix],201);}
-    if($action==='nfc-intent'){go_method('POST');$body=go_body();$amount=isset($body['amount_cents'])?(int)$body['amount_cents']:null;$result=(new NfcService())->createIntent((int)($body['order_id']??0),$deviceId,$amount);go_out(['ok'=>true]+$result,201);}
+    if($action==='pix-create'){go_method('POST');$body=go_body();$orderId=(int)($body['order_id']??0);$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de receber pagamento.');go_assert_order_unit($tenantId,$orderId,$current);$amount=isset($body['amount_cents'])?(int)$body['amount_cents']:null;$pix=(new NativePixService())->create($orderId,(string)($body['tax_id']??''),$amount);go_out(['ok'=>true,'pix'=>$pix],201);}
+    if($action==='nfc-intent'){go_method('POST');$body=go_body();$orderId=(int)($body['order_id']??0);$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de receber pagamento.');go_assert_order_unit($tenantId,$orderId,$current);$amount=isset($body['amount_cents'])?(int)$body['amount_cents']:null;$result=(new NfcService())->createIntent($orderId,$deviceId,$amount);go_out(['ok'=>true]+$result,201);}
     if($action==='nfc-verify'){go_method('POST');$body=go_body();go_out((new NfcService())->verifyIntent((string)($body['intent_token']??''),(string)($body['transaction_code']??''),$deviceId));}
 
     $posPayment=new PosPaymentService();
-    if($action==='payment-status'){$id=(int)($_GET['order_id']??0);go_out(['ok'=>true,'payment'=>$posPayment->status($id)]);}
-    if($action==='payment-cash'){go_method('POST');$body=go_body();go_out(['ok'=>true,'payment'=>$posPayment->cash((int)($body['order_id']??0),(int)($body['amount_cents']??0),(string)($body['idempotency_key']??''))]);}
+    if($action==='payment-status'){$id=(int)($_GET['order_id']??0);$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de consultar pagamento.');go_assert_order_unit($tenantId,$id,$current);go_out(['ok'=>true,'payment'=>$posPayment->status($id)]);}
+    if($action==='payment-cash'){go_method('POST');$body=go_body();$id=(int)($body['order_id']??0);$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno antes de receber pagamento.');go_assert_order_unit($tenantId,$id,$current);go_out(['ok'=>true,'payment'=>$posPayment->cash($id,(int)($body['amount_cents']??0),(string)($body['idempotency_key']??''))]);}
 
     $deliveryCash=new DeliveryCashService();
-    if($action==='delivery-cash-collect'){go_method('POST');$body=go_body();go_out(['ok'=>true,'receipt'=>$deliveryCash->collect((int)($body['order_id']??0),(int)($body['received_cents']??0))]);}
+    if($action==='delivery-cash-collect'){go_method('POST');$body=go_body();$id=(int)($body['order_id']??0);$current=$shift->current();if(!$current)throw new RuntimeException('Inicie seu turno.');go_assert_order_unit($tenantId,$id,$current);go_out(['ok'=>true,'receipt'=>$deliveryCash->collect($id,(int)($body['received_cents']??0))]);}
     if($action==='delivery-cash-outstanding'){$id=(int)($_GET['shift_id']??0);go_out(['ok'=>true,'cash'=>$deliveryCash->outstanding($id?:null)]);}
     if($action==='handoff-create'){go_method('POST');go_out(['ok'=>true,'handoff'=>$deliveryCash->createHandoff()],201);}
     if($action==='handoff-resolve'){$handoff=$deliveryCash->resolveHandoff((string)($_GET['token']??''));go_out(['ok'=>true,'handoff'=>$handoff]);}
