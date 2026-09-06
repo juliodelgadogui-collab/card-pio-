@@ -43,6 +43,7 @@ import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.DeliveryProgressViewModel
 import br.com.eventmenu.go.DeliveryUnitTriageViewModel
 import br.com.eventmenu.go.DeviceStatusViewModel
+import br.com.eventmenu.go.DiscountViewModel
 import br.com.eventmenu.go.EventBarViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.MainViewModel
@@ -112,6 +113,8 @@ fun EventMenuGoApp(
     val triageState by triageViewModel.state.collectAsState()
     val deliveryProgressViewModel: DeliveryProgressViewModel = composeViewModel(factory = DeliveryProgressViewModel.Factory(app.deliveryProgressRepository))
     val deliveryProgressState by deliveryProgressViewModel.state.collectAsState()
+    val discountViewModel: DiscountViewModel = composeViewModel(factory = DiscountViewModel.Factory(app.discountRepository))
+    val discountState by discountViewModel.state.collectAsState()
     val printerPreferences = remember(app) { PrinterPreferences(app) }
     val bluetoothPrinter = remember(app) { BluetoothEscPosPrinter(app, printerPreferences) }
     val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter, app.receiptRepository))
@@ -123,9 +126,7 @@ fun EventMenuGoApp(
     fun startScan() {
         onScan { value ->
             val trimmed = value.trim()
-            val universal = trimmed.contains("EVENTMENU:QR:", ignoreCase = true) ||
-                Regex("^[A-Fa-f0-9]{64}$").matches(trimmed) ||
-                Regex("[?&](?:qr|token|t)=[A-Fa-f0-9]{64}(?:&|$)", RegexOption.IGNORE_CASE).containsMatchIn(trimmed)
+            val universal = trimmed.contains("EVENTMENU:QR:", ignoreCase = true) || Regex("^[A-Fa-f0-9]{64}$").matches(trimmed) || Regex("[?&](?:qr|token|t)=[A-Fa-f0-9]{64}(?:&|$)", RegexOption.IGNORE_CASE).containsMatchIn(trimmed)
             if (universal) universalQrViewModel.resolve(trimmed) else viewModel.resolveQr(trimmed)
         }
     }
@@ -134,9 +135,7 @@ fun EventMenuGoApp(
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
         if (state.error != null || state.message != null) viewModel.clearFeedback()
     }
-    LaunchedEffect(shiftUnitState.error) {
-        shiftUnitState.error?.let { snackbar.showSnackbar(it); shiftUnitViewModel.clearError() }
-    }
+    LaunchedEffect(shiftUnitState.error) { shiftUnitState.error?.let { snackbar.showSnackbar(it); shiftUnitViewModel.clearError() } }
     LaunchedEffect(triageState.error, triageState.message) {
         (triageState.error ?: triageState.message)?.let { snackbar.showSnackbar(it) }
         if (triageState.error != null || triageState.message != null) triageViewModel.clearFeedback()
@@ -144,6 +143,10 @@ fun EventMenuGoApp(
     LaunchedEffect(deliveryProgressState.error, deliveryProgressState.message) {
         (deliveryProgressState.error ?: deliveryProgressState.message)?.let { snackbar.showSnackbar(it) }
         if (deliveryProgressState.error != null || deliveryProgressState.message != null) deliveryProgressViewModel.clearFeedback()
+    }
+    LaunchedEffect(discountState.error, discountState.message) {
+        (discountState.error ?: discountState.message)?.let { snackbar.showSnackbar(it) }
+        if (discountState.error != null || discountState.message != null) discountViewModel.clearFeedback()
     }
     LaunchedEffect(eventBarState.error, eventBarState.message) {
         (eventBarState.error ?: eventBarState.message)?.let { snackbar.showSnackbar(it) }
@@ -161,148 +164,84 @@ fun EventMenuGoApp(
         (managerActionState.error ?: managerActionState.message)?.let { snackbar.showSnackbar(it) }
         if (managerActionState.error != null || managerActionState.message != null) managerActionsViewModel.clearFeedback()
     }
-    LaunchedEffect(receiptState.error) {
-        receiptState.error?.let { snackbar.showSnackbar(it); receiptViewModel.clearError() }
-    }
-    LaunchedEffect(deviceState.error) {
-        deviceState.error?.let { snackbar.showSnackbar(it); deviceViewModel.clearError() }
-    }
+    LaunchedEffect(receiptState.error) { receiptState.error?.let { snackbar.showSnackbar(it); receiptViewModel.clearError() } }
+    LaunchedEffect(deviceState.error) { deviceState.error?.let { snackbar.showSnackbar(it); deviceViewModel.clearError() } }
     LaunchedEffect(printerState.error, printerState.message) {
         (printerState.error ?: printerState.message)?.let { snackbar.showSnackbar(it) }
         if (printerState.error != null || printerState.message != null) printerViewModel.clearFeedback()
     }
     LaunchedEffect(receiptState.shareText) {
         receiptState.shareText?.let { text ->
-            val share = Intent(Intent.ACTION_SEND).apply {
-                type = "text/plain"
-                putExtra(Intent.EXTRA_SUBJECT, "Comprovante EventMenu")
-                putExtra(Intent.EXTRA_TEXT, text)
-            }
-            context.startActivity(Intent.createChooser(share, "Enviar comprovante"))
-            receiptViewModel.consumed()
+            val share = Intent(Intent.ACTION_SEND).apply { type = "text/plain"; putExtra(Intent.EXTRA_SUBJECT, "Comprovante EventMenu"); putExtra(Intent.EXTRA_TEXT, text) }
+            context.startActivity(Intent.createChooser(share, "Enviar comprovante")); receiptViewModel.consumed()
         }
     }
-    LaunchedEffect(state.session?.user?.id, state.workShift?.id) {
-        if (state.session != null && state.workShift == null) shiftUnitViewModel.load()
-    }
-    LaunchedEffect(shiftUnitState.completedVersion) {
-        if (shiftUnitState.completedVersion > 0) viewModel.restoreSession()
-    }
-    LaunchedEffect(state.notifications) {
-        OperationNotificationScheduler.showUnread(context, state.notifications)
-    }
+    LaunchedEffect(state.session?.user?.id, state.workShift?.id) { if (state.session != null && state.workShift == null) shiftUnitViewModel.load() }
+    LaunchedEffect(shiftUnitState.completedVersion) { if (shiftUnitState.completedVersion > 0) viewModel.restoreSession() }
+    LaunchedEffect(state.notifications) { OperationNotificationScheduler.showUnread(context, state.notifications) }
     LaunchedEffect(state.workShift?.id) {
         if (state.workShift?.status != "open") return@LaunchedEffect
         if (state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()
-        while (true) {
-            delay(10_000)
-            viewModel.refreshNotifications()
-        }
+        while (true) { delay(10_000); viewModel.refreshNotifications() }
     }
     LaunchedEffect(state.tapOnRequest) {
-        state.tapOnRequest?.let { request ->
-            onTapOn(request) { transactionCode ->
-                if (transactionCode.isNullOrBlank()) viewModel.tapOnCancelled() else viewModel.verifyTapOn(request, transactionCode)
-            }
-            viewModel.tapOnLaunchConsumed()
-        }
+        state.tapOnRequest?.let { request -> onTapOn(request) { transactionCode -> if (transactionCode.isNullOrBlank()) viewModel.tapOnCancelled() else viewModel.verifyTapOn(request, transactionCode) }; viewModel.tapOnLaunchConsumed() }
     }
     LaunchedEffect(eventBarState.tapOnRequest) {
-        eventBarState.tapOnRequest?.let { request ->
-            onTapOn(request) { transactionCode ->
-                if (transactionCode.isNullOrBlank()) eventBarViewModel.nfcCancelled() else eventBarViewModel.verifyNfc(request, transactionCode)
-            }
-            eventBarViewModel.consumeTapOnLaunch()
-        }
+        eventBarState.tapOnRequest?.let { request -> onTapOn(request) { transactionCode -> if (transactionCode.isNullOrBlank()) eventBarViewModel.nfcCancelled() else eventBarViewModel.verifyNfc(request, transactionCode) }; eventBarViewModel.consumeTapOnLaunch() }
     }
     LaunchedEffect(tabSplitState.tapOnRequest) {
-        tabSplitState.tapOnRequest?.let { request ->
-            onTapOn(request) { transactionCode ->
-                if (transactionCode.isNullOrBlank()) tabSplitViewModel.nfcCancelled() else tabSplitViewModel.verifyNfc(request, transactionCode)
-            }
-            tabSplitViewModel.consumeTapOnLaunch()
-        }
+        tabSplitState.tapOnRequest?.let { request -> onTapOn(request) { transactionCode -> if (transactionCode.isNullOrBlank()) tabSplitViewModel.nfcCancelled() else tabSplitViewModel.verifyNfc(request, transactionCode) }; tabSplitViewModel.consumeTapOnLaunch() }
     }
-    LaunchedEffect(eventBarState.completedVersion) {
-        if (eventBarState.completedVersion > 0) viewModel.refreshEvents()
-    }
+    LaunchedEffect(eventBarState.completedVersion) { if (eventBarState.completedVersion > 0) viewModel.refreshEvents() }
     LaunchedEffect(tabSplitState.paidVersion) {
-        if (tabSplitState.paidVersion > 0) {
-            viewModel.refreshTableAccount()
-            viewModel.refreshTables()
-            viewModel.refreshCash()
-            viewModel.refreshOrders()
-        }
+        if (tabSplitState.paidVersion > 0) { viewModel.refreshTableAccount(); viewModel.refreshTables(); viewModel.refreshCash(); viewModel.refreshOrders() }
     }
     LaunchedEffect(eventBarState.order?.id, eventBarState.balance?.remainingCents) {
         val orderId = eventBarState.order?.id ?: return@LaunchedEffect
         if (eventBarState.balance?.remainingCents == 0) printerViewModel.autoPrintReceipt(orderId)
     }
     LaunchedEffect(state.workShift?.id) {
-        val shiftId = state.workShift?.id
-        baselineShiftId = shiftId
-        paymentBaseline.clear()
-        pendingDeliveryQrOrderId = null
-        state.orders.forEach { paymentBaseline[it.id] = it.paymentStatus }
-        profileViewModel.bindShift(shiftId)
+        val shiftId = state.workShift?.id; baselineShiftId = shiftId; paymentBaseline.clear(); pendingDeliveryQrOrderId = null; discountViewModel.clearOrder()
+        state.orders.forEach { paymentBaseline[it.id] = it.paymentStatus }; profileViewModel.bindShift(shiftId)
     }
     LaunchedEffect(state.orders, state.workShift?.id) {
         val shiftId = state.workShift?.id ?: return@LaunchedEffect
         if (baselineShiftId != shiftId) return@LaunchedEffect
-        state.orders.forEach { order ->
-            val previous = paymentBaseline[order.id]
-            if (previous != null && previous != "paid" && order.paymentStatus == "paid") printerViewModel.autoPrintReceipt(order.id)
-            paymentBaseline[order.id] = order.paymentStatus
-        }
-        val visibleIds = state.orders.mapTo(mutableSetOf()) { it.id }
-        paymentBaseline.keys.toList().filter { it !in visibleIds }.forEach(paymentBaseline::remove)
+        state.orders.forEach { order -> val previous = paymentBaseline[order.id]; if (previous != null && previous != "paid" && order.paymentStatus == "paid") printerViewModel.autoPrintReceipt(order.id); paymentBaseline[order.id] = order.paymentStatus }
+        val visibleIds = state.orders.mapTo(mutableSetOf()) { it.id }; paymentBaseline.keys.toList().filter { it !in visibleIds }.forEach(paymentBaseline::remove)
     }
     LaunchedEffect(state.posOrder?.id, state.paymentBalance?.remainingCents) {
         val orderId = state.posOrder?.id ?: return@LaunchedEffect
         if (state.paymentBalance?.remainingCents == 0) printerViewModel.autoPrintReceipt(orderId)
     }
-    LaunchedEffect(state.screen, state.workShift?.id) {
-        if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) {
-            profileViewModel.refresh(); deviceViewModel.refresh(); printerViewModel.refresh()
-        }
-        if (state.screen == AppScreen.MANAGER && state.workShift?.id != null) managerActionsViewModel.refresh()
+    LaunchedEffect(state.screen, state.workShift?.id, state.posOrder?.id) {
+        if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) { profileViewModel.refresh(); deviceViewModel.refresh(); printerViewModel.refresh() }
+        if (state.screen == AppScreen.MANAGER && state.workShift?.id != null) { managerActionsViewModel.refresh(); if (state.session?.permissions?.contains("discount_approve") == true) discountViewModel.loadPending() }
         if (state.screen == AppScreen.DISPATCH && state.workShift?.id != null && ("delivery_assign" in state.session?.permissions.orEmpty() || "orders_manage" in state.session?.permissions.orEmpty())) triageViewModel.refresh()
         if (state.screen == AppScreen.DELIVERY && state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()
+        if (state.screen == AppScreen.POS && state.posOrder != null && state.session?.permissions?.contains("discount_request") == true) discountViewModel.watchOrder(state.posOrder!!.id)
     }
-    LaunchedEffect(managerActionState.changeVersion) {
-        if (managerActionState.changeVersion > 0) {
-            viewModel.refreshManager(); viewModel.refreshOrders(); viewModel.refreshNotifications()
-        }
+    LaunchedEffect(state.screen, state.posOrder?.id, discountState.orderRequest?.id, discountState.orderRequest?.status) {
+        val orderId = state.posOrder?.id ?: return@LaunchedEffect
+        if (state.screen != AppScreen.POS || discountState.orderRequest?.status != "pending") return@LaunchedEffect
+        while (true) { delay(5_000); discountViewModel.watchOrder(orderId) }
     }
-    LaunchedEffect(triageState.changedVersion) {
-        if (triageState.changedVersion > 0) {
-            viewModel.refreshOrders()
-            viewModel.refreshDispatch()
-            viewModel.refreshManager()
-            viewModel.refreshNotifications()
-        }
-    }
-    LaunchedEffect(deliveryProgressState.changeVersion) {
-        if (deliveryProgressState.changeVersion > 0) {
-            viewModel.refreshOrders()
-            viewModel.refreshDeliveryCash()
-            viewModel.refreshNotifications()
-            profileViewModel.refresh()
+    LaunchedEffect(managerActionState.changeVersion) { if (managerActionState.changeVersion > 0) { viewModel.refreshManager(); viewModel.refreshOrders(); viewModel.refreshNotifications() } }
+    LaunchedEffect(triageState.changedVersion) { if (triageState.changedVersion > 0) { viewModel.refreshOrders(); viewModel.refreshDispatch(); viewModel.refreshManager(); viewModel.refreshNotifications() } }
+    LaunchedEffect(deliveryProgressState.changeVersion) { if (deliveryProgressState.changeVersion > 0) { viewModel.refreshOrders(); viewModel.refreshDeliveryCash(); viewModel.refreshNotifications(); profileViewModel.refresh() } }
+    LaunchedEffect(discountState.changeVersion) {
+        if (discountState.changeVersion > 0) {
+            if (state.posOrder != null) viewModel.refreshPosPayment()
+            if (state.session?.permissions?.contains("discount_approve") == true) discountViewModel.loadPending()
+            viewModel.refreshOrders(); viewModel.refreshManager(); viewModel.refreshNotifications()
         }
     }
 
     if (state.session == null) { LoginScreen(state, viewModel::login, viewModel::unlockWithPin, onBiometric); return }
     if (state.mode == null) { ModePickerScreen(state.session!!.user.name, state.modes, viewModel::chooseMode); return }
     if (state.workShift == null || state.workShift?.status != "open") {
-        UnitShiftStartScreen(
-            state = state,
-            unitState = shiftUnitState,
-            onSelectUnit = shiftUnitViewModel::select,
-            onStart = { state.mode?.let(shiftUnitViewModel::open) },
-            onChangeMode = if (state.modes.size > 1) ({ viewModel.chooseMode(state.modes.first { it != state.mode }) }) else null,
-            onLogout = viewModel::logout,
-        )
-        return
+        UnitShiftStartScreen(state, shiftUnitState, shiftUnitViewModel::select, { state.mode?.let(shiftUnitViewModel::open) }, if (state.modes.size > 1) ({ viewModel.chooseMode(state.modes.first { it != state.mode }) }) else null, viewModel::logout); return
     }
 
     val session = state.session!!
@@ -328,237 +267,74 @@ fun EventMenuGoApp(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = { if (!focusedFlow) FloatingActionButton(onClick = ::startScan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear") } },
-        bottomBar = {
-            if (!focusedFlow) NavigationBar {
-                nav.forEach { screen ->
-                    val icon = when (screen) {
-                        AppScreen.HOME -> Icons.Default.Home
-                        AppScreen.NOTIFICATIONS -> Icons.Default.Notifications
-                        AppScreen.MANAGER -> Icons.Default.Assessment
-                        AppScreen.POS -> Icons.Default.ShoppingCart
-                        AppScreen.TABLES, AppScreen.TABLE_ACCOUNT -> Icons.Default.Restaurant
-                        AppScreen.ORDERS -> Icons.Default.ReceiptLong
-                        AppScreen.KITCHEN -> Icons.Default.Restaurant
-                        AppScreen.DISPATCH -> Icons.Default.DeliveryDining
-                        AppScreen.CASH -> Icons.Default.PointOfSale
-                        AppScreen.DELIVERY -> Icons.Default.DeliveryDining
-                        AppScreen.EVENTS -> Icons.Default.ConfirmationNumber
-                        AppScreen.PROFILE -> Icons.Default.BadgeIcon
-                    }
-                    NavigationBarItem(
-                        selected = state.screen == screen,
-                        onClick = { viewModel.navigate(screen) },
-                        icon = {
-                            if (screen == AppScreen.NOTIFICATIONS && state.unreadNotifications > 0) {
-                                BadgedBox(badge = { Badge { Text(if (state.unreadNotifications > 99) "99+" else state.unreadNotifications.toString()) } }) { Icon(icon, contentDescription = screen.name) }
-                            } else Icon(icon, contentDescription = screen.name)
-                        },
-                    )
-                }
-            }
-        },
+        bottomBar = { if (!focusedFlow) NavigationBar { nav.forEach { screen ->
+            val icon = when (screen) { AppScreen.HOME -> Icons.Default.Home; AppScreen.NOTIFICATIONS -> Icons.Default.Notifications; AppScreen.MANAGER -> Icons.Default.Assessment; AppScreen.POS -> Icons.Default.ShoppingCart; AppScreen.TABLES, AppScreen.TABLE_ACCOUNT -> Icons.Default.Restaurant; AppScreen.ORDERS -> Icons.Default.ReceiptLong; AppScreen.KITCHEN -> Icons.Default.Restaurant; AppScreen.DISPATCH -> Icons.Default.DeliveryDining; AppScreen.CASH -> Icons.Default.PointOfSale; AppScreen.DELIVERY -> Icons.Default.DeliveryDining; AppScreen.EVENTS -> Icons.Default.ConfirmationNumber; AppScreen.PROFILE -> Icons.Default.BadgeIcon }
+            NavigationBarItem(selected = state.screen == screen, onClick = { viewModel.navigate(screen) }, icon = { if (screen == AppScreen.NOTIFICATIONS && state.unreadNotifications > 0) BadgedBox(badge = { Badge { Text(if (state.unreadNotifications > 99) "99+" else state.unreadNotifications.toString()) } }) { Icon(icon, contentDescription = screen.name) } else Icon(icon, contentDescription = screen.name) })
+        } } },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
-                barActive -> EventBarScreen(
-                    state = eventBarState,
-                    cashOpen = state.cashOpen,
-                    canCash = "payments" in permissions && "cash" in permissions,
-                    canPix = "payments" in permissions,
-                    canNfc = "nfc_collect" in permissions,
-                    onAdd = eventBarViewModel::add,
-                    onRemove = eventBarViewModel::remove,
-                    onClearCart = eventBarViewModel::clearCart,
-                    onCreate = eventBarViewModel::create,
-                    onCash = eventBarViewModel::payCash,
-                    onPix = eventBarViewModel::requestPix,
-                    onNfc = eventBarViewModel::requestNfc,
-                    onRefreshPayment = eventBarViewModel::refreshPayment,
-                    onPollPix = eventBarViewModel::pollPix,
-                    onDismissPix = eventBarViewModel::dismissPix,
-                    onReceipt = receiptViewModel::prepare,
-                    onPrint = printerViewModel::printReceipt,
-                    onFinish = eventBarViewModel::finishSale,
-                    onExit = eventBarViewModel::close,
-                )
-                splitActive -> TabSplitPaymentScreen(
-                    state = tabSplitState,
-                    cashOpen = state.cashOpen,
-                    canCash = "payments" in permissions && "cash" in permissions,
-                    canPix = "payments" in permissions,
-                    canNfc = "nfc_collect" in permissions,
-                    onValue = tabSplitViewModel::startValue,
-                    onPercentage = tabSplitViewModel::startPercentage,
-                    onPerson = tabSplitViewModel::startPerson,
-                    onProducts = tabSplitViewModel::startProducts,
-                    onPollPix = tabSplitViewModel::pollPix,
-                    onHidePix = tabSplitViewModel::hidePix,
-                    onShowPix = tabSplitViewModel::showPix,
-                    onCancelGroup = tabSplitViewModel::cancelGroup,
-                    onReceiptGroup = receiptViewModel::prepareGroup,
-                    onPrintGroup = printerViewModel::printGroupReceipt,
-                    onRefresh = tabSplitViewModel::refresh,
-                    onBack = {
-                        tabSplitViewModel.close()
-                        viewModel.refreshTableAccount()
-                    },
-                )
+                barActive -> EventBarScreen(eventBarState, state.cashOpen, "payments" in permissions && "cash" in permissions, "payments" in permissions, "nfc_collect" in permissions, eventBarViewModel::add, eventBarViewModel::remove, eventBarViewModel::clearCart, eventBarViewModel::create, eventBarViewModel::payCash, eventBarViewModel::requestPix, eventBarViewModel::requestNfc, eventBarViewModel::refreshPayment, eventBarViewModel::pollPix, eventBarViewModel::dismissPix, receiptViewModel::prepare, printerViewModel::printReceipt, eventBarViewModel::finishSale, eventBarViewModel::close)
+                splitActive -> TabSplitPaymentScreen(tabSplitState, state.cashOpen, "payments" in permissions && "cash" in permissions, "payments" in permissions, "nfc_collect" in permissions, tabSplitViewModel::startValue, tabSplitViewModel::startPercentage, tabSplitViewModel::startPerson, tabSplitViewModel::startProducts, tabSplitViewModel::pollPix, tabSplitViewModel::hidePix, tabSplitViewModel::showPix, tabSplitViewModel::cancelGroup, receiptViewModel::prepareGroup, printerViewModel::printGroupReceipt, tabSplitViewModel::refresh) { tabSplitViewModel.close(); viewModel.refreshTableAccount() }
                 else -> when (state.screen) {
-                    AppScreen.HOME -> RoleDashboardScreen(
-                        state = state,
-                        onNavigate = viewModel::navigate,
-                        onScan = ::startScan,
-                        onRefresh = {
-                            viewModel.refreshOrders()
-                            viewModel.refreshCash()
-                            viewModel.refreshNotifications()
-                            if (mode == AppMode.EVENTS) viewModel.refreshEvents()
-                            if (mode == AppMode.DELIVERY) { viewModel.refreshDeliveryCash(); deliveryProgressViewModel.refresh() }
-                            if ("orders_kitchen" in permissions) viewModel.refreshKitchen()
-                            if ("reports" in permissions) viewModel.refreshManager()
-                        },
-                    )
+                    AppScreen.HOME -> RoleDashboardScreen(state, viewModel::navigate, ::startScan) { viewModel.refreshOrders(); viewModel.refreshCash(); viewModel.refreshNotifications(); if (mode == AppMode.EVENTS) viewModel.refreshEvents(); if (mode == AppMode.DELIVERY) { viewModel.refreshDeliveryCash(); deliveryProgressViewModel.refresh() }; if ("orders_kitchen" in permissions) viewModel.refreshKitchen(); if ("reports" in permissions) viewModel.refreshManager() }
                     AppScreen.NOTIFICATIONS -> NotificationsScreen(state.notifications, state.unreadNotifications, viewModel::markNotificationRead, viewModel::markAllNotificationsRead, viewModel::refreshNotifications)
                     AppScreen.MANAGER -> ManagerScreen(
                         overview = state.managerOverview,
                         details = managerActionState.details,
-                        loading = managerActionState.loading,
+                        pendingDiscounts = discountState.pending,
+                        loading = managerActionState.loading || discountState.loading,
                         canTransferDelivery = "delivery_assign" in permissions,
                         canCancelOrder = "orders_manage" in permissions,
+                        canApproveDiscount = "discount_approve" in permissions,
                         onTransferDelivery = managerActionsViewModel::transferDelivery,
                         onCancelOrder = managerActionsViewModel::cancelOrder,
-                        onRefresh = { viewModel.refreshManager(); managerActionsViewModel.refresh() },
+                        onApproveDiscount = discountViewModel::approve,
+                        onRejectDiscount = discountViewModel::reject,
+                        onRefresh = { viewModel.refreshManager(); managerActionsViewModel.refresh(); if ("discount_approve" in permissions) discountViewModel.loadPending() },
                     )
-                    AppScreen.POS -> PosScreen(state, viewModel::addProduct, viewModel::removeProduct, viewModel::clearCart, viewModel::createPosOrder, viewModel::payPosCash, viewModel::requestPosPix, viewModel::requestPosNfc, receiptViewModel::prepare, { printerViewModel.printReceipt(it) }, viewModel::refreshPosPayment, viewModel::finishPosFlow, viewModel::clearSelectedTable)
-                    AppScreen.TABLES -> TablesScreen(state.tables, "orders_create" in permissions, viewModel::refreshTables, viewModel::openTable, viewModel::closeTable, viewModel::orderForTable, viewModel::openTableAccount)
-                    AppScreen.TABLE_ACCOUNT -> TableAccountScreen(
-                        account = state.tableAccount,
-                        canReceive = "payments" in permissions,
-                        onReceive = viewModel::receiveTableOrder,
-                        onSplit = tabSplitViewModel::open,
-                        onRefresh = viewModel::refreshTableAccount,
-                        onBack = viewModel::closeTableAccount,
-                    )
-                    AppScreen.ORDERS -> OrdersScreen(state.orders, viewModel::refreshOrders, viewModel::changeOrderStatus)
-                    AppScreen.KITCHEN -> KitchenScreen(state.kitchenTickets, viewModel::refreshKitchen, viewModel::kitchenStatus)
-                    AppScreen.DISPATCH -> DispatchScreen(
-                        orders = state.orders,
-                        deliveryUsers = state.deliveryUsers,
-                        canAssignDelivery = "delivery_assign" in permissions,
-                        focusOrderId = state.dispatchFocusOrderId,
-                        unassignedUnitOrders = triageState.orders,
-                        units = triageState.units,
-                        canRouteUnit = "delivery_assign" in permissions || "orders_manage" in permissions,
-                        onRefresh = { viewModel.refreshDispatch(); triageViewModel.refresh() },
-                        onDispatch = viewModel::dispatchReady,
-                        onAssignDelivery = viewModel::assignDelivery,
-                        onScanDelivery = { orderId -> pendingDeliveryQrOrderId = orderId; startScan() },
-                        onAssignUnit = triageViewModel::assign,
-                    )
-                    AppScreen.CASH -> CashOperationsScreen(state.cashOpen, state.cashSummary, viewModel::openCash, viewModel::addCashSupply, viewModel::addCashWithdrawal, viewModel::closeCash, viewModel::refreshCash)
-                    AppScreen.DELIVERY -> DeliveryOperationsScreen(
-                        orders = state.orders,
-                        progress = deliveryProgressState.items,
-                        pixCharge = state.pixCharge,
-                        onRefreshProgress = deliveryProgressViewModel::refresh,
-                        onPickup = deliveryProgressViewModel::pickup,
-                        onStartRoute = deliveryProgressViewModel::startRoute,
-                        onArrive = deliveryProgressViewModel::arrive,
-                        onComplete = deliveryProgressViewModel::complete,
-                        onPix = viewModel::requestPix,
-                        onNfc = viewModel::requestNfc,
-                        onCash = viewModel::collectDeliveryCash,
+                    AppScreen.POS -> PosScreen(
+                        state = state,
+                        discountRequest = discountState.orderRequest?.takeIf { it.orderId == state.posOrder?.id },
+                        canRequestDiscount = "discount_request" in permissions,
+                        onRequestDiscount = discountViewModel::request,
+                        onRefreshDiscount = discountViewModel::watchOrder,
+                        onAdd = viewModel::addProduct,
+                        onRemove = viewModel::removeProduct,
+                        onClear = viewModel::clearCart,
+                        onCreate = viewModel::createPosOrder,
+                        onCash = viewModel::payPosCash,
+                        onPix = viewModel::requestPosPix,
+                        onNfc = viewModel::requestPosNfc,
                         onReceipt = receiptViewModel::prepare,
                         onPrintReceipt = printerViewModel::printReceipt,
-                        onPollPix = viewModel::pollPixStatus,
-                        onDismissPix = viewModel::dismissPix,
+                        onRefreshPayment = viewModel::refreshPosPayment,
+                        onFinishFlow = { discountViewModel.clearOrder(); viewModel.finishPosFlow() },
+                        onClearTable = viewModel::clearSelectedTable,
                     )
-                    AppScreen.EVENTS -> EventModeScreen(
-                        events = state.events,
-                        selectedEventId = state.selectedEventId,
-                        entries = state.eventEntries,
-                        canScanTicket = "tickets" in permissions,
-                        canScanGuest = "guests" in permissions,
-                        canUseBar = "event_bar" in permissions,
-                        onSelect = viewModel::selectEvent,
-                        onOpenBar = { eventId -> state.events.firstOrNull { it.id == eventId }?.let { eventBarViewModel.open(it.id, it.name) } },
-                        onRefresh = viewModel::refreshEvents,
-                        onScan = ::startScan,
-                    )
-                    AppScreen.PROFILE -> EmployeeProfileScreen(
-                        state = state,
-                        shiftSummary = profileState.summary,
-                        summaryLoading = profileState.loading,
-                        onRefreshSummary = profileViewModel::refresh,
-                        onGenerateMyQr = { universalQrViewModel.issueSelf(session.user.id, session.user.name, state.workShift?.mode == "delivery") },
-                        deviceState = deviceState,
-                        onRefreshDevice = deviceViewModel::refresh,
-                        printerState = printerState,
-                        onPrinterRefresh = printerViewModel::refresh,
-                        onSelectPrinter = printerViewModel::selectDevice,
-                        onClearPrinter = printerViewModel::clearDevice,
-                        onPrinterEnabled = printerViewModel::setEnabled,
-                        onPrinterAutoPrint = printerViewModel::setAutoPrint,
-                        onPrinterPaperWidth = printerViewModel::setPaperWidth,
-                        onPrinterTest = printerViewModel::printTest,
-                        onSavePin = viewModel::savePin,
-                        onBiometric = viewModel::setBiometric,
-                        onCloseShift = viewModel::closeShift,
-                        onCreateHandoff = viewModel::createCashHandoff,
-                        onDismissHandoff = viewModel::dismissCashHandoff,
-                        onRefreshDeliveryCash = viewModel::refreshDeliveryCash,
-                        onLogout = viewModel::logout,
-                    )
+                    AppScreen.TABLES -> TablesScreen(state.tables, "orders_create" in permissions, viewModel::refreshTables, viewModel::openTable, viewModel::closeTable, viewModel::orderForTable, viewModel::openTableAccount)
+                    AppScreen.TABLE_ACCOUNT -> TableAccountScreen(state.tableAccount, "payments" in permissions, viewModel::receiveTableOrder, tabSplitViewModel::open, viewModel::refreshTableAccount, viewModel::closeTableAccount)
+                    AppScreen.ORDERS -> OrdersScreen(state.orders, viewModel::refreshOrders, viewModel::changeOrderStatus)
+                    AppScreen.KITCHEN -> KitchenScreen(state.kitchenTickets, viewModel::refreshKitchen, viewModel::kitchenStatus)
+                    AppScreen.DISPATCH -> DispatchScreen(state.orders, state.deliveryUsers, "delivery_assign" in permissions, state.dispatchFocusOrderId, triageState.orders, triageState.units, "delivery_assign" in permissions || "orders_manage" in permissions, { viewModel.refreshDispatch(); triageViewModel.refresh() }, viewModel::dispatchReady, viewModel::assignDelivery, { orderId -> pendingDeliveryQrOrderId = orderId; startScan() }, triageViewModel::assign)
+                    AppScreen.CASH -> CashOperationsScreen(state.cashOpen, state.cashSummary, viewModel::openCash, viewModel::addCashSupply, viewModel::addCashWithdrawal, viewModel::closeCash, viewModel::refreshCash)
+                    AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, deliveryProgressState.items, state.pixCharge, deliveryProgressViewModel::refresh, deliveryProgressViewModel::pickup, deliveryProgressViewModel::startRoute, deliveryProgressViewModel::arrive, deliveryProgressViewModel::complete, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, printerViewModel::printReceipt, viewModel::pollPixStatus, viewModel::dismissPix)
+                    AppScreen.EVENTS -> EventModeScreen(state.events, state.selectedEventId, state.eventEntries, "tickets" in permissions, "guests" in permissions, "event_bar" in permissions, viewModel::selectEvent, { eventId -> state.events.firstOrNull { it.id == eventId }?.let { eventBarViewModel.open(it.id, it.name) } }, viewModel::refreshEvents, ::startScan)
+                    AppScreen.PROFILE -> EmployeeProfileScreen(state, profileState.summary, profileState.loading, profileViewModel::refresh, { universalQrViewModel.issueSelf(session.user.id, session.user.name, state.workShift?.mode == "delivery") }, deviceState, deviceViewModel::refresh, printerState, printerViewModel::refresh, printerViewModel::selectDevice, printerViewModel::clearDevice, printerViewModel::setEnabled, printerViewModel::setAutoPrint, printerViewModel::setPaperWidth, printerViewModel::printTest, viewModel::savePin, viewModel::setBiometric, viewModel::closeShift, viewModel::createCashHandoff, viewModel::dismissCashHandoff, viewModel::refreshDeliveryCash, viewModel::logout)
                 }
             }
-            if (state.loading || shiftUnitState.loading || triageState.loading || deliveryProgressState.loading || eventBarState.loading || tabSplitState.loading || universalQrState.loading || receiptState.loading || printerState.loading || deviceState.loading) {
-                CircularProgressIndicator(Modifier.align(Alignment.Center))
-            }
+            if (state.loading || shiftUnitState.loading || triageState.loading || deliveryProgressState.loading || discountState.loading || eventBarState.loading || tabSplitState.loading || universalQrState.loading || receiptState.loading || printerState.loading || deviceState.loading) CircularProgressIndicator(Modifier.align(Alignment.Center))
         }
     }
 
     if (!focusedFlow) state.qr?.let { QrResultDialog(it, viewModel::clearQr, viewModel::processCurrentQr) }
-
-    universalQrState.issued?.let { issued ->
-        MyEmployeeQrDialog(
-            qr = issued,
-            onRevoke = { universalQrViewModel.revokeSelf(session.user.id, issued.type == "delivery_user") },
-            onDismiss = universalQrViewModel::clearIssued,
-        )
-    }
-
+    universalQrState.issued?.let { issued -> MyEmployeeQrDialog(issued, { universalQrViewModel.revokeSelf(session.user.id, issued.type == "delivery_user") }, universalQrViewModel::clearIssued) }
     universalQrState.resolved?.let { result ->
         val pendingOrder = pendingDeliveryQrOrderId
         val table = if (result.type == "tab") state.tables.firstOrNull { it.tabId == result.entityId } else null
-        val actionLabel = when {
-            result.type == "delivery_user" && pendingOrder != null -> "ATRIBUIR AO PEDIDO #$pendingOrder"
-            result.type == "event" && mode == AppMode.EVENTS -> "ABRIR EVENTO"
-            result.type == "tab" && table != null -> "ABRIR CONTA"
-            else -> null
-        }
+        val actionLabel = when { result.type == "delivery_user" && pendingOrder != null -> "ATRIBUIR AO PEDIDO #$pendingOrder"; result.type == "event" && mode == AppMode.EVENTS -> "ABRIR EVENTO"; result.type == "tab" && table != null -> "ABRIR CONTA"; else -> null }
         val actionEnabled = if (result.type == "delivery_user" && pendingOrder != null) result.deliveryShiftOpen else true
-        val hint = when {
-            result.type == "delivery_user" && pendingOrder != null && !result.deliveryShiftOpen -> "Este funcionário não está com turno Delivery aberto e não pode receber o pedido."
-            result.type == "tab" && table == null -> "A comanda foi identificada, mas não está disponível no salão carregado deste turno."
-            else -> ""
-        }
-        UniversalQrResultDialog(
-            result = result,
-            actionLabel = actionLabel,
-            actionEnabled = actionEnabled,
-            actionHint = hint,
-            onAction = if (actionLabel == null) null else {
-                {
-                    when {
-                        result.type == "delivery_user" && pendingOrder != null -> viewModel.assignDelivery(pendingOrder, result.entityId)
-                        result.type == "event" && mode == AppMode.EVENTS -> viewModel.selectEvent(result.entityId)
-                        result.type == "tab" && table != null -> viewModel.openTableAccount(table)
-                    }
-                    pendingDeliveryQrOrderId = null
-                    universalQrViewModel.clearResolved()
-                }
-            },
-            onDismiss = { pendingDeliveryQrOrderId = null; universalQrViewModel.clearResolved() },
-        )
+        val hint = when { result.type == "delivery_user" && pendingOrder != null && !result.deliveryShiftOpen -> "Este funcionário não está com turno Delivery aberto e não pode receber o pedido."; result.type == "tab" && table == null -> "A comanda foi identificada, mas não está disponível no salão carregado deste turno."; else -> "" }
+        UniversalQrResultDialog(result, actionLabel, actionEnabled, hint, if (actionLabel == null) null else {{ when { result.type == "delivery_user" && pendingOrder != null -> viewModel.assignDelivery(pendingOrder, result.entityId); result.type == "event" && mode == AppMode.EVENTS -> viewModel.selectEvent(result.entityId); result.type == "tab" && table != null -> viewModel.openTableAccount(table) }; pendingDeliveryQrOrderId = null; universalQrViewModel.clearResolved() }}, { pendingDeliveryQrOrderId = null; universalQrViewModel.clearResolved() })
     }
 }
