@@ -23,21 +23,24 @@ CREATE TABLE payment_groups (
   INDEX idx_payment_group_tab (tenant_id,tab_id,status,created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+ALTER TABLE payments ADD COLUMN payment_group_id BIGINT UNSIGNED NULL AFTER order_id;
+ALTER TABLE payments ADD CONSTRAINT fk_payments_group FOREIGN KEY (payment_group_id) REFERENCES payment_groups(id) ON DELETE SET NULL;
+CREATE INDEX idx_payments_group ON payments(tenant_id,payment_group_id,status);
+
 CREATE TABLE payment_group_allocations (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   tenant_id BIGINT UNSIGNED NOT NULL,
   payment_group_id BIGINT UNSIGNED NOT NULL,
   order_id BIGINT UNSIGNED NOT NULL,
+  payment_id BIGINT UNSIGNED NOT NULL,
   amount_cents INT UNSIGNED NOT NULL,
   metadata JSON NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_payment_group_alloc_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   CONSTRAINT fk_payment_group_alloc_group FOREIGN KEY (payment_group_id) REFERENCES payment_groups(id) ON DELETE CASCADE,
   CONSTRAINT fk_payment_group_alloc_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_payment_group_alloc_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE RESTRICT,
   UNIQUE KEY uq_payment_group_order (payment_group_id,order_id),
+  UNIQUE KEY uq_payment_group_payment (payment_id),
   INDEX idx_payment_group_alloc_order (tenant_id,order_id,payment_group_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-ALTER TABLE payments ADD COLUMN payment_group_id BIGINT UNSIGNED NULL AFTER order_id;
-ALTER TABLE payments ADD CONSTRAINT fk_payments_group FOREIGN KEY (payment_group_id) REFERENCES payment_groups(id) ON DELETE SET NULL;
-CREATE INDEX idx_payments_group ON payments(tenant_id,payment_group_id,status);
