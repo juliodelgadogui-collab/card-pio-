@@ -21,24 +21,24 @@ import org.json.JSONObject
 
 class MainActivity : FragmentActivity() {
     private var pendingTapOn: TapOnRequest? = null
-    private var pendingTapOnVm: MainViewModel? = null
+    private var pendingTapOnResult: ((String?) -> Unit)? = null
 
     private val tapOnLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val request = pendingTapOn
-        val vm = pendingTapOnVm
+        val callback = pendingTapOnResult
         pendingTapOn = null
-        pendingTapOnVm = null
-        if (request == null || vm == null) return@registerForActivityResult
+        pendingTapOnResult = null
+        if (request == null || callback == null) return@registerForActivityResult
 
         val successJson = result.data?.getStringExtra("resultTapOnSuccessJson")
         if (result.resultCode == Activity.RESULT_OK && !successJson.isNullOrBlank()) {
             val transactionCode = runCatching { JSONObject(successJson).optString("transactionCode") }.getOrNull()
             if (!transactionCode.isNullOrBlank()) {
-                vm.verifyTapOn(request, transactionCode)
+                callback(transactionCode)
                 return@registerForActivityResult
             }
         }
-        vm.tapOnCancelled()
+        callback(null)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -58,7 +58,7 @@ class MainActivity : FragmentActivity() {
                     viewModel = vm,
                     onScan = { scanQr(vm) },
                     onBiometric = { authenticateBiometric(vm) },
-                    onTapOn = { request -> launchTapOn(request, vm) },
+                    onTapOn = ::launchTapOn,
                 )
             }
         }
@@ -73,7 +73,7 @@ class MainActivity : FragmentActivity() {
             .addOnSuccessListener { barcode -> barcode.rawValue?.let(vm::resolveQr) }
     }
 
-    private fun launchTapOn(request: TapOnRequest, vm: MainViewModel) {
+    private fun launchTapOn(request: TapOnRequest, onResult: (String?) -> Unit) {
         val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID).orEmpty()
         val payload = JSONObject()
             .put("appKey", request.appKey)
@@ -90,11 +90,11 @@ class MainActivity : FragmentActivity() {
             .putExtra("TAP_ON_PAYMENT_DATA", payload)
 
         if (intent.resolveActivity(packageManager) == null) {
-            vm.tapOnCancelled()
+            onResult(null)
             return
         }
         pendingTapOn = request
-        pendingTapOnVm = vm
+        pendingTapOnResult = onResult
         tapOnLauncher.launch(intent)
     }
 
