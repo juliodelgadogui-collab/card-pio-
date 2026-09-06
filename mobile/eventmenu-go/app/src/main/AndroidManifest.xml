@@ -15,8 +15,8 @@
         android:name=".EventMenuGoApplication"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
-        android:icon="@drawable/ic_eventmenu_logo"
-        android:roundIcon="@drawable/ic_eventmenu_logo"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:label="EventMenu GO"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <meta-data
