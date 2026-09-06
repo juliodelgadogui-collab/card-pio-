@@ -54,6 +54,8 @@ fun TabSplitPaymentScreen(
     onHidePix: () -> Unit,
     onShowPix: () -> Unit,
     onCancelGroup: () -> Unit,
+    onReceiptGroup: (Int) -> Unit,
+    onPrintGroup: (Int) -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -136,6 +138,13 @@ fun TabSplitPaymentScreen(
                         }
                         if (group.status == "created" && group.providerPaymentId.isBlank()) {
                             OutlinedButton(onClick = onCancelGroup, modifier = Modifier.fillMaxWidth()) { Text("CANCELAR ESTA DIVISÃO") }
+                        }
+                        if (group.status == "paid") {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { onReceiptGroup(group.id) }, modifier = Modifier.weight(1f)) { Text("ENVIAR") }
+                                OutlinedButton(onClick = { onPrintGroup(group.id) }, modifier = Modifier.weight(1f)) { Text("IMPRIMIR") }
+                            }
+                            Text("O comprovante desta parte é montado pelo servidor com as alocações reais por pedido.")
                         }
                         if (group.status == "attention") Text("⚠️ O provedor confirmou o valor, mas a operação exige conferência administrativa.")
                     }
