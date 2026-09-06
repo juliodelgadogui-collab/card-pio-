@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS order_item_fulfillments (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  order_item_id BIGINT UNSIGNED NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL,
+  fulfilled_by BIGINT UNSIGNED NOT NULL,
+  source VARCHAR(40) NOT NULL DEFAULT 'qr',
+  batch_key VARCHAR(80) NOT NULL,
+  notes VARCHAR(500) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_order_fulfillment_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_order_fulfillment_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_order_fulfillment_item FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE CASCADE,
+  CONSTRAINT fk_order_fulfillment_user FOREIGN KEY (fulfilled_by) REFERENCES users(id) ON DELETE RESTRICT,
+  UNIQUE KEY uq_order_fulfillment_batch_item (tenant_id, batch_key, order_item_id),
+  INDEX idx_order_fulfillment_order (tenant_id, order_id, created_at),
+  INDEX idx_order_fulfillment_item (order_item_id, created_at),
+  CONSTRAINT chk_order_fulfillment_qty CHECK (quantity > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
