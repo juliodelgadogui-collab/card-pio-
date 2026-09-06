@@ -26,10 +26,13 @@ final class OrderService
     public function changeStatus(int $orderId,string $target,string $source='panel'):array
     {
         $tenantId=Auth::tenantId();if(!$tenantId||$orderId<1)throw new RuntimeException('Pedido ou empresa inválidos.');$target=strtolower(trim($target));if(!array_key_exists($target,self::TRANSITIONS))throw new RuntimeException('Status inválido.');
-        $result=Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$target,$source):array{
+        $result=Database::transaction(function(PDO$pdo)use($tenantId,$orderId,$target,$source):array{
             $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$orderId,$tenantId]);$order=$s->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');$current=(string)$order['status'];if($current===$target)return $order;if(!in_array($target,self::TRANSITIONS[$current]??[],true))throw new RuntimeException("Transição {$current} → {$target} não permitida.");
 
-            if($target==='completed'&&$order['payment_status']!=='paid')throw new RuntimeException('Pedido não pago não pode ser finalizado.');
+            if($target==='completed'){
+                if($order['payment_status']!=='paid')throw new RuntimeException('Pedido não pago não pode ser finalizado.');
+                if(in_array((string)$order['channel'],['counter','pickup'],true)&&$source!=='fulfillment')$this->assertPickupFullyFulfilled($pdo,$orderId);
+            }
             if($target==='served'){
                 if($order['channel']!=='table')throw new RuntimeException('Somente pedido de mesa pode ser marcado como servido.');
                 if($current!=='ready')throw new RuntimeException('O pedido precisa estar pronto antes de ser servido.');
@@ -75,6 +78,19 @@ final class OrderService
         return $result;
     }
 
+    private function assertPickupFullyFulfilled(PDO $pdo,int $orderId):void
+    {
+        $s=$pdo->prepare('SELECT oi.id,oi.name_snapshot,oi.quantity,COALESCE((SELECT SUM(f.quantity) FROM order_item_fulfillments f WHERE f.order_item_id=oi.id),0) fulfilled_quantity FROM order_items oi WHERE oi.order_id=? ORDER BY oi.id');$s->execute([$orderId]);$pending=[];
+        foreach($s->fetchAll() as$item){$remaining=max(0.0,(float)$item['quantity']-(float)$item['fulfilled_quantity']);if($remaining>0.0005)$pending[]=$item['name_snapshot'].' (falta '.$this->formatQty($remaining).')';}
+        if($pending)throw new RuntimeException('Ainda há itens não entregues. Use Retirada / QR: '.implode(', ',array_slice($pending,0,4)).(count($pending)>4?'…':''));
+    }
+
+    private function formatQty(float $qty):string
+    {
+        if(abs($qty-round($qty))<0.0005)return(string)(int)round($qty);
+        return rtrim(rtrim(number_format($qty,3,',','.'),'0'),',');
+    }
+
     private function historyNote(string $target,string $source):string
     {
         if($source==='accept'&&$target==='confirmed')return 'Pedido aceito pela operação.';
@@ -94,22 +110,8 @@ final class OrderService
         if(!in_array((string)($order['channel']??''),['counter','table','delivery','pickup'],true))return;
         try{
             $notifications=new NotificationService();$id=(int)$order['id'];$expires=gmdate('Y-m-d H:i:s',time()+86400);
-            if($target==='confirmed'){
-                $notifications->publishToPermission(
-                    'orders.kitchen','operation','order.new','Novo pedido #'.$id,
-                    'Um novo pedido confirmado entrou na fila da cozinha.','order',(string)$id,
-                    'order:'.$id.':kitchen-confirmed','info',$expires
-                );
-            }
-            if($target==='ready'){
-                $notifications->publishToPermission(
-                    'orders.dispatch','operation','order.ready','Pedido #'.$id.' pronto',
-                    'A cozinha marcou o pedido como pronto para despacho.','order',(string)$id,
-                    'order:'.$id.':ready-dispatch','success',$expires
-                );
-            }
-        }catch(\Throwable){
-            // Notificação é auxiliar e nunca pode desfazer uma transição operacional já confirmada.
-        }
+            if($target==='confirmed')$notifications->publishToPermission('orders.kitchen','operation','order.new','Novo pedido #'.$id,'Um novo pedido confirmado entrou na fila da cozinha.','order',(string)$id,'order:'.$id.':kitchen-confirmed','info',$expires);
+            if($target==='ready')$notifications->publishToPermission('orders.dispatch','operation','order.ready','Pedido #'.$id.' pronto','A cozinha marcou o pedido como pronto para despacho.','order',(string)$id,'order:'.$id.':ready-dispatch','success',$expires);
+        }catch(\Throwable){/* Notificação auxiliar nunca desfaz a operação. */}
     }
 }
