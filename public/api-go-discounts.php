@@ -21,8 +21,13 @@ try{
     $action=(string)($_GET['action']??'pending');$service=new OrderDiscountService();
     if($action==='pending')godis_out(['ok'=>true,'requests'=>$service->pending()]);
     if($action==='order'){$orderId=(int)($_GET['order_id']??0);godis_out(['ok'=>true,'request'=>$service->forOrder($orderId)]);}
+    if($action==='policy')godis_out(['ok'=>true,'policy'=>$service->policy()]);
     godis_post();$body=godis_body();
-    if($action==='request')godis_out(['ok'=>true,'request'=>$service->request((int)($body['order_id']??0),(int)($body['amount_cents']??0),(string)($body['reason']??''))],201);
+    if($action==='request'){
+        $type=strtolower((string)($body['discount_type']??'fixed'));
+        $value=$type==='percent'?(int)($body['value_bps']??0):(int)($body['amount_cents']??$body['value_cents']??0);
+        godis_out(['ok'=>true,'request'=>$service->request((int)($body['order_id']??0),$value,(string)($body['reason']??''),$type)],201);
+    }
     if($action==='approve')godis_out(['ok'=>true,'result'=>$service->approve((int)($body['request_id']??0))]);
     if($action==='reject')godis_out(['ok'=>true,'result'=>$service->reject((int)($body['request_id']??0),(string)($body['reason']??''))]);
     godis_out(['ok'=>false,'error'=>'Endpoint de desconto não encontrado.'],404);
