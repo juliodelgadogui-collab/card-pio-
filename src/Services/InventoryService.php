@@ -13,66 +13,30 @@ final class InventoryService
 {
     public function move(int $productId,string $type,float $quantity,string $reason,?int $unitCostCents=null):array
     {
-        Auth::requirePermission('inventory.manage');
-        $tenantId=Auth::tenantId();
-        $userId=Auth::id();
-        if(!$tenantId||!$userId) throw new RuntimeException('Operador ou empresa inválidos.');
-        $type=strtolower(trim($type));
-        if(!in_array($type,['in','out'],true)) throw new RuntimeException('Tipo de movimentação inválido.');
-        if(!is_finite($quantity)||$quantity<=0) throw new RuntimeException('Quantidade inválida.');
-        $reason=mb_substr(trim($reason),0,500);
-        if($reason==='') throw new RuntimeException('Informe o motivo da movimentação.');
-        if($unitCostCents!==null&&$unitCostCents<0)throw new RuntimeException('Custo unitário inválido.');
-
-        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$productId,$type,$quantity,$reason,$unitCostCents):array{
-            $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT id,name,stock_qty,track_stock,average_cost_cents FROM products WHERE id=? AND tenant_id=? FOR UPDATE'));
-            $stmt->execute([$productId,$tenantId]);
-            $product=$stmt->fetch();
-            if(!$product) throw new RuntimeException('Produto não encontrado.');
-            if(!(int)$product['track_stock']) throw new RuntimeException('Este produto não está com controle de estoque ativo.');
-
-            $current=(float)$product['stock_qty'];
-            $next=$type==='in'?$current+$quantity:$current-$quantity;
-            if($next<0) throw new RuntimeException('Saída maior que o estoque disponível.');
-            $average=(int)$product['average_cost_cents'];
-            if($type==='in'&&$unitCostCents!==null){
-                $r=$pdo->prepare('SELECT COALESCE(SUM(quantity),0) FROM stock_reservations WHERE tenant_id=? AND product_id=? AND status="reserved"');$r->execute([$tenantId,$productId]);$reserved=(float)$r->fetchColumn();$physical=max(0.0,$current+$reserved);$den=$physical+$quantity;$average=$den>0?(int)round((($physical*(int)$product['average_cost_cents'])+($quantity*$unitCostCents))/$den):$unitCostCents;
-            }
-
-            $pdo->prepare('UPDATE products SET stock_qty=?,average_cost_cents=? WHERE id=? AND tenant_id=?')->execute([$next,$average,$productId,$tenantId]);
-            $key='inventory:'.$tenantId.':'.$productId.':'.bin2hex(random_bytes(16));
-            $movementCost=$type==='in'?($unitCostCents??$average):$average;$totalCost=(int)round($movementCost*$quantity);
-            $pdo->prepare('INSERT INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents) VALUES (?,?,NULL,?,?,?,?,?)')->execute([$tenantId,$productId,$type,$quantity,$key,$movementCost,$totalCost]);
-            Auth::audit('inventory.'.$type,'product',(string)$productId,['quantity'=>$quantity,'before'=>$current,'after'=>$next,'reason'=>$reason,'user_id'=>$userId,'unit_cost_cents'=>$movementCost,'average_cost_cents'=>$average]);
-            return ['product_id'=>$productId,'before'=>$current,'after'=>$next,'type'=>$type,'quantity'=>$quantity,'average_cost_cents'=>$average];
+        Auth::requirePermission('inventory.manage');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');
+        $unit=(new OperatingUnitService())->requireCurrent();$unitId=(int)$unit['id'];$type=strtolower(trim($type));if(!in_array($type,['in','out'],true))throw new RuntimeException('Tipo de movimentação inválido.');if(!is_finite($quantity)||$quantity<=0)throw new RuntimeException('Quantidade inválida.');$reason=mb_substr(trim($reason),0,500);if($reason==='')throw new RuntimeException('Informe o motivo da movimentação.');if($unitCostCents!==null&&$unitCostCents<0)throw new RuntimeException('Custo unitário inválido.');
+        return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$unitId,$productId,$type,$quantity,$reason,$unitCostCents):array{
+            $product=$this->lockedProduct($pdo,$tenantId,$productId);if(!(int)$product['track_stock'])throw new RuntimeException('Este produto não está com controle de estoque ativo.');$this->ensureUnitRow($pdo,$tenantId,$unitId,$product);
+            $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM unit_inventory WHERE tenant_id=? AND unit_id=? AND product_id=? FOR UPDATE'));$s->execute([$tenantId,$unitId,$productId]);$inventory=$s->fetch();if(!$inventory)throw new RuntimeException('Saldo da unidade não encontrado.');
+            $current=(float)$inventory['stock_qty'];$next=$type==='in'?$current+$quantity:$current-$quantity;if($next<-.0005)throw new RuntimeException('Saída maior que o estoque disponível nesta unidade.');$average=(int)$inventory['average_cost_cents'];
+            if($type==='in'&&$unitCostCents!==null){$r=$pdo->prepare('SELECT COALESCE(SUM(quantity),0) FROM stock_reservations WHERE tenant_id=? AND unit_id=? AND product_id=? AND status="reserved"');$r->execute([$tenantId,$unitId,$productId]);$reserved=(float)$r->fetchColumn();$physical=max(0.0,$current+$reserved);$den=$physical+$quantity;$average=$den>0?(int)round((($physical*(int)$inventory['average_cost_cents'])+($quantity*$unitCostCents))/$den):$unitCostCents;}
+            $pdo->prepare('UPDATE unit_inventory SET stock_qty=?,average_cost_cents=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND unit_id=? AND product_id=?')->execute([$next,$average,$tenantId,$unitId,$productId]);$movementCost=$type==='in'?($unitCostCents??$average):$average;$key='inventory:'.$tenantId.':'.$unitId.':'.$productId.':'.bin2hex(random_bytes(12));$pdo->prepare('INSERT INTO stock_movements (tenant_id,unit_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents,reason,performed_by) VALUES (?,?,?,NULL,?,?,?,?,?,?,?)')->execute([$tenantId,$unitId,$productId,$type,$quantity,$key,$movementCost,(int)round($movementCost*$quantity),$reason,$userId]);$this->syncLegacyProduct($pdo,$tenantId,$productId);Auth::audit('inventory.'.$type,'product',(string)$productId,['unit_id'=>$unitId,'unit_name'=>$unit['name'],'quantity'=>$quantity,'before'=>$current,'after'=>$next,'reason'=>$reason,'unit_cost_cents'=>$movementCost,'average_cost_cents'=>$average]);return['product_id'=>$productId,'unit_id'=>$unitId,'before'=>$current,'after'=>$next,'type'=>$type,'quantity'=>$quantity,'average_cost_cents'=>$average];
         });
     }
 
-    public function setStock(int $productId,float $newQuantity,string $reason):array
+    public function setStock(int$productId,float$newQuantity,string$reason):array
     {
-        Auth::requirePermission('inventory.manage');
-        $tenantId=Auth::tenantId();
-        $userId=Auth::id();
-        if(!$tenantId||!$userId) throw new RuntimeException('Operador ou empresa inválidos.');
-        if(!is_finite($newQuantity)||$newQuantity<0) throw new RuntimeException('Novo saldo inválido.');
-        $reason=mb_substr(trim($reason),0,500);
-        if($reason==='') throw new RuntimeException('Informe o motivo do ajuste.');
-
-        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$productId,$newQuantity,$reason):array{
-            $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT id,name,stock_qty,track_stock,average_cost_cents FROM products WHERE id=? AND tenant_id=? FOR UPDATE'));
-            $stmt->execute([$productId,$tenantId]);
-            $product=$stmt->fetch();
-            if(!$product) throw new RuntimeException('Produto não encontrado.');
-            if(!(int)$product['track_stock']) throw new RuntimeException('Este produto não está com controle de estoque ativo.');
-
-            $current=(float)$product['stock_qty'];
-            if(abs($current-$newQuantity)<0.000001) return ['product_id'=>$productId,'before'=>$current,'after'=>$newQuantity,'type'=>'adjustment','quantity'=>0.0];
-            $delta=$newQuantity-$current;
-            $pdo->prepare('UPDATE products SET stock_qty=? WHERE id=? AND tenant_id=?')->execute([$newQuantity,$productId,$tenantId]);
-            $key='inventory-adjust:'.$tenantId.':'.$productId.':'.bin2hex(random_bytes(16));$average=(int)$product['average_cost_cents'];
-            $pdo->prepare('INSERT INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents) VALUES (?,?,NULL,"adjustment",?,?,?,?)')->execute([$tenantId,$productId,$delta,$key,$average,(int)round($average*$delta)]);
-            Auth::audit('inventory.adjustment','product',(string)$productId,['delta'=>$delta,'before'=>$current,'after'=>$newQuantity,'reason'=>$reason,'user_id'=>$userId,'average_cost_cents'=>$average]);
-            return ['product_id'=>$productId,'before'=>$current,'after'=>$newQuantity,'type'=>'adjustment','quantity'=>$delta];
-        });
+        Auth::requirePermission('inventory.manage');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');$unit=(new OperatingUnitService())->requireCurrent();$unitId=(int)$unit['id'];if(!is_finite($newQuantity)||$newQuantity<0)throw new RuntimeException('Novo saldo inválido.');$reason=mb_substr(trim($reason),0,500);if($reason==='')throw new RuntimeException('Informe o motivo do ajuste.');
+        return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$unitId,$unit,$productId,$newQuantity,$reason):array{$product=$this->lockedProduct($pdo,$tenantId,$productId);if(!(int)$product['track_stock'])throw new RuntimeException('Este produto não está com controle de estoque ativo.');$this->ensureUnitRow($pdo,$tenantId,$unitId,$product);$s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM unit_inventory WHERE tenant_id=? AND unit_id=? AND product_id=? FOR UPDATE'));$s->execute([$tenantId,$unitId,$productId]);$inventory=$s->fetch();$current=(float)$inventory['stock_qty'];if(abs($current-$newQuantity)<.000001)return['product_id'=>$productId,'unit_id'=>$unitId,'before'=>$current,'after'=>$newQuantity,'type'=>'adjustment','quantity'=>0.0];$delta=$newQuantity-$current;$pdo->prepare('UPDATE unit_inventory SET stock_qty=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND unit_id=? AND product_id=?')->execute([$newQuantity,$tenantId,$unitId,$productId]);$average=(int)$inventory['average_cost_cents'];$key='inventory-adjust:'.$tenantId.':'.$unitId.':'.$productId.':'.bin2hex(random_bytes(12));$pdo->prepare('INSERT INTO stock_movements (tenant_id,unit_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents,reason,performed_by) VALUES (?,?,?,NULL,"adjustment",?,?,?,?,?,?)')->execute([$tenantId,$unitId,$productId,$delta,$key,$average,(int)round($average*$delta),$reason,$userId]);$this->syncLegacyProduct($pdo,$tenantId,$productId);Auth::audit('inventory.adjustment','product',(string)$productId,['unit_id'=>$unitId,'unit_name'=>$unit['name'],'delta'=>$delta,'before'=>$current,'after'=>$newQuantity,'reason'=>$reason]);return['product_id'=>$productId,'unit_id'=>$unitId,'before'=>$current,'after'=>$newQuantity,'type'=>'adjustment','quantity'=>$delta];});
     }
+
+    public function waste(int$productId,float$quantity,string$reasonType,string$reason=''):int
+    {
+        Auth::requirePermission('inventory.manage');$allowed=['expired','breakage','production_error','internal_use','courtesy','waste','other'];if(!in_array($reasonType,$allowed,true))throw new RuntimeException('Tipo de perda inválido.');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');if($quantity<=0)throw new RuntimeException('Quantidade inválida.');$unit=(new OperatingUnitService())->requireCurrent();$unitId=(int)$unit['id'];$reason=mb_substr(trim($reason),0,500);
+        return Database::transaction(function(PDO$pdo)use($tenantId,$userId,$unitId,$productId,$quantity,$reasonType,$reason):int{$product=$this->lockedProduct($pdo,$tenantId,$productId);$this->ensureUnitRow($pdo,$tenantId,$unitId,$product);$s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM unit_inventory WHERE tenant_id=? AND unit_id=? AND product_id=? FOR UPDATE'));$s->execute([$tenantId,$unitId,$productId]);$inventory=$s->fetch();$current=(float)$inventory['stock_qty'];if($quantity-$current>.0005)throw new RuntimeException('Perda maior que o saldo disponível.');$cost=(int)$inventory['average_cost_cents'];$pdo->prepare('UPDATE unit_inventory SET stock_qty=stock_qty-?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND unit_id=? AND product_id=?')->execute([$quantity,$tenantId,$unitId,$productId]);$pdo->prepare('INSERT INTO inventory_waste (tenant_id,unit_id,product_id,quantity,reason_type,reason,cost_cents,user_id) VALUES (?,?,?,?,?,?,?,?)')->execute([$tenantId,$unitId,$productId,$quantity,$reasonType,$reason?:null,(int)round($cost*$quantity),$userId]);$id=(int)$pdo->lastInsertId();$key='waste:'.$id;$pdo->prepare('INSERT INTO stock_movements (tenant_id,unit_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents,reason,performed_by) VALUES (?,?,?,NULL,"out",?,?,?,?,?,?)')->execute([$tenantId,$unitId,$productId,$quantity,$key,$cost,(int)round($cost*$quantity),$reasonType.($reason?': '.$reason:''),$userId]);$this->syncLegacyProduct($pdo,$tenantId,$productId);Auth::audit('inventory.waste','product',(string)$productId,['unit_id'=>$unitId,'quantity'=>$quantity,'reason_type'=>$reasonType,'reason'=>$reason]);return$id;});
+    }
+
+    private function lockedProduct(PDO$pdo,int$tenantId,int$productId):array{$s=$pdo->prepare(Database::portableSql($pdo,'SELECT id,name,stock_qty,track_stock,average_cost_cents,min_stock_qty FROM products WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$productId,$tenantId]);$product=$s->fetch();if(!$product)throw new RuntimeException('Produto não encontrado.');return$product;}
+    private function ensureUnitRow(PDO$pdo,int$tenantId,int$unitId,array$product):void{$sql=Database::portableSql($pdo,'INSERT IGNORE INTO unit_inventory (tenant_id,unit_id,product_id,stock_qty,average_cost_cents,min_stock_qty) VALUES (?,?,?,?,?,?)');$pdo->prepare($sql)->execute([$tenantId,$unitId,$product['id'],0,$product['average_cost_cents']??0,$product['min_stock_qty']??0]);}
+    private function syncLegacyProduct(PDO$pdo,int$tenantId,int$productId):void{$s=$pdo->prepare('SELECT COALESCE(SUM(stock_qty),0) qty,CASE WHEN COALESCE(SUM(stock_qty),0)>0 THEN CAST(ROUND(SUM(stock_qty*average_cost_cents)/SUM(stock_qty)) AS INTEGER) ELSE MAX(average_cost_cents) END avg_cost FROM unit_inventory WHERE tenant_id=? AND product_id=?');$s->execute([$tenantId,$productId]);$row=$s->fetch()?:['qty'=>0,'avg_cost'=>0];$pdo->prepare('UPDATE products SET stock_qty=?,average_cost_cents=? WHERE id=? AND tenant_id=?')->execute([(float)$row['qty'],(int)($row['avg_cost']??0),$productId,$tenantId]);}
 }
