@@ -35,6 +35,7 @@ final class OrderService
                 if($current!=='ready')throw new RuntimeException('O pedido precisa estar pronto antes de ser servido.');
             }
             if($target==='cancelled'){
+                if($source==='panel'&&!Auth::can('cancellations.approve'))throw new RuntimeException('Solicite o cancelamento para autorização do Gerente/ADM.');
                 $paid=$pdo->prepare('SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE tenant_id=? AND order_id=? AND status="paid"');$paid->execute([$tenantId,$orderId]);$paidCents=(int)$paid->fetchColumn();
                 if($paidCents>0||$order['payment_status']==='paid')throw new RuntimeException('Pedido possui valor já recebido. Estorne os pagamentos antes de cancelar.');
                 $active=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized")');$active->execute([$tenantId,$orderId]);if((int)$active->fetchColumn()>0)throw new RuntimeException('Há uma cobrança em processamento. Aguarde ou encerre a cobrança antes de cancelar.');
