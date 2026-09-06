@@ -56,7 +56,7 @@ class MainActivity : FragmentActivity() {
             EventMenuTheme {
                 EventMenuGoApp(
                     viewModel = vm,
-                    onScan = { scanQr(vm) },
+                    onScan = ::scanQr,
                     onBiometric = { authenticateBiometric(vm) },
                     onTapOn = ::launchTapOn,
                 )
@@ -64,13 +64,13 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun scanQr(vm: MainViewModel) {
+    private fun scanQr(onResult: (String) -> Unit) {
         val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE, Barcode.FORMAT_AZTEC, Barcode.FORMAT_CODE_128)
             .enableAutoZoom()
             .build()
         GmsBarcodeScanning.getClient(this, options).startScan()
-            .addOnSuccessListener { barcode -> barcode.rawValue?.let(vm::resolveQr) }
+            .addOnSuccessListener { barcode -> barcode.rawValue?.takeIf { it.isNotBlank() }?.let(onResult) }
     }
 
     private fun launchTapOn(request: TapOnRequest, onResult: (String?) -> Unit) {
