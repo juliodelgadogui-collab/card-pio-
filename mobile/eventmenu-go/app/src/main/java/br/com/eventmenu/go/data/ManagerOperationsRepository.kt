@@ -68,12 +68,34 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
         return ManagerDetails(cash, delivery, problems)
     }
 
+    suspend fun reopenCandidates(): List<ManagerReopenCandidate> {
+        val array = api.getManager("reopen-candidates", requireToken()).optJSONArray("orders") ?: JSONArray()
+        return buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                add(
+                    ManagerReopenCandidate(
+                        id = item.optInt("id"),
+                        channel = item.optString("channel"),
+                        paymentStatus = item.optString("payment_status"),
+                        totalCents = item.optInt("total_cents"),
+                        customerName = item.optString("customer_name").ifBlank { "Consumidor" },
+                        tableName = item.optString("table_name"),
+                        updatedAt = item.optString("updated_at"),
+                        eligible = item.optInt("reopen_eligible") == 1,
+                        blockReason = item.optString("reopen_block_reason"),
+                    )
+                )
+            }
+        }
+    }
+
     suspend fun transferDelivery(orderId: Int, deliveryUserId: Int) {
         api.postManager("transfer-delivery", requireToken(), JSONObject().put("order_id", orderId).put("delivery_user_id", deliveryUserId))
     }
 
-    suspend fun cancelOrder(orderId: Int) {
-        api.postManager("cancel-order", requireToken(), JSONObject().put("order_id", orderId))
+    suspend fun reopenOrder(orderId: Int, reason: String) {
+        api.postManager("reopen-order", requireToken(), JSONObject().put("order_id", orderId).put("reason", reason))
     }
 
     private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)
