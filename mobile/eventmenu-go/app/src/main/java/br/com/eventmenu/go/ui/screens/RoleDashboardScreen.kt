@@ -30,6 +30,9 @@ fun RoleDashboardScreen(
     val session = state.session ?: return
     val permissions = session.permissions
     val mode = state.mode ?: return
+    val shift = state.workShift
+    val tenant = session.user.tenantName.ifBlank { "Empresa #${session.user.tenantId}" }
+    val unit = shift?.unitName?.ifBlank { "Principal" } ?: "Principal"
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(16.dp),
@@ -37,7 +40,9 @@ fun RoleDashboardScreen(
     ) {
         item {
             Text(greeting() + ", ${session.user.name}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("${dashboardModeLabel(mode)} · turno desde ${state.workShift?.startedAt.orEmpty()}")
+            Text("Empresa: $tenant", style = MaterialTheme.typography.titleMedium)
+            Text("Unidade: $unit")
+            Text("${dashboardModeLabel(mode)} · turno desde ${shift?.startedAt.orEmpty()}")
         }
 
         when (mode) {
