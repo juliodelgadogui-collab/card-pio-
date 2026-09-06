@@ -91,6 +91,20 @@ class PrinterViewModel(
         _state.update { it.copy(loading = false) }
     }
 
+    fun printGroupReceipt(groupId: Int) = viewModelScope.launch {
+        if (groupId < 1) return@launch
+        _state.update { it.copy(loading = true, error = null) }
+        runCatching {
+            val text = receipts.shareText(receipts.group(groupId))
+            withContext(Dispatchers.IO) { printer.print(text) }
+        }.onSuccess {
+            _state.update { it.copy(message = "Comprovante da divisão #$groupId impresso.") }
+        }.onFailure { error ->
+            _state.update { it.copy(error = error.message ?: "Falha ao imprimir comprovante da divisão.") }
+        }
+        _state.update { it.copy(loading = false) }
+    }
+
     fun autoPrintReceipt(orderId: Int) = printReceipt(orderId, automatic = true)
 
     fun printTest() = printText(
