@@ -48,6 +48,7 @@ import br.com.eventmenu.go.ManagerActionsViewModel
 import br.com.eventmenu.go.PrinterViewModel
 import br.com.eventmenu.go.ProfileSummaryViewModel
 import br.com.eventmenu.go.ReceiptViewModel
+import br.com.eventmenu.go.UniversalQrViewModel
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.printing.BluetoothEscPosPrinter
@@ -63,6 +64,7 @@ import br.com.eventmenu.go.ui.screens.KitchenScreen
 import br.com.eventmenu.go.ui.screens.LoginScreen
 import br.com.eventmenu.go.ui.screens.ManagerScreen
 import br.com.eventmenu.go.ui.screens.ModePickerScreen
+import br.com.eventmenu.go.ui.screens.MyEmployeeQrDialog
 import br.com.eventmenu.go.ui.screens.NotificationsScreen
 import br.com.eventmenu.go.ui.screens.OrdersScreen
 import br.com.eventmenu.go.ui.screens.PosScreen
@@ -70,11 +72,12 @@ import br.com.eventmenu.go.ui.screens.QrResultDialog
 import br.com.eventmenu.go.ui.screens.ShiftStartScreen
 import br.com.eventmenu.go.ui.screens.TableAccountScreen
 import br.com.eventmenu.go.ui.screens.TablesScreen
+import br.com.eventmenu.go.ui.screens.UniversalQrResultDialog
 
 @Composable
 fun EventMenuGoApp(
     viewModel: MainViewModel,
-    onScan: () -> Unit,
+    onScan: ((String) -> Unit) -> Unit,
     onBiometric: () -> Unit,
     onTapOn: (TapOnRequest, (String?) -> Unit) -> Unit,
 ) {
@@ -92,12 +95,23 @@ fun EventMenuGoApp(
     val deviceState by deviceViewModel.state.collectAsState()
     val eventBarViewModel: EventBarViewModel = composeViewModel(factory = EventBarViewModel.Factory(app.eventBarRepository))
     val eventBarState by eventBarViewModel.state.collectAsState()
+    val universalQrViewModel: UniversalQrViewModel = composeViewModel(factory = UniversalQrViewModel.Factory(app.universalQrRepository))
+    val universalQrState by universalQrViewModel.state.collectAsState()
     val printerPreferences = remember(app) { PrinterPreferences(app) }
     val bluetoothPrinter = remember(app) { BluetoothEscPosPrinter(app, printerPreferences) }
     val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter, app.receiptRepository))
     val printerState by printerViewModel.state.collectAsState()
     val paymentBaseline = remember { mutableStateMapOf<Int, String>() }
     var baselineShiftId by remember { mutableStateOf<Int?>(null) }
+    var pendingDeliveryQrOrderId by remember { mutableStateOf<Int?>(null) }
+
+    fun startScan() {
+        onScan { value ->
+            val trimmed = value.trim()
+            val universal = trimmed.contains("EVENTMENU:QR:", ignoreCase = true) || Regex("^[A-Fa-f0-9]{64}$").matches(trimmed)
+            if (universal) universalQrViewModel.resolve(trimmed) else viewModel.resolveQr(trimmed)
+        }
+    }
 
     LaunchedEffect(state.error, state.message) {
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
@@ -106,6 +120,10 @@ fun EventMenuGoApp(
     LaunchedEffect(eventBarState.error, eventBarState.message) {
         (eventBarState.error ?: eventBarState.message)?.let { snackbar.showSnackbar(it) }
         if (eventBarState.error != null || eventBarState.message != null) eventBarViewModel.clearFeedback()
+    }
+    LaunchedEffect(universalQrState.error, universalQrState.message) {
+        (universalQrState.error ?: universalQrState.message)?.let { snackbar.showSnackbar(it) }
+        if (universalQrState.error != null || universalQrState.message != null) universalQrViewModel.clearFeedback()
     }
     LaunchedEffect(managerActionState.error, managerActionState.message) {
         (managerActionState.error ?: managerActionState.message)?.let { snackbar.showSnackbar(it) }
@@ -161,6 +179,7 @@ fun EventMenuGoApp(
         val shiftId = state.workShift?.id
         baselineShiftId = shiftId
         paymentBaseline.clear()
+        pendingDeliveryQrOrderId = null
         state.orders.forEach { paymentBaseline[it.id] = it.paymentStatus }
         profileViewModel.bindShift(shiftId)
     }
@@ -169,9 +188,7 @@ fun EventMenuGoApp(
         if (baselineShiftId != shiftId) return@LaunchedEffect
         state.orders.forEach { order ->
             val previous = paymentBaseline[order.id]
-            if (previous != null && previous != "paid" && order.paymentStatus == "paid") {
-                printerViewModel.autoPrintReceipt(order.id)
-            }
+            if (previous != null && previous != "paid" && order.paymentStatus == "paid") printerViewModel.autoPrintReceipt(order.id)
             paymentBaseline[order.id] = order.paymentStatus
         }
         val visibleIds = state.orders.mapTo(mutableSetOf()) { it.id }
@@ -204,7 +221,8 @@ fun EventMenuGoApp(
         return
     }
 
-    val permissions = state.session!!.permissions
+    val session = state.session!!
+    val permissions = session.permissions
     val mode = state.mode!!
     val barActive = eventBarState.eventId != null
     val nav = buildList {
@@ -225,7 +243,7 @@ fun EventMenuGoApp(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = {
-            if (!barActive) FloatingActionButton(onClick = onScan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear") }
+            if (!barActive) FloatingActionButton(onClick = ::startScan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear") }
         },
         bottomBar = {
             if (!barActive) {
@@ -306,7 +324,16 @@ fun EventMenuGoApp(
                     AppScreen.TABLE_ACCOUNT -> TableAccountScreen(state.tableAccount, "payments" in permissions, viewModel::receiveTableOrder, viewModel::refreshTableAccount, viewModel::closeTableAccount)
                     AppScreen.ORDERS -> OrdersScreen(state.orders, viewModel::refreshOrders, viewModel::changeOrderStatus)
                     AppScreen.KITCHEN -> KitchenScreen(state.kitchenTickets, viewModel::refreshKitchen, viewModel::kitchenStatus)
-                    AppScreen.DISPATCH -> DispatchScreen(state.orders, state.deliveryUsers, "delivery_assign" in permissions, state.dispatchFocusOrderId, viewModel::refreshDispatch, viewModel::dispatchReady, viewModel::assignDelivery)
+                    AppScreen.DISPATCH -> DispatchScreen(
+                        orders = state.orders,
+                        deliveryUsers = state.deliveryUsers,
+                        canAssignDelivery = "delivery_assign" in permissions,
+                        focusOrderId = state.dispatchFocusOrderId,
+                        onRefresh = viewModel::refreshDispatch,
+                        onDispatch = viewModel::dispatchReady,
+                        onAssignDelivery = viewModel::assignDelivery,
+                        onScanDelivery = { orderId -> pendingDeliveryQrOrderId = orderId; startScan() },
+                    )
                     AppScreen.CASH -> CashOperationsScreen(state.cashOpen, state.cashSummary, viewModel::openCash, viewModel::addCashSupply, viewModel::addCashWithdrawal, viewModel::closeCash, viewModel::refreshCash)
                     AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, state.pixCharge, viewModel::changeOrderStatus, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, { orderId -> printerViewModel.printReceipt(orderId) }, viewModel::pollPixStatus, viewModel::dismissPix)
                     AppScreen.EVENTS -> EventModeScreen(
@@ -322,13 +349,16 @@ fun EventMenuGoApp(
                             if (event != null) eventBarViewModel.open(event.id, event.name)
                         },
                         onRefresh = viewModel::refreshEvents,
-                        onScan = onScan,
+                        onScan = ::startScan,
                     )
                     AppScreen.PROFILE -> EmployeeProfileScreen(
                         state = state,
                         shiftSummary = profileState.summary,
                         summaryLoading = profileState.loading,
                         onRefreshSummary = profileViewModel::refresh,
+                        onGenerateMyQr = {
+                            universalQrViewModel.issueSelf(session.user.id, session.user.name, state.workShift?.mode == "delivery")
+                        },
                         deviceState = deviceState,
                         onRefreshDevice = deviceViewModel::refresh,
                         printerState = printerState,
@@ -349,10 +379,60 @@ fun EventMenuGoApp(
                     )
                 }
             }
-            if (state.loading || eventBarState.loading || receiptState.loading || printerState.loading || deviceState.loading) {
+            if (state.loading || eventBarState.loading || universalQrState.loading || receiptState.loading || printerState.loading || deviceState.loading) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
             }
         }
     }
+
     if (!barActive) state.qr?.let { QrResultDialog(it, viewModel::clearQr, viewModel::processCurrentQr) }
+
+    universalQrState.issued?.let { issued ->
+        MyEmployeeQrDialog(
+            qr = issued,
+            onRevoke = { universalQrViewModel.revokeSelf(session.user.id, issued.type == "delivery_user") },
+            onDismiss = universalQrViewModel::clearIssued,
+        )
+    }
+
+    universalQrState.resolved?.let { result ->
+        val pendingOrder = pendingDeliveryQrOrderId
+        val table = if (result.type == "tab") state.tables.firstOrNull { it.tabId == result.entityId } else null
+        val actionLabel = when {
+            result.type == "delivery_user" && pendingOrder != null -> "ATRIBUIR AO PEDIDO #$pendingOrder"
+            result.type == "event" && mode == AppMode.EVENTS -> "ABRIR EVENTO"
+            result.type == "tab" && table != null -> "ABRIR CONTA"
+            else -> null
+        }
+        val actionEnabled = when {
+            result.type == "delivery_user" && pendingOrder != null -> result.deliveryShiftOpen
+            else -> true
+        }
+        val hint = when {
+            result.type == "delivery_user" && pendingOrder != null && !result.deliveryShiftOpen -> "Este funcionário não está com turno Delivery aberto e não pode receber o pedido."
+            result.type == "tab" && table == null -> "A comanda foi identificada, mas não está disponível no salão carregado deste turno."
+            else -> ""
+        }
+        UniversalQrResultDialog(
+            result = result,
+            actionLabel = actionLabel,
+            actionEnabled = actionEnabled,
+            actionHint = hint,
+            onAction = if (actionLabel == null) null else {
+                {
+                    when {
+                        result.type == "delivery_user" && pendingOrder != null -> viewModel.assignDelivery(pendingOrder, result.entityId)
+                        result.type == "event" && mode == AppMode.EVENTS -> viewModel.selectEvent(result.entityId)
+                        result.type == "tab" && table != null -> viewModel.openTableAccount(table)
+                    }
+                    pendingDeliveryQrOrderId = null
+                    universalQrViewModel.clearResolved()
+                }
+            },
+            onDismiss = {
+                pendingDeliveryQrOrderId = null
+                universalQrViewModel.clearResolved()
+            },
+        )
+    }
 }
