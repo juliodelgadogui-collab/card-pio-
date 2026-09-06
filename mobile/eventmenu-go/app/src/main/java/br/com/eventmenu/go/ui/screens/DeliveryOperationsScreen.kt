@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import br.com.eventmenu.go.data.DeliveryProgress
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.PixCharge
 import com.google.zxing.BarcodeFormat
@@ -43,8 +44,13 @@ import kotlinx.coroutines.delay
 @Composable
 fun DeliveryOperationsScreen(
     orders: List<Order>,
+    progress: Map<Int, DeliveryProgress>,
     pixCharge: PixCharge?,
-    onStatus: (Int, String) -> Unit,
+    onRefreshProgress: () -> Unit,
+    onPickup: (Int) -> Unit,
+    onStartRoute: (Int) -> Unit,
+    onArrive: (Int) -> Unit,
+    onComplete: (Int) -> Unit,
     onPix: (Int, String) -> Unit,
     onNfc: (Int) -> Unit,
     onCash: (Int, Int) -> Unit,
@@ -57,9 +63,20 @@ fun DeliveryOperationsScreen(
     var pixOrder by remember { mutableStateOf<Order?>(null) }
     var cashOrder by remember { mutableStateOf<Order?>(null) }
     val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
+
+    LaunchedEffect(deliveries.map { it.id }) { onRefreshProgress() }
+
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { Text("Minhas entregas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black) }
+        item {
+            Text("Minhas entregas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text("Retirada, rota, chegada e pagamento são confirmados pela API EventMenu.")
+        }
         items(deliveries, key = { it.id }) { order ->
+            val step = progress[order.id]
+            val pickedUp = step?.pickedUp == true
+            val routeStarted = step?.routeStarted == true || order.status == "out_for_delivery"
+            val arrived = step?.arrived == true
+
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -74,15 +91,28 @@ fun DeliveryOperationsScreen(
                             OutlinedButton(onClick = { openMessage(context, order.customerPhone, order.id) }, modifier = Modifier.weight(1f)) { Text("💬 MENSAGEM") }
                         }
                     }
+
+                    DeliveryStepIndicator(pickedUp, routeStarted, arrived)
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
-                    if (order.status == "ready") Button(onClick = { onStatus(order.id, "out_for_delivery") }, modifier = Modifier.fillMaxWidth()) { Text("RETIRAR PEDIDO") }
+
+                    if (order.status == "ready" && !pickedUp) {
+                        Button(onClick = { onPickup(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("RETIRAR PEDIDO") }
+                    }
+                    if (order.status == "ready" && pickedUp) {
+                        Button(onClick = { onStartRoute(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("INICIAR ROTA") }
+                    }
+
                     if (order.status == "out_for_delivery") {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { openGoogleMaps(context, order.deliveryAddress) }, modifier = Modifier.weight(1f)) { Text("MAPS") }
                             OutlinedButton(onClick = { openWaze(context, order.deliveryAddress) }, modifier = Modifier.weight(1f)) { Text("WAZE") }
                         }
-                        if (order.paymentStatus != "paid") {
-                            Text("Como o cliente deseja pagar?", fontWeight = FontWeight.Bold)
+
+                        if (!arrived) {
+                            Button(onClick = { onArrive(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CHEGUEI") }
+                            Text("PIX, cartão NFC e dinheiro serão liberados somente depois que o servidor registrar sua chegada.")
+                        } else if (order.paymentStatus != "paid") {
+                            Text("✅ Chegada confirmada · Como o cliente deseja pagar?", fontWeight = FontWeight.Bold)
                             Button(onClick = { pixOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("PIX") }
                             Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO NFC") }
                             OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("DINHEIRO") }
@@ -91,13 +121,14 @@ fun DeliveryOperationsScreen(
                                 OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("ENVIAR") }
                                 OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("IMPRIMIR") }
                             }
-                            Button(onClick = { onStatus(order.id, "completed") }, modifier = Modifier.fillMaxWidth()) { Text("CONCLUIR ENTREGA") }
+                            Button(onClick = { onComplete(order.id) }, enabled = arrived, modifier = Modifier.fillMaxWidth()) { Text("CONCLUIR ENTREGA") }
                         }
                     }
                 }
             }
         }
         if (deliveries.isEmpty()) item { Text("Nenhuma entrega atribuída agora.") }
+        item { OutlinedButton(onClick = onRefreshProgress, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR ETAPAS") } }
     }
 
     pixOrder?.let { order ->
@@ -107,6 +138,18 @@ fun DeliveryOperationsScreen(
         CashReceiveDialog(order, onDismiss = { cashOrder = null }, onConfirm = { received -> cashOrder = null; onCash(order.id, received) })
     }
     pixCharge?.let { PixWaitingDialog(it, onPollPix, onDismissPix) }
+}
+
+@Composable
+private fun DeliveryStepIndicator(pickedUp: Boolean, routeStarted: Boolean, arrived: Boolean) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Etapas", fontWeight = FontWeight.Bold)
+            Text((if (pickedUp) "✅" else "○") + " Pedido retirado")
+            Text((if (routeStarted) "✅" else "○") + " Rota iniciada")
+            Text((if (arrived) "✅" else "○") + " Cheguei ao cliente")
+        }
+    }
 }
 
 @Composable
