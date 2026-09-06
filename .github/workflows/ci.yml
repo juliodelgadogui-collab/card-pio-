@@ -47,13 +47,20 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
-      - name: Install Android SDK 37
-        run: sdkmanager "platforms;android-37" "build-tools;36.0.0"
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-      - name: Compile EventMenu GO
-        run: gradle :app:compileDebugKotlin --stacktrace --no-daemon
+      - name: Assemble EventMenu GO debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - name: Upload EventMenu GO debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventmenu-go-debug-apk
+          path: mobile/eventmenu-go/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
 
   sqlite:
     runs-on: ubuntu-latest
