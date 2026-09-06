@@ -1,6 +1,6 @@
 package br.com.eventmenu.go.data
 
-data class AppUser(val id: Int, val tenantId: Int, val name: String, val email: String, val role: String)
+data class AppUser(val id: Int, val tenantId: Int, val name: String, val email: String, val role: String, val tenantName: String = "")
 data class WorkShift(
     val id: Int,
     val mode: String,
