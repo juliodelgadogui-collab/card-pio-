@@ -17,7 +17,8 @@ function gor_out(array $data,int $status=200):never{http_response_code($status);
 
 try{
     $auth=new ApiAuthService();$token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')gor_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
-    $auth->authenticate($token,$deviceId);$action=(string)($_GET['action']??'order');
-    if($action==='order')gor_out(['ok'=>true,'receipt'=>(new ReceiptService())->order((int)($_GET['order_id']??0))]);
+    $auth->authenticate($token,$deviceId);$action=(string)($_GET['action']??'order');$service=new ReceiptService();
+    if($action==='order')gor_out(['ok'=>true,'receipt'=>$service->order((int)($_GET['order_id']??0))]);
+    if($action==='group')gor_out(['ok'=>true,'receipt'=>$service->paymentGroup((int)($_GET['group_id']??0))]);
     gor_out(['ok'=>false,'error'=>'Endpoint de comprovante não encontrado.'],404);
 }catch(RuntimeException $e){gor_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))gor_out(['ok'=>false,'error'=>$e->getMessage()],500);gor_out(['ok'=>false,'error'=>'Erro interno.'],500);}
