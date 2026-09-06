@@ -1,6 +1,9 @@
 package br.com.eventmenu.go.data
 
+import br.com.eventmenu.go.security.SecureSessionStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -9,7 +12,11 @@ import java.net.URLEncoder
 
 class ApiException(message: String, val status: Int = 0) : RuntimeException(message)
 
-class ApiClient(private val baseUrl: String, private val deviceId: String) {
+class ApiClient(
+    private val baseUrl: String,
+    private val deviceId: String,
+    private val sessionStore: SecureSessionStore? = null,
+) {
     suspend fun get(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api.php", "GET", action, token, query, null)
     suspend fun post(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
@@ -55,7 +62,31 @@ class ApiClient(private val baseUrl: String, private val deviceId: String) {
     suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go-units.php", "POST", action, token, emptyMap(), body)
 
-    private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
+    private suspend fun request(
+        path: String,
+        method: String,
+        action: String,
+        token: String?,
+        query: Map<String, String>,
+        body: JSONObject?,
+    ): JSONObject = withContext(Dispatchers.IO) {
+        try {
+            execute(path, method, action, token, query, body)
+        } catch (error: ApiException) {
+            if (token == null || action == "refresh" || !shouldRefresh(error) || sessionStore == null) throw@withContext error
+            val refreshed = refreshAccessToken(token)
+            execute(path, method, action, refreshed, query, body)
+        }
+    }
+
+    private fun execute(
+        path: String,
+        method: String,
+        action: String,
+        token: String?,
+        query: Map<String, String>,
+        body: JSONObject?,
+    ): JSONObject {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
         val qs = params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}" }
         val connection = URL(baseUrl.trimEnd('/') + "/$path?$qs").openConnection() as HttpURLConnection
@@ -76,7 +107,48 @@ class ApiClient(private val baseUrl: String, private val deviceId: String) {
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val json = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("ok", false).put("error", "Resposta inválida do servidor.") }
             if (status !in 200..299 || !json.optBoolean("ok", false)) throw ApiException(json.optString("error", "Falha na API."), status)
-            json
+            return json
         } finally { connection.disconnect() }
+    }
+
+    private fun shouldRefresh(error: ApiException): Boolean {
+        val message = error.message.orEmpty()
+        return error.status == 401 || (error.status == 422 && (
+            message.contains("Sessão do app expirada", ignoreCase = true) ||
+                message.contains("Token inválido", ignoreCase = true)
+            ))
+    }
+
+    private suspend fun refreshAccessToken(failedToken: String): String = refreshMutex.withLock {
+        val store = sessionStore ?: throw ApiException("Sessão não encontrada.", 401)
+        val current = store.token()
+        if (!current.isNullOrBlank() && current != failedToken) return@withLock current
+        val refresh = store.refreshToken() ?: throw ApiException("Faça login novamente.", 401)
+        try {
+            val root = execute(
+                path = "api.php",
+                method = "POST",
+                action = "refresh",
+                token = null,
+                query = emptyMap(),
+                body = JSONObject().put("refresh_token", refresh).put("device_id", deviceId),
+            )
+            val access = root.getString("token")
+            val nextRefresh = root.getString("refresh_token")
+            store.saveSessionTokens(
+                accessToken = access,
+                refreshToken = nextRefresh,
+                accessExpiresAt = root.optString("expires_at"),
+                refreshExpiresAt = root.optString("refresh_expires_at"),
+            )
+            access
+        } catch (error: Throwable) {
+            store.clearSessionTokens()
+            throw error
+        }
+    }
+
+    companion object {
+        private val refreshMutex = Mutex()
     }
 }
