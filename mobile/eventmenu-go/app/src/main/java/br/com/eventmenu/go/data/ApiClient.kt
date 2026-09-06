@@ -4,7 +4,6 @@ import br.com.eventmenu.go.security.SecureSessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -44,16 +43,18 @@ class ApiClient(
     suspend fun getUnits(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-units.php", "GET", action, token, query, null)
     suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-units.php", "POST", action, token, emptyMap(), body)
 
-    private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
-        val store = sessionStore ?: sharedSessionStore
-        try {
-            execute(path, method, action, token, query, body).also { result ->
-                if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
+    private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject {
+        return kotlinx.coroutines.withContext(Dispatchers.IO) {
+            val store = sessionStore ?: sharedSessionStore
+            try {
+                execute(path, method, action, token, query, body).also { result ->
+                    if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
+                }
+            } catch (error: ApiException) {
+                if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) throw@withContext error
+                val refreshed = refreshAccessToken(store, token)
+                execute(path, method, action, refreshed, query, body)
             }
-        } catch (error: ApiException) {
-            if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) throw@withContext error
-            val refreshed = refreshAccessToken(store, token)
-            execute(path, method, action, refreshed, query, body)
         }
     }
 
