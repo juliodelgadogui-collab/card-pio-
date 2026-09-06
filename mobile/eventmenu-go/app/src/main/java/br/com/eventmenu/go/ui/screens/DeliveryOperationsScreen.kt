@@ -67,7 +67,13 @@ fun DeliveryOperationsScreen(
                         Text(moneyDelivery(order.totalCents), fontWeight = FontWeight.Black)
                     }
                     if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
-                    if (order.customerPhone.isNotBlank()) Text("Telefone: ${order.customerPhone}")
+                    if (order.customerPhone.isNotBlank()) {
+                        Text("Telefone: ${order.customerPhone}")
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { openDialer(context, order.customerPhone) }, modifier = Modifier.weight(1f)) { Text("📞 LIGAR") }
+                            OutlinedButton(onClick = { openMessage(context, order.customerPhone, order.id) }, modifier = Modifier.weight(1f)) { Text("💬 MENSAGEM") }
+                        }
+                    }
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
                     if (order.status == "ready") Button(onClick = { onStatus(order.id, "out_for_delivery") }, modifier = Modifier.fillMaxWidth()) { Text("RETIRAR PEDIDO") }
                     if (order.status == "out_for_delivery") {
@@ -161,6 +167,8 @@ internal fun qrBitmap(text: String): Bitmap? = runCatching {
 }.getOrNull()
 
 private fun copy(context: Context, text: String) { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("PIX EventMenu", text)) }
+private fun openDialer(context: Context, phone: String) { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(phone)))) }
+private fun openMessage(context: Context, phone: String, orderId: Int) { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phone))).putExtra("sms_body", "Olá! Estou chegando com seu pedido EventMenu #$orderId.")) }
 private fun openGoogleMaps(context: Context, address: String) { val uri=Uri.parse("google.navigation:q="+Uri.encode(address)); val intent=Intent(Intent.ACTION_VIEW,uri).setPackage("com.google.android.apps.maps"); runCatching{context.startActivity(intent)}.onFailure{context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0?q="+Uri.encode(address))))} }
 private fun openWaze(context: Context, address: String) { val uri=Uri.parse("https://waze.com/ul?q="+Uri.encode(address)+"&navigate=yes"); context.startActivity(Intent(Intent.ACTION_VIEW,uri)) }
 internal fun moneyDelivery(cents:Int)="R$ %.2f".format(cents/100.0).replace('.',',')
