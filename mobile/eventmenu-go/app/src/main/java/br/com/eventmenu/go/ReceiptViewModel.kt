@@ -22,8 +22,17 @@ class ReceiptViewModel(private val repo: ReceiptRepository) : ViewModel() {
 
     fun prepare(orderId: Int) = viewModelScope.launch {
         if (orderId < 1) return@launch
+        prepareText { repo.shareText(repo.order(orderId)) }
+    }
+
+    fun prepareGroup(groupId: Int) = viewModelScope.launch {
+        if (groupId < 1) return@launch
+        prepareText { repo.shareText(repo.group(groupId)) }
+    }
+
+    private suspend fun prepareText(block: suspend () -> String) {
         _state.update { it.copy(loading = true, error = null, shareText = null) }
-        runCatching { repo.shareText(repo.order(orderId)) }
+        runCatching { block() }
             .onSuccess { text -> _state.update { it.copy(loading = false, shareText = text) } }
             .onFailure { error -> _state.update { it.copy(loading = false, error = error.message ?: "Falha ao gerar comprovante.") } }
     }
