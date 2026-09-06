@@ -37,12 +37,16 @@ fun DispatchScreen(
     unassignedUnitOrders: List<UnassignedUnitDelivery> = emptyList(),
     units: List<OperatingUnit> = emptyList(),
     canRouteUnit: Boolean = false,
+    canAcceptOrders: Boolean = false,
     onRefresh: () -> Unit,
     onDispatch: (Order) -> Unit,
+    onAccept: (Int) -> Unit = {},
+    onOpenOrder: (Int) -> Unit = {},
     onAssignDelivery: (Int, Int) -> Unit,
     onScanDelivery: (Int) -> Unit,
     onAssignUnit: (Int, Int) -> Unit = { _, _ -> },
 ) {
+    val pending = orders.filter { it.status == "pending" && it.channel in setOf("counter", "pickup", "table", "delivery") }.sortedBy { it.id }
     val ready = orders
         .filter { it.status == "ready" && it.channel in setOf("counter", "pickup", "table", "delivery") }
         .sortedWith(compareByDescending<Order> { focusOrderId != null && it.id == focusOrderId }.thenBy { it.id })
@@ -51,8 +55,8 @@ fun DispatchScreen(
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text("Balcão · Pedidos prontos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Esta área só despacha pedidos. Pagamentos continuam protegidos pelo Caixa/Pay.")
+            Text("Balcão · Operação", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text("Aceitação e despacho são operacionais. Pagamentos continuam protegidos pelo Caixa/Pay.")
         }
 
         if (canRouteUnit && unassignedUnitOrders.isNotEmpty()) {
@@ -83,6 +87,28 @@ fun DispatchScreen(
             }
         }
 
+        if (pending.isNotEmpty()) {
+            item { Text("NOVOS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
+            items(pending, key = { "pending-${it.id}" }) { order ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("#${order.id} · ${dispatchChannel(order)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                                if (order.customerName.isNotBlank() && order.customerName != "Consumidor") Text(order.customerName)
+                            }
+                            Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
+                        }
+                        if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
+                        Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "⏳ Pagamento ${order.paymentStatus}")
+                        OutlinedButton(onClick = { onOpenOrder(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
+                        if (canAcceptOrders) Button(onClick = { onAccept(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ACEITAR PEDIDO") }
+                    }
+                }
+            }
+        }
+
+        if (ready.isNotEmpty()) item { Text("PRONTOS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
         items(ready, key = { it.id }) { order ->
             val focused = focusOrderId == order.id
             Card(Modifier.fillMaxWidth()) {
@@ -97,6 +123,7 @@ fun DispatchScreen(
                         Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                     }
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "⏳ Pagamento ainda não concluído")
+                    OutlinedButton(onClick = { onOpenOrder(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
 
                     when (order.channel) {
                         "table" -> Button(onClick = { onDispatch(order) }, modifier = Modifier.fillMaxWidth()) { Text("MARCAR COMO SERVIDO") }
@@ -120,7 +147,7 @@ fun DispatchScreen(
             }
         }
 
-        if (ready.isEmpty() && unassignedUnitOrders.isEmpty()) item { Text("Nenhum pedido aguardando ação do balcão.") }
+        if (ready.isEmpty() && pending.isEmpty() && unassignedUnitOrders.isEmpty()) item { Text("Nenhum pedido aguardando ação do balcão.") }
         item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR FILA") } }
     }
 
