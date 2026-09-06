@@ -1,0 +1,21 @@
+CREATE TABLE group_nfc_intents (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  payment_group_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  nfc_device_id BIGINT UNSIGNED NOT NULL,
+  intent_token_hash CHAR(64) NOT NULL,
+  amount_cents INT UNSIGNED NOT NULL,
+  status ENUM('created','verified','expired','failed') NOT NULL DEFAULT 'created',
+  provider_transaction_code VARCHAR(190) NULL,
+  expires_at DATETIME NOT NULL,
+  verified_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_group_nfc_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_group_nfc_group FOREIGN KEY (payment_group_id) REFERENCES payment_groups(id) ON DELETE CASCADE,
+  CONSTRAINT fk_group_nfc_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_group_nfc_device FOREIGN KEY (nfc_device_id) REFERENCES nfc_devices(id) ON DELETE RESTRICT,
+  UNIQUE KEY uq_group_nfc_token (intent_token_hash),
+  UNIQUE KEY uq_group_nfc_transaction (tenant_id,provider_transaction_code),
+  INDEX idx_group_nfc_group (tenant_id,payment_group_id,status,expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
