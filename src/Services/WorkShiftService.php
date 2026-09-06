@@ -26,9 +26,13 @@ final class WorkShiftService
         $allowed=PermissionCatalog::modesForPermissions(Auth::effectivePermissions());if(!in_array($mode,$allowed,true))throw new RuntimeException('Sua conta não possui permissão para este modo.');
         $unit=(new OperatingUnitService())->resolveForShift($unitId);$resolvedUnitId=$unit?(int)$unit['id']:null;
         $deviceHash=$deviceId!==''?hash('sha256',$deviceId):null;$notes=mb_substr(trim($notes),0,500);
-        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$mode,$deviceHash,$notes,$resolvedUnitId):array{
+        $pdo=Database::connection();$commissionBps=0;$commissionFixed=0;
+        if($mode==='delivery'){
+            $cq=$pdo->prepare('SELECT delivery_commission_bps,delivery_commission_fixed_cents FROM users WHERE id=? AND tenant_id=? LIMIT 1');$cq->execute([$userId,$tenantId]);if($commission=$cq->fetch()){$commissionBps=max(0,(int)($commission['delivery_commission_bps']??0));$commissionFixed=max(0,(int)($commission['delivery_commission_fixed_cents']??0));}
+        }
+        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$mode,$deviceHash,$notes,$resolvedUnitId,$commissionBps,$commissionFixed):array{
             $s=$pdo->prepare(Database::portableSql($pdo,'SELECT ws.*,ou.name unit_name,ou.code unit_code FROM work_shifts ws LEFT JOIN operating_units ou ON ou.id=ws.unit_id AND ou.tenant_id=ws.tenant_id WHERE ws.tenant_id=? AND ws.user_id=? AND ws.status="open" ORDER BY ws.id DESC LIMIT 1 FOR UPDATE'));$s->execute([$tenantId,$userId]);if($existing=$s->fetch())return $existing;
-            $i=$pdo->prepare('INSERT INTO work_shifts (tenant_id,user_id,unit_id,mode,status,device_hash,opening_notes) VALUES (?, ?, ?, ?,"open",?,?)');$i->execute([$tenantId,$userId,$resolvedUnitId,$mode,$deviceHash,$notes?:null]);$id=(int)$pdo->lastInsertId();Auth::audit('work_shift.opened','work_shift',(string)$id,['mode'=>$mode,'unit_id'=>$resolvedUnitId]);$q=$pdo->prepare('SELECT ws.*,ou.name unit_name,ou.code unit_code FROM work_shifts ws LEFT JOIN operating_units ou ON ou.id=ws.unit_id AND ou.tenant_id=ws.tenant_id WHERE ws.id=?');$q->execute([$id]);return $q->fetch()?:throw new RuntimeException('Falha ao iniciar turno.');
+            $i=$pdo->prepare('INSERT INTO work_shifts (tenant_id,user_id,unit_id,mode,status,device_hash,opening_notes,delivery_commission_bps,delivery_commission_fixed_cents) VALUES (?, ?, ?, ?,"open",?,?,?,?)');$i->execute([$tenantId,$userId,$resolvedUnitId,$mode,$deviceHash,$notes?:null,$commissionBps,$commissionFixed]);$id=(int)$pdo->lastInsertId();Auth::audit('work_shift.opened','work_shift',(string)$id,['mode'=>$mode,'unit_id'=>$resolvedUnitId,'delivery_commission_bps'=>$commissionBps,'delivery_commission_fixed_cents'=>$commissionFixed]);$q=$pdo->prepare('SELECT ws.*,ou.name unit_name,ou.code unit_code FROM work_shifts ws LEFT JOIN operating_units ou ON ou.id=ws.unit_id AND ou.tenant_id=ws.tenant_id WHERE ws.id=?');$q->execute([$id]);return $q->fetch()?:throw new RuntimeException('Falha ao iniciar turno.');
         });
     }
 
@@ -61,7 +65,13 @@ final class WorkShiftService
 
         $end=$shift['ended_at']?:gmdate('Y-m-d H:i:s');$o=$pdo->prepare('SELECT COUNT(*) qty,COALESCE(SUM(total_cents),0) total_cents FROM orders WHERE tenant_id=? AND (created_by=? OR assigned_delivery_user_id=?) AND created_at>=? AND created_at<=?');$o->execute([$tenantId,$shift['user_id'],$shift['user_id'],$shift['started_at'],$end]);
         $result=['shift'=>$shift,'movements'=>$movements,'by_method'=>$byMethod,'orders'=>$o->fetch()?:['qty'=>0,'total_cents'=>0]];
-        if($shift['mode']==='delivery')$result['delivery_cash']=(new DeliveryCashService())->outstanding((int)$shift['id']);
+        if($shift['mode']==='delivery'){
+            $result['delivery_cash']=(new DeliveryCashService())->outstanding((int)$shift['id']);
+            $sql='SELECT COUNT(*) qty,COALESCE(SUM(o.total_cents),0) revenue_cents FROM delivery_progress dp JOIN orders o ON o.id=dp.order_id AND o.tenant_id=dp.tenant_id WHERE dp.tenant_id=? AND dp.delivery_user_id=? AND dp.completed_at IS NOT NULL AND dp.completed_at>=? AND dp.completed_at<=? AND o.status="completed" AND o.payment_status="paid"';$args=[$tenantId,$shift['user_id'],$shift['started_at'],$end];
+            if($shift['unit_id']!==null){$sql.=' AND o.unit_id=?';$args[]=$shift['unit_id'];}
+            $cq=$pdo->prepare($sql);$cq->execute($args);$delivery=$cq->fetch()?:['qty'=>0,'revenue_cents'=>0];$qty=(int)$delivery['qty'];$revenue=(int)$delivery['revenue_cents'];$bps=max(0,(int)($shift['delivery_commission_bps']??0));$fixed=max(0,(int)($shift['delivery_commission_fixed_cents']??0));$percentPart=(int)round($revenue*$bps/10000);$fixedPart=$qty*$fixed;
+            $result['delivery_commission']=['deliveries'=>$qty,'revenue_cents'=>$revenue,'percent_bps'=>$bps,'fixed_per_delivery_cents'=>$fixed,'percent_part_cents'=>$percentPart,'fixed_part_cents'=>$fixedPart,'commission_cents'=>$percentPart+$fixedPart];
+        }
         return $result;
     }
 
