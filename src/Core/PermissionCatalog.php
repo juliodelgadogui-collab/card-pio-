@@ -7,13 +7,13 @@ namespace EventMenu\Core;
 final class PermissionCatalog
 {
     private const ROLES = [
-        'admin'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','payments.manage','discounts.request','discounts.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect'],
-        'manager'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','payments.manage','discounts.request','discounts.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect'],
-        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','payments.manage','discounts.request','cash.manage','customers.manage','tables.manage','events.bar','nfc.collect'],
-        'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','events.bar','tickets.manage','guests.manage','customers.manage','tables.manage','delivery.assign'],
-        'waiter'=>['dashboard','orders.create','orders.view','orders.dispatch','tables.manage'],
+        'admin'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect'],
+        'manager'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect'],
+        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','tables.manage','events.bar','nfc.collect'],
+        'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','cancellations.request','events.bar','tickets.manage','guests.manage','customers.manage','tables.manage','delivery.assign'],
+        'waiter'=>['dashboard','orders.create','orders.view','orders.dispatch','cancellations.request','tables.manage'],
         'kitchen'=>['dashboard','orders.kitchen'],
-        'delivery'=>['dashboard','orders.delivery','nfc.collect'],
+        'delivery'=>['dashboard','orders.delivery','cancellations.request','nfc.collect'],
         'promoter'=>['dashboard','events.promoter','reports.own','guests.manage'],
     ];
 
@@ -30,6 +30,8 @@ final class PermissionCatalog
         'payments.manage'=>'Recebimentos operacionais',
         'discounts.request'=>'Solicitar desconto',
         'discounts.approve'=>'Aprovar / rejeitar desconto',
+        'cancellations.request'=>'Solicitar cancelamento',
+        'cancellations.approve'=>'Aprovar / rejeitar cancelamento',
         'refunds.manage'=>'Estornos',
         'cash.manage'=>'Caixa',
         'gateways.manage'=>'Configurar gateways',
@@ -88,7 +90,9 @@ final class PermissionCatalog
         $map=[
             'orders_create'=>'orders.create','orders_manage'=>'orders.manage','orders_view'=>'orders.view',
             'orders_kitchen'=>'orders.kitchen','orders_delivery'=>'orders.delivery','orders_dispatch'=>'orders.dispatch','delivery_assign'=>'delivery.assign',
-            'cash'=>'cash.manage','payments'=>'payments.manage','discount_request'=>'discounts.request','discount_approve'=>'discounts.approve','nfc_collect'=>'nfc.collect','tickets'=>'tickets.manage',
+            'cash'=>'cash.manage','payments'=>'payments.manage','discount_request'=>'discounts.request','discount_approve'=>'discounts.approve',
+            'cancellation_request'=>'cancellations.request','cancellation_approve'=>'cancellations.approve',
+            'nfc_collect'=>'nfc.collect','tickets'=>'tickets.manage',
             'guests'=>'guests.manage','tables'=>'tables.manage','customers'=>'customers.manage','events'=>'events.manage','event_bar'=>'events.bar',
             'reports'=>'reports.view','promoter'=>'events.promoter',
         ];
