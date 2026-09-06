@@ -36,7 +36,7 @@ try {
         'stock_movements','audit_logs','restaurant_tables','tabs','coupons',
         'coupon_redemptions','coupon_reservations','customer_points_movements','promoters',
         'promoter_commissions','event_guests','ticket_checkin_logs','nfc_devices',
-        'cash_sessions','cash_movements','migrations',
+        'cash_sessions','cash_movements','saas_plans','tenant_subscriptions','migrations',
     ];
     foreach ($requiredTables as $table) {
         try {
@@ -46,10 +46,21 @@ try {
         }
     }
 
+    $planCount = (int)$pdo->query('SELECT COUNT(*) FROM saas_plans WHERE active=1')->fetchColumn();
+    assert_ci($planCount >= 3, 'Catálogo comercial inicial não foi criado.');
+    $premiumPlanId = (int)$pdo->query('SELECT id FROM saas_plans WHERE code="premium" LIMIT 1')->fetchColumn();
+    assert_ci($premiumPlanId > 0, 'Plano Premium inicial não encontrado.');
+
     $slug = 'ci-' . bin2hex(random_bytes(4));
     $pdo->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,?,"premium","active")')->execute(['CI Tenant', $slug]);
     $tenantId = (int)$pdo->lastInsertId();
     assert_ci($tenantId > 0, 'Falha ao inserir tenant.');
+
+    $pdo->prepare('INSERT INTO tenant_subscriptions (tenant_id,plan_id,status,billing_cycle) VALUES (?,? ,"active","monthly")')->execute([$tenantId,$premiumPlanId]);
+    $subscription = $pdo->prepare('SELECT ts.status,p.code FROM tenant_subscriptions ts JOIN saas_plans p ON p.id=ts.plan_id WHERE ts.tenant_id=?');
+    $subscription->execute([$tenantId]);
+    $subscriptionRow = $subscription->fetch();
+    assert_ci(is_array($subscriptionRow) && $subscriptionRow['status'] === 'active' && $subscriptionRow['code'] === 'premium', 'Assinatura comercial não pôde ser vinculada ao tenant.');
 
     $pdo->prepare('INSERT INTO users (tenant_id,name,email,password_hash,role,status) VALUES (?,?,?,?,"admin","active")')->execute([
         $tenantId,
