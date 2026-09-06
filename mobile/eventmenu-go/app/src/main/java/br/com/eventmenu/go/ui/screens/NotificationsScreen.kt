@@ -16,9 +16,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.data.AppNotification
+import br.com.eventmenu.go.navigation.AppDeepLinks
 import kotlinx.coroutines.delay
 
 @Composable
@@ -29,6 +31,7 @@ fun NotificationsScreen(
     onReadAll: () -> Unit,
     onRefresh: () -> Unit,
 ) {
+    val context = LocalContext.current
     LaunchedEffect(Unit) {
         while (true) {
             delay(15_000)
@@ -54,7 +57,11 @@ fun NotificationsScreen(
             item { Text("Nenhuma notificação para este modo de trabalho.") }
         } else {
             items(notifications, key = { it.id }) { notification ->
-                NotificationCard(notification, onRead)
+                NotificationCard(
+                    notification = notification,
+                    onRead = onRead,
+                    onOpen = { context.startActivity(AppDeepLinks.intent(context, notification)) },
+                )
             }
         }
 
@@ -63,7 +70,11 @@ fun NotificationsScreen(
 }
 
 @Composable
-private fun NotificationCard(notification: AppNotification, onRead: (Int) -> Unit) {
+private fun NotificationCard(
+    notification: AppNotification,
+    onRead: (Int) -> Unit,
+    onOpen: () -> Unit,
+) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
             Text(
@@ -76,6 +87,7 @@ private fun NotificationCard(notification: AppNotification, onRead: (Int) -> Uni
             if (notification.entityType.isNotBlank() && notification.entityId.isNotBlank()) {
                 Text("${notification.entityType} #${notification.entityId}", style = MaterialTheme.typography.bodySmall)
             }
+            Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("ABRIR") }
             if (notification.unread) {
                 OutlinedButton(onClick = { onRead(notification.id) }, modifier = Modifier.fillMaxWidth()) { Text("MARCAR COMO LIDA") }
             } else {
