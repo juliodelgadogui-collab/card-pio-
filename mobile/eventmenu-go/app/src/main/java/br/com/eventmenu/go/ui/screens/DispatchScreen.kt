@@ -16,13 +16,19 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.OrderOperationsViewModel
 import br.com.eventmenu.go.data.DeliveryUser
 import br.com.eventmenu.go.data.OperatingUnit
 import br.com.eventmenu.go.data.Order
@@ -37,15 +43,15 @@ fun DispatchScreen(
     unassignedUnitOrders: List<UnassignedUnitDelivery> = emptyList(),
     units: List<OperatingUnit> = emptyList(),
     canRouteUnit: Boolean = false,
-    canAcceptOrders: Boolean = false,
     onRefresh: () -> Unit,
     onDispatch: (Order) -> Unit,
-    onAccept: (Int) -> Unit = {},
-    onOpenOrder: (Int) -> Unit = {},
     onAssignDelivery: (Int, Int) -> Unit,
     onScanDelivery: (Int) -> Unit,
     onAssignUnit: (Int, Int) -> Unit = { _, _ -> },
 ) {
+    val app = LocalContext.current.applicationContext as EventMenuGoApplication
+    val orderViewModel: OrderOperationsViewModel = viewModel(factory = OrderOperationsViewModel.Factory(app.orderOperationsRepository))
+    val orderState by orderViewModel.state.collectAsState()
     val pending = orders.filter { it.status == "pending" && it.channel in setOf("counter", "pickup", "table", "delivery") }.sortedBy { it.id }
     val ready = orders
         .filter { it.status == "ready" && it.channel in setOf("counter", "pickup", "table", "delivery") }
@@ -53,10 +59,16 @@ fun DispatchScreen(
     var assigning by remember { mutableStateOf<Order?>(null) }
     var routing by remember { mutableStateOf<UnassignedUnitDelivery?>(null) }
 
+    LaunchedEffect(orderState.changedVersion) {
+        if (orderState.changedVersion > 0) onRefresh()
+    }
+
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Balcão · Operação", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("Aceitação e despacho são operacionais. Pagamentos continuam protegidos pelo Caixa/Pay.")
+            orderState.error?.let { Text("⚠️ $it", color = MaterialTheme.colorScheme.error) }
+            orderState.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
 
         if (canRouteUnit && unassignedUnitOrders.isNotEmpty()) {
@@ -101,8 +113,8 @@ fun DispatchScreen(
                         }
                         if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
                         Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "⏳ Pagamento ${order.paymentStatus}")
-                        OutlinedButton(onClick = { onOpenOrder(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
-                        if (canAcceptOrders) Button(onClick = { onAccept(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ACEITAR PEDIDO") }
+                        OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
+                        Button(onClick = { orderViewModel.accept(order.id) }, enabled = !orderState.loading, modifier = Modifier.fillMaxWidth()) { Text("ACEITAR PEDIDO") }
                     }
                 }
             }
@@ -123,7 +135,7 @@ fun DispatchScreen(
                         Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                     }
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "⏳ Pagamento ainda não concluído")
-                    OutlinedButton(onClick = { onOpenOrder(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
+                    OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
 
                     when (order.channel) {
                         "table" -> Button(onClick = { onDispatch(order) }, modifier = Modifier.fillMaxWidth()) { Text("MARCAR COMO SERVIDO") }
@@ -149,6 +161,15 @@ fun DispatchScreen(
 
         if (ready.isEmpty() && pending.isEmpty() && unassignedUnitOrders.isEmpty()) item { Text("Nenhum pedido aguardando ação do balcão.") }
         item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR FILA") } }
+    }
+
+    orderState.detail?.let { detail ->
+        OrderDetailDialog(
+            detail = detail,
+            canAccept = detail.status == "pending",
+            onAccept = orderViewModel::accept,
+            onDismiss = orderViewModel::close,
+        )
     }
 
     routing?.let { order ->
