@@ -3,6 +3,7 @@ package br.com.eventmenu.go
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import br.com.eventmenu.go.data.DiscountPolicy
 import br.com.eventmenu.go.data.DiscountRepository
 import br.com.eventmenu.go.data.DiscountRequest
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -14,6 +15,7 @@ import kotlinx.coroutines.launch
 data class DiscountState(
     val pending: List<DiscountRequest> = emptyList(),
     val orderRequest: DiscountRequest? = null,
+    val policy: DiscountPolicy = DiscountPolicy(),
     val orderId: Int? = null,
     val loading: Boolean = false,
     val error: String? = null,
@@ -24,6 +26,12 @@ data class DiscountState(
 class DiscountViewModel(private val repository: DiscountRepository) : ViewModel() {
     private val _state = MutableStateFlow(DiscountState())
     val state: StateFlow<DiscountState> = _state.asStateFlow()
+
+    fun loadPolicy() = viewModelScope.launch {
+        runCatching { repository.policy() }
+            .onSuccess { policy -> _state.update { it.copy(policy = policy) } }
+            .onFailure { e -> _state.update { it.copy(error = e.message ?: "Falha ao carregar política de desconto.") } }
+    }
 
     fun loadPending() = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null) }
@@ -50,21 +58,25 @@ class DiscountViewModel(private val repository: DiscountRepository) : ViewModel(
             .onFailure { e -> _state.update { it.copy(error = e.message ?: "Falha ao consultar desconto.") } }
     }
 
-    fun request(orderId: Int, amountCents: Int, reason: String) = viewModelScope.launch {
+    fun request(orderId: Int, discountType: String, value: Int, reason: String) = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null, message = null) }
-        runCatching { repository.request(orderId, amountCents, reason) }
+        runCatching { repository.request(orderId, discountType, value, reason) }
             .onSuccess { request ->
                 _state.update {
                     it.copy(
                         orderId = orderId,
                         orderRequest = request,
                         loading = false,
-                        message = "Solicitação enviada ao gerente.",
+                        message = when (request.status) {
+                            "approved" -> if (request.autoApproved) "Desconto aplicado automaticamente." else "Desconto aprovado."
+                            "pending" -> "Desconto enviado para aprovação."
+                            else -> "Desconto registrado."
+                        },
                         changeVersion = it.changeVersion + 1,
                     )
                 }
             }
-            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao solicitar desconto.") } }
+            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao aplicar desconto.") } }
     }
 
     fun approve(requestId: Int) = decide(requestId, true, "")
