@@ -51,9 +51,7 @@ class ApiClient(
                     if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
                 }
             } catch (error: ApiException) {
-                if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) {
-                    throw error
-                }
+                if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) throw error
                 val refreshed = refreshAccessToken(store, token)
                 execute(path, method, action, refreshed, query, body)
             }
@@ -80,9 +78,22 @@ class ApiClient(
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val json = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("ok", false).put("error", "Resposta inválida do servidor.") }
-            if (status !in 200..299 || !json.optBoolean("ok", false)) throw ApiException(json.optString("error", "Falha na API."), status)
+            if (status !in 200..299 || !json.optBoolean("ok", false)) {
+                val serverMessage = json.optString("error", "Falha na API.")
+                throw ApiException(friendlyError(serverMessage, status), status)
+            }
             return json
         } finally { connection.disconnect() }
+    }
+
+    private fun friendlyError(message: String, status: Int): String {
+        val normalized = message.lowercase()
+        if (normalized.contains("database is locked") || normalized.contains("database table is locked")) {
+            return "O servidor está ocupado por alguns segundos. Aguarde e tente novamente."
+        }
+        val technical = normalized.contains("sqlstate[") || normalized.contains("pdoexception") || normalized.contains("general error:") || normalized.contains("constraint failed") || normalized.contains("stack trace")
+        if (technical) return if (status >= 500 || status == 0) "Não foi possível concluir a operação no servidor. Tente novamente." else "Não foi possível concluir esta operação."
+        return message.ifBlank { "Não foi possível concluir esta operação." }
     }
 
     private fun shouldRefresh(error: ApiException): Boolean {
