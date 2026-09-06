@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 require __DIR__.'/../app/bootstrap.php';
 
-use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\OperatingUnitService;
+use EventMenu\Services\OrderUnitRoutingService;
 use EventMenu\Services\WorkShiftService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -32,5 +32,10 @@ try{
         gou_out(['ok'=>true,'shift'=>$shift],201);
     }
     if($action==='current')gou_out(['ok'=>true,'shift'=>(new WorkShiftService())->current()]);
+    if($action==='delivery-unassigned')gou_out(['ok'=>true,'orders'=>(new OrderUnitRoutingService())->pending()]);
+    if($action==='delivery-assign-unit'){
+        gou_method('POST');$body=gou_body();$order=(new OrderUnitRoutingService())->assign((int)($body['order_id']??0),(int)($body['unit_id']??0));
+        gou_out(['ok'=>true,'order'=>$order]);
+    }
     gou_out(['ok'=>false,'error'=>'Endpoint de unidade não encontrado.'],404);
 }catch(RuntimeException $e){gou_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))gou_out(['ok'=>false,'error'=>$e->getMessage()],500);gou_out(['ok'=>false,'error'=>'Erro interno.'],500);}
