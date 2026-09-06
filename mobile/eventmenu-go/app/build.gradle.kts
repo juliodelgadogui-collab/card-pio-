@@ -4,10 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-val apiBase = providers.gradleProperty("EVENTMENU_API_BASE_URL")
-    .orElse("https://example.invalid/1/")
-    .get()
-    .trimEnd('/') + "/"
+// Servidor oficial do EventMenu GO. Não existe configuração de servidor na interface do app.
+val apiBase = "https://go.gestao2.store/1/"
 
 android {
     namespace = "br.com.eventmenu.go"
