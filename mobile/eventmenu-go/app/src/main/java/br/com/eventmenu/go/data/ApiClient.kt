@@ -36,6 +36,7 @@ class ApiClient(
     suspend fun postNotifications(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-notifications.php", "POST", action, token, emptyMap(), body)
     suspend fun getReceipt(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-receipts.php", "GET", action, token, query, null)
     suspend fun getDevice(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-device.php", "GET", action, token, query, null)
+    suspend fun postDevice(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-device.php", "POST", action, token, emptyMap(), body)
     suspend fun getQr(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-qr.php", "GET", action, token, query, null)
     suspend fun postQr(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-qr.php", "POST", action, token, emptyMap(), body)
     suspend fun getTabPayments(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-tab-payments.php", "GET", action, token, query, null)
