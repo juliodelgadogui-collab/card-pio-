@@ -21,6 +21,7 @@ final class NativePixService
         $shift=(new WorkShiftService())->current();
         if($shift&&$shift['mode']==='delivery'){
             if(!Auth::can('orders.delivery')||(int)($order['assigned_delivery_user_id']??0)!==$userId)throw new RuntimeException('Este pedido não está atribuído a você.');
+            (new DeliveryProgressService())->assertArrived($orderId);
         }elseif(!Auth::can('payments.manage'))throw new RuntimeException('Você não possui permissão para cobrar PIX.');
 
         $balance=(new PaymentService())->remaining($orderId,$tenantId);$remaining=(int)$balance['remaining_cents'];$paidBefore=(int)$balance['paid_cents'];$amount=$amountCents??$remaining;if($amount<=0||$amount>$remaining)throw new RuntimeException('Valor PIX inválido. Saldo restante: R$ '.number_format($remaining/100,2,',','.').'.');
