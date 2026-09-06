@@ -1,7 +1,10 @@
 package br.com.eventmenu.go
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.compose.setContent
@@ -23,6 +26,8 @@ class MainActivity : FragmentActivity() {
     private var pendingTapOn: TapOnRequest? = null
     private var pendingTapOnResult: ((String?) -> Unit)? = null
 
+    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     private val tapOnLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val request = pendingTapOn
         val callback = pendingTapOnResult
@@ -43,6 +48,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestNotificationPermissionIfNeeded()
         val app = application as EventMenuGoApplication
         setContent {
             val vm: MainViewModel = viewModel(
@@ -56,7 +62,7 @@ class MainActivity : FragmentActivity() {
             EventMenuTheme {
                 EventMenuGoApp(
                     viewModel = vm,
-                    onScan = ::scanQr,
+                    onScan = { callback -> scanQr(callback) },
                     onBiometric = { authenticateBiometric(vm) },
                     onTapOn = ::launchTapOn,
                 )
@@ -64,13 +70,19 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    private fun scanQr(onResult: (String) -> Unit) {
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT < 33) return
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
+        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+    }
+
+    private fun scanQr(onValue: (String) -> Unit) {
         val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(Barcode.FORMAT_QR_CODE, Barcode.FORMAT_AZTEC, Barcode.FORMAT_CODE_128)
             .enableAutoZoom()
             .build()
         GmsBarcodeScanning.getClient(this, options).startScan()
-            .addOnSuccessListener { barcode -> barcode.rawValue?.takeIf { it.isNotBlank() }?.let(onResult) }
+            .addOnSuccessListener { barcode -> barcode.rawValue?.let(onValue) }
     }
 
     private fun launchTapOn(request: TapOnRequest, onResult: (String?) -> Unit) {
