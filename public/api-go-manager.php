@@ -6,6 +6,7 @@ require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\ManagerOperationsService;
+use EventMenu\Services\OrderReopenService;
 use EventMenu\Services\WorkShiftService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -27,6 +28,8 @@ try{
     if($action==='overview')gom_out(['ok'=>true,'overview'=>$service->overview()]);
     if($action==='details')gom_out(['ok'=>true,'details'=>$service->details()]);
     if($action==='transfer-delivery'){gom_method('POST');$body=gom_body();gom_out(['ok'=>true,'order'=>$service->transferDelivery((int)($body['order_id']??0),(int)($body['delivery_user_id']??0))]);}
-    if($action==='cancel-order'){gom_method('POST');$body=gom_body();gom_out(['ok'=>true,'order'=>$service->cancelUnpaidOrder((int)($body['order_id']??0))]);}
+    if($action==='reopen-candidates')gom_out(['ok'=>true,'orders'=>(new OrderReopenService())->candidates()]);
+    if($action==='reopen-order'){gom_method('POST');$body=gom_body();gom_out(['ok'=>true,'order'=>(new OrderReopenService())->reopen((int)($body['order_id']??0),(string)($body['reason']??''))]);}
+    if($action==='cancel-order')gom_out(['ok'=>false,'error'=>'Cancelamento direto foi desativado. Use o fluxo de solicitação e autorização.'],410);
     gom_out(['ok'=>false,'error'=>'Endpoint gerencial não encontrado.'],404);
 }catch(RuntimeException $e){gom_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))gom_out(['ok'=>false,'error'=>$e->getMessage()],500);gom_out(['ok'=>false,'error'=>'Erro interno.'],500);}
