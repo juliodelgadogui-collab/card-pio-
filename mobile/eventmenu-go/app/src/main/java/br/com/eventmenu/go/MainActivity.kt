@@ -11,10 +11,18 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
+import br.com.eventmenu.go.navigation.AppDeepLinkTarget
+import br.com.eventmenu.go.navigation.AppDeepLinks
 import br.com.eventmenu.go.ui.EventMenuGoApp
 import br.com.eventmenu.go.ui.theme.EventMenuTheme
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -25,6 +33,7 @@ import org.json.JSONObject
 class MainActivity : FragmentActivity() {
     private var pendingTapOn: TapOnRequest? = null
     private var pendingTapOnResult: ((String?) -> Unit)? = null
+    private var pendingDeepLink by mutableStateOf<AppDeepLinkTarget?>(null)
 
     private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -48,6 +57,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingDeepLink = AppDeepLinks.parse(intent)
         requestNotificationPermissionIfNeeded()
         val app = application as EventMenuGoApplication
         setContent {
@@ -59,6 +69,29 @@ class MainActivity : FragmentActivity() {
                     app.notificationRepository,
                 )
             )
+            val state by vm.state.collectAsState()
+
+            LaunchedEffect(
+                pendingDeepLink,
+                state.session?.user?.id,
+                state.mode,
+                state.workShift?.id,
+                state.workShift?.status,
+            ) {
+                val target = pendingDeepLink ?: return@LaunchedEffect
+                if (state.session == null) return@LaunchedEffect
+
+                if (state.workShift?.status != "open") {
+                    val linkMode = AppMode.fromWire(target.mode)
+                    if (linkMode != null && linkMode in state.modes && state.mode != linkMode) vm.chooseMode(linkMode)
+                    return@LaunchedEffect
+                }
+
+                routeDeepLink(vm, state, target)
+                target.notificationId?.let(vm::markNotificationRead)
+                pendingDeepLink = null
+            }
+
             EventMenuTheme {
                 EventMenuGoApp(
                     viewModel = vm,
@@ -68,6 +101,51 @@ class MainActivity : FragmentActivity() {
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        AppDeepLinks.parse(intent)?.let { pendingDeepLink = it }
+    }
+
+    private fun routeDeepLink(vm: MainViewModel, state: GoState, target: AppDeepLinkTarget) {
+        if (target.mode.isNotBlank() && target.mode != state.workShift?.mode) {
+            vm.navigate(AppScreen.NOTIFICATIONS)
+            return
+        }
+
+        val permissions = state.session?.permissions.orEmpty()
+        val notificationType = target.notificationType.lowercase()
+        val entityType = target.entityType.lowercase()
+        val destination = when {
+            entityType in setOf("discount_request", "cancellation_request") &&
+                "reports" in permissions && state.mode in setOf(AppMode.OPERATION, AppMode.PAY) -> AppScreen.MANAGER
+
+            notificationType == "order.new" && "orders_kitchen" in permissions && state.mode == AppMode.OPERATION -> AppScreen.KITCHEN
+
+            notificationType == "order.ready" &&
+                ("orders_dispatch" in permissions || "delivery_assign" in permissions) &&
+                state.mode == AppMode.OPERATION -> AppScreen.DISPATCH
+
+            state.mode == AppMode.DELIVERY && (target.mode == "delivery" || entityType == "order") -> AppScreen.DELIVERY
+
+            entityType == "event" && state.mode == AppMode.EVENTS -> AppScreen.EVENTS
+
+            entityType in setOf("table", "tab") && "tables" in permissions && state.mode == AppMode.OPERATION -> AppScreen.TABLES
+
+            entityType == "payment" && "cash" in permissions -> AppScreen.CASH
+
+            entityType == "order" && (
+                state.mode == AppMode.DELIVERY ||
+                    permissions.any { it in setOf("orders_view", "orders_create", "orders_manage") }
+                ) -> AppScreen.ORDERS
+
+            else -> AppScreen.NOTIFICATIONS
+        }
+
+        if (destination == AppScreen.EVENTS) target.entityId.toIntOrNull()?.let(vm::selectEvent)
+        vm.navigate(destination)
     }
 
     private fun requestNotificationPermissionIfNeeded() {
