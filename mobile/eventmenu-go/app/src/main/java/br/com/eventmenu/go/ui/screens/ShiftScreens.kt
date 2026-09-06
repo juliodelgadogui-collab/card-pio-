@@ -57,6 +57,7 @@ fun EmployeeProfileScreen(
     shiftSummary: ShiftSummary?,
     summaryLoading: Boolean,
     onRefreshSummary: () -> Unit,
+    onGenerateMyQr: () -> Unit,
     deviceState: DeviceStatusState,
     onRefreshDevice: () -> Unit,
     printerState: PrinterState,
@@ -82,6 +83,10 @@ fun EmployeeProfileScreen(
         item {
             Text(user.name, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("${state.mode?.label ?: user.role} · ${user.email}")
+            OutlinedButton(onClick = onGenerateMyQr, modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
+                Text(if (state.workShift?.mode == "delivery") "MOSTRAR MEU QR DE ENTREGADOR" else "MOSTRAR MEU QR DE FUNCIONÁRIO")
+            }
+            Text("O QR identifica o funcionário, mas cargo, permissões e turno são sempre validados pela API.")
         }
 
         state.workShift?.let { shift ->
