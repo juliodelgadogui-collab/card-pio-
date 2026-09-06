@@ -40,6 +40,11 @@ final class OrderService
                 $active=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized")');$active->execute([$tenantId,$orderId]);if((int)$active->fetchColumn()>0)throw new RuntimeException('Há uma cobrança em processamento. Aguarde ou encerre a cobrança antes de cancelar.');
             }
 
+            if($source==='accept'){
+                if(!Auth::can('orders.dispatch')&&!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode aceitar pedidos.');
+                if($current!=='pending'||$target!=='confirmed')throw new RuntimeException('Somente pedido novo pendente pode ser aceito.');
+                if(!in_array($order['channel'],['counter','table','delivery','pickup'],true))throw new RuntimeException('Pedido não pertence à operação de atendimento.');
+            }
             if($source==='kitchen'){
                 if(!in_array($target,['preparing','ready'],true))throw new RuntimeException('A cozinha só pode iniciar preparo ou marcar como pronto.');
                 if(!in_array($order['channel'],['counter','table','delivery','pickup'],true))throw new RuntimeException('Pedido não pertence à operação da cozinha.');
@@ -61,11 +66,26 @@ final class OrderService
             elseif($target==='cancelled')(new StockReservationService())->release($pdo,$tenantId,$orderId);
 
             $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$target,$orderId,$tenantId]);
+            (new OrderHistoryService())->record($pdo,$tenantId,$orderId,$current,$target,$source,$this->historyNote($target,$source));
             Auth::audit('order.status','order',(string)$orderId,['from'=>$current,'to'=>$target,'source'=>$source]);$order['status']=$target;return $order;
         });
 
         $this->publishOperationalNotification($result,$target);
         return $result;
+    }
+
+    private function historyNote(string $target,string $source):string
+    {
+        if($source==='accept'&&$target==='confirmed')return 'Pedido aceito pela operação.';
+        return match($target){
+            'preparing'=>'Preparação iniciada.',
+            'ready'=>'Pedido marcado como pronto.',
+            'served'=>'Pedido servido na mesa.',
+            'out_for_delivery'=>'Pedido retirado pelo entregador e colocado em rota.',
+            'completed'=>'Pedido concluído.',
+            'cancelled'=>'Pedido cancelado.',
+            default=>'Status do pedido atualizado.',
+        };
     }
 
     private function publishOperationalNotification(array $order,string $target):void
