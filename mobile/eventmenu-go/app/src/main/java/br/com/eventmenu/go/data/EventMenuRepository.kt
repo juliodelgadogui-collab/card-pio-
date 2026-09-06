@@ -168,7 +168,19 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
     suspend fun confirmDeliveryHandoff(token:String):CashHandoff{val h=api.postGo("handoff-confirm",requireToken(),JSONObject().put("token",token)).getJSONObject("handoff");return CashHandoff(h.getInt("id"),token,"",h.getInt("amount_cents"),h.optString("status"),h.optString("delivery_name"))}
 
     fun modes(session:Session):List<AppMode> = session.modes.ifEmpty{listOf(AppMode.OPERATION)}
-    private fun parseShift(json:JSONObject?):WorkShift?{if(json==null)return null;return WorkShift(json.optInt("id"),json.optString("mode"),json.optString("status"),json.optString("started_at"),json.optString("ended_at").takeIf{it.isNotBlank()})}
+    private fun parseShift(json:JSONObject?):WorkShift? {
+        if(json==null)return null
+        return WorkShift(
+            id=json.optInt("id"),
+            mode=json.optString("mode"),
+            status=json.optString("status"),
+            startedAt=json.optString("started_at"),
+            endedAt=json.optString("ended_at").takeIf{it.isNotBlank()},
+            unitId=if(json.isNull("unit_id"))null else json.optInt("unit_id").takeIf{it>0},
+            unitName=json.optString("unit_name"),
+            unitCode=json.optString("unit_code"),
+        )
+    }
     private fun parsePaymentBalance(p:JSONObject):PaymentBalance{
         val a=p.optJSONArray("payments")?:JSONArray();val parts=buildList{for(i in 0 until a.length()){val x=a.getJSONObject(i);add(PaymentPart(x.getInt("id"),x.optString("provider"),x.optInt("amount_cents"),x.optString("status"),x.optString("verified_at")))}}
         return PaymentBalance(p.getInt("order_id"),p.getInt("total_cents"),p.optInt("paid_cents"),p.optInt("remaining_cents"),p.optString("payment_status"),parts)
