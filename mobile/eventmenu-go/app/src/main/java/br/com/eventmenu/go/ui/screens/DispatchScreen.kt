@@ -24,7 +24,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.data.DeliveryUser
+import br.com.eventmenu.go.data.OperatingUnit
 import br.com.eventmenu.go.data.Order
+import br.com.eventmenu.go.data.UnassignedUnitDelivery
 
 @Composable
 fun DispatchScreen(
@@ -32,20 +34,53 @@ fun DispatchScreen(
     deliveryUsers: List<DeliveryUser>,
     canAssignDelivery: Boolean,
     focusOrderId: Int?,
+    unassignedUnitOrders: List<UnassignedUnitDelivery> = emptyList(),
+    units: List<OperatingUnit> = emptyList(),
+    canRouteUnit: Boolean = false,
     onRefresh: () -> Unit,
     onDispatch: (Order) -> Unit,
     onAssignDelivery: (Int, Int) -> Unit,
     onScanDelivery: (Int) -> Unit,
+    onAssignUnit: (Int, Int) -> Unit = { _, _ -> },
 ) {
     val ready = orders
         .filter { it.status == "ready" && it.channel in setOf("counter", "pickup", "table", "delivery") }
         .sortedWith(compareByDescending<Order> { focusOrderId != null && it.id == focusOrderId }.thenBy { it.id })
     var assigning by remember { mutableStateOf<Order?>(null) }
+    var routing by remember { mutableStateOf<UnassignedUnitDelivery?>(null) }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Balcão · Pedidos prontos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("Esta área só despacha pedidos. Pagamentos continuam protegidos pelo Caixa/Pay.")
+        }
+
+        if (canRouteUnit && unassignedUnitOrders.isNotEmpty()) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("⚠️ Delivery sem unidade", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        Text("${unassignedUnitOrders.size} pedido(s) público(s) aguardam direcionamento para uma filial antes de entrar na operação.")
+                    }
+                }
+            }
+            items(unassignedUnitOrders, key = { "unit-${it.id}" }) { order ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Pedido #${order.id}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                            Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
+                        }
+                        if (order.customerName.isNotBlank()) Text(order.customerName)
+                        if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
+                        if (order.customerPhone.isNotBlank()) Text(order.customerPhone)
+                        Text("Pagamento: ${if (order.paymentStatus == "paid") "confirmado" else order.paymentStatus}")
+                        Button(onClick = { routing = order }, enabled = units.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
+                            Text(if (units.isEmpty()) "SEM UNIDADE DISPONÍVEL" else "ESCOLHER UNIDADE")
+                        }
+                    }
+                }
+            }
         }
 
         items(ready, key = { it.id }) { order ->
@@ -85,8 +120,34 @@ fun DispatchScreen(
             }
         }
 
-        if (ready.isEmpty()) item { Text("Nenhum pedido pronto aguardando despacho.") }
+        if (ready.isEmpty() && unassignedUnitOrders.isEmpty()) item { Text("Nenhum pedido aguardando ação do balcão.") }
         item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR FILA") } }
+    }
+
+    routing?.let { order ->
+        AlertDialog(
+            onDismissRequest = { routing = null },
+            title = { Text("Direcionar pedido #${order.id}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(order.deliveryAddress.ifBlank { "Endereço não informado" })
+                    Text("Escolha a unidade que assumirá este Delivery:")
+                    units.forEach { unit ->
+                        OutlinedButton(
+                            onClick = { routing = null; onAssignUnit(order.id, unit.id) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Column {
+                                Text(unit.name, fontWeight = FontWeight.Bold)
+                                if (unit.address.isNotBlank()) Text(unit.address)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { routing = null }) { Text("FECHAR") } },
+        )
     }
 
     assigning?.let { order ->
