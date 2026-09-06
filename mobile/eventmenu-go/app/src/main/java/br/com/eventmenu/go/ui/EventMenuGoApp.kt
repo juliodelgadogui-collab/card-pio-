@@ -250,27 +250,84 @@ fun EventMenuGoApp(
     val barActive = eventBarState.eventId != null
     val splitActive = tabSplitState.tabId != null
     val focusedFlow = barActive || splitActive
-    val nav = buildList {
-        add(AppScreen.HOME); add(AppScreen.NOTIFICATIONS)
-        if ("reports" in permissions && mode in setOf(AppMode.OPERATION, AppMode.PAY)) add(AppScreen.MANAGER)
-        if ("orders_create" in permissions && mode != AppMode.EVENTS) add(AppScreen.POS)
-        if (mode == AppMode.OPERATION && "tables" in permissions) add(AppScreen.TABLES)
-        if (mode == AppMode.OPERATION && "orders_kitchen" in permissions) add(AppScreen.KITCHEN)
-        if (mode == AppMode.OPERATION && ("orders_dispatch" in permissions || "delivery_assign" in permissions)) add(AppScreen.DISPATCH)
-        if (mode == AppMode.DELIVERY || (mode != AppMode.EVENTS && ("orders_view" in permissions || "orders_create" in permissions || "orders_manage" in permissions))) add(AppScreen.ORDERS)
-        if ("cash" in permissions) add(AppScreen.CASH)
-        if (mode == AppMode.DELIVERY) add(AppScreen.DELIVERY)
-        if (mode == AppMode.EVENTS) add(AppScreen.EVENTS)
-        add(AppScreen.PROFILE)
-    }.distinct()
+    val nav = when (mode) {
+        AppMode.DELIVERY -> listOf(AppScreen.HOME, AppScreen.NOTIFICATIONS, AppScreen.DELIVERY, AppScreen.ORDERS, AppScreen.PROFILE)
+        AppMode.EVENTS -> listOf(AppScreen.HOME, AppScreen.NOTIFICATIONS, AppScreen.EVENTS, AppScreen.PROFILE)
+        AppMode.PAY -> buildList {
+            add(AppScreen.HOME)
+            add(AppScreen.NOTIFICATIONS)
+            if ("orders_create" in permissions) add(AppScreen.POS)
+            if ("cash" in permissions) add(AppScreen.CASH)
+            add(AppScreen.PROFILE)
+        }.distinct().take(5)
+        AppMode.OPERATION -> buildList {
+            add(AppScreen.HOME)
+            add(AppScreen.NOTIFICATIONS)
+            when {
+                "orders_create" in permissions -> add(AppScreen.POS)
+                "reports" in permissions -> add(AppScreen.MANAGER)
+                "orders_kitchen" in permissions -> add(AppScreen.KITCHEN)
+            }
+            when {
+                "orders_dispatch" in permissions || "delivery_assign" in permissions -> add(AppScreen.DISPATCH)
+                "orders_view" in permissions || "orders_manage" in permissions -> add(AppScreen.ORDERS)
+                "tables" in permissions -> add(AppScreen.TABLES)
+                "cash" in permissions -> add(AppScreen.CASH)
+            }
+            add(AppScreen.PROFILE)
+        }.distinct().take(5)
+    }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = { if (!focusedFlow) FloatingActionButton(onClick = ::startScan) { Icon(Icons.Default.QrCodeScanner, contentDescription = "Escanear") } },
-        bottomBar = { if (!focusedFlow) NavigationBar { nav.forEach { screen ->
-            val icon = when (screen) { AppScreen.HOME -> Icons.Default.Home; AppScreen.NOTIFICATIONS -> Icons.Default.Notifications; AppScreen.MANAGER -> Icons.Default.Assessment; AppScreen.POS -> Icons.Default.ShoppingCart; AppScreen.TABLES, AppScreen.TABLE_ACCOUNT -> Icons.Default.Restaurant; AppScreen.ORDERS -> Icons.Default.ReceiptLong; AppScreen.KITCHEN -> Icons.Default.Restaurant; AppScreen.DISPATCH -> Icons.Default.DeliveryDining; AppScreen.CASH -> Icons.Default.PointOfSale; AppScreen.DELIVERY -> Icons.Default.DeliveryDining; AppScreen.EVENTS -> Icons.Default.ConfirmationNumber; AppScreen.PROFILE -> Icons.Default.BadgeIcon }
-            NavigationBarItem(selected = state.screen == screen, onClick = { viewModel.navigate(screen) }, icon = { if (screen == AppScreen.NOTIFICATIONS && state.unreadNotifications > 0) BadgedBox(badge = { Badge { Text(if (state.unreadNotifications > 99) "99+" else state.unreadNotifications.toString()) } }) { Icon(icon, contentDescription = screen.name) } else Icon(icon, contentDescription = screen.name) })
-        } } },
+        bottomBar = {
+            if (!focusedFlow) NavigationBar {
+                nav.forEach { screen ->
+                    val icon = when (screen) {
+                        AppScreen.HOME -> Icons.Default.Home
+                        AppScreen.NOTIFICATIONS -> Icons.Default.Notifications
+                        AppScreen.MANAGER -> Icons.Default.Assessment
+                        AppScreen.POS -> Icons.Default.ShoppingCart
+                        AppScreen.TABLES, AppScreen.TABLE_ACCOUNT -> Icons.Default.Restaurant
+                        AppScreen.ORDERS -> Icons.Default.ReceiptLong
+                        AppScreen.KITCHEN -> Icons.Default.Restaurant
+                        AppScreen.DISPATCH -> Icons.Default.DeliveryDining
+                        AppScreen.CASH -> Icons.Default.PointOfSale
+                        AppScreen.DELIVERY -> Icons.Default.DeliveryDining
+                        AppScreen.EVENTS -> Icons.Default.ConfirmationNumber
+                        AppScreen.PROFILE -> Icons.Default.BadgeIcon
+                    }
+                    val label = when (screen) {
+                        AppScreen.HOME -> "Início"
+                        AppScreen.NOTIFICATIONS -> "Avisos"
+                        AppScreen.MANAGER -> "Gestão"
+                        AppScreen.POS -> "PDV"
+                        AppScreen.TABLES, AppScreen.TABLE_ACCOUNT -> "Mesas"
+                        AppScreen.ORDERS -> "Pedidos"
+                        AppScreen.KITCHEN -> "KDS"
+                        AppScreen.DISPATCH -> "Saída"
+                        AppScreen.CASH -> "Caixa"
+                        AppScreen.DELIVERY -> "Entrega"
+                        AppScreen.EVENTS -> "Evento"
+                        AppScreen.PROFILE -> "Perfil"
+                    }
+                    NavigationBarItem(
+                        selected = state.screen == screen,
+                        onClick = { viewModel.navigate(screen) },
+                        icon = {
+                            if (screen == AppScreen.NOTIFICATIONS && state.unreadNotifications > 0) {
+                                BadgedBox(badge = { Badge { Text(if (state.unreadNotifications > 99) "99+" else state.unreadNotifications.toString()) } }) {
+                                    Icon(icon, contentDescription = label)
+                                }
+                            } else Icon(icon, contentDescription = label)
+                        },
+                        label = { Text(label) },
+                        alwaysShowLabel = false,
+                    )
+                }
+            }
+        },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
             when {
