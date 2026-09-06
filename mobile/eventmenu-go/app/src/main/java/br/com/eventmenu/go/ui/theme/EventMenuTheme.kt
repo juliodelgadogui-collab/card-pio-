@@ -12,14 +12,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-private val Purple = Color(0xFF6C36E8)
-private val PurpleDark = Color(0xFF4B1FB6)
-private val PurpleSoft = Color(0xFFF0E9FF)
-private val Ink = Color(0xFF1D1B2A)
-private val Muted = Color(0xFF716C80)
-private val Canvas = Color(0xFFF7F6FB)
-private val Border = Color(0xFFE7E3EF)
+private val Purple = Color(0xFF5B34D6)
+private val PurpleDark = Color(0xFF3F1CA6)
+private val PurpleSoft = Color(0xFFF1ECFF)
+private val Ink = Color(0xFF1E1B2B)
+private val Muted = Color(0xFF716B80)
+private val Canvas = Color(0xFFF6F7FB)
+private val Border = Color(0xFFE5E1EC)
 private val Green = Color(0xFF159B63)
+private val Gold = Color(0xFFF5B942)
 private val Red = Color(0xFFE34855)
 
 private val EventMenuLight = lightColorScheme(
@@ -29,12 +30,15 @@ private val EventMenuLight = lightColorScheme(
     onPrimaryContainer = PurpleDark,
     secondary = Green,
     onSecondary = Color.White,
-    tertiary = Color(0xFF3D7AE8),
+    secondaryContainer = Color(0xFFE8F8F0),
+    onSecondaryContainer = Color(0xFF0A603B),
+    tertiary = Gold,
+    onTertiary = Color(0xFF2A1D00),
     background = Canvas,
     onBackground = Ink,
     surface = Color.White,
     onSurface = Ink,
-    surfaceVariant = Color(0xFFF2EFF8),
+    surfaceVariant = Color(0xFFF3F0F8),
     onSurfaceVariant = Muted,
     outline = Border,
     error = Red,
@@ -42,15 +46,15 @@ private val EventMenuLight = lightColorScheme(
 )
 
 private val EventMenuShapes = Shapes(
-    small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(18.dp),
-    extraLarge = RoundedCornerShape(24.dp),
+    small = RoundedCornerShape(12.dp),
+    medium = RoundedCornerShape(16.dp),
+    large = RoundedCornerShape(22.dp),
+    extraLarge = RoundedCornerShape(28.dp),
 )
 
 private val EventMenuTypography = Typography(
-    headlineLarge = TextStyle(fontSize = 30.sp, lineHeight = 34.sp, fontWeight = FontWeight.ExtraBold, color = Ink),
-    headlineMedium = TextStyle(fontSize = 24.sp, lineHeight = 29.sp, fontWeight = FontWeight.ExtraBold, color = Ink),
+    headlineLarge = TextStyle(fontSize = 31.sp, lineHeight = 35.sp, fontWeight = FontWeight.ExtraBold, color = Ink),
+    headlineMedium = TextStyle(fontSize = 25.sp, lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold, color = Ink),
     headlineSmall = TextStyle(fontSize = 20.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold, color = Ink),
     titleLarge = TextStyle(fontSize = 18.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = Ink),
     titleMedium = TextStyle(fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold, color = Ink),
