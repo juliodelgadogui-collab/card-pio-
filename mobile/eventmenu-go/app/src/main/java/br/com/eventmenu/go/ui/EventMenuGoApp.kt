@@ -40,6 +40,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel as composeViewModel
 import br.com.eventmenu.go.AppScreen
+import br.com.eventmenu.go.DeliveryUnitTriageViewModel
 import br.com.eventmenu.go.DeviceStatusViewModel
 import br.com.eventmenu.go.EventBarViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
@@ -106,6 +107,8 @@ fun EventMenuGoApp(
     val tabSplitState by tabSplitViewModel.state.collectAsState()
     val shiftUnitViewModel: ShiftUnitViewModel = composeViewModel(factory = ShiftUnitViewModel.Factory(app.operatingUnitRepository))
     val shiftUnitState by shiftUnitViewModel.state.collectAsState()
+    val triageViewModel: DeliveryUnitTriageViewModel = composeViewModel(factory = DeliveryUnitTriageViewModel.Factory(app.operatingUnitRepository))
+    val triageState by triageViewModel.state.collectAsState()
     val printerPreferences = remember(app) { PrinterPreferences(app) }
     val bluetoothPrinter = remember(app) { BluetoothEscPosPrinter(app, printerPreferences) }
     val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter, app.receiptRepository))
@@ -130,6 +133,10 @@ fun EventMenuGoApp(
     }
     LaunchedEffect(shiftUnitState.error) {
         shiftUnitState.error?.let { snackbar.showSnackbar(it); shiftUnitViewModel.clearError() }
+    }
+    LaunchedEffect(triageState.error, triageState.message) {
+        (triageState.error ?: triageState.message)?.let { snackbar.showSnackbar(it) }
+        if (triageState.error != null || triageState.message != null) triageViewModel.clearFeedback()
     }
     LaunchedEffect(eventBarState.error, eventBarState.message) {
         (eventBarState.error ?: eventBarState.message)?.let { snackbar.showSnackbar(it) }
@@ -251,10 +258,19 @@ fun EventMenuGoApp(
             profileViewModel.refresh(); deviceViewModel.refresh(); printerViewModel.refresh()
         }
         if (state.screen == AppScreen.MANAGER && state.workShift?.id != null) managerActionsViewModel.refresh()
+        if (state.screen == AppScreen.DISPATCH && state.workShift?.id != null && ("delivery_assign" in state.session?.permissions.orEmpty() || "orders_manage" in state.session?.permissions.orEmpty())) triageViewModel.refresh()
     }
     LaunchedEffect(managerActionState.changeVersion) {
         if (managerActionState.changeVersion > 0) {
             viewModel.refreshManager(); viewModel.refreshOrders(); viewModel.refreshNotifications()
+        }
+    }
+    LaunchedEffect(triageState.changedVersion) {
+        if (triageState.changedVersion > 0) {
+            viewModel.refreshOrders()
+            viewModel.refreshDispatch()
+            viewModel.refreshManager()
+            viewModel.refreshNotifications()
         }
     }
 
@@ -413,10 +429,14 @@ fun EventMenuGoApp(
                         deliveryUsers = state.deliveryUsers,
                         canAssignDelivery = "delivery_assign" in permissions,
                         focusOrderId = state.dispatchFocusOrderId,
-                        onRefresh = viewModel::refreshDispatch,
+                        unassignedUnitOrders = triageState.orders,
+                        units = triageState.units,
+                        canRouteUnit = "delivery_assign" in permissions || "orders_manage" in permissions,
+                        onRefresh = { viewModel.refreshDispatch(); triageViewModel.refresh() },
                         onDispatch = viewModel::dispatchReady,
                         onAssignDelivery = viewModel::assignDelivery,
                         onScanDelivery = { orderId -> pendingDeliveryQrOrderId = orderId; startScan() },
+                        onAssignUnit = triageViewModel::assign,
                     )
                     AppScreen.CASH -> CashOperationsScreen(state.cashOpen, state.cashSummary, viewModel::openCash, viewModel::addCashSupply, viewModel::addCashWithdrawal, viewModel::closeCash, viewModel::refreshCash)
                     AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, state.pixCharge, viewModel::changeOrderStatus, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, { printerViewModel.printReceipt(it) }, viewModel::pollPixStatus, viewModel::dismissPix)
@@ -458,7 +478,7 @@ fun EventMenuGoApp(
                     )
                 }
             }
-            if (state.loading || shiftUnitState.loading || eventBarState.loading || tabSplitState.loading || universalQrState.loading || receiptState.loading || printerState.loading || deviceState.loading) {
+            if (state.loading || shiftUnitState.loading || triageState.loading || eventBarState.loading || tabSplitState.loading || universalQrState.loading || receiptState.loading || printerState.loading || deviceState.loading) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
             }
         }
