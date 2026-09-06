@@ -8,7 +8,7 @@ val apiBase = "https://go.gestao2.store/1/"
 
 android {
     namespace = "br.com.eventmenu.go"
-    compileSdk = 37
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "br.com.eventmenu.go"
