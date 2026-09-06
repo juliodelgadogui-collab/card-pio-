@@ -19,13 +19,20 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.CancellationViewModel
+import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.data.CancellationRequest
 import br.com.eventmenu.go.data.DiscountRequest
 import br.com.eventmenu.go.data.ManagerAlert
 import br.com.eventmenu.go.data.ManagerDeliveryShift
@@ -48,15 +55,21 @@ fun ManagerScreen(
     onRejectDiscount: (Int, String) -> Unit,
     onRefresh: () -> Unit,
 ) {
+    val app = LocalContext.current.applicationContext as EventMenuGoApplication
+    val cancellationViewModel: CancellationViewModel = viewModel(factory = CancellationViewModel.Factory(app.cancellationRepository))
+    val cancellationState by cancellationViewModel.state.collectAsState()
     var transferOrder by remember { mutableStateOf<ManagerProblemOrder?>(null) }
-    var cancelOrder by remember { mutableStateOf<ManagerProblemOrder?>(null) }
     var rejectingDiscount by remember { mutableStateOf<DiscountRequest?>(null) }
+    var rejectingCancellation by remember { mutableStateOf<CancellationRequest?>(null) }
+
+    LaunchedEffect(Unit) { cancellationViewModel.loadPending() }
+    LaunchedEffect(cancellationState.changeVersion) { if (cancellationState.changeVersion > 0) onRefresh() }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Painel do gerente", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("Ações rápidas da operação. Configurações e relatórios completos continuam no painel web.")
-            if (loading) CircularProgressIndicator(Modifier.padding(top = 8.dp))
+            if (loading || cancellationState.loading) CircularProgressIndicator(Modifier.padding(top = 8.dp))
         }
 
         if (canApproveDiscount) {
@@ -87,6 +100,35 @@ fun ManagerScreen(
             }
         }
 
+        if (cancellationState.error?.contains("Acesso negado", ignoreCase = true) != true) {
+            item {
+                HorizontalDivider()
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Cancelamentos aguardando autorização", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Text(cancellationState.pending.size.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                }
+            }
+            if (cancellationState.pending.isEmpty()) item { Text("Nenhuma solicitação de cancelamento pendente nesta unidade.") }
+            items(cancellationState.pending, key = { "cancel-${it.id}" }) { request ->
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Pedido #${request.orderId}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                            Text(managerMoney(request.totalCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        }
+                        if (request.customerName.isNotBlank()) Text(request.customerName)
+                        Text("Solicitado por: ${request.requesterName.ifBlank { "Funcionário" }}")
+                        Text("Motivo: ${request.reason}")
+                        Text("${channelLabel(request.channel)} · ${request.orderStatus} · pagamento ${request.paymentStatus}")
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { cancellationViewModel.approve(request.id) }, modifier = Modifier.weight(1f)) { Text("AUTORIZAR") }
+                            OutlinedButton(onClick = { rejectingCancellation = request }, modifier = Modifier.weight(1f)) { Text("REJEITAR") }
+                        }
+                    }
+                }
+            }
+        }
+
         if (overview == null) item { Text("Carregando indicadores...") }
         else {
             item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { ManagerMetric("Pedidos agora", overview.ordersNow.toString(), Modifier.weight(1f)); ManagerMetric("Cozinha atrasada", overview.kitchenDelayed.toString(), Modifier.weight(1f)) } }
@@ -109,15 +151,15 @@ fun ManagerScreen(
             item { Text("Pedidos que exigem atenção", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
             if (data.problemOrders.isEmpty()) item { Text("Nenhum problema operacional identificado.") }
             items(data.problemOrders, key = { "problem-${it.id}" }) { order ->
-                ManagerProblemCard(order, canTransferDelivery && order.channel == "delivery" && data.deliveryShifts.isNotEmpty(), canCancelOrder && order.paymentStatus != "paid" && order.status !in setOf("cancelled", "completed"), { transferOrder = order }, { cancelOrder = order })
+                ManagerProblemCard(order, canTransferDelivery && order.channel == "delivery" && data.deliveryShifts.isNotEmpty(), { transferOrder = order })
             }
         }
 
-        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR PAINEL") } }
+        cancellationState.error?.takeIf { !it.contains("Acesso negado", ignoreCase = true) }?.let { error -> item { Text("Cancelamentos: $error") } }
+        item { OutlinedButton(onClick = { cancellationViewModel.loadPending(); onRefresh() }, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR PAINEL") } }
     }
 
     transferOrder?.let { order -> DeliveryTransferDialog(order, details?.deliveryShifts.orEmpty(), { transferOrder = null }) { userId -> transferOrder = null; onTransferDelivery(order.id, userId) } }
-    cancelOrder?.let { order -> AlertDialog(onDismissRequest = { cancelOrder = null }, title = { Text("Cancelar pedido #${order.id}?") }, text = { Text("O servidor só permitirá o cancelamento se não houver valor recebido nem cobrança eletrônica em processamento. Pedido pago exige estorno.") }, confirmButton = { Button(onClick = { cancelOrder = null; onCancelOrder(order.id) }) { Text("CANCELAR PEDIDO") } }, dismissButton = { TextButton(onClick = { cancelOrder = null }) { Text("VOLTAR") } }) }
     rejectingDiscount?.let { request ->
         var reason by remember(request.id) { mutableStateOf("") }
         AlertDialog(
@@ -128,11 +170,21 @@ fun ManagerScreen(
             dismissButton = { TextButton(onClick = { rejectingDiscount = null }) { Text("VOLTAR") } },
         )
     }
+    rejectingCancellation?.let { request ->
+        var reason by remember(request.id) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { rejectingCancellation = null },
+            title = { Text("Rejeitar cancelamento · Pedido #${request.orderId}") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Motivo informado: ${request.reason}"); OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("Motivo da rejeição") }, modifier = Modifier.fillMaxWidth()) } },
+            confirmButton = { Button(onClick = { rejectingCancellation = null; cancellationViewModel.reject(request.id, reason) }) { Text("REJEITAR") } },
+            dismissButton = { TextButton(onClick = { rejectingCancellation = null }) { Text("VOLTAR") } },
+        )
+    }
 }
 
 @Composable private fun ManagerMetric(label: String, value: String, modifier: Modifier = Modifier) { Card(modifier) { Column(Modifier.padding(16.dp)) { Text(label); Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black) } } }
 @Composable private fun ManagerAlertCard(alert: ManagerAlert) { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { Text(when (alert.level) { "warning" -> "⚠️ ${alert.title}"; "critical" -> "🔴 ${alert.title}"; "ok" -> "✅ ${alert.title}"; else -> "ℹ️ ${alert.title}" }, fontWeight = FontWeight.Bold); Text(alert.message) } } }
-@Composable private fun ManagerProblemCard(order: ManagerProblemOrder, canTransfer: Boolean, canCancel: Boolean, onTransfer: () -> Unit, onCancel: () -> Unit) { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("#${order.id} · ${problemLabel(order.problemType)}", fontWeight = FontWeight.Bold); Text(managerMoney(order.totalCents), fontWeight = FontWeight.Black) }; Text("${order.customerName} · ${channelLabel(order.channel)}"); Text("Status: ${order.status} · Pagamento: ${order.paymentStatus}"); if (order.deliveryName.isNotBlank()) Text("Entregador: ${order.deliveryName}"); Text("Atualizado: ${order.updatedAt}"); if (canTransfer) OutlinedButton(onClick = onTransfer, modifier = Modifier.fillMaxWidth()) { Text(if (order.deliveryUserId == null) "ATRIBUIR ENTREGADOR" else "TRANSFERIR ENTREGA") }; if (canCancel) OutlinedButton(onClick = onCancel, modifier = Modifier.fillMaxWidth()) { Text("CANCELAR PEDIDO") } } } }
+@Composable private fun ManagerProblemCard(order: ManagerProblemOrder, canTransfer: Boolean, onTransfer: () -> Unit) { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("#${order.id} · ${problemLabel(order.problemType)}", fontWeight = FontWeight.Bold); Text(managerMoney(order.totalCents), fontWeight = FontWeight.Black) }; Text("${order.customerName} · ${channelLabel(order.channel)}"); Text("Status: ${order.status} · Pagamento: ${order.paymentStatus}"); if (order.deliveryName.isNotBlank()) Text("Entregador: ${order.deliveryName}"); Text("Atualizado: ${order.updatedAt}"); if (canTransfer) OutlinedButton(onClick = onTransfer, modifier = Modifier.fillMaxWidth()) { Text(if (order.deliveryUserId == null) "ATRIBUIR ENTREGADOR" else "TRANSFERIR ENTREGA") } } } }
 @Composable private fun DeliveryTransferDialog(order: ManagerProblemOrder, delivery: List<ManagerDeliveryShift>, onDismiss: () -> Unit, onSelect: (Int) -> Unit) { AlertDialog(onDismissRequest = onDismiss, title = { Text("Entregador para #${order.id}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { delivery.forEach { worker -> OutlinedButton(onClick = { onSelect(worker.userId) }, modifier = Modifier.fillMaxWidth()) { Text("${worker.userName} · ${worker.activeOrders} entrega(s)") } } } }, confirmButton = {}, dismissButton = { TextButton(onClick = onDismiss) { Text("FECHAR") } }) }
 private fun problemLabel(value: String) = when (value) { "kitchen_delay" -> "Cozinha atrasada"; "delivery_unassigned" -> "Sem entregador"; "payment_pending" -> "Pagamento pendente"; else -> "Atenção" }
 private fun channelLabel(value: String) = when (value) { "delivery" -> "Delivery"; "pickup" -> "Retirada"; "table" -> "Mesa"; "counter" -> "Balcão"; "event" -> "Evento"; else -> value }
