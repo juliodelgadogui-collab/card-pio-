@@ -132,36 +132,49 @@ jobs:
 
   package:
     if: github.event_name == 'push'
-    needs: [lint, android, sqlite, mysql]
+    # O pacote do servidor é independente do app Android e, na fase inicial, depende do caminho SQLite validado.
+    needs: [lint, sqlite]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
-          extensions: curl, mbstring, openssl, pdo_mysql, pdo_sqlite
+          extensions: curl, mbstring, openssl, pdo_sqlite
           coverage: none
       - name: Install production dependencies
         run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
-      - name: Build clean /1 package
-        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-1"
-      - name: Verify package entrypoints
+      - name: Build clean /1 SQLite server package
+        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-SQLite-1"
+      - name: Verify server package
         run: |
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/index.php"
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/install.php"
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/mesa.php"
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/webhook.php"
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/manifest.webmanifest"
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/sw.js"
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/.htaccess"
-          test -f "$RUNNER_TEMP/EventMenu-Premium-1/.env.example"
-          test -d "$RUNNER_TEMP/EventMenu-Premium-1/vendor"
-          grep -q '^APP_BASE_PATH=/1$' "$RUNNER_TEMP/EventMenu-Premium-1/.env.example"
+          PACKAGE="$RUNNER_TEMP/EventMenu-Premium-Servidor-SQLite-1"
+          test -f "$PACKAGE/index.php"
+          test -f "$PACKAGE/install.php"
+          test -f "$PACKAGE/update.php"
+          test -f "$PACKAGE/api.php"
+          test -f "$PACKAGE/api-go.php"
+          test -f "$PACKAGE/mesa.php"
+          test -f "$PACKAGE/webhook.php"
+          test -f "$PACKAGE/manifest.webmanifest"
+          test -f "$PACKAGE/sw.js"
+          test -f "$PACKAGE/.htaccess"
+          test -f "$PACKAGE/.env.example"
+          test -f "$PACKAGE/database/sqlite/schema.sql"
+          test -d "$PACKAGE/database/sqlite/migrations"
+          test -d "$PACKAGE/vendor"
+          test -d "$PACKAGE/storage"
+          grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
+          grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
+          grep -q '^DB_SQLITE_PATH=storage/eventmenu.sqlite$' "$PACKAGE/.env.example"
+      - name: Generate package checksums
+        run: |
+          cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-SQLite-1"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
-        continue-on-error: true
         with:
-          name: EventMenu-Premium-1
-          path: ${{ runner.temp }}/EventMenu-Premium-1
+          name: EventMenu-Premium-Servidor-SQLite-1
+          path: ${{ runner.temp }}/EventMenu-Premium-Servidor-SQLite-1
           if-no-files-found: error
           include-hidden-files: true
-          retention-days: 1
+          retention-days: 7
