@@ -7,10 +7,10 @@ namespace EventMenu\Core;
 final class PermissionCatalog
 {
     private const ROLES = [
-        'admin'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect'],
-        'manager'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect'],
-        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','tables.manage','events.bar','nfc.collect'],
-        'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','cancellations.request','events.bar','tickets.manage','guests.manage','customers.manage','tables.manage','delivery.assign'],
+        'admin'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect'],
+        'manager'=>['dashboard','catalog.manage','inventory.manage','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect'],
+        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','orders.fulfill','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','tables.manage','events.bar','nfc.collect'],
+        'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','orders.fulfill','cancellations.request','events.bar','tickets.manage','guests.manage','customers.manage','tables.manage','delivery.assign'],
         'waiter'=>['dashboard','orders.create','orders.view','orders.dispatch','cancellations.request','tables.manage'],
         'kitchen'=>['dashboard','orders.kitchen'],
         'delivery'=>['dashboard','orders.delivery','cancellations.request','nfc.collect'],
@@ -27,6 +27,7 @@ final class PermissionCatalog
         'orders.kitchen'=>'Operação da cozinha',
         'orders.delivery'=>'Operação de entregas',
         'orders.dispatch'=>'Liberar pedidos prontos / servir mesa',
+        'orders.fulfill'=>'Entregar itens por QR / retirada',
         'orders.reopen'=>'Reabrir pedido finalizado',
         'payments.manage'=>'Recebimentos operacionais',
         'discounts.request'=>'Solicitar desconto',
@@ -78,7 +79,7 @@ final class PermissionCatalog
     public static function modesForPermissions(array $permissions): array
     {
         $set=array_fill_keys($permissions,true);$modes=[];
-        if(isset($set['orders.create'])||isset($set['orders.kitchen'])||isset($set['orders.dispatch'])||isset($set['orders.reopen'])||isset($set['tables.manage'])||isset($set['cash.manage']))$modes[]='operation';
+        if(isset($set['orders.create'])||isset($set['orders.kitchen'])||isset($set['orders.dispatch'])||isset($set['orders.fulfill'])||isset($set['orders.reopen'])||isset($set['tables.manage'])||isset($set['cash.manage']))$modes[]='operation';
         if(isset($set['orders.delivery'])||isset($set['delivery.assign']))$modes[]='delivery';
         if(isset($set['tickets.manage'])||isset($set['guests.manage'])||isset($set['events.manage'])||isset($set['events.bar'])||isset($set['events.promoter']))$modes[]='events';
         if(isset($set['payments.manage'])||isset($set['cash.manage'])||isset($set['nfc.collect']))$modes[]='pay';
