@@ -1,6 +1,7 @@
 package br.com.eventmenu.go
 
 import android.app.Application
+import br.com.eventmenu.go.data.ApiClient
 import br.com.eventmenu.go.data.DeliveryProgressRepository
 import br.com.eventmenu.go.data.DeviceStatusRepository
 import br.com.eventmenu.go.data.EventBarRepository
@@ -46,6 +47,7 @@ class EventMenuGoApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         val store = SecureSessionStore(this)
+        ApiClient.configureSessionStore(store)
         val deviceId = DeviceIdentity.id(this)
         val baseUrl = BuildConfig.API_BASE_URL
         repository = EventMenuRepository(baseUrl, deviceId, store)
