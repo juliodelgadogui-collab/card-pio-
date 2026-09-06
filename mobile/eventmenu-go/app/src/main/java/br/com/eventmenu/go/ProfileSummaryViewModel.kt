@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import br.com.eventmenu.go.data.DeliveryCashBalance
+import br.com.eventmenu.go.data.DeliveryCommissionSummary
 import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.ShiftMethodTotal
 import br.com.eventmenu.go.data.ShiftOrderSummary
@@ -55,6 +56,9 @@ class ProfileSummaryViewModel(private val repo: EventMenuRepository) : ViewModel
                 status = it.optString("status"),
                 startedAt = it.optString("started_at"),
                 endedAt = it.optString("ended_at").takeIf(String::isNotBlank),
+                unitId = if (it.isNull("unit_id")) null else it.optInt("unit_id"),
+                unitName = it.optString("unit_name"),
+                unitCode = it.optString("unit_code"),
             )
         }
         val methods = buildList {
@@ -81,12 +85,25 @@ class ProfileSummaryViewModel(private val repo: EventMenuRepository) : ViewModel
                 outstandingCents = it.optInt("outstanding_cents"),
             )
         }
+        val commissionJson = json.optJSONObject("delivery_commission")
+        val commission = commissionJson?.let {
+            DeliveryCommissionSummary(
+                deliveries = it.optInt("deliveries"),
+                revenueCents = it.optInt("revenue_cents"),
+                percentBps = it.optInt("percent_bps"),
+                fixedPerDeliveryCents = it.optInt("fixed_per_delivery_cents"),
+                percentPartCents = it.optInt("percent_part_cents"),
+                fixedPartCents = it.optInt("fixed_part_cents"),
+                commissionCents = it.optInt("commission_cents"),
+            )
+        }
         return ShiftSummary(
             shift = shift,
             userName = shiftJson?.optString("user_name").orEmpty(),
             orders = ShiftOrderSummary(ordersJson.optInt("qty"), ordersJson.optInt("total_cents")),
             byMethod = methods,
             deliveryCash = delivery,
+            deliveryCommission = commission,
         )
     }
 
