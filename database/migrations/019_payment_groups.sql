@@ -9,7 +9,7 @@ CREATE TABLE payment_groups (
   idempotency_key VARCHAR(190) NOT NULL,
   amount_cents INT UNSIGNED NOT NULL,
   currency CHAR(3) NOT NULL DEFAULT 'BRL',
-  status ENUM('created','pending','paid','failed','cancelled','refunded') NOT NULL DEFAULT 'created',
+  status ENUM('created','pending','paid','attention','failed','cancelled','refunded') NOT NULL DEFAULT 'created',
   provider_payment_id VARCHAR(190) NULL,
   metadata JSON NULL,
   raw_payload JSON NULL,
@@ -43,4 +43,18 @@ CREATE TABLE payment_group_allocations (
   UNIQUE KEY uq_payment_group_order (payment_group_id,order_id),
   UNIQUE KEY uq_payment_group_payment (payment_id),
   INDEX idx_payment_group_alloc_order (tenant_id,order_id,payment_group_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payment_group_items (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  payment_group_id BIGINT UNSIGNED NOT NULL,
+  order_item_id BIGINT UNSIGNED NOT NULL,
+  amount_cents INT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_payment_group_item_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_payment_group_item_group FOREIGN KEY (payment_group_id) REFERENCES payment_groups(id) ON DELETE CASCADE,
+  CONSTRAINT fk_payment_group_item_order_item FOREIGN KEY (order_item_id) REFERENCES order_items(id) ON DELETE RESTRICT,
+  UNIQUE KEY uq_payment_group_item (payment_group_id,order_item_id),
+  INDEX idx_payment_group_item_lookup (tenant_id,order_item_id,payment_group_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
