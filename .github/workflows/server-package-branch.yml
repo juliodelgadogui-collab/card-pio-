@@ -1,0 +1,81 @@
+name: EventMenu Server Package
+
+on:
+  push:
+    branches:
+      - server/order-qr-partial-pickup
+    paths:
+      - '.github/workflows/server-package-branch.yml'
+      - 'app/**'
+      - 'public/**'
+      - 'src/**'
+      - 'database/**'
+      - 'scripts/**'
+      - 'composer.json'
+      - 'composer.lock'
+      - '.env.example'
+
+permissions:
+  contents: read
+
+jobs:
+  server-package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_sqlite
+          coverage: none
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: PHP syntax validation
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: SQLite smoke validation
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-package.sqlite
+          SESSION_NAME: eventmenu_package_sqlite
+        run: |
+          rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
+          php scripts/ci-db-smoke.php
+          php scripts/ci-super-admin-smoke.php
+          php scripts/ci-operations-smoke.php
+      - name: Build SQLite server package
+        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-Novo"
+      - name: Verify new server modules
+        run: |
+          PACKAGE="$RUNNER_TEMP/EventMenu-Premium-Servidor-Novo"
+          test -f "$PACKAGE/index.php"
+          test -f "$PACKAGE/update.php"
+          test -f "$PACKAGE/public/assets/premium-v4.css"
+          test -f "$PACKAGE/app/routes/pickup.php"
+          test -f "$PACKAGE/app/routes/production.php"
+          test -f "$PACKAGE/app/routes/product-config.php"
+          test -f "$PACKAGE/app/routes/event-admin.php"
+          test -f "$PACKAGE/src/Services/OrderFulfillmentService.php"
+          test -f "$PACKAGE/src/Services/ConfiguredOrderService.php"
+          test -f "$PACKAGE/src/Services/ProductConfigurationService.php"
+          test -f "$PACKAGE/src/Services/ProductCostService.php"
+          test -f "$PACKAGE/src/Services/ProductionService.php"
+          test -f "$PACKAGE/src/Services/EventProfessionalService.php"
+          test -f "$PACKAGE/database/sqlite/migrations/034_production_print_queue.sql"
+          test -d "$PACKAGE/vendor"
+          test -d "$PACKAGE/storage"
+          grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
+          grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
+      - name: Generate checksums
+        run: |
+          cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-Novo"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-Servidor-Novo
+          path: ${{ runner.temp }}/EventMenu-Premium-Servidor-Novo
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
