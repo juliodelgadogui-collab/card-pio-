@@ -10,6 +10,7 @@ import br.com.eventmenu.go.data.NotificationRepository
 import br.com.eventmenu.go.data.ReceiptRepository
 import br.com.eventmenu.go.data.TabSplitPaymentRepository
 import br.com.eventmenu.go.data.UniversalQrRepository
+import br.com.eventmenu.go.notifications.OperationNotificationScheduler
 import br.com.eventmenu.go.security.DeviceIdentity
 import br.com.eventmenu.go.security.SecureSessionStore
 
@@ -47,5 +48,6 @@ class EventMenuGoApplication : Application() {
         deviceStatusRepository = DeviceStatusRepository(baseUrl, deviceId, store)
         universalQrRepository = UniversalQrRepository(baseUrl, deviceId, store)
         tabSplitPaymentRepository = TabSplitPaymentRepository(baseUrl, deviceId, store)
+        OperationNotificationScheduler.initialize(this)
     }
 }
