@@ -43,6 +43,11 @@ class ManagerActionsViewModel(private val repo: ManagerOperationsRepository) : V
         _state.update { it.copy(reopenCandidates = repo.reopenCandidates(), details = repo.details()) }
     }
 
+    @Deprecated("Cancelamento direto foi removido; use o fluxo de solicitação/autorização.")
+    fun cancelOrder(orderId: Int) {
+        _state.update { it.copy(error = "Cancelamento direto foi desativado para o pedido #$orderId. Use Solicitar cancelamento.") }
+    }
+
     fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
 
     private fun launch(block: suspend () -> Unit) = viewModelScope.launch {
