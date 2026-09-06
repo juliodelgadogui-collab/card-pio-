@@ -330,6 +330,8 @@ fun EventMenuGoApp(
                     onHidePix = tabSplitViewModel::hidePix,
                     onShowPix = tabSplitViewModel::showPix,
                     onCancelGroup = tabSplitViewModel::cancelGroup,
+                    onReceiptGroup = receiptViewModel::prepareGroup,
+                    onPrintGroup = printerViewModel::printGroupReceipt,
                     onRefresh = tabSplitViewModel::refresh,
                     onBack = {
                         tabSplitViewModel.close()
