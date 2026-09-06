@@ -5,22 +5,21 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import androidx.work.Constraints
 import br.com.eventmenu.go.EventMenuGoApplication
-import br.com.eventmenu.go.MainActivity
 import br.com.eventmenu.go.data.AppNotification
+import br.com.eventmenu.go.navigation.AppDeepLinks
 import java.util.concurrent.TimeUnit
 
 object OperationNotificationScheduler {
@@ -46,12 +45,7 @@ object OperationNotificationScheduler {
         val key = "shown_${notification.id}"
         if (store.getBoolean(key, false)) return
 
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra("notification_id", notification.id)
-            putExtra("entity_type", notification.entityType)
-            putExtra("entity_id", notification.entityId)
-        }
+        val intent = AppDeepLinks.intent(context, notification)
         val pendingIntent = PendingIntent.getActivity(
             context,
             notification.id,
@@ -65,6 +59,7 @@ object OperationNotificationScheduler {
             .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
             .setPriority(if (notification.priority in setOf("warning", "critical")) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setGroup("eventmenu_${notification.mode.ifBlank { "general" }}")
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
 
