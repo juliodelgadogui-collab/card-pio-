@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -21,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -39,43 +42,56 @@ fun TablesScreen(
     var opening by remember { mutableStateOf<RestaurantTable?>(null) }
     var closing by remember { mutableStateOf<RestaurantTable?>(null) }
 
-    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item {
-            Text("Mesas e comandas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("O saldo considera pagamentos parciais já confirmados pelo servidor.")
+    Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Mesas", style = MaterialTheme.typography.headlineMedium)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            TableLegend("●", "Livre", MaterialTheme.colorScheme.secondary, Modifier.weight(1f))
+            TableLegend("●", "Ocupada", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+            TableLegend("●", "Inativa", MaterialTheme.colorScheme.error, Modifier.weight(1f))
         }
-        items(tables, key = { it.id }) { table ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
-                            Text(table.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                            Text("${table.seats} lugares · ${statusLabel(table.status, table.tabId != null)}")
+        if (tables.isEmpty()) {
+            Card(Modifier.fillMaxWidth()) { Text("Nenhuma mesa cadastrada para esta unidade.", modifier = Modifier.padding(18.dp)) }
+        } else {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(112.dp),
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(9.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                items(tables, key = { it.id }) { table ->
+                    val occupied = table.tabId != null
+                    val inactive = table.status == "inactive"
+                    val tone = when { inactive -> MaterialTheme.colorScheme.error; occupied -> MaterialTheme.colorScheme.primary; else -> MaterialTheme.colorScheme.secondary }
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        onClick = {
+                            when {
+                                inactive -> Unit
+                                occupied -> onAccount(table)
+                                else -> opening = table
+                            }
+                        },
+                    ) {
+                        Column(
+                            Modifier.padding(horizontal = 10.dp, vertical = 13.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(if (inactive) "⛔" else "🍽️", style = MaterialTheme.typography.titleLarge)
+                            Text(table.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                            Text(statusLabel(table.status, occupied), color = tone, style = MaterialTheme.typography.labelLarge)
+                            if (occupied) {
+                                Text(tableMoney(table.unpaidCents), fontWeight = FontWeight.Bold)
+                                if (canCreateOrder) TextButton(onClick = { onOrder(table) }) { Text("+ Pedido") }
+                                TextButton(onClick = { closing = table }) { Text("Fechar") }
+                            }
                         }
-                        if (table.tabId != null) Text("Comanda #${table.tabId}", fontWeight = FontWeight.Bold)
-                    }
-
-                    if (table.tabId != null) {
-                        if (table.tabLabel.isNotBlank()) Text(table.tabLabel)
-                        Text("Total da comanda: ${tableMoney(table.tabTotalCents)}")
-                        Text("Saldo a receber: ${tableMoney(table.unpaidCents)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                        Button(onClick = { onAccount(table) }, modifier = Modifier.fillMaxWidth()) {
-                            Text(if (table.unpaidCents > 0) "ABRIR CONTA / RECEBER" else "VER CONTA")
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            if (canCreateOrder) Button(onClick = { onOrder(table) }, modifier = Modifier.weight(1f)) { Text("LANÇAR PEDIDO") }
-                            OutlinedButton(onClick = { closing = table }, modifier = Modifier.weight(1f)) { Text("FECHAR") }
-                        }
-                    } else if (table.status != "inactive") {
-                        Button(onClick = { opening = table }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR COMANDA") }
-                    } else {
-                        Text("Mesa inativa.")
                     }
                 }
             }
         }
-        if (tables.isEmpty()) item { Text("Nenhuma mesa cadastrada para esta empresa.") }
-        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR SALÃO") } }
+        OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar salão") }
     }
 
     opening?.let { table ->
@@ -89,8 +105,8 @@ fun TablesScreen(
                     OutlinedTextField(label, { label = it.take(120) }, label = { Text("Nome/identificação (opcional)") }, modifier = Modifier.fillMaxWidth())
                 }
             },
-            confirmButton = { Button(onClick = { opening = null; onOpen(table.id, label) }) { Text("ABRIR") } },
-            dismissButton = { TextButton(onClick = { opening = null }) { Text("CANCELAR") } },
+            confirmButton = { Button(onClick = { opening = null; onOpen(table.id, label) }) { Text("Abrir") } },
+            dismissButton = { TextButton(onClick = { opening = null }) { Text("Cancelar") } },
         )
     }
 
@@ -104,16 +120,24 @@ fun TablesScreen(
                     Text("O servidor bloqueará o fechamento se existir pedido não pago ou ainda em operação.")
                 }
             },
-            confirmButton = { Button(onClick = { closing = null; table.tabId?.let(onClose) }) { Text("CONFIRMAR") } },
-            dismissButton = { TextButton(onClick = { closing = null }) { Text("VOLTAR") } },
+            confirmButton = { Button(onClick = { closing = null; table.tabId?.let(onClose) }) { Text("Confirmar") } },
+            dismissButton = { TextButton(onClick = { closing = null }) { Text("Voltar") } },
         )
+    }
+}
+
+@Composable
+private fun TableLegend(symbol: String, label: String, color: androidx.compose.ui.graphics.Color, modifier: Modifier = Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(symbol, color = color)
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 private fun statusLabel(status: String, hasTab: Boolean): String = when {
     status == "inactive" -> "Inativa"
     hasTab -> "Ocupada"
-    else -> "Disponível"
+    else -> "Livre"
 }
 
 private fun tableMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
