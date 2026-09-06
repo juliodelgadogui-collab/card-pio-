@@ -70,11 +70,14 @@ class ApiClient(
         query: Map<String, String>,
         body: JSONObject?,
     ): JSONObject = withContext(Dispatchers.IO) {
+        val store = sessionStore ?: sharedSessionStore
         try {
-            execute(path, method, action, token, query, body)
+            execute(path, method, action, token, query, body).also { result ->
+                if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
+            }
         } catch (error: ApiException) {
-            if (token == null || action == "refresh" || !shouldRefresh(error) || sessionStore == null) throw@withContext error
-            val refreshed = refreshAccessToken(token)
+            if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) throw@withContext error
+            val refreshed = refreshAccessToken(store, token)
             execute(path, method, action, refreshed, query, body)
         }
     }
@@ -119,8 +122,7 @@ class ApiClient(
             ))
     }
 
-    private suspend fun refreshAccessToken(failedToken: String): String = refreshMutex.withLock {
-        val store = sessionStore ?: throw ApiException("Sessão não encontrada.", 401)
+    private suspend fun refreshAccessToken(store: SecureSessionStore, failedToken: String): String = refreshMutex.withLock {
         val current = store.token()
         if (!current.isNullOrBlank() && current != failedToken) return@withLock current
         val refresh = store.refreshToken() ?: throw ApiException("Faça login novamente.", 401)
@@ -133,22 +135,27 @@ class ApiClient(
                 query = emptyMap(),
                 body = JSONObject().put("refresh_token", refresh).put("device_id", deviceId),
             )
-            val access = root.getString("token")
-            val nextRefresh = root.getString("refresh_token")
-            store.saveSessionTokens(
-                accessToken = access,
-                refreshToken = nextRefresh,
-                accessExpiresAt = root.optString("expires_at"),
-                refreshExpiresAt = root.optString("refresh_expires_at"),
-            )
-            access
+            saveTokenPair(store, root)
+            root.getString("token")
         } catch (error: Throwable) {
             store.clearSessionTokens()
             throw error
         }
     }
 
+    private fun saveTokenPair(store: SecureSessionStore?, root: JSONObject) {
+        if (store == null || !root.has("token") || !root.has("refresh_token")) return
+        store.saveSessionTokens(
+            accessToken = root.getString("token"),
+            refreshToken = root.getString("refresh_token"),
+            accessExpiresAt = root.optString("expires_at"),
+            refreshExpiresAt = root.optString("refresh_expires_at"),
+        )
+    }
+
     companion object {
         private val refreshMutex = Mutex()
+        @Volatile private var sharedSessionStore: SecureSessionStore? = null
+        fun configureSessionStore(store: SecureSessionStore) { sharedSessionStore = store }
     }
 }
