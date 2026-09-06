@@ -110,12 +110,22 @@ data class CashSummary(
 
 data class ShiftMethodTotal(val method: String, val direction: String, val qty: Int, val totalCents: Int)
 data class ShiftOrderSummary(val qty: Int, val totalCents: Int)
+data class DeliveryCommissionSummary(
+    val deliveries: Int,
+    val revenueCents: Int,
+    val percentBps: Int,
+    val fixedPerDeliveryCents: Int,
+    val percentPartCents: Int,
+    val fixedPartCents: Int,
+    val commissionCents: Int,
+)
 data class ShiftSummary(
     val shift: WorkShift?,
     val userName: String,
     val orders: ShiftOrderSummary,
     val byMethod: List<ShiftMethodTotal>,
     val deliveryCash: DeliveryCashBalance? = null,
+    val deliveryCommission: DeliveryCommissionSummary? = null,
 ) {
     fun totalFor(method: String, direction: String = "in"): Int = byMethod.filter { it.method == method && it.direction == direction }.sumOf { it.totalCents }
     val receivedTotalCents: Int get() = byMethod.filter { it.direction == "in" }.sumOf { it.totalCents }
