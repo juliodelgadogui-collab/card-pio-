@@ -8,6 +8,7 @@ import br.com.eventmenu.go.data.EventOperationsRepository
 import br.com.eventmenu.go.data.ManagerOperationsRepository
 import br.com.eventmenu.go.data.NotificationRepository
 import br.com.eventmenu.go.data.OperatingUnitRepository
+import br.com.eventmenu.go.data.OrderOperationsRepository
 import br.com.eventmenu.go.data.ReceiptRepository
 import br.com.eventmenu.go.data.TabSplitPaymentRepository
 import br.com.eventmenu.go.data.UniversalQrRepository
@@ -36,6 +37,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var operatingUnitRepository: OperatingUnitRepository
         private set
+    lateinit var orderOperationsRepository: OrderOperationsRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -52,6 +55,7 @@ class EventMenuGoApplication : Application() {
         universalQrRepository = UniversalQrRepository(baseUrl, deviceId, store)
         tabSplitPaymentRepository = TabSplitPaymentRepository(baseUrl, deviceId, store)
         operatingUnitRepository = OperatingUnitRepository(baseUrl, deviceId, store)
+        orderOperationsRepository = OrderOperationsRepository(baseUrl, deviceId, store)
         OperationNotificationScheduler.initialize(this)
     }
 }
