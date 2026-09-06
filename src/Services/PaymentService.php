@@ -77,7 +77,10 @@ final class PaymentService
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="paid",verified_at=CURRENT_TIMESTAMP,raw_payload=? WHERE id=?')->execute([(string)$verified['provider_payment_id'],json_encode($verified,JSON_UNESCAPED_UNICODE),$payment['id']]);
             if($paidAfter<$total){$pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=?')->execute([$orderId,$tenantId]);Auth::audit('payment.partial_confirmed','payment',(string)$payment['id'],['order_id'=>$orderId,'paid_cents'=>$paidAfter,'remaining_cents'=>$total-$paidAfter]);return;}
             $pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=?')->execute([$orderId]);
-            $this->settleOrderEffects($pdo,$tenantId,$order,$orderId);Auth::audit('payment.order_settled','order',(string)$orderId,['final_payment_id'=>(int)$payment['id'],'total_cents'=>$total]);
+            $order['payment_status']='paid';if($order['status']==='pending')$order['status']='confirmed';
+            $this->settleOrderEffects($pdo,$tenantId,$order,$orderId);
+            (new ProductionService())->ensureOrderJobs($pdo,$tenantId,$orderId,null);
+            Auth::audit('payment.order_settled','order',(string)$orderId,['final_payment_id'=>(int)$payment['id'],'total_cents'=>$total]);
         });
 
         $this->publishVerifiedNotification($verified);
@@ -122,6 +125,12 @@ final class PaymentService
             else{$red=$pdo->prepare($insertSql);$red->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$order['discount_cents'],$settlement.':coupon']);if($red->rowCount()===1)$pdo->prepare('UPDATE coupons SET uses_count=uses_count+1 WHERE id=? AND tenant_id=?')->execute([$order['coupon_id'],$tenantId]);}
         }
         if(!empty($order['customer_id'])){$points=intdiv((int)$order['total_cents'],100);if($points>0){$ins=$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO customer_points_movements (tenant_id,customer_id,order_id,points,type,idempotency_key) VALUES (?,?,?,?,"earn",?)'));$ins->execute([$tenantId,$order['customer_id'],$orderId,$points,$settlement.':points']);if($ins->rowCount()===1)$pdo->prepare('UPDATE customers SET points=points+? WHERE id=? AND tenant_id=?')->execute([$points,$order['customer_id'],$tenantId]);}}
-        if(!empty($order['promoter_id'])){$p=$pdo->prepare('SELECT commission_percent FROM promoters WHERE id=? AND tenant_id=? AND active=1');$p->execute([$order['promoter_id'],$tenantId]);$percent=$p->fetchColumn();if($percent!==false){$commission=(int)round((int)$order['total_cents']*((float)$percent/100));$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO promoter_commissions (tenant_id,promoter_id,order_id,amount_cents,status,idempotency_key) VALUES (?,?,?,?,"approved",?)'))->execute([$tenantId,$order['promoter_id'],$orderId,$commission,$settlement.':commission']);}}
+        if(!empty($order['promoter_id'])){
+            $p=$pdo->prepare('SELECT commission_percent FROM promoters WHERE id=? AND tenant_id=? AND active=1');$p->execute([$order['promoter_id'],$tenantId]);$percent=$p->fetchColumn();
+            if($percent!==false){
+                try{$event=$pdo->prepare('SELECT event_id FROM tickets WHERE tenant_id=? AND order_id=? LIMIT 1');$event->execute([$tenantId,$orderId]);$eventId=$event->fetchColumn();if($eventId){$ep=$pdo->prepare('SELECT commission_percent FROM event_promoters WHERE tenant_id=? AND event_id=? AND promoter_id=? AND active=1 LIMIT 1');$ep->execute([$tenantId,$eventId,$order['promoter_id']]);$override=$ep->fetchColumn();if($override!==false&&$override!==null)$percent=(float)$override;}}catch(\Throwable){}
+                $commission=(int)round((int)$order['total_cents']*((float)$percent/100));$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO promoter_commissions (tenant_id,promoter_id,order_id,amount_cents,status,idempotency_key) VALUES (?,?,?,?,"approved",?)'))->execute([$tenantId,$order['promoter_id'],$orderId,$commission,$settlement.':commission']);
+            }
+        }
     }
 }
