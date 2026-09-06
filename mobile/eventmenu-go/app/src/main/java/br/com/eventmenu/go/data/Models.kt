@@ -1,7 +1,16 @@
 package br.com.eventmenu.go.data
 
 data class AppUser(val id: Int, val tenantId: Int, val name: String, val email: String, val role: String)
-data class WorkShift(val id: Int, val mode: String, val status: String, val startedAt: String, val endedAt: String? = null)
+data class WorkShift(
+    val id: Int,
+    val mode: String,
+    val status: String,
+    val startedAt: String,
+    val endedAt: String? = null,
+    val unitId: Int? = null,
+    val unitName: String = "",
+    val unitCode: String = "",
+)
 data class Session(val user: AppUser, val permissions: Set<String>, val modes: List<AppMode> = emptyList(), val shift: WorkShift? = null)
 
 data class Order(
@@ -79,6 +88,8 @@ data class CashSession(
     val expectedCashCents: Int? = null,
     val differenceCents: Int? = null,
     val closedAt: String = "",
+    val unitId: Int? = null,
+    val unitName: String = "",
 )
 data class CashMovement(
     val id: Int,
