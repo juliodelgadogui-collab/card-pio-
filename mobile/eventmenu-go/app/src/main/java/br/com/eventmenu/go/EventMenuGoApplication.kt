@@ -2,6 +2,7 @@ package br.com.eventmenu.go
 
 import android.app.Application
 import br.com.eventmenu.go.data.ApiClient
+import br.com.eventmenu.go.data.CancellationRepository
 import br.com.eventmenu.go.data.DeliveryProgressRepository
 import br.com.eventmenu.go.data.DeviceStatusRepository
 import br.com.eventmenu.go.data.DiscountRepository
@@ -46,6 +47,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var discountRepository: DiscountRepository
         private set
+    lateinit var cancellationRepository: CancellationRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -66,6 +69,7 @@ class EventMenuGoApplication : Application() {
         orderOperationsRepository = OrderOperationsRepository(baseUrl, deviceId, store)
         deliveryProgressRepository = DeliveryProgressRepository(baseUrl, deviceId, store)
         discountRepository = DiscountRepository(baseUrl, deviceId, store)
+        cancellationRepository = CancellationRepository(baseUrl, deviceId, store)
         OperationNotificationScheduler.initialize(this)
     }
 }
