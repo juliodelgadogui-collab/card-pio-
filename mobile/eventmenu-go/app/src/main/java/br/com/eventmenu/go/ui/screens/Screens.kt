@@ -143,7 +143,7 @@ private fun MetricCard(label: String, value: String) {
 }
 
 @Composable
-fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, String) -> Unit) {
+fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, String) -> Unit, onOpen: (Int) -> Unit = {}) {
     val filters = listOf("Todos", "Novos", "Preparando", "Prontos", "Delivery", "Finalizados")
     var filter by remember { mutableStateOf("Todos") }
     val visible = orders.filter { order -> when (filter) {
@@ -160,13 +160,13 @@ fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, Str
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { filters.take(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) } }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { filters.drop(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) } }
         }
-        items(visible, key = { it.id }) { order -> OrderCard(order, onStatus) }
+        items(visible, key = { it.id }) { order -> OrderCard(order, onStatus, onOpen) }
         item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR") } }
     }
 }
 
 @Composable
-private fun OrderCard(order: Order, onStatus: (Int, String) -> Unit) {
+private fun OrderCard(order: Order, onStatus: (Int, String) -> Unit, onOpen: (Int) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -176,6 +176,7 @@ private fun OrderCard(order: Order, onStatus: (Int, String) -> Unit) {
             Text("${order.customerName} · ${order.channel.uppercase()}")
             Text("Status: ${order.status} · Pagamento: ${order.paymentStatus}")
             if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
+            OutlinedButton(onClick = { onOpen(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR") }
             when (order.status) {
                 "confirmed" -> Button(onClick = { onStatus(order.id, "preparing") }) { Text("INICIAR") }
                 "preparing" -> Button(onClick = { onStatus(order.id, "ready") }) { Text("PRONTO") }
