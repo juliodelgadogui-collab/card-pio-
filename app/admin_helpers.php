@@ -110,6 +110,7 @@ function em_nav(): array
         ['guests', 'Convidados', 'guests.manage'],
         ['promoters', 'Promotores', 'promoters.manage'],
         ['payments', 'Pagamentos', 'payments.manage'],
+        ['finance', 'Financeiro', 'finance.view'],
         ['gateways', 'Gateways e NFC', 'gateways.manage'],
         ['users', 'Equipe', 'users.manage'],
         ['units', 'Unidades', 'settings.manage'],
