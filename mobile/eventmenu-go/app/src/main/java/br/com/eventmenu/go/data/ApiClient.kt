@@ -12,45 +12,36 @@ class ApiException(message: String, val status: Int = 0) : RuntimeException(mess
 class ApiClient(private val baseUrl: String, private val deviceId: String) {
     suspend fun get(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api.php", "GET", action, token, query, null)
-
     suspend fun post(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api.php", "POST", action, token, emptyMap(), body)
-
     suspend fun getGo(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go.php", "GET", action, token, query, null)
-
     suspend fun postGo(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go.php", "POST", action, token, emptyMap(), body)
-
     suspend fun getEvents(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-events.php", "GET", action, token, query, null)
-
     suspend fun postEvents(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go-events.php", "POST", action, token, emptyMap(), body)
-
     suspend fun getManager(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-manager.php", "GET", action, token, query, null)
-
     suspend fun postManager(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go-manager.php", "POST", action, token, emptyMap(), body)
-
     suspend fun getNotifications(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-notifications.php", "GET", action, token, query, null)
-
     suspend fun postNotifications(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go-notifications.php", "POST", action, token, emptyMap(), body)
-
     suspend fun getReceipt(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-receipts.php", "GET", action, token, query, null)
-
     suspend fun getDevice(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-device.php", "GET", action, token, query, null)
-
     suspend fun getQr(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-qr.php", "GET", action, token, query, null)
-
     suspend fun postQr(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go-qr.php", "POST", action, token, emptyMap(), body)
+    suspend fun getTabPayments(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
+        request("api-go-tab-payments.php", "GET", action, token, query, null)
+    suspend fun postTabPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
+        request("api-go-tab-payments.php", "POST", action, token, emptyMap(), body)
 
     private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
@@ -74,8 +65,6 @@ class ApiClient(private val baseUrl: String, private val deviceId: String) {
             val json = runCatching { JSONObject(text) }.getOrElse { JSONObject().put("ok", false).put("error", "Resposta inválida do servidor.") }
             if (status !in 200..299 || !json.optBoolean("ok", false)) throw ApiException(json.optString("error", "Falha na API."), status)
             json
-        } finally {
-            connection.disconnect()
-        }
+        } finally { connection.disconnect() }
     }
 }
