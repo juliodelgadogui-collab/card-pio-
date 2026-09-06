@@ -22,16 +22,21 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.GoState
+import br.com.eventmenu.go.OrderOperationsViewModel
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.QrResult
@@ -143,7 +148,10 @@ private fun MetricCard(label: String, value: String) {
 }
 
 @Composable
-fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, String) -> Unit, onOpen: (Int) -> Unit = {}) {
+fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, String) -> Unit) {
+    val app = LocalContext.current.applicationContext as EventMenuGoApplication
+    val orderViewModel: OrderOperationsViewModel = viewModel(factory = OrderOperationsViewModel.Factory(app.orderOperationsRepository))
+    val orderState by orderViewModel.state.collectAsState()
     val filters = listOf("Todos", "Novos", "Preparando", "Prontos", "Delivery", "Finalizados")
     var filter by remember { mutableStateOf("Todos") }
     val visible = orders.filter { order -> when (filter) {
@@ -157,11 +165,21 @@ fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, Str
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Pedidos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            orderState.error?.let { Text("⚠️ $it", color = MaterialTheme.colorScheme.error) }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { filters.take(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) } }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { filters.drop(3).forEach { f -> FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f) }) } }
         }
-        items(visible, key = { it.id }) { order -> OrderCard(order, onStatus, onOpen) }
+        items(visible, key = { it.id }) { order -> OrderCard(order, onStatus, orderViewModel::open) }
         item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR") } }
+    }
+
+    orderState.detail?.let { detail ->
+        OrderDetailDialog(
+            detail = detail,
+            canAccept = false,
+            onAccept = {},
+            onDismiss = orderViewModel::close,
+        )
     }
 }
 
