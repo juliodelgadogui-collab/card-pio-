@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import br.com.eventmenu.go.data.ManagerDetails
 import br.com.eventmenu.go.data.ManagerOperationsRepository
+import br.com.eventmenu.go.data.ManagerReopenCandidate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -13,6 +14,7 @@ import kotlinx.coroutines.launch
 
 data class ManagerActionsState(
     val details: ManagerDetails? = null,
+    val reopenCandidates: List<ManagerReopenCandidate> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
     val message: String? = null,
@@ -25,16 +27,20 @@ class ManagerActionsViewModel(private val repo: ManagerOperationsRepository) : V
 
     fun refresh() = launch { _state.update { it.copy(details = repo.details()) } }
 
+    fun refreshReopenCandidates() = launch {
+        _state.update { it.copy(reopenCandidates = repo.reopenCandidates()) }
+    }
+
     fun transferDelivery(orderId: Int, deliveryUserId: Int) = launch {
         repo.transferDelivery(orderId, deliveryUserId)
         _state.update { it.copy(message = "Entrega #$orderId transferida.", changeVersion = it.changeVersion + 1) }
         _state.update { it.copy(details = repo.details()) }
     }
 
-    fun cancelOrder(orderId: Int) = launch {
-        repo.cancelOrder(orderId)
-        _state.update { it.copy(message = "Pedido #$orderId cancelado.", changeVersion = it.changeVersion + 1) }
-        _state.update { it.copy(details = repo.details()) }
+    fun reopenOrder(orderId: Int, reason: String) = launch {
+        repo.reopenOrder(orderId, reason)
+        _state.update { it.copy(message = "Pedido #$orderId reaberto e devolvido para Prontos.", changeVersion = it.changeVersion + 1) }
+        _state.update { it.copy(reopenCandidates = repo.reopenCandidates(), details = repo.details()) }
     }
 
     fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
