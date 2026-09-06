@@ -15,6 +15,7 @@ final class DeliveryCashService
     {
         $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId||!Auth::can('orders.delivery'))throw new RuntimeException('Acesso negado.');
         $shift=(new WorkShiftService())->current();if(!$shift||$shift['mode']!=='delivery')throw new RuntimeException('Inicie seu turno de Delivery antes de receber dinheiro.');
+        (new DeliveryProgressService())->assertArrived($orderId);
 
         return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$orderId,$receivedCents,$shift):array{
             $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$orderId,$tenantId]);$order=$s->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');
