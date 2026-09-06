@@ -5,6 +5,9 @@ plugins {
 
 // Servidor oficial do EventMenu GO. Não existe configuração de servidor na interface do app.
 val apiBase = "https://go.gestao2.store/1/"
+val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val appVersionCode = ciBuildNumber ?: 3
+val appVersionName = if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
 
 android {
     namespace = "br.com.eventmenu.go"
@@ -14,8 +17,8 @@ android {
         applicationId = "br.com.eventmenu.go"
         minSdk = 23
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = appVersionCode
+        versionName = appVersionName
         buildConfigField("String", "API_BASE_URL", "\"$apiBase\"")
     }
 
