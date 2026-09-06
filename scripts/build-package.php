@@ -91,28 +91,57 @@ HTACCESS;
 write_file($destination . '/.htaccess', $rootHtaccess . "\n");
 
 $deployReadme = <<<'TXT'
-EVENTMENU PREMIUM — PACOTE /1
+EVENTMENU PREMIUM — PRIMEIRA INSTALAÇÃO /1 — SQLITE
 
-Este diretório foi gerado do HEAD atual do GitHub. Não reutiliza ZIP antigo.
+Este pacote foi gerado do HEAD atual do GitHub e foi preparado para um servidor totalmente vazio.
+O Composer NÃO precisa estar instalado no servidor: a pasta vendor já acompanha o pacote.
 
-Instalação:
-1. Envie TODO o conteúdo deste diretório para a pasta /1 do domínio.
-2. Renomeie .env.example para .env.
-3. Ajuste APP_URL para a origem do domínio (ex.: https://exemplo.com.br).
-4. Mantenha APP_BASE_PATH=/1.
-5. Gere uma APP_KEY longa e aleatória.
-6. Configure DB_CONNECTION=mysql ou sqlite e as credenciais/caminho.
-7. Garanta permissão de escrita na pasta storage.
-8. Acesse https://SEU-DOMINIO/1/install.php.
-9. Depois da instalação, acesse https://SEU-DOMINIO/1/.
+REQUISITOS DO SERVIDOR
+- PHP 8.2 ou superior.
+- Extensões: PDO, pdo_sqlite, mbstring, curl e openssl.
+- HTTPS recomendado desde a primeira instalação.
+- Apache/LiteSpeed com .htaccess habilitado, ou regras equivalentes no Nginx.
+- Permissão de escrita para a pasta do sistema durante a instalação e para storage depois.
 
-Produção:
-- HTTPS obrigatório para pagamentos e PWA.
-- SESSION_SECURE=true em HTTPS.
-- Não exponha .env, app, src, database, storage, vendor ou public diretamente.
-- O .htaccess do pacote bloqueia essas áreas em Apache/LiteSpeed.
-- Em Nginx, replique os bloqueios no virtual host.
+INSTALAÇÃO DO ZERO
+1. Crie/abra a pasta /1 no domínio.
+2. Envie TODO o conteúdo deste pacote para essa pasta.
+3. NÃO crie banco de dados manualmente.
+4. NÃO é obrigatório renomear .env.example: se .env não existir, o instalador cria automaticamente.
+5. Acesse https://SEU-DOMINIO/1/install.php.
+6. Confira se todos os requisitos aparecem com ✅.
+7. Informe a URL, empresa inicial e os dados do Super ADM.
+8. Clique em "Instalar EventMenu com SQLite".
+9. O sistema criará automaticamente:
+   - .env com APP_KEY e CRON_SECRET aleatórios;
+   - storage/eventmenu.sqlite;
+   - schema e migrações atuais;
+   - empresa inicial;
+   - usuário Super ADM;
+   - storage/installed.lock para bloquear nova instalação.
+10. Entre em https://SEU-DOMINIO/1/.
+
+BANCO INICIAL
+- Banco: SQLite.
+- Arquivo: storage/eventmenu.sqlite.
+- WAL e foreign keys são ativados automaticamente.
+- Nunca disponibilize storage publicamente.
+- Faça backup periódico do banco antes de atualizações importantes.
+
+ATUALIZAÇÕES
+- Envie os novos arquivos preservando .env e toda a pasta storage.
+- Entre como administrador autorizado e acesse /1/update.php para aplicar migrações.
+- NUNCA substitua storage/eventmenu.sqlite por um arquivo vazio durante atualização.
+
+SEGURANÇA
+- O .htaccess do pacote bloqueia .env, app, src, database, storage, vendor e public em Apache/LiteSpeed.
+- Em Nginx, replique esses bloqueios no virtual host.
+- SESSION_SECURE é ativado automaticamente quando a URL informada usa HTTPS.
+- Depois de instalado, install.php é bloqueado por installed.lock e pela existência do Super ADM.
+
+MIGRAÇÃO FUTURA PARA MYSQL/MARIADB
+O sistema mantém suporte a MySQL/MariaDB, mas a primeira instalação deste pacote usa SQLite conforme definido para a fase inicial do projeto.
 TXT;
 write_file($destination . '/LEIA-ME-INSTALACAO.txt', $deployReadme . "\n");
 
-echo "Pacote criado em: {$destination}\n";
+echo "Pacote SQLite de primeira instalação criado em: {$destination}\n";
