@@ -137,11 +137,25 @@ fun EmployeeProfileScreen(
 
             if (shift.mode == "delivery") {
                 val cash = shiftSummary?.deliveryCash ?: state.deliveryCash
+                val commission = shiftSummary?.deliveryCommission
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                             Text("Fechamento do entregador", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Text("Unidade: ${shift.unitName.ifBlank { "Principal" }}")
+                            Text("Entregas concluídas: ${commission?.deliveries ?: 0}")
+                            Text("Valor das entregas concluídas: ${profileMoney(commission?.revenueCents ?: 0)}")
+                            val bps = commission?.percentBps ?: 0
+                            val fixed = commission?.fixedPerDeliveryCents ?: 0
+                            if (bps > 0 || fixed > 0) {
+                                val rules = buildList {
+                                    if (bps > 0) add("${formatCommissionPercent(bps)}%")
+                                    if (fixed > 0) add("${profileMoney(fixed)} por entrega")
+                                }.joinToString(" + ")
+                                Text("Regra de comissão: $rules")
+                            } else Text("Regra de comissão: sem comissão configurada")
+                            Text("Comissão: ${profileMoney(commission?.commissionCents ?: 0)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                            HorizontalDivider()
                             Text("Dinheiro recebido: ${profileMoney(cash?.cashCollectedCents ?: 0)}")
                             Text("Já entregue ao caixa: ${profileMoney(cash?.confirmedHandoffCents ?: 0)}")
                             Text("Dinheiro a entregar: ${profileMoney(cash?.outstandingCents ?: 0)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
@@ -154,13 +168,10 @@ fun EmployeeProfileScreen(
                 }
             }
 
-            item {
-                Button(onClick = onCloseShift, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") }
-            }
+            item { Button(onClick = onCloseShift, modifier = Modifier.fillMaxWidth()) { Text("ENCERRAR TURNO") } }
         }
 
         item { DeviceStatusCard(deviceState, onRefreshDevice) }
-
         item {
             PrinterSettingsCard(
                 state = printerState,
@@ -185,9 +196,7 @@ fun EmployeeProfileScreen(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
-        item {
-            OutlinedButton(onClick = { onSavePin(pin); pin = "" }, enabled = pin.length >= 4, modifier = Modifier.fillMaxWidth()) { Text("SALVAR PIN") }
-        }
+        item { OutlinedButton(onClick = { onSavePin(pin); pin = "" }, enabled = pin.length >= 4, modifier = Modifier.fillMaxWidth()) { Text("SALVAR PIN") } }
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text("Entrar com biometria")
@@ -230,6 +239,11 @@ private fun methodLabel(method: String) = when (method.lowercase()) {
     "nfc", "card", "credit", "debit" -> "Cartão / NFC"
     "handoff" -> "Repasse"
     else -> method.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+}
+
+private fun formatCommissionPercent(bps: Int): String {
+    val value = bps / 100.0
+    return if (value % 1.0 == 0.0) value.toInt().toString() else "%.2f".format(value).replace('.', ',')
 }
 
 private fun profileMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
