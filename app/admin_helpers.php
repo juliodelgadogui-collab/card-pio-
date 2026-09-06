@@ -29,6 +29,7 @@ function em_nav():array{return[
     ['pickup','Retirada / QR','orders.fulfill'],
     ['cash','Turno de caixa','cash.manage'],
     ['kitchen','Cozinha / KDS','orders.kitchen'],
+    ['production','Produção / Estações','production.manage'],
     ['delivery','Entregas','orders.delivery'],
     ['products','Cardápio','catalog.manage'],
     ['inventory','Estoque','inventory.manage'],
