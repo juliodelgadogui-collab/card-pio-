@@ -6,41 +6,74 @@ Esta reconstrução é mantida diretamente no GitHub e parte dos requisitos da l
 
 ## Estado atual
 
-O `main` possui CI obrigatório de aplicação com:
+O `main` possui CI de aplicação com:
 
 - lint/sintaxe PHP 8.2;
 - validação estrita do Composer;
-- smoke test real em MySQL 8;
 - smoke test real em SQLite;
+- smoke test real em MySQL 8;
 - teste específico de URLs para instalação em `/1`;
-- geração do artefato limpo `EventMenu-Premium-1` somente depois que os gates anteriores passam.
+- compilação independente do app Android EventMenu GO;
+- geração do artefato de servidor **`EventMenu-Premium-Servidor-SQLite-1`** depois que lint e SQLite passam.
 
-## Requisitos
+O pacote do servidor não depende do resultado da compilação Android. Assim, uma correção do app móvel não bloqueia uma implantação web/servidor válida.
+
+## Requisitos do servidor
+
+Para a primeira instalação definida para esta fase:
 
 - PHP 8.2+
-- MySQL 8/MariaDB **ou SQLite**
-- Extensões PHP: PDO, pdo_mysql e/ou pdo_sqlite, mbstring, curl, openssl
+- SQLite via `pdo_sqlite`
+- Extensões PHP: PDO, pdo_sqlite, mbstring, curl, openssl
 - HTTPS em produção
 - Apache/LiteSpeed ou Nginx com bloqueio de acesso às pastas privadas
+- permissão de escrita em `storage/`
 
-## Instalação direta em `/1`
+O pacote já inclui `vendor/`, portanto **Composer não é necessário no servidor de produção** para a instalação pelo artefato.
 
-A forma recomendada para hospedagem compartilhada é usar o artefato **`EventMenu-Premium-1`** gerado pelo GitHub Actions.
+## Primeira instalação em servidor totalmente vazio — SQLite
+
+A forma recomendada é usar o artefato **`EventMenu-Premium-Servidor-SQLite-1`** gerado pelo GitHub Actions.
 
 1. Baixe o artefato da execução verde mais recente do workflow **EventMenu CI**.
-2. Envie todo o conteúdo do artefato para a pasta `/1` do domínio.
-3. Renomeie `.env.example` para `.env`.
-4. Configure `APP_URL` apenas com a origem do domínio, por exemplo `https://exemplo.com.br`.
-5. Mantenha `APP_BASE_PATH=/1`.
-6. Gere uma `APP_KEY` longa e aleatória.
-7. Escolha `DB_CONNECTION=mysql` ou `DB_CONNECTION=sqlite` e configure os campos correspondentes.
-8. Em HTTPS, use `SESSION_SECURE=true`.
-9. Garanta permissão de escrita em `storage/`.
-10. Acesse `https://SEU-DOMINIO/1/install.php` e crie a primeira empresa e o administrador.
+2. Crie/abra a pasta `/1` no domínio.
+3. Envie **todo o conteúdo** do artefato para `/1`.
+4. Não crie banco de dados manualmente.
+5. Não é obrigatório criar ou renomear `.env`: se ele não existir, o instalador cria automaticamente.
+6. Acesse `https://SEU-DOMINIO/1/install.php`.
+7. Confira a verificação automática de PHP, PDO SQLite, schema, dependências e permissões.
+8. Informe a URL do sistema, empresa inicial e os dados do Super ADM.
+9. Clique em **Instalar EventMenu com SQLite**.
+
+O instalador cria automaticamente:
+
+- `.env` com `APP_KEY` e `CRON_SECRET` aleatórios;
+- `DB_CONNECTION=sqlite`;
+- `DB_SQLITE_PATH=storage/eventmenu.sqlite`;
+- `storage/eventmenu.sqlite`;
+- schema e todas as migrations SQLite atuais;
+- empresa inicial;
+- usuário Super ADM;
+- `storage/installed.lock`, bloqueando uma segunda instalação.
+
+Depois, acesse `https://SEU-DOMINIO/1/`.
 
 O pacote contém wrappers públicos na raiz de `/1`, dependências de produção (`vendor/`), PWA, assets e regras `.htaccess` para impedir acesso HTTP direto a `app/`, `src/`, `database/`, `storage/`, `vendor/` e `public/` em Apache/LiteSpeed.
 
 Para Nginx, replique esses bloqueios no virtual host.
+
+## Atualizações do servidor
+
+Ao atualizar uma instalação existente:
+
+1. preserve o arquivo `.env`;
+2. preserve **toda a pasta `storage/`**;
+3. envie os novos arquivos do pacote;
+4. nunca substitua `storage/eventmenu.sqlite` por um arquivo vazio;
+5. entre com usuário administrativo autorizado;
+6. acesse `/1/update.php` para executar somente as migrations ainda não aplicadas.
+
+O pacote inclui `SHA256SUMS.txt` para conferência de integridade dos arquivos gerados no CI.
 
 ## Desenvolvimento com DocumentRoot em `public/`
 
@@ -48,9 +81,22 @@ Também é possível clonar o repositório normalmente, executar `composer insta
 
 ## Banco de dados
 
-### MySQL/MariaDB
+### SQLite — padrão da primeira instalação
 
-Use:
+```env
+DB_CONNECTION=sqlite
+DB_SQLITE_PATH=storage/eventmenu.sqlite
+```
+
+A conexão ativa automaticamente:
+
+- `PRAGMA foreign_keys = ON`;
+- `PRAGMA busy_timeout = 5000`;
+- modo WAL para o banco persistente.
+
+### MySQL/MariaDB — opção futura
+
+O sistema continua mantendo suporte a MySQL/MariaDB para uma migração futura:
 
 ```env
 DB_CONNECTION=mysql
@@ -59,15 +105,6 @@ DB_PORT=3306
 DB_DATABASE=eventmenu
 DB_USERNAME=...
 DB_PASSWORD=...
-```
-
-### SQLite
-
-Use:
-
-```env
-DB_CONNECTION=sqlite
-DB_SQLITE_PATH=storage/eventmenu.sqlite
 ```
 
 A camada `Database` seleciona schema e estratégia de transação por driver. Locks usados em pagamentos, ingressos, cupons, pontos, mesas/comandas, convidados e NFC possuem comportamento portátil para os dois bancos.
@@ -102,7 +139,7 @@ A camada `Database` seleciona schema e estratégia de transação por driver. Lo
 
 ## Segurança de pagamentos
 
-O sistema não confia no navegador, PWA ou futuro aplicativo Android para declarar um pagamento como aprovado. O estado `paid` só pode ser confirmado após validação servidor-a-servidor, conferindo:
+O sistema não confia no navegador, PWA ou aplicativo Android para declarar um pagamento como aprovado. O estado `paid` só pode ser confirmado após validação servidor-a-servidor, conferindo:
 
 - assinatura/autenticidade do webhook;
 - provedor;
@@ -118,15 +155,15 @@ O núcleo está em `src/Services/PaymentService.php`, enquanto `GatewayService.p
 ## Estrutura do repositório
 
 ```text
-.github/workflows/   CI MySQL/SQLite/lint e geração do pacote
+.github/workflows/   CI SQLite/MySQL/lint, Android e geração independente do pacote do servidor
 app/                 bootstrap, helpers e rotas administrativas
-database/            schema/migrações MySQL e schema SQLite
-public/              frontends públicos, painel, PWA e assets
-scripts/             smoke tests e gerador do pacote /1
+database/            schema/migrations MySQL e SQLite
+public/              frontends públicos, painel, instalador, APIs, PWA e assets
+scripts/             smoke tests e gerador do pacote do servidor
 src/Core/            banco, autenticação e segurança
 src/Services/        pagamentos, gateways, ingressos e domínio
 ```
 
 ## Regra de produção
 
-Nenhuma mudança deve ser tratada como pronta apenas porque compilou. O HEAD precisa fechar os gates de CI e o artefato deve ser gerado pela mesma execução verde que será usada para implantação.
+Nenhuma mudança deve ser tratada como pronta apenas porque compilou. Para a implantação inicial SQLite, o pacote de servidor deve ser gerado por uma execução em que **lint + SQLite estejam verdes**. O app Android mantém sua própria validação independente.
