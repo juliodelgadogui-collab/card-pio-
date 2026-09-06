@@ -29,6 +29,9 @@ try{
     if($action==='login'){
         api_method('POST');$body=api_body();$result=$auth->login((string)($body['email']??''),(string)($body['password']??''),(string)($body['device_id']??''),(string)($body['device_label']??''));api_out(['ok'=>true]+$result);
     }
+    if($action==='refresh'){
+        api_method('POST');$body=api_body();$deviceId=ApiAuthService::deviceId();if($deviceId==='')$deviceId=(string)($body['device_id']??'');$result=$auth->refresh((string)($body['refresh_token']??''),$deviceId);api_out(['ok'=>true]+$result);
+    }
 
     $token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')api_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);$user=$auth->authenticate($token,$deviceId);$pdo=Database::connection();$tenantId=(int)$user['tenant_id'];
 
