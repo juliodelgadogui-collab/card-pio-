@@ -4,6 +4,7 @@ import android.app.Application
 import br.com.eventmenu.go.data.ApiClient
 import br.com.eventmenu.go.data.DeliveryProgressRepository
 import br.com.eventmenu.go.data.DeviceStatusRepository
+import br.com.eventmenu.go.data.DiscountRepository
 import br.com.eventmenu.go.data.EventBarRepository
 import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.EventOperationsRepository
@@ -43,6 +44,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var deliveryProgressRepository: DeliveryProgressRepository
         private set
+    lateinit var discountRepository: DiscountRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -62,6 +65,7 @@ class EventMenuGoApplication : Application() {
         operatingUnitRepository = OperatingUnitRepository(baseUrl, deviceId, store)
         orderOperationsRepository = OrderOperationsRepository(baseUrl, deviceId, store)
         deliveryProgressRepository = DeliveryProgressRepository(baseUrl, deviceId, store)
+        discountRepository = DiscountRepository(baseUrl, deviceId, store)
         OperationNotificationScheduler.initialize(this)
     }
 }
