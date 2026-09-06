@@ -18,6 +18,10 @@ class ApiClient(private val baseUrl: String, private val deviceId: String) {
         request("api-go.php", "GET", action, token, query, null)
     suspend fun postGo(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go.php", "POST", action, token, emptyMap(), body)
+    suspend fun getOrderOps(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
+        request("api-go-orders.php", "GET", action, token, query, null)
+    suspend fun postOrderOps(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
+        request("api-go-orders.php", "POST", action, token, emptyMap(), body)
     suspend fun getEvents(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
         request("api-go-events.php", "GET", action, token, query, null)
     suspend fun postEvents(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
