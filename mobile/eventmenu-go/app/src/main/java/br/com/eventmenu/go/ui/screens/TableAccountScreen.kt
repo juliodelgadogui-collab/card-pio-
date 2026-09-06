@@ -26,6 +26,7 @@ fun TableAccountScreen(
     account: TableAccount?,
     canReceive: Boolean,
     onReceive: (TableAccountOrder) -> Unit,
+    onSplit: (Int) -> Unit,
     onRefresh: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -64,6 +65,14 @@ fun TableAccountScreen(
             }
         }
 
+        if (canReceive && account.remainingCents > 0 && account.table.tabId != null) {
+            item {
+                Button(onClick = { onSplit(account.table.tabId) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("DIVIDIR CONTA · PESSOA / PRODUTO / VALOR / %")
+                }
+            }
+        }
+
         item {
             Text("Pedidos da comanda", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             Text("Cada pagamento permanece ligado ao pedido original para manter estoque, estorno e auditoria corretos.")
@@ -82,7 +91,7 @@ fun TableAccountScreen(
                     if (order.remainingCents <= 0) {
                         Text("✅ PAGAMENTO CONCLUÍDO")
                     } else if (canReceive) {
-                        Button(onClick = { onReceive(order) }, modifier = Modifier.fillMaxWidth()) { Text("RECEBER ESTE PEDIDO") }
+                        OutlinedButton(onClick = { onReceive(order) }, modifier = Modifier.fillMaxWidth()) { Text("RECEBER SOMENTE ESTE PEDIDO") }
                     } else {
                         Text("Sua função pode consultar a comanda, mas não receber pagamentos.")
                     }
