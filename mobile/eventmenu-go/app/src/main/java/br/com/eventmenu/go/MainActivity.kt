@@ -8,7 +8,6 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.LaunchedEffect
@@ -16,6 +15,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -34,26 +34,6 @@ class MainActivity : FragmentActivity() {
     private var pendingTapOn: TapOnRequest? = null
     private var pendingTapOnResult: ((String?) -> Unit)? = null
     private var pendingDeepLink by mutableStateOf<AppDeepLinkTarget?>(null)
-
-    private val notificationPermissionLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
-    private val tapOnLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        val request = pendingTapOn
-        val callback = pendingTapOnResult
-        pendingTapOn = null
-        pendingTapOnResult = null
-        if (request == null || callback == null) return@registerForActivityResult
-
-        val successJson = result.data?.getStringExtra("resultTapOnSuccessJson")
-        if (result.resultCode == Activity.RESULT_OK && !successJson.isNullOrBlank()) {
-            val transactionCode = runCatching { JSONObject(successJson).optString("transactionCode") }.getOrNull()
-            if (!transactionCode.isNullOrBlank()) {
-                callback(transactionCode)
-                return@registerForActivityResult
-            }
-        }
-        callback(null)
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -109,6 +89,28 @@ class MainActivity : FragmentActivity() {
         AppDeepLinks.parse(intent)?.let { pendingDeepLink = it }
     }
 
+    @Deprecated("Compatibilidade com o SDK do Tap On")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != TAP_ON_REQUEST_CODE) return
+
+        val request = pendingTapOn
+        val callback = pendingTapOnResult
+        pendingTapOn = null
+        pendingTapOnResult = null
+        if (request == null || callback == null) return
+
+        val successJson = data?.getStringExtra("resultTapOnSuccessJson")
+        if (resultCode == Activity.RESULT_OK && !successJson.isNullOrBlank()) {
+            val transactionCode = runCatching { JSONObject(successJson).optString("transactionCode") }.getOrNull()
+            if (!transactionCode.isNullOrBlank()) {
+                callback(transactionCode)
+                return
+            }
+        }
+        callback(null)
+    }
+
     private fun routeDeepLink(vm: MainViewModel, state: GoState, target: AppDeepLinkTarget) {
         if (target.mode.isNotBlank() && target.mode != state.workShift?.mode) {
             vm.navigate(AppScreen.NOTIFICATIONS)
@@ -151,7 +153,14 @@ class MainActivity : FragmentActivity() {
     private fun requestNotificationPermissionIfNeeded() {
         if (Build.VERSION.SDK_INT < 33) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
-        notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+
+        // FragmentActivity valida requestCode em 16 bits. Usar um código fixo baixo evita
+        // o crash causado pelo ActivityResultRegistry em combinações antigas de Fragment/Biometric.
+        ActivityCompat.requestPermissions(
+            this,
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            NOTIFICATION_PERMISSION_REQUEST_CODE,
+        )
     }
 
     private fun scanQr(onValue: (String) -> Unit) {
@@ -163,6 +172,7 @@ class MainActivity : FragmentActivity() {
             .addOnSuccessListener { barcode -> barcode.rawValue?.let(onValue) }
     }
 
+    @Suppress("DEPRECATION")
     private fun launchTapOn(request: TapOnRequest, onResult: (String?) -> Unit) {
         val androidId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID).orEmpty()
         val payload = JSONObject()
@@ -185,7 +195,7 @@ class MainActivity : FragmentActivity() {
         }
         pendingTapOn = request
         pendingTapOnResult = onResult
-        tapOnLauncher.launch(intent)
+        startActivityForResult(intent, TAP_ON_REQUEST_CODE)
     }
 
     private fun authenticateBiometric(vm: MainViewModel) {
@@ -204,5 +214,10 @@ class MainActivity : FragmentActivity() {
                 .setAllowedAuthenticators(allowed)
                 .build()
         )
+    }
+
+    companion object {
+        private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 1001
+        private const val TAP_ON_REQUEST_CODE = 1002
     }
 }
