@@ -4,6 +4,7 @@ CREATE TABLE order_discount_requests (
   order_id BIGINT UNSIGNED NOT NULL,
   requested_by BIGINT UNSIGNED NOT NULL,
   approved_by BIGINT UNSIGNED NULL,
+  base_discount_cents INT UNSIGNED NOT NULL DEFAULT 0,
   requested_cents INT UNSIGNED NOT NULL,
   reason VARCHAR(500) NOT NULL,
   status ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
