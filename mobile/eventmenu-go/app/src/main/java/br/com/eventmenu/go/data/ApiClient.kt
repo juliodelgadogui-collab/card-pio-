@@ -42,6 +42,10 @@ class ApiClient(private val baseUrl: String, private val deviceId: String) {
         request("api-go-tab-payments.php", "GET", action, token, query, null)
     suspend fun postTabPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
         request("api-go-tab-payments.php", "POST", action, token, emptyMap(), body)
+    suspend fun getUnits(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject =
+        request("api-go-units.php", "GET", action, token, query, null)
+    suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject =
+        request("api-go-units.php", "POST", action, token, emptyMap(), body)
 
     private suspend fun request(path: String, method: String, action: String, token: String?, query: Map<String, String>, body: JSONObject?): JSONObject = withContext(Dispatchers.IO) {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
