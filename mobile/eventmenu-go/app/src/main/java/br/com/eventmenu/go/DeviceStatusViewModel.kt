@@ -15,6 +15,7 @@ data class DeviceStatusState(
     val status: DeviceStatus? = null,
     val loading: Boolean = false,
     val error: String? = null,
+    val message: String? = null,
 )
 
 class DeviceStatusViewModel(private val repo: DeviceStatusRepository) : ViewModel() {
@@ -22,13 +23,28 @@ class DeviceStatusViewModel(private val repo: DeviceStatusRepository) : ViewMode
     val state: StateFlow<DeviceStatusState> = _state.asStateFlow()
 
     fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(loading = true, error = null) }
+        _state.update { it.copy(loading = true, error = null, message = null) }
         runCatching { repo.status() }
             .onSuccess { value -> _state.update { it.copy(status = value, loading = false) } }
             .onFailure { error -> _state.update { it.copy(loading = false, error = error.message ?: "Falha ao consultar aparelho.") } }
     }
 
-    fun clearError() = _state.update { it.copy(error = null) }
+    fun requestNfcAuthorization() = viewModelScope.launch {
+        _state.update { it.copy(loading = true, error = null, message = null) }
+        runCatching { repo.requestNfcAuthorization() }
+            .onSuccess { value ->
+                _state.update {
+                    it.copy(
+                        status = value,
+                        loading = false,
+                        message = if (value.tapOnReady) "Este aparelho já está autorizado para Tap On." else "Solicitação enviada ao administrador. Não é necessário reinstalar o app.",
+                    )
+                }
+            }
+            .onFailure { error -> _state.update { it.copy(loading = false, error = error.message ?: "Falha ao solicitar autorização.") } }
+    }
+
+    fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
 
     class Factory(private val repo: DeviceStatusRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
