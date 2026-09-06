@@ -77,12 +77,6 @@ final class ManagerOperationsService
         $notifications=new NotificationService();$notifications->publishToUser($deliveryUserId,'delivery','delivery_transferred','Entrega transferida','O pedido #'.$orderId.' foi transferido para você.','order',(string)$orderId,'delivery-transfer:'.$orderId.':to:'.$deliveryUserId,'warning');if($previousUserId&&$previousUserId!==$deliveryUserId)$notifications->publishToUser($previousUserId,'delivery','delivery_removed','Entrega transferida','O pedido #'.$orderId.' foi transferido para outro entregador.','order',(string)$orderId,'delivery-transfer:'.$orderId.':from:'.$previousUserId,'info');return $order;
     }
 
-    public function cancelUnpaidOrder(int $orderId): array
-    {
-        Auth::requirePermission('orders.manage');$tenantId=Auth::tenantId();if(!$tenantId||$orderId<1)throw new RuntimeException('Pedido inválido.');$unitId=$this->currentUnitId();if($unitId!==null){$s=Database::connection()->prepare('SELECT unit_id FROM orders WHERE id=? AND tenant_id=?');$s->execute([$orderId,$tenantId]);$orderUnit=$s->fetchColumn();if($orderUnit===false||$orderUnit===null||(int)$orderUnit!==$unitId)throw new RuntimeException('Pedido pertence a outra unidade.');}
-        $order=(new OrderService())->changeStatus($orderId,'cancelled','panel');Auth::audit('manager.order_cancelled','order',(string)$orderId,['unit_id'=>$unitId,'source'=>'eventmenu_go_manager']);return $order;
-    }
-
     private function currentUnitId():?int
     {
         $shift=(new WorkShiftService())->current();if(!$shift||$shift['unit_id']===null||$shift['unit_id']==='')return null;return (int)$shift['unit_id'];
