@@ -48,6 +48,7 @@ import br.com.eventmenu.go.ManagerActionsViewModel
 import br.com.eventmenu.go.PrinterViewModel
 import br.com.eventmenu.go.ProfileSummaryViewModel
 import br.com.eventmenu.go.ReceiptViewModel
+import br.com.eventmenu.go.ShiftUnitViewModel
 import br.com.eventmenu.go.TabSplitPaymentViewModel
 import br.com.eventmenu.go.UniversalQrViewModel
 import br.com.eventmenu.go.data.AppMode
@@ -71,10 +72,10 @@ import br.com.eventmenu.go.ui.screens.OrdersScreen
 import br.com.eventmenu.go.ui.screens.PosScreen
 import br.com.eventmenu.go.ui.screens.QrResultDialog
 import br.com.eventmenu.go.ui.screens.RoleDashboardScreen
-import br.com.eventmenu.go.ui.screens.ShiftStartScreen
 import br.com.eventmenu.go.ui.screens.TabSplitPaymentScreen
 import br.com.eventmenu.go.ui.screens.TableAccountScreen
 import br.com.eventmenu.go.ui.screens.TablesScreen
+import br.com.eventmenu.go.ui.screens.UnitShiftStartScreen
 import br.com.eventmenu.go.ui.screens.UniversalQrResultDialog
 import kotlinx.coroutines.delay
 
@@ -103,6 +104,8 @@ fun EventMenuGoApp(
     val universalQrState by universalQrViewModel.state.collectAsState()
     val tabSplitViewModel: TabSplitPaymentViewModel = composeViewModel(factory = TabSplitPaymentViewModel.Factory(app.tabSplitPaymentRepository))
     val tabSplitState by tabSplitViewModel.state.collectAsState()
+    val shiftUnitViewModel: ShiftUnitViewModel = composeViewModel(factory = ShiftUnitViewModel.Factory(app.operatingUnitRepository))
+    val shiftUnitState by shiftUnitViewModel.state.collectAsState()
     val printerPreferences = remember(app) { PrinterPreferences(app) }
     val bluetoothPrinter = remember(app) { BluetoothEscPosPrinter(app, printerPreferences) }
     val printerViewModel: PrinterViewModel = composeViewModel(factory = PrinterViewModel.Factory(printerPreferences, bluetoothPrinter, app.receiptRepository))
@@ -124,6 +127,9 @@ fun EventMenuGoApp(
     LaunchedEffect(state.error, state.message) {
         (state.error ?: state.message)?.let { snackbar.showSnackbar(it) }
         if (state.error != null || state.message != null) viewModel.clearFeedback()
+    }
+    LaunchedEffect(shiftUnitState.error) {
+        shiftUnitState.error?.let { snackbar.showSnackbar(it); shiftUnitViewModel.clearError() }
     }
     LaunchedEffect(eventBarState.error, eventBarState.message) {
         (eventBarState.error ?: eventBarState.message)?.let { snackbar.showSnackbar(it) }
@@ -161,6 +167,12 @@ fun EventMenuGoApp(
             context.startActivity(Intent.createChooser(share, "Enviar comprovante"))
             receiptViewModel.consumed()
         }
+    }
+    LaunchedEffect(state.session?.user?.id, state.workShift?.id) {
+        if (state.session != null && state.workShift == null) shiftUnitViewModel.load()
+    }
+    LaunchedEffect(shiftUnitState.completedVersion) {
+        if (shiftUnitState.completedVersion > 0) viewModel.restoreSession()
     }
     LaunchedEffect(state.notifications) {
         OperationNotificationScheduler.showUnread(context, state.notifications)
@@ -249,7 +261,15 @@ fun EventMenuGoApp(
     if (state.session == null) { LoginScreen(state, viewModel::login, viewModel::unlockWithPin, onBiometric); return }
     if (state.mode == null) { ModePickerScreen(state.session!!.user.name, state.modes, viewModel::chooseMode); return }
     if (state.workShift == null || state.workShift?.status != "open") {
-        ShiftStartScreen(state, viewModel::startShift, if (state.modes.size > 1) ({ viewModel.chooseMode(state.modes.first { it != state.mode }) }) else null, viewModel::logout); return
+        UnitShiftStartScreen(
+            state = state,
+            unitState = shiftUnitState,
+            onSelectUnit = shiftUnitViewModel::select,
+            onStart = { state.mode?.let(shiftUnitViewModel::open) },
+            onChangeMode = if (state.modes.size > 1) ({ viewModel.chooseMode(state.modes.first { it != state.mode }) }) else null,
+            onLogout = viewModel::logout,
+        )
+        return
     }
 
     val session = state.session!!
@@ -438,7 +458,7 @@ fun EventMenuGoApp(
                     )
                 }
             }
-            if (state.loading || eventBarState.loading || tabSplitState.loading || universalQrState.loading || receiptState.loading || printerState.loading || deviceState.loading) {
+            if (state.loading || shiftUnitState.loading || eventBarState.loading || tabSplitState.loading || universalQrState.loading || receiptState.loading || printerState.loading || deviceState.loading) {
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
             }
         }
