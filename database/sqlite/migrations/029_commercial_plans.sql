@@ -32,3 +32,10 @@ INSERT OR IGNORE INTO saas_plans (code,name,description,monthly_cents,yearly_cen
 ('premium','Premium','Para operações que estão começando com cardápio digital e atendimento.',14900,149000,1,10,'["Cardápio digital","Pedidos","Mesas e comandas","Clientes e pontos"]','{"users":8,"units":1,"products":250}'),
 ('pro','Pro','Operação completa com delivery, gestão e automações.',29900,299000,1,20,'["Tudo do Premium","Delivery","Estoque","Relatórios","Pagamentos e NFC"]','{"users":25,"units":3,"products":1000}'),
 ('enterprise','Enterprise','Para redes, eventos e operações com múltiplas unidades.',59900,599000,1,30,'["Tudo do Pro","Eventos e ingressos","Múltiplas unidades","Auditoria avançada","Personalização premium"]','{"users":100,"units":20,"products":5000}');
+
+-- Empresas já existentes entram automaticamente no plano correspondente,
+-- sem perder dados e sem exigir recadastro comercial.
+INSERT OR IGNORE INTO tenant_subscriptions (tenant_id,plan_id,status,billing_cycle)
+SELECT t.id,p.id,'active','monthly'
+FROM tenants t
+JOIN saas_plans p ON p.code=t.plan;
