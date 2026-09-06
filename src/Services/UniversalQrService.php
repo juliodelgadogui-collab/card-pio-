@@ -12,7 +12,7 @@ use RuntimeException;
 
 final class UniversalQrService
 {
-    private const TYPES=['employee','delivery_user','customer','event','device'];
+    private const TYPES=['employee','delivery_user','customer','event','device','tab'];
 
     public function issue(string $type,int $entityId,string $label='',?int $ttlHours=null):array
     {
@@ -65,6 +65,9 @@ final class UniversalQrService
         if($type==='device'){
             Auth::requirePermission('nfc.manage');$s=$pdo->prepare('SELECT id FROM nfc_devices WHERE id=? AND tenant_id=?');$s->execute([$entityId,$tenantId]);if(!$s->fetchColumn())throw new RuntimeException('Dispositivo não encontrado.');return;
         }
+        if($type==='tab'){
+            Auth::requirePermission('tables.manage');$s=$pdo->prepare('SELECT id FROM tabs WHERE id=? AND tenant_id=?');$s->execute([$entityId,$tenantId]);if(!$s->fetchColumn())throw new RuntimeException('Comanda não encontrada.');return;
+        }
     }
 
     private function entityData(PDO $pdo,int $tenantId,string $type,int $entityId):array
@@ -84,6 +87,9 @@ final class UniversalQrService
         }
         if($type==='device'){
             Auth::requirePermission('nfc.manage');$s=$pdo->prepare('SELECT d.id,d.provider,d.name,d.status,d.paired_at,d.revoked_at,u.name user_name FROM nfc_devices d LEFT JOIN users u ON u.id=d.user_id WHERE d.id=? AND d.tenant_id=?');$s->execute([$entityId,$tenantId]);$row=$s->fetch();if(!$row)throw new RuntimeException('Dispositivo não encontrado.');return $row;
+        }
+        if($type==='tab'){
+            Auth::requirePermission('tables.manage');$s=$pdo->prepare('SELECT t.id,t.label,t.status,t.opened_at,t.closed_at,rt.id table_id,rt.name table_name,rt.seats FROM tabs t JOIN restaurant_tables rt ON rt.id=t.table_id WHERE t.id=? AND t.tenant_id=?');$s->execute([$entityId,$tenantId]);$row=$s->fetch();if(!$row)throw new RuntimeException('Comanda não encontrada.');return $row;
         }
         throw new RuntimeException('Tipo de QR não suportado.');
     }
