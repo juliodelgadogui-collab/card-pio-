@@ -88,8 +88,6 @@ data class CashSession(
     val expectedCashCents: Int? = null,
     val differenceCents: Int? = null,
     val closedAt: String = "",
-    val unitId: Int? = null,
-    val unitName: String = "",
 )
 data class CashMovement(
     val id: Int,
