@@ -47,6 +47,7 @@ fun DeliveryOperationsScreen(
     progress: Map<Int, DeliveryProgress>,
     pixCharge: PixCharge?,
     onRefreshProgress: () -> Unit,
+    onOpenOrder: (Int) -> Unit,
     onPickup: (Int) -> Unit,
     onStartRoute: (Int) -> Unit,
     onArrive: (Int) -> Unit,
@@ -92,6 +93,7 @@ fun DeliveryOperationsScreen(
                         }
                     }
 
+                    OutlinedButton(onClick = { onOpenOrder(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
                     DeliveryStepIndicator(pickedUp, routeStarted, arrived)
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
 
