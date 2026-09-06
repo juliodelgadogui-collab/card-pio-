@@ -59,12 +59,42 @@ Como o repositório não contém o `gradle-wrapper.jar` binário, os scripts `bu
 
 ## APK de debug
 
-Após uma compilação bem-sucedida, o APK normalmente será criado em:
+Após uma compilação bem-sucedida, o APK será criado em:
 
 `app/build/outputs/apk/debug/app-debug.apk`
+
+O workflow `EventMenu CI` também executa `:app:assembleDebug` em push e pull request. Quando o GitHub Actions estiver disponível para a conta/repositório, o job Android publica o APK como artefato `eventmenu-go-debug-apk` por 7 dias.
+
+## Deep links e notificações inteligentes
+
+O app registra o esquema:
+
+`eventmenugo://open/{entity_type}/{entity_id}`
+
+A notificação inclui também `notification_id`, `notification_type` e `notification_mode`. O `MainActivity` espera uma sessão e um turno válidos antes de navegar e nunca troca um turno já aberto silenciosamente.
+
+Exemplos de teste com ADB:
+
+```bash
+adb shell am start -a android.intent.action.VIEW -d "eventmenugo://open/order/123?notification_type=order.new&notification_mode=operation"
+adb shell am start -a android.intent.action.VIEW -d "eventmenugo://open/order/123?notification_type=order.ready&notification_mode=operation"
+adb shell am start -a android.intent.action.VIEW -d "eventmenugo://open/discount_request/55?notification_type=discount.requested"
+```
+
+Rotas inteligentes atuais:
+
+- `order.new` → Cozinha quando o usuário possui permissão de cozinha no modo Operação.
+- `order.ready` → Despacho quando o usuário possui permissão de despacho/atribuição no modo Operação.
+- notificações de pedido no modo Delivery → área Delivery.
+- `discount_request` e `cancellation_request` → Gerência quando a função possui acesso ao painel gerencial.
+- `event` → Eventos.
+- `table` / `tab` → Mesas.
+- `payment` → Caixa quando permitido.
+- demais pedidos → Pedidos; caso a rota não seja permitida, o app mantém o usuário na Central de Notificações.
 
 ## Observações
 
 - O domínio do servidor não é configurável pela interface do funcionário.
 - `local.properties`, pastas de build e arquivos do Android Studio ficam fora do Git.
-- A primeira compilação é o momento de descobrir eventuais erros de integração restantes; nenhuma compilação automatizada foi executada durante a etapa atual de desenvolvimento.
+- O deep link apenas navega para uma área permitida; autorizações sensíveis continuam validadas pelo servidor.
+- Se um workflow do GitHub Actions falhar sem iniciar nenhuma etapa, isso não representa um erro de compilação do projeto. Use os scripts locais acima para separar falha de execução do Actions de falha real do Gradle/Kotlin.
