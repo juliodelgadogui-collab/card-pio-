@@ -45,6 +45,7 @@ class DeviceStatusViewModel(private val repo: DeviceStatusRepository) : ViewMode
     }
 
     fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
+    fun clearError() = clearFeedback()
 
     class Factory(private val repo: DeviceStatusRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
