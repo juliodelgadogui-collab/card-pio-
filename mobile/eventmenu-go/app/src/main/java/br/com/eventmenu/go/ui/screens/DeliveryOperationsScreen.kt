@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.CancellationViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.OrderOperationsViewModel
 import br.com.eventmenu.go.data.DeliveryProgress
@@ -67,8 +68,11 @@ fun DeliveryOperationsScreen(
     val app = context.applicationContext as EventMenuGoApplication
     val detailViewModel: OrderOperationsViewModel = viewModel(factory = OrderOperationsViewModel.Factory(app.orderOperationsRepository))
     val detailState by detailViewModel.state.collectAsState()
+    val cancellationViewModel: CancellationViewModel = viewModel(factory = CancellationViewModel.Factory(app.cancellationRepository))
+    val cancellationState by cancellationViewModel.state.collectAsState()
     var pixOrder by remember { mutableStateOf<Order?>(null) }
     var cashOrder by remember { mutableStateOf<Order?>(null) }
+    var cancelOrder by remember { mutableStateOf<Order?>(null) }
     val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
 
     LaunchedEffect(deliveries.map { it.id }) { onRefreshProgress() }
@@ -100,6 +104,9 @@ fun DeliveryOperationsScreen(
                     }
 
                     OutlinedButton(onClick = { detailViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
+                    if (order.paymentStatus != "paid") {
+                        OutlinedButton(onClick = { cancelOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("SOLICITAR CANCELAMENTO") }
+                    }
                     DeliveryStepIndicator(pickedUp, routeStarted, arrived)
                     Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
 
@@ -136,6 +143,8 @@ fun DeliveryOperationsScreen(
             }
         }
         if (deliveries.isEmpty()) item { Text("Nenhuma entrega atribuída agora.") }
+        cancellationState.message?.let { msg -> item { Text(msg, fontWeight = FontWeight.Bold) } }
+        cancellationState.error?.let { error -> item { Text(error) } }
         item { OutlinedButton(onClick = onRefreshProgress, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR ETAPAS") } }
     }
 
@@ -148,6 +157,21 @@ fun DeliveryOperationsScreen(
             title = { Text("Não foi possível abrir o pedido") },
             text = { Text(error) },
             confirmButton = { TextButton(onClick = detailViewModel::clearFeedback) { Text("FECHAR") } },
+        )
+    }
+    cancelOrder?.let { order ->
+        var reason by remember(order.id) { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { cancelOrder = null },
+            title = { Text("Solicitar cancelamento · Pedido #${order.id}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("O pedido não será cancelado agora. O Gerente/ADM precisará autorizar no servidor.")
+                    OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("Motivo *") }, modifier = Modifier.fillMaxWidth())
+                }
+            },
+            confirmButton = { Button(onClick = { cancelOrder = null; cancellationViewModel.request(order.id, reason) }, enabled = reason.isNotBlank()) { Text("ENVIAR SOLICITAÇÃO") } },
+            dismissButton = { TextButton(onClick = { cancelOrder = null }) { Text("VOLTAR") } },
         )
     }
     pixOrder?.let { order ->
