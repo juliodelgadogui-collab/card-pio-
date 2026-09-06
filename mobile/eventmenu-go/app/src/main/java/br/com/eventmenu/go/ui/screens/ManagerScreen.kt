@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.CancellationViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.ManagerActionsViewModel
 import br.com.eventmenu.go.data.CancellationRequest
 import br.com.eventmenu.go.data.DiscountRequest
 import br.com.eventmenu.go.data.ManagerAlert
@@ -39,20 +40,18 @@ import br.com.eventmenu.go.data.ManagerDeliveryShift
 import br.com.eventmenu.go.data.ManagerDetails
 import br.com.eventmenu.go.data.ManagerOverview
 import br.com.eventmenu.go.data.ManagerProblemOrder
-import br.com.eventmenu.go.data.ManagerReopenCandidate
 
 @Composable
 fun ManagerScreen(
     overview: ManagerOverview?,
     details: ManagerDetails?,
     pendingDiscounts: List<DiscountRequest>,
-    reopenCandidates: List<ManagerReopenCandidate>,
     loading: Boolean,
     canTransferDelivery: Boolean,
+    canCancelOrder: Boolean,
     canApproveDiscount: Boolean,
-    canReopenOrder: Boolean,
     onTransferDelivery: (Int, Int) -> Unit,
-    onReopenOrder: (Int, String) -> Unit,
+    onCancelOrder: (Int) -> Unit,
     onApproveDiscount: (Int) -> Unit,
     onRejectDiscount: (Int, String) -> Unit,
     onRefresh: () -> Unit,
@@ -60,18 +59,24 @@ fun ManagerScreen(
     val app = LocalContext.current.applicationContext as EventMenuGoApplication
     val cancellationViewModel: CancellationViewModel = viewModel(factory = CancellationViewModel.Factory(app.cancellationRepository))
     val cancellationState by cancellationViewModel.state.collectAsState()
+    val managerActionsViewModel: ManagerActionsViewModel = viewModel(factory = ManagerActionsViewModel.Factory(app.managerOperationsRepository))
+    val managerActionState by managerActionsViewModel.state.collectAsState()
     var transferOrder by remember { mutableStateOf<ManagerProblemOrder?>(null) }
     var rejectingDiscount by remember { mutableStateOf<DiscountRequest?>(null) }
     var rejectingCancellation by remember { mutableStateOf<CancellationRequest?>(null) }
 
-    LaunchedEffect(Unit) { cancellationViewModel.loadPending() }
+    LaunchedEffect(Unit) {
+        cancellationViewModel.loadPending()
+        managerActionsViewModel.refreshReopenCandidates()
+    }
     LaunchedEffect(cancellationState.changeVersion) { if (cancellationState.changeVersion > 0) onRefresh() }
+    LaunchedEffect(managerActionState.changeVersion) { if (managerActionState.changeVersion > 0) onRefresh() }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Painel do gerente", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("Ações rápidas da operação. Configurações e relatórios completos continuam no painel web.")
-            if (loading || cancellationState.loading) CircularProgressIndicator(Modifier.padding(top = 8.dp))
+            if (loading || cancellationState.loading || managerActionState.loading) CircularProgressIndicator(Modifier.padding(top = 8.dp))
         }
 
         if (canApproveDiscount) {
@@ -131,10 +136,10 @@ fun ManagerScreen(
             }
         }
 
-        if (canReopenOrder) {
+        if (managerActionState.error?.contains("Acesso negado", ignoreCase = true) != true) {
             item {
                 HorizontalDivider()
-                ManagerReopenPanel(reopenCandidates, onReopenOrder)
+                ManagerReopenPanel(managerActionState.reopenCandidates, managerActionsViewModel::reopenOrder)
             }
         }
 
@@ -165,7 +170,14 @@ fun ManagerScreen(
         }
 
         cancellationState.error?.takeIf { !it.contains("Acesso negado", ignoreCase = true) }?.let { error -> item { Text("Cancelamentos: $error") } }
-        item { OutlinedButton(onClick = { cancellationViewModel.loadPending(); onRefresh() }, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR PAINEL") } }
+        managerActionState.error?.takeIf { !it.contains("Acesso negado", ignoreCase = true) }?.let { error -> item { Text("Gerência: $error") } }
+        managerActionState.message?.let { message -> item { Text("✅ $message") } }
+        item {
+            OutlinedButton(
+                onClick = { cancellationViewModel.loadPending(); managerActionsViewModel.refreshReopenCandidates(); onRefresh() },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("ATUALIZAR PAINEL") }
+        }
     }
 
     transferOrder?.let { order -> DeliveryTransferDialog(order, details?.deliveryShifts.orEmpty(), { transferOrder = null }) { userId -> transferOrder = null; onTransferDelivery(order.id, userId) } }
@@ -189,6 +201,9 @@ fun ManagerScreen(
             dismissButton = { TextButton(onClick = { rejectingCancellation = null }) { Text("VOLTAR") } },
         )
     }
+
+    @Suppress("UNUSED_VARIABLE")
+    val legacyDirectCancelRemoved = canCancelOrder to onCancelOrder
 }
 
 @Composable private fun ManagerMetric(label: String, value: String, modifier: Modifier = Modifier) { Card(modifier) { Column(Modifier.padding(16.dp)) { Text(label); Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black) } } }
