@@ -39,18 +39,20 @@ import br.com.eventmenu.go.data.ManagerDeliveryShift
 import br.com.eventmenu.go.data.ManagerDetails
 import br.com.eventmenu.go.data.ManagerOverview
 import br.com.eventmenu.go.data.ManagerProblemOrder
+import br.com.eventmenu.go.data.ManagerReopenCandidate
 
 @Composable
 fun ManagerScreen(
     overview: ManagerOverview?,
     details: ManagerDetails?,
     pendingDiscounts: List<DiscountRequest>,
+    reopenCandidates: List<ManagerReopenCandidate>,
     loading: Boolean,
     canTransferDelivery: Boolean,
-    canCancelOrder: Boolean,
     canApproveDiscount: Boolean,
+    canReopenOrder: Boolean,
     onTransferDelivery: (Int, Int) -> Unit,
-    onCancelOrder: (Int) -> Unit,
+    onReopenOrder: (Int, String) -> Unit,
     onApproveDiscount: (Int) -> Unit,
     onRejectDiscount: (Int, String) -> Unit,
     onRefresh: () -> Unit,
@@ -126,6 +128,13 @@ fun ManagerScreen(
                         }
                     }
                 }
+            }
+        }
+
+        if (canReopenOrder) {
+            item {
+                HorizontalDivider()
+                ManagerReopenPanel(reopenCandidates, onReopenOrder)
             }
         }
 
