@@ -51,7 +51,9 @@ class ApiClient(
                     if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
                 }
             } catch (error: ApiException) {
-                if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) throw@withContext error
+                if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) {
+                    throw error
+                }
                 val refreshed = refreshAccessToken(store, token)
                 execute(path, method, action, refreshed, query, body)
             }
