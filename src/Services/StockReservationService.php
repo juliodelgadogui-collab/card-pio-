@@ -12,12 +12,12 @@ final class StockReservationService
 {
     public function reserve(PDO $pdo,int $tenantId,int $orderId,array $items,?string $expiresAt=null):void
     {
-        foreach($items as $item){
-            $productId=(int)($item['product_id']??$item['id']??0);$qty=(float)($item['quantity']??$item['qty']??0);
+        $requirements=$this->requirements($pdo,$tenantId,$orderId,$items);
+        foreach($requirements as $productId=>$qty){
             if($productId<1||!is_finite($qty)||$qty<=0)continue;
-            $p=$pdo->prepare(Database::portableSql($pdo,'SELECT id,name,stock_qty,track_stock FROM products WHERE id=? AND tenant_id=? FOR UPDATE'));$p->execute([$productId,$tenantId]);$product=$p->fetch();if(!$product)throw new RuntimeException('Produto não encontrado durante reserva de estoque.');if(!(int)$product['track_stock'])continue;
+            $p=$pdo->prepare(Database::portableSql($pdo,'SELECT id,name,stock_qty,track_stock FROM products WHERE id=? AND tenant_id=? FOR UPDATE'));$p->execute([$productId,$tenantId]);$product=$p->fetch();if(!$product)throw new RuntimeException('Produto/ingrediente não encontrado durante reserva de estoque.');if(!(int)$product['track_stock'])continue;
             $existing=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM stock_reservations WHERE tenant_id=? AND order_id=? AND product_id=? FOR UPDATE'));$existing->execute([$tenantId,$orderId,$productId]);$row=$existing->fetch();if($row){if($row['status']==='reserved'||$row['status']==='consumed')continue;throw new RuntimeException('A reserva de estoque deste pedido já foi liberada.');}
-            $update=$pdo->prepare('UPDATE products SET stock_qty=stock_qty-? WHERE id=? AND tenant_id=? AND stock_qty>=?');$update->execute([$qty,$productId,$tenantId,$qty]);if($update->rowCount()!==1)throw new RuntimeException('Estoque insuficiente para '.$product['name'].'.');
+            $update=$pdo->prepare('UPDATE products SET stock_qty=stock_qty-? WHERE id=? AND tenant_id=? AND stock_qty>=?');$update->execute([$qty,$productId,$tenantId,$qty]);if($update->rowCount()!==1)throw new RuntimeException('Estoque insuficiente para '.$product['name'].'. Necessário: '.$this->formatQty($qty).'.');
             $pdo->prepare('INSERT INTO stock_reservations (tenant_id,order_id,product_id,quantity,status,expires_at) VALUES (?,?,?, ?,"reserved",?)')->execute([$tenantId,$orderId,$productId,$qty,$expiresAt]);
         }
     }
@@ -33,15 +33,12 @@ final class StockReservationService
     public function consumeForSettlement(PDO $pdo,int $tenantId,int $orderId,string $settlementKey):void
     {
         $settlementKey=trim($settlementKey);if($settlementKey==='')throw new RuntimeException('Chave de liquidação do estoque inválida.');
-        $items=$pdo->prepare('SELECT oi.product_id,oi.quantity,p.track_stock,p.name FROM order_items oi LEFT JOIN products p ON p.id=oi.product_id WHERE oi.order_id=?');$items->execute([$orderId]);
-        foreach($items->fetchAll() as $item){
-            if(!$item['product_id']||!(int)$item['track_stock'])continue;$productId=(int)$item['product_id'];$qty=(float)$item['quantity'];$key=$settlementKey.':product:'.$productId;
-            $check=$pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=?');$check->execute([$tenantId,$key]);if($check->fetchColumn())continue;
-            $r=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM stock_reservations WHERE tenant_id=? AND order_id=? AND product_id=? FOR UPDATE'));$r->execute([$tenantId,$orderId,$productId]);$reservation=$r->fetch();
-            if($reservation&&in_array($reservation['status'],['reserved','consumed'],true)){if($reservation['status']==='reserved')$pdo->prepare('UPDATE stock_reservations SET status="consumed",expires_at=NULL WHERE id=?')->execute([$reservation['id']]);$movementQty=(float)$reservation['quantity'];}
-            else{$update=$pdo->prepare('UPDATE products SET stock_qty=stock_qty-? WHERE id=? AND tenant_id=? AND stock_qty>=?');$update->execute([$qty,$productId,$tenantId,$qty]);if($update->rowCount()!==1)throw new RuntimeException('Estoque insuficiente para confirmar o pagamento de '.$item['name'].'.');$movementQty=$qty;}
-            $pdo->prepare('INSERT INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key) VALUES (?,?,?,"out",?,?)')->execute([$tenantId,$productId,$orderId,$movementQty,$key]);
+        $reservations=$pdo->prepare(Database::portableSql($pdo,'SELECT sr.*,p.name,p.average_cost_cents FROM stock_reservations sr JOIN products p ON p.id=sr.product_id WHERE sr.tenant_id=? AND sr.order_id=? AND sr.status IN ("reserved","consumed") FOR UPDATE'));$reservations->execute([$tenantId,$orderId]);$rows=$reservations->fetchAll();
+        if(!$rows){
+            $requirements=$this->requirements($pdo,$tenantId,$orderId,[]);
+            foreach($requirements as$productId=>$qty){$p=$pdo->prepare(Database::portableSql($pdo,'SELECT id,name,track_stock,average_cost_cents FROM products WHERE id=? AND tenant_id=? FOR UPDATE'));$p->execute([$productId,$tenantId]);$product=$p->fetch();if(!$product||!(int)$product['track_stock'])continue;$update=$pdo->prepare('UPDATE products SET stock_qty=stock_qty-? WHERE id=? AND tenant_id=? AND stock_qty>=?');$update->execute([$qty,$productId,$tenantId,$qty]);if($update->rowCount()!==1)throw new RuntimeException('Estoque insuficiente para confirmar '.$product['name'].'.');$rows[]=['id'=>null,'product_id'=>$productId,'quantity'=>$qty,'status'=>'consumed','average_cost_cents'=>$product['average_cost_cents']];}
         }
+        foreach($rows as$row){$productId=(int)$row['product_id'];$key=$settlementKey.':product:'.$productId;$check=$pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=?');$check->execute([$tenantId,$key]);if($check->fetchColumn())continue;if($row['id']!==null&&$row['status']==='reserved')$pdo->prepare('UPDATE stock_reservations SET status="consumed",expires_at=NULL WHERE id=?')->execute([$row['id']]);$qty=(float)$row['quantity'];$cost=(int)($row['average_cost_cents']??0);$pdo->prepare('INSERT INTO stock_movements (tenant_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents) VALUES (?,?,?,"out",?,?,?,?)')->execute([$tenantId,$productId,$orderId,$qty,$key,$cost,(int)round($cost*$qty)]);}
     }
 
     public function release(PDO $pdo,int $tenantId,int $orderId):int
@@ -71,5 +68,20 @@ final class StockReservationService
             }
             return $total;
         });
+    }
+
+    private function requirements(PDO $pdo,int $tenantId,int $orderId,array $fallbackItems):array
+    {
+        $requirements=[];$lines=[];
+        $s=$pdo->prepare('SELECT product_id,quantity FROM order_items WHERE order_id=? AND product_id IS NOT NULL');$s->execute([$orderId]);$lines=$s->fetchAll();
+        if(!$lines){foreach($fallbackItems as$item){$pid=(int)($item['product_id']??$item['id']??0);$qty=(float)($item['quantity']??$item['qty']??0);if($pid>0&&$qty>0)$lines[]=['product_id'=>$pid,'quantity'=>$qty];}}
+        foreach($lines as$line){$productId=(int)$line['product_id'];$ordered=(float)$line['quantity'];if($productId<1||$ordered<=0)continue;$r=$pdo->prepare('SELECT ingredient_product_id,quantity,waste_percent FROM product_recipes WHERE tenant_id=? AND product_id=?');$r->execute([$tenantId,$productId]);$recipe=$r->fetchAll();if($recipe){foreach($recipe as$row){$ingredient=(int)$row['ingredient_product_id'];$factor=(float)$row['quantity']*(1+max(0.0,(float)$row['waste_percent'])/100);$requirements[$ingredient]=($requirements[$ingredient]??0)+($ordered*$factor);}}else{$requirements[$productId]=($requirements[$productId]??0)+$ordered;}}
+        try{$m=$pdo->prepare('SELECT inventory_product_id,inventory_quantity,quantity FROM order_item_modifiers WHERE tenant_id=? AND order_id=? AND inventory_product_id IS NOT NULL AND inventory_quantity>0');$m->execute([$tenantId,$orderId]);foreach($m->fetchAll() as$row){$pid=(int)$row['inventory_product_id'];$requirements[$pid]=($requirements[$pid]??0)+((float)$row['inventory_quantity']*(float)$row['quantity']);}}catch(\Throwable){}
+        foreach($requirements as$id=>$qty)$requirements[$id]=round($qty,6);return $requirements;
+    }
+
+    private function formatQty(float $qty):string
+    {
+        if(abs($qty-round($qty))<0.0005)return (string)(int)round($qty);return rtrim(rtrim(number_format($qty,3,',','.'),'0'),',');
     }
 }
