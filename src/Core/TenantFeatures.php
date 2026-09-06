@@ -30,7 +30,7 @@ final class TenantFeatures
 
     public static function routeEnabled(string $route,?int $tenantId=null):bool
     {
-        $menu=['pos','cash','kitchen','delivery','products','inventory','restaurant'];
+        $menu=['pos','cash','kitchen','delivery','pickup','products','inventory','restaurant'];
         $event=['events','tickets','guests','promoters'];
         if(in_array($route,$menu,true))return self::menu($tenantId);
         if(in_array($route,$event,true))return self::events($tenantId);
