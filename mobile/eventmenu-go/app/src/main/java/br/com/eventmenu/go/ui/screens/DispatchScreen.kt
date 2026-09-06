@@ -35,6 +35,7 @@ fun DispatchScreen(
     onRefresh: () -> Unit,
     onDispatch: (Order) -> Unit,
     onAssignDelivery: (Int, Int) -> Unit,
+    onScanDelivery: (Int) -> Unit,
 ) {
     val ready = orders
         .filter { it.status == "ready" && it.channel in setOf("counter", "pickup", "table", "delivery") }
@@ -95,6 +96,11 @@ fun DispatchScreen(
             title = { Text("Entregador · Pedido #${order.id}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { assigning = null; onScanDelivery(order.id) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) { Text("📷 LER QR DO ENTREGADOR") }
+                    Text("ou escolha na lista:")
                     if (available.isEmpty()) Text("Nenhum entregador está com turno de Delivery aberto agora.")
                     available.forEach { user ->
                         OutlinedButton(
