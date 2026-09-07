@@ -13,6 +13,11 @@ data class PaymentCapabilities(
     val cardPresentProvider: String?,
     val pixProvider: String?,
     val providers: List<PaymentProviderCapability>,
+    val cardPresentEnabled: Boolean = false,
+    val pixEnabled: Boolean = true,
+    val cashEnabled: Boolean = true,
+    val externalTerminalEnabled: Boolean = true,
+    val externalTerminalReferenceRequired: Boolean = true,
 )
 
 data class CardSdkSession(
