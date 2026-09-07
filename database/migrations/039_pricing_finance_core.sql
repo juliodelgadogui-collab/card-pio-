@@ -95,6 +95,8 @@ CREATE TABLE financial_entries (
   gross_cents BIGINT NOT NULL,
   fee_cents BIGINT NOT NULL DEFAULT 0,
   net_cents BIGINT NOT NULL,
+  affects_result TINYINT(1) NOT NULL DEFAULT 1,
+  affects_cash TINYINT(1) NOT NULL DEFAULT 0,
   status VARCHAR(20) NOT NULL DEFAULT 'open',
   competence_date DATE NOT NULL,
   due_date DATE NULL,
@@ -118,7 +120,9 @@ CREATE TABLE financial_entries (
   UNIQUE KEY uq_fin_entry_idempotency (tenant_id,idempotency_key),
   KEY idx_fin_entry_scope (tenant_id,unit_id,competence_date,direction,status),
   KEY idx_fin_entry_due (tenant_id,status,due_date),
-  KEY idx_fin_entry_event (tenant_id,event_id,competence_date)
+  KEY idx_fin_entry_event (tenant_id,event_id,competence_date),
+  KEY idx_fin_entry_result (tenant_id,affects_result,competence_date),
+  KEY idx_fin_entry_cash (tenant_id,affects_cash,status,due_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE payment_fee_rules (
