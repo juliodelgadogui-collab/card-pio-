@@ -71,12 +71,13 @@ final class ApiAuthService
         ];
     }
 
-    public function revoke(string $rawToken):void
+    public function revoke(string $rawToken,string $deviceId=''):void
     {
-        $hash=hash('sha256',trim($rawToken));$pdo=Database::connection();$stmt=$pdo->prepare('SELECT id,tenant_id,user_id,device_hash FROM api_tokens WHERE token_hash=? AND revoked_at IS NULL');$stmt->execute([$hash]);$row=$stmt->fetch();if(!$row)return;
-        Database::transaction(function(PDO $tx)use($row,$hash):void{
+        $hash=hash('sha256',trim($rawToken));$deviceId=mb_substr(trim($deviceId),0,190);$pdo=Database::connection();$stmt=$pdo->prepare('SELECT id,tenant_id,user_id,device_hash FROM api_tokens WHERE token_hash=? AND revoked_at IS NULL');$stmt->execute([$hash]);$row=$stmt->fetch();if(!$row)return;
+        Database::transaction(function(PDO $tx)use($row,$hash,$deviceId):void{
             $tx->prepare('UPDATE api_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE token_hash=? AND revoked_at IS NULL')->execute([$hash]);
             if($row['device_hash'])$tx->prepare('UPDATE api_refresh_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND device_hash=? AND revoked_at IS NULL')->execute([$row['tenant_id'],$row['user_id'],$row['device_hash']]);
+            if($deviceId!==''&&$row['device_hash']&&hash_equals((string)$row['device_hash'],hash('sha256',$deviceId))){$tx->prepare('UPDATE push_devices SET active=0,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND device_id=?')->execute([$row['tenant_id'],$row['user_id'],$deviceId]);}
         });
         $this->audit((int)$row['tenant_id'],(int)$row['user_id'],'api.logout',[]);
     }
