@@ -11,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +35,7 @@ class MainActivity : FragmentActivity() {
     private var pendingTapOn: TapOnRequest? = null
     private var pendingTapOnResult: ((String?) -> Unit)? = null
     private var pendingDeepLink by mutableStateOf<AppDeepLinkTarget?>(null)
+    private var appBackHandler: (() -> Boolean)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -50,6 +52,33 @@ class MainActivity : FragmentActivity() {
                 )
             )
             val state by vm.state.collectAsState()
+
+            SideEffect {
+                appBackHandler = {
+                    when {
+                        state.session == null -> false
+                        state.mode == null -> false
+                        state.workShift?.status != "open" -> false
+                        state.screen == AppScreen.TABLE_ACCOUNT -> {
+                            vm.closeTableAccount()
+                            true
+                        }
+                        state.screen == AppScreen.POS && state.posReturnScreen != null -> {
+                            vm.navigate(state.posReturnScreen!!)
+                            true
+                        }
+                        state.screen == AppScreen.POS && state.selectedTable != null -> {
+                            vm.clearSelectedTable()
+                            true
+                        }
+                        state.screen != AppScreen.HOME -> {
+                            vm.navigate(AppScreen.HOME)
+                            true
+                        }
+                        else -> false
+                    }
+                }
+            }
 
             LaunchedEffect(
                 pendingDeepLink,
@@ -81,6 +110,12 @@ class MainActivity : FragmentActivity() {
                 )
             }
         }
+    }
+
+    @Deprecated("Compatibilidade com navegação Android antiga")
+    override fun onBackPressed() {
+        if (appBackHandler?.invoke() == true) return
+        super.onBackPressed()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -154,8 +189,6 @@ class MainActivity : FragmentActivity() {
         if (Build.VERSION.SDK_INT < 33) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
 
-        // FragmentActivity valida requestCode em 16 bits. Usar um código fixo baixo evita
-        // o crash causado pelo ActivityResultRegistry em combinações antigas de Fragment/Biometric.
         ActivityCompat.requestPermissions(
             this,
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),
