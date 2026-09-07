@@ -113,6 +113,7 @@ function em_nav(): array
         ['finance', 'Financeiro', 'finance.view'],
         ['finance-advanced', 'Financeiro avançado', 'finance.view'],
         ['gateways', 'Gateways e NFC', 'gateways.manage'],
+        ['payment-providers', 'Provedores integrados', 'gateways.manage'],
         ['users', 'Equipe', 'users.manage'],
         ['units', 'Unidades', 'settings.manage'],
         ['reports', 'Relatórios', 'reports.any'],
@@ -267,6 +268,7 @@ function em_footer(): void
     $sw = json_encode(app_url('sw.js?v=' . em_asset_version('sw.js')), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $receiptBase = json_encode(app_url('?route=receipt&id='), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $receiptSettings = json_encode(app_url('?route=receipt-settings'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $paymentProviders = json_encode(app_url('?route=payment-providers'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     ?>
         <script>
         (() => {
@@ -311,6 +313,17 @@ function em_footer(): void
                     a.href = <?= $receiptSettings ?>;
                     a.textContent = 'Impressão térmica';
                     host.append(a);
+                }
+            }
+            if (route === 'gateways') {
+                const host = document.querySelector('.page-hero .hero-actions');
+                if (host && !host.querySelector('[data-payment-providers]')) {
+                    const a = document.createElement('a');
+                    a.className = 'button primary';
+                    a.dataset.paymentProviders = '1';
+                    a.href = <?= $paymentProviders ?>;
+                    a.textContent = 'SumUp + PIX integrado';
+                    host.prepend(a);
                 }
             }
             if ('serviceWorker' in navigator) {
