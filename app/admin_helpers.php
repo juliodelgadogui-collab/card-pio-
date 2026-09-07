@@ -61,7 +61,6 @@ function em_flash(?string $type = null, ?string $message = null): ?array
         $_SESSION['_flash'] = [$type, $message];
         return null;
     }
-
     $flash = $_SESSION['_flash'] ?? null;
     unset($_SESSION['_flash']);
     return $flash;
@@ -148,6 +147,7 @@ function em_header(string $title, string $active): void
     $manifest = Security::e(app_url('manifest.webmanifest?v=' . em_asset_version('manifest.webmanifest')));
     $css = Security::e(app_url('assets/app.css?v=' . em_asset_version('assets/app.css')));
     $premiumCss = Security::e(app_url('assets/premium-v4.css?v=' . em_asset_version('assets/premium-v4.css')));
+    $tenantBrandCss = Security::e(app_url('assets/tenant-branding.css?v=' . em_asset_version('assets/tenant-branding.css')));
     $currentTenantId = Auth::tenantId();
     $context = em_context_tenant_name();
     $type = $currentTenantId ? TenantFeatures::label($currentTenantId) : null;
@@ -182,6 +182,7 @@ function em_header(string $title, string $active): void
     <link rel="manifest" href="<?= $manifest ?>">
     <link rel="stylesheet" href="<?= $css ?>">
     <link rel="stylesheet" href="<?= $premiumCss ?>">
+    <link rel="stylesheet" href="<?= $tenantBrandCss ?>">
 </head>
 <body<?= $brandCss!=='' ? ' style="'.Security::e($brandCss).'"' : '' ?>>
 <div class="layout">
