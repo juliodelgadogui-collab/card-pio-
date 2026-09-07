@@ -57,7 +57,7 @@ fun DeliveryOperationsScreen(
     onArrive: (Int) -> Unit,
     onComplete: (Int) -> Unit,
     onPix: (Int, String) -> Unit,
-    onNfc: (Int) -> Unit,
+    onNfc: (Int,String,Int) -> Unit,
     onCash: (Int, Int) -> Unit,
     onReceipt: (Int) -> Unit,
     onPrintReceipt: (Int) -> Unit,
@@ -71,6 +71,7 @@ fun DeliveryOperationsScreen(
     val cancellationViewModel: CancellationViewModel = viewModel(factory = CancellationViewModel.Factory(app.cancellationRepository))
     val cancellationState by cancellationViewModel.state.collectAsState()
     var pixOrder by remember { mutableStateOf<Order?>(null) }
+    var cardOrder by remember { mutableStateOf<Order?>(null) }
     var cashOrder by remember { mutableStateOf<Order?>(null) }
     var cancelOrder by remember { mutableStateOf<Order?>(null) }
     val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
@@ -125,11 +126,11 @@ fun DeliveryOperationsScreen(
 
                         if (!arrived) {
                             Button(onClick = { onArrive(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CHEGUEI") }
-                            Text("PIX, cartão NFC e dinheiro serão liberados somente depois que o servidor registrar sua chegada.")
+                            Text("PIX, cartão por aproximação e dinheiro serão liberados somente depois que o servidor registrar sua chegada.")
                         } else if (order.paymentStatus != "paid") {
                             Text("✅ Chegada confirmada · Como o cliente deseja pagar?", fontWeight = FontWeight.Bold)
                             Button(onClick = { pixOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("PIX") }
-                            Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO NFC") }
+                            Button(onClick = { cardOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO POR APROXIMAÇÃO") }
                             OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("DINHEIRO") }
                         } else {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -177,6 +178,13 @@ fun DeliveryOperationsScreen(
     pixOrder?.let { order ->
         TaxIdDialog(orderId = order.id, amountCents = order.totalCents, onDismiss = { pixOrder = null }, onConfirm = { taxId -> pixOrder = null; onPix(order.id, taxId) })
     }
+    cardOrder?.let { order ->
+        CardMethodDialog(
+            amountCents = 0,
+            onDismiss = { cardOrder = null },
+            onConfirm = { method, installments -> cardOrder = null; onNfc(order.id, method, installments) },
+        )
+    }
     cashOrder?.let { order ->
         CashReceiveDialog(order, onDismiss = { cashOrder = null }, onConfirm = { received -> cashOrder = null; onCash(order.id, received) })
     }
@@ -220,7 +228,7 @@ private fun TaxIdDialog(orderId: Int, amountCents: Int, onDismiss: () -> Unit, o
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("PIX · Pedido #$orderId") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Total ${moneyDelivery(amountCents)}"); Text("O PagBank exige CPF/CNPJ do pagador para emitir este QR PIX."); OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true) } },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Total ${moneyDelivery(amountCents)}"); Text("O provedor PIX pode exigir CPF/CNPJ do pagador para emitir a cobrança."); OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true) } },
         confirmButton = { Button(onClick = { onConfirm(taxId) }, enabled = taxId.length in setOf(11,14)) { Text("GERAR PIX") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("CANCELAR") } },
     )
@@ -237,7 +245,7 @@ private fun PixWaitingDialog(charge: PixCharge, onPoll: () -> Unit, onDismiss: (
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 qr?.let { Image(it.asImageBitmap(), contentDescription = "QR Code PIX", modifier = Modifier.fillMaxWidth()) }
-                Text("⏳ Aguardando confirmação do PagBank…")
+                Text("⏳ Aguardando confirmação do provedor pelo servidor…")
                 if (charge.expiresAt.isNotBlank()) Text("Validade: ${charge.expiresAt}")
                 OutlinedButton(onClick = { copy(context, charge.copyPaste) }, modifier = Modifier.fillMaxWidth()) { Text("COPIAR CÓDIGO PIX") }
             }
