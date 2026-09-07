@@ -132,6 +132,23 @@ class PaymentRepository(
         )
     }
 
+    suspend fun verifyPix(paymentId: Int): PixVerification {
+        val data = api.getPayments(
+            "pix-status",
+            requireToken(),
+            mapOf("payment_id" to paymentId.toString()),
+        ).getJSONObject("pix")
+        val balance = data.optJSONObject("balance") ?: JSONObject()
+        return PixVerification(
+            paid = data.optBoolean("paid", false),
+            provider = data.optString("provider"),
+            paymentId = data.optInt("payment_id", paymentId),
+            status = data.optString("status"),
+            remainingCents = balance.optInt("remaining_cents"),
+            paymentStatus = balance.optString("payment_status"),
+        )
+    }
+
     private fun parseVerification(root: JSONObject): CardVerification {
         val balance = root.optJSONObject("balance") ?: JSONObject()
         return CardVerification(
