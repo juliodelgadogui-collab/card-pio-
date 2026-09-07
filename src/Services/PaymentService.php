@@ -82,6 +82,7 @@ final class PaymentService
             $pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=?')->execute([$orderId]);
             $order['payment_status']='paid';if($order['status']==='pending')$order['status']='confirmed';
             $this->settleOrderEffects($pdo,$tenantId,$order,$orderId);
+            (new FinancialLedgerService())->recordOrderResult($pdo,$tenantId,$order);
             (new ProductionService())->ensureOrderJobs($pdo,$tenantId,$orderId,null);
             Auth::audit('payment.order_settled','order',(string)$orderId,['final_payment_id'=>(int)$payment['id'],'total_cents'=>$total]);
         });
