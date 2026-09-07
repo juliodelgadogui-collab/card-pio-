@@ -38,7 +38,17 @@ jobs:
           echo "PHP syntax OK"
 
       - name: SQLite smoke tests
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: ci-eventmenu-payments-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          APP_URL: https://example.test
+          APP_BASE_PATH: /1
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-payments-release.sqlite
+          SESSION_NAME: eventmenu_payments_release
         run: |
+          rm -f /tmp/eventmenu-payments-release.sqlite /tmp/eventmenu-payments-release.sqlite-shm /tmp/eventmenu-payments-release.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-operations-smoke.php
           php scripts/ci-url-smoke.php
