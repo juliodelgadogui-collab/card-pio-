@@ -6,6 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -15,8 +17,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +39,7 @@ fun TenantBrandLogo(
                 connection.readTimeout = 7_000
                 connection.instanceFollowRedirects = true
                 try {
-                    connection.inputStream.use(BitmapFactory::decodeStream)
+                    connection.inputStream.use { input -> BitmapFactory.decodeStream(input) }
                 } finally {
                     connection.disconnect()
                 }
@@ -49,10 +49,7 @@ fun TenantBrandLogo(
 
     val shape = RoundedCornerShape((size.value * .24f).dp)
     Box(
-        modifier = modifier
-            .size(size)
-            .clip(shape)
-            .background(MaterialTheme.colorScheme.surface),
+        modifier = modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surface),
         contentAlignment = Alignment.Center,
     ) {
         val image = bitmap
