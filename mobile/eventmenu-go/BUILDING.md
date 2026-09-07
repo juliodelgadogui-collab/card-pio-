@@ -18,6 +18,7 @@ O projeto usa:
 - Kotlin integrado do AGP, fixado em KGP 2.4.10
 - Compose Compiler 2.4.10
 - Compose BOM 2026.06.00
+- Firebase Cloud Messaging `firebase-messaging:25.0.1`
 - `minSdk 23`
 - `targetSdk 36`
 - `compileSdk 36`
@@ -64,6 +65,25 @@ Após uma compilação bem-sucedida, o APK será criado em:
 `app/build/outputs/apk/debug/app-debug.apk`
 
 O workflow `EventMenu CI` também executa `:app:assembleDebug` em push e pull request. Quando o GitHub Actions estiver disponível para a conta/repositório, o job Android publica o APK como artefato `eventmenu-go-debug-apk` por 7 dias.
+
+## Firebase Cloud Messaging
+
+O aplicativo compila normalmente mesmo sem um projeto Firebase configurado. Nesse caso, a sincronização periódica de notificações continua funcionando e o FCM permanece desativado.
+
+Para ativar push em tempo real no APK, defina no ambiente de compilação:
+
+```bash
+export EVENTMENU_FIREBASE_PROJECT_ID="seu-project-id"
+export EVENTMENU_FIREBASE_APP_ID="1:000000000000:android:0000000000000000"
+export EVENTMENU_FIREBASE_API_KEY="sua-chave-do-app-android"
+export EVENTMENU_FIREBASE_SENDER_ID="000000000000"
+```
+
+`EVENTMENU_FIREBASE_PROJECT_ID` também aceita `FCM_PROJECT_ID` como fallback. Esses valores pertencem à configuração do app Android no projeto Firebase. A conta de serviço usada pelo servidor continua separada e é configurada no backend por `FCM_SERVICE_ACCOUNT_PATH` ou `FCM_SERVICE_ACCOUNT_BASE64`.
+
+Quando uma sessão é aberta, o EventMenu GO obtém o token FCM e registra o aparelho em `api-go-notifications.php?action=push-register`. A renovação de token é tratada pelo `FirebaseMessagingService`. O servidor inclui `tenant_id` e `user_id` no push e o app rejeita qualquer mensagem que não pertença à sessão ativa do aparelho.
+
+No logout, o backend desativa o registro push associado ao mesmo aparelho. Pagamentos, alterações de pedido, check-in e entrega continuam dependendo da API; push apenas informa e abre a área correta.
 
 ## Deep links e notificações inteligentes
 
