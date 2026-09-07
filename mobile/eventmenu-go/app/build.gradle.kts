@@ -15,8 +15,8 @@ android {
 
     defaultConfig {
         applicationId = "br.com.eventmenu.go"
-        // SumUp Tap-to-Pay 1.1.6 exige Android 11 / API 30 ou superior.
-        minSdk = 30
+        // A variante sem Tap to Pay continua disponível para aparelhos antigos.
+        minSdk = 23
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
@@ -27,12 +27,13 @@ android {
     productFlavors {
         create("sumup") {
             dimension = "payments"
+            // SumUp Tap-to-Pay 1.1.6 exige Android 11 / API 30 ou superior.
+            minSdk = 30
             buildConfigField("boolean", "SUMUP_TAP_TO_PAY", "true")
         }
         create("nosumup") {
             dimension = "payments"
-            applicationIdSuffix = ".preview"
-            versionNameSuffix = "-preview"
+            versionNameSuffix = "-sem-nfc"
             buildConfigField("boolean", "SUMUP_TAP_TO_PAY", "false")
         }
     }
@@ -65,7 +66,7 @@ dependencies {
     androidTestImplementation(composeBom)
 
     // Somente a variante sumup baixa o artefato privado. A variante nosumup é usada
-    // para homologar o restante do aplicativo enquanto as credenciais Maven não existem.
+    // normalmente enquanto as credenciais Maven do SDK não estão disponíveis.
     add("sumupImplementation", "com.sumup.tap-to-pay:utopia-sdk:1.1.6")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
