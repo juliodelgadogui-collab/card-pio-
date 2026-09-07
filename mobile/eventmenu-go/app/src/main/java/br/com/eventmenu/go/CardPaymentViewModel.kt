@@ -55,16 +55,26 @@ class CardPaymentViewModel(
     private var chargeJob: Job? = null
 
     fun charge(orderId: Int, amountCents: Int, method: String, installments: Int) {
+        require(amountCents > 0) { "Valor da cobrança inválido." }
+        startCharge(orderId, amountCents, method, installments)
+    }
+
+    /** Usado quando a tela não conhece com segurança o saldo após pagamentos parciais. */
+    fun chargeRemaining(orderId: Int, method: String, installments: Int) {
+        startCharge(orderId, null, method, installments)
+    }
+
+    private fun startCharge(orderId: Int, amountCents: Int?, method: String, installments: Int) {
         if (_state.value.blocking || chargeJob?.isActive == true) return
         require(method in setOf("credit", "debit")) { "Forma de cartão inválida." }
         val count = if (method == "debit") 1 else installments.coerceIn(1, 12)
         _state.value = CardPaymentUiState(
             orderId = orderId,
-            amountCents = amountCents,
+            amountCents = amountCents ?: 0,
             paymentMethod = method,
             installments = count,
             phase = CardPaymentPhase.PREPARING,
-            message = "Preparando pagamento seguro…",
+            message = if (amountCents == null) "Consultando o saldo restante no servidor…" else "Preparando pagamento seguro…",
             completedVersion = _state.value.completedVersion,
         )
         chargeJob = viewModelScope.launch {
@@ -78,8 +88,12 @@ class CardPaymentViewModel(
             }.onFailure { error ->
                 _state.update {
                     it.copy(
-                        phase = CardPaymentPhase.PENDING_CONFIRMATION,
-                        message = error.message ?: "Não foi possível concluir a confirmação. Não cobre novamente até verificar.",
+                        phase = if (it.intentToken.isNotBlank()) CardPaymentPhase.PENDING_CONFIRMATION else CardPaymentPhase.FAILED,
+                        message = error.message ?: if (it.intentToken.isNotBlank()) {
+                            "Não foi possível concluir a confirmação. Não cobre novamente até verificar."
+                        } else {
+                            "Não foi possível iniciar a cobrança."
+                        },
                     )
                 }
             }
