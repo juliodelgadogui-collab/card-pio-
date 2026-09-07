@@ -9,6 +9,16 @@ val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 val appVersionCode = ciBuildNumber ?: 3
 val appVersionName = if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
 
+fun envValue(primary: String, fallback: String? = null): String =
+    System.getenv(primary)?.trim().orEmpty().ifBlank { fallback?.let { System.getenv(it)?.trim().orEmpty() }.orEmpty() }
+
+fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
+val firebaseAppId = envValue("EVENTMENU_FIREBASE_APP_ID")
+val firebaseApiKey = envValue("EVENTMENU_FIREBASE_API_KEY")
+val firebaseSenderId = envValue("EVENTMENU_FIREBASE_SENDER_ID")
+
 android {
     namespace = "br.com.eventmenu.go"
     compileSdk = 36
@@ -20,6 +30,10 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         buildConfigField("String", "API_BASE_URL", "\"$apiBase\"")
+        buildConfigField("String", "FIREBASE_PROJECT_ID", buildConfigString(firebaseProjectId))
+        buildConfigField("String", "FIREBASE_APP_ID", buildConfigString(firebaseAppId))
+        buildConfigField("String", "FIREBASE_API_KEY", buildConfigString(firebaseApiKey))
+        buildConfigField("String", "FIREBASE_SENDER_ID", buildConfigString(firebaseSenderId))
     }
 
     buildFeatures {
@@ -61,6 +75,7 @@ dependencies {
     implementation("androidx.biometric:biometric:1.1.0")
     implementation("androidx.work:work-runtime-ktx:2.10.1")
     implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    implementation("com.google.firebase:firebase-messaging:25.0.1")
     implementation("com.google.zxing:core:3.5.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
