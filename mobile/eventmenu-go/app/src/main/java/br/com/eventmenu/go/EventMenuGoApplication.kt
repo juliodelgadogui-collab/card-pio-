@@ -2,6 +2,7 @@ package br.com.eventmenu.go
 
 import android.app.Application
 import br.com.eventmenu.go.data.ApiClient
+import br.com.eventmenu.go.data.BrandingRepository
 import br.com.eventmenu.go.data.CancellationRepository
 import br.com.eventmenu.go.data.DeliveryProgressRepository
 import br.com.eventmenu.go.data.DeviceStatusRepository
@@ -59,6 +60,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var paymentRepository: PaymentRepository
         private set
+    lateinit var brandingRepository: BrandingRepository
+        private set
     lateinit var cardPaymentCoordinator: CardPaymentCoordinator
         private set
 
@@ -85,9 +88,9 @@ class EventMenuGoApplication : Application() {
         discountRepository = DiscountRepository(baseUrl, deviceId, store)
         cancellationRepository = CancellationRepository(baseUrl, deviceId, store)
         financeRepository = FinanceRepository(baseUrl, deviceId, store)
+        brandingRepository = BrandingRepository(baseUrl, deviceId, store)
 
         paymentRepository = PaymentRepository(baseUrl, deviceId, store)
-        // Uma única instância do SDK por ciclo de vida do app, conforme orientação SumUp.
         sumUpTapToPaySdk = SumUpTapToPaySdk(this)
         cardPaymentCoordinator = CardPaymentCoordinator(paymentRepository) { provider ->
             when (provider) {
