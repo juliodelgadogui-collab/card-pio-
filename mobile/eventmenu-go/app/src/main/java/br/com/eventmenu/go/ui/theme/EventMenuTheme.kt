@@ -1,5 +1,6 @@
 package br.com.eventmenu.go.ui.theme
 
+import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -81,9 +82,9 @@ fun EventMenuTheme(branding: AppBranding = DefaultBranding, content: @Composable
 }
 
 private fun parseColor(hex: String, fallback: Color): Color {
-    val clean = hex.trim().removePrefix("#")
-    if (clean.length != 6 || clean.any { it !in "0123456789abcdefABCDEF" }) return fallback
-    return runCatching { Color((0xFF000000L or clean.toLong(16)).toULong()) }.getOrDefault(fallback)
+    val clean = hex.trim()
+    if (!Regex("^#[0-9A-Fa-f]{6}$").matches(clean)) return fallback
+    return runCatching { Color(AndroidColor.parseColor(clean)) }.getOrDefault(fallback)
 }
 
 private fun blend(a: Color, b: Color, amount: Float): Color {
