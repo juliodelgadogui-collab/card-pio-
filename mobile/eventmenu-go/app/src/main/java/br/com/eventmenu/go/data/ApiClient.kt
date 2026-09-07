@@ -27,6 +27,8 @@ class ApiClient(
     suspend fun getDiscounts(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-discounts.php", "GET", action, token, query, null)
     suspend fun postDiscounts(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-discounts.php", "POST", action, token, emptyMap(), body)
     suspend fun getFinance(token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-finance.php", "GET", "summary", token, query, null)
+    suspend fun getPayments(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-payments.php", "GET", action, token, query, null)
+    suspend fun postPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-payments.php", "POST", action, token, emptyMap(), body)
     suspend fun getCancellations(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-cancellations.php", "GET", action, token, query, null)
     suspend fun postCancellations(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-cancellations.php", "POST", action, token, emptyMap(), body)
     suspend fun getEvents(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-events.php", "GET", action, token, query, null)
