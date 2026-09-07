@@ -6,7 +6,12 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 
 use EventMenu\Core\Database;
 use EventMenu\Core\Migrator;
+use EventMenu\Services\ApiRateLimitService;
+use EventMenu\Services\BackgroundJobService;
 use EventMenu\Services\GatewayService;
+use EventMenu\Services\ProductionService;
+use EventMenu\Services\RuntimeStatusService;
+use EventMenu\Services\SystemHealthService;
 
 function fail_ci(string $message): never
 {
@@ -37,6 +42,7 @@ try {
         'coupon_redemptions','coupon_reservations','customer_points_movements','promoters',
         'promoter_commissions','event_guests','ticket_checkin_logs','nfc_devices',
         'cash_sessions','cash_movements','saas_plans','tenant_subscriptions','migrations',
+        'background_jobs','push_devices','system_runtime_status','api_rate_limits',
     ];
     foreach ($requiredTables as $table) {
         try {
@@ -116,6 +122,49 @@ try {
     $method = $reflection->getMethod('header');
     $headerValue = $method->invoke(new GatewayService(), ['Stripe-Signature' => 'ci-signature'], 'stripe-signature');
     assert_ci($headerValue === 'ci-signature', 'Normalização de headers de webhook regrediu.');
+
+    $runtime = new RuntimeStatusService();
+    $runtime->set('ci.heartbeat','ok','CI ativo.',['driver'=>$driver]);
+    $heartbeat = $runtime->get('ci.heartbeat');
+    assert_ci(is_array($heartbeat) && $heartbeat['state'] === 'ok', 'Runtime status não persistiu.');
+
+    $jobs = new BackgroundJobService();
+    $dedupe = 'ci-job-' . bin2hex(random_bytes(6));
+    $jobId = $jobs->enqueue('push.notification',['notification_id'=>999999],$tenantId,$dedupe,null,2);
+    assert_ci($jobId > 0, 'Fila não aceitou tarefa.');
+    $sameJobId = $jobs->enqueue('push.notification',['notification_id'=>999999],$tenantId,$dedupe,null,2);
+    assert_ci($sameJobId === $jobId, 'Dedupe da fila não é idempotente.');
+    $jobResult = $jobs->runBatch(5,'ci-worker');
+    assert_ci((int)$jobResult['completed'] >= 1, 'Worker não concluiu tarefa segura de CI.');
+
+    $rate = new ApiRateLimitService();
+    $rateSubject = 'ci-' . bin2hex(random_bytes(6));
+    $rate->assertAllowed('ci.bucket',$rateSubject,1,60);
+    $blocked = false;
+    try { $rate->assertAllowed('ci.bucket',$rateSubject,1,60); }
+    catch (\RuntimeException) { $blocked = true; }
+    assert_ci($blocked, 'Rate limit não bloqueou o excesso.');
+
+    $unitCode = 'ci-unit-' . bin2hex(random_bytes(3));
+    $pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,"Bar CI",1)')->execute([$tenantId,$unitCode]);
+    $unitId = (int)$pdo->lastInsertId();
+    assert_ci($unitId > 0, 'Unidade de teste do evento não foi criada.');
+    $eventSlug = 'ci-event-' . bin2hex(random_bytes(4));
+    $pdo->prepare('INSERT INTO events (tenant_id,name,slug,starts_at,status,bar_enabled,bar_unit_id) VALUES (?,?,?,CURRENT_TIMESTAMP,"published",1,?)')->execute([$tenantId,'Evento CI',$eventSlug,$unitId]);
+    $eventId = (int)$pdo->lastInsertId();
+    assert_ci($eventId > 0, 'Evento de teste do bar não foi criado.');
+    $pdo->prepare('INSERT INTO orders (public_token,tenant_id,unit_id,event_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?,?,?,?,"event_bar","confirmed","paid",1000,1000,?)')->execute([bin2hex(random_bytes(20)),$tenantId,$unitId,$eventId,$userId]);
+    $eventOrderId = (int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents) VALUES (?, ?, "Bebida pronta CI", 1000, 1, 1000)')->execute([$eventOrderId,$productId]);
+    Database::transaction(function (\PDO $tx) use ($tenantId,$eventOrderId): void {
+        (new ProductionService())->ensureOrderJobs($tx,$tenantId,$eventOrderId,null);
+    });
+    $s=$pdo->prepare('SELECT status FROM orders WHERE id=? AND tenant_id=?');$s->execute([$eventOrderId,$tenantId]);
+    assert_ci((string)$s->fetchColumn()==='ready','Pedido event_bar sem preparo não ficou pronto automaticamente.');
+
+    $health = (new SystemHealthService())->snapshot();
+    assert_ci(isset($health['checks']['database'],$health['checks']['queue'],$health['checks']['backup']), 'Snapshot de saúde incompleto.');
+    assert_ci(($health['checks']['queue']['state'] ?? null) === 'ok', 'Fila vazia gerou alerta falso no health check.');
 
     echo "CI DB smoke OK ({$driver})\n";
 } catch (\Throwable $e) {
