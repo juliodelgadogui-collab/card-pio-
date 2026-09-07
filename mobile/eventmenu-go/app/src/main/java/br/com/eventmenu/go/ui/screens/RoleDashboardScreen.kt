@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.GoState
 import br.com.eventmenu.go.data.AppMode
+import br.com.eventmenu.go.ui.components.TenantBrandLogo
+import br.com.eventmenu.go.ui.theme.LocalEventMenuBranding
 
 private data class HomeShortcut(val icon: ImageVector, val label: String, val subtitle: String, val screen: AppScreen)
 
@@ -56,7 +58,9 @@ fun RoleDashboardScreen(
     val permissions = session.permissions
     val mode = state.mode ?: return
     val shift = state.workShift
-    val tenant = session.user.tenantName.ifBlank { "Empresa #${session.user.tenantId}" }
+    val branding = LocalEventMenuBranding.current
+    val tenantFallback = session.user.tenantName.ifBlank { "Empresa #${session.user.tenantId}" }
+    val brandName = branding.displayName.takeIf { branding.applyApp && it.isNotBlank() } ?: tenantFallback
     val unit = dashboardUnitName(shift?.unitName)
 
     val shortcuts = buildList {
@@ -85,15 +89,21 @@ fun RoleDashboardScreen(
             ) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("EventMenu GO", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                            Text("Olá, ${firstName(session.user.name)}", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            TenantBrandLogo(
+                                logoUrl = branding.logoUrl.takeIf { branding.applyApp } ?: "",
+                                displayName = brandName,
+                                size = 50.dp,
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(brandName, color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 1)
+                                Text("Olá, ${firstName(session.user.name)}", color = MaterialTheme.colorScheme.onPrimary.copy(alpha = .86f), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                         Surface(shape = CircleShape, color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.14f)) {
                             IconButton(onClick = onRefresh) { Icon(Icons.Default.Refresh, contentDescription = "Atualizar", tint = MaterialTheme.colorScheme.onPrimary) }
                         }
                     }
-                    Text(tenant, color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.14f)) {
                             Text(unit, modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.bodyMedium)
@@ -108,24 +118,18 @@ fun RoleDashboardScreen(
             }
         }
 
-        item {
-            Text("Acesso rápido", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-        }
+        item { Text("Acesso rápido", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
 
         shortcuts.chunked(2).forEach { row ->
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { shortcut ->
-                        HomeShortcutCard(shortcut, Modifier.weight(1f)) { onNavigate(shortcut.screen) }
-                    }
+                    row.forEach { shortcut -> HomeShortcutCard(shortcut, Modifier.weight(1f)) { onNavigate(shortcut.screen) } }
                     if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
 
-        item {
-            Text("Resumo de hoje", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-        }
+        item { Text("Resumo de hoje", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
 
         when (mode) {
             AppMode.DELIVERY -> {
