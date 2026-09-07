@@ -68,11 +68,11 @@ final class PosPaymentService
             if($existing){if((int)$existing['order_id']!==$orderId)throw new RuntimeException('Este código/NSU já foi usado em outro pedido.');return $this->status($orderId);}
 
             $o=$pdo->prepare(Database::portableSql($pdo,'SELECT unit_id FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$o->execute([$orderId,$tenantId]);$unitId=$o->fetchColumn();if($unitId===false)throw new RuntimeException('Pedido não encontrado.');
-            $payments=new PaymentService();$payment=$payments->create($orderId,'manual',$idempotencyKey,$amountCents);
+            $payments=new PaymentService();$payment=$payments->create($orderId,'terminal_manual',$idempotencyKey,$amountCents);
             $providerPaymentId='EXT-'.hash('sha256',$tenantId.'|'.$transactionReference);
             $payments->confirmVerified([
-                'payment_id'=>(int)$payment['id'],'tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'manual',
-                'provider_payment_id'=>$providerPaymentId,'amount_cents'=>(int)$payment['amount_cents'],'currency'=>'BRL','account_reference'=>'manual',
+                'payment_id'=>(int)$payment['id'],'tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'terminal_manual',
+                'provider_payment_id'=>$providerPaymentId,'amount_cents'=>(int)$payment['amount_cents'],'currency'=>'BRL','account_reference'=>'manual_terminal',
                 'source'=>'external_terminal','payment_method_type'=>$paymentMethod,'machine_label'=>$machineLabel,'transaction_reference'=>$transactionReference,
             ]);
             $pdo->prepare('INSERT INTO external_terminal_payments (tenant_id,unit_id,order_id,payment_id,user_id,device_id,payment_method,machine_label,transaction_reference,amount_cents) VALUES (?,?,?,?,?,?,?,?,?,?)')
