@@ -10,16 +10,29 @@ import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.data.ApiConnectionMonitor
+import br.com.eventmenu.go.data.ApiConnectivity
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.navigation.AppDeepLinkTarget
@@ -51,6 +64,7 @@ class MainActivity : FragmentActivity() {
                 )
             )
             val state by vm.state.collectAsState()
+            val connectivity by ApiConnectionMonitor.state.collectAsState()
             var brand by remember { mutableStateOf(app.brandRepository.cached()) }
 
             LaunchedEffect(state.session?.user?.id) {
@@ -79,12 +93,33 @@ class MainActivity : FragmentActivity() {
             }
 
             EventMenuTheme(brand) {
-                EventMenuGoApp(
-                    viewModel = vm,
-                    onScan = { callback -> scanQr(callback) },
-                    onBiometric = { authenticateBiometric(vm) },
-                    onTapOn = ::launchTapOn,
-                )
+                Column(Modifier.fillMaxSize()) {
+                    if (connectivity == ApiConnectivity.OFFLINE) {
+                        Surface(
+                            modifier = Modifier.fillMaxWidth(),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                        ) {
+                            Text(
+                                text = if (state.session != null) {
+                                    "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
+                                } else {
+                                    "Sem conexão com o servidor · verifique sua internet."
+                                },
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                    Box(Modifier.weight(1f)) {
+                        EventMenuGoApp(
+                            viewModel = vm,
+                            onScan = { callback -> scanQr(callback) },
+                            onBiometric = { authenticateBiometric(vm) },
+                            onTapOn = ::launchTapOn,
+                        )
+                    }
+                }
             }
         }
     }
