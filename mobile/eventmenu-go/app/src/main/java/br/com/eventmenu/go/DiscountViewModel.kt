@@ -27,6 +27,8 @@ class DiscountViewModel(private val repository: DiscountRepository) : ViewModel(
     private val _state = MutableStateFlow(DiscountState())
     val state: StateFlow<DiscountState> = _state.asStateFlow()
 
+    init { loadPolicy() }
+
     fun loadPolicy() = viewModelScope.launch {
         runCatching { repository.policy() }
             .onSuccess { policy -> _state.update { it.copy(policy = policy) } }
@@ -58,9 +60,12 @@ class DiscountViewModel(private val repository: DiscountRepository) : ViewModel(
             .onFailure { e -> _state.update { it.copy(error = e.message ?: "Falha ao consultar desconto.") } }
     }
 
-    // Mantém o contrato usado hoje pelo PDV: pedido + valor em centavos + motivo.
-    fun request(orderId: Int, amountCents: Int, reason: String) =
-        requestAdvanced(orderId, "fixed", amountCents, reason)
+    // Mantém o callback legado do PDV sem perder o tipo do desconto:
+    // valor positivo = centavos; valor negativo = basis points percentuais (500 = 5%).
+    fun request(orderId: Int, encodedValue: Int, reason: String) {
+        if (encodedValue < 0) requestAdvanced(orderId, "percent", -encodedValue, reason)
+        else requestAdvanced(orderId, "fixed", encodedValue, reason)
+    }
 
     fun requestAdvanced(orderId: Int, discountType: String, value: Int, reason: String) = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null, message = null) }
