@@ -111,6 +111,7 @@ function em_nav(): array
         ['promoters', 'Promotores', 'promoters.manage'],
         ['payments', 'Pagamentos', 'payments.manage'],
         ['finance', 'Financeiro', 'finance.view'],
+        ['finance-advanced', 'Financeiro avançado', 'finance.view'],
         ['gateways', 'Gateways e NFC', 'gateways.manage'],
         ['users', 'Equipe', 'users.manage'],
         ['units', 'Unidades', 'settings.manage'],
