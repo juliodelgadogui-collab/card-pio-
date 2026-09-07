@@ -6,8 +6,8 @@ import org.json.JSONObject
 /**
  * Fonte única do app para pagamentos digitais.
  *
- * Credenciais de provedor nunca são persistidas aqui. A sessão do SDK vem do servidor
- * somente quando o operador inicia a cobrança e deve permanecer apenas em memória.
+ * Credenciais permanentes de provedor nunca são persistidas aqui. A sessão curta do SDK
+ * vem do servidor somente quando o operador inicia a cobrança e permanece em memória.
  */
 class PaymentRepository(
     baseUrl: String,
@@ -86,14 +86,20 @@ class PaymentRepository(
             requireToken(),
             JSONObject().put("intent_token", intentToken).put("provider_result", providerResult),
         )
-        val balance = root.optJSONObject("balance") ?: JSONObject()
-        return CardVerification(
-            provider = root.optString("provider"),
-            orderId = root.optInt("order_id"),
-            paymentId = root.optInt("payment_id"),
-            remainingCents = balance.optInt("remaining_cents"),
-            paymentStatus = balance.optString("payment_status"),
+        return parseVerification(root)
+    }
+
+    /**
+     * Reconsulta o adquirente pelo identificador gerado antes da aproximação.
+     * Usado quando o SDK informa TransactionResultUnknown ou quando a rede cai depois do tap.
+     */
+    suspend fun reconcileCardIntent(intentToken: String): CardVerification {
+        val root = api.postPayments(
+            "card-reconcile",
+            requireToken(),
+            JSONObject().put("intent_token", intentToken),
         )
+        return parseVerification(root)
     }
 
     suspend fun failCardIntent(intentToken: String, reason: String) {
@@ -123,6 +129,17 @@ class PaymentRepository(
             imageUrl = data.optString("image_url"),
             imageBase64 = data.optString("image_base64"),
             expiresAt = data.optString("expires_at"),
+        )
+    }
+
+    private fun parseVerification(root: JSONObject): CardVerification {
+        val balance = root.optJSONObject("balance") ?: JSONObject()
+        return CardVerification(
+            provider = root.optString("provider"),
+            orderId = root.optInt("order_id"),
+            paymentId = root.optInt("payment_id"),
+            remainingCents = balance.optInt("remaining_cents"),
+            paymentStatus = balance.optString("payment_status"),
         )
     }
 
