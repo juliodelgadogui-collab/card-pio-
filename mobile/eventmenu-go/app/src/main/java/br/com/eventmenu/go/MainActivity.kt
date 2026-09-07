@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
@@ -41,6 +42,16 @@ class MainActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         pendingDeepLink = AppDeepLinks.parse(intent)
         requestNotificationPermissionIfNeeded()
+
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (appBackHandler?.invoke() == true) return
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+                isEnabled = true
+            }
+        })
+
         val app = application as EventMenuGoApplication
         setContent {
             val vm: MainViewModel = viewModel(
@@ -110,12 +121,6 @@ class MainActivity : FragmentActivity() {
                 )
             }
         }
-    }
-
-    @Deprecated("Compatibilidade com navegação Android antiga")
-    override fun onBackPressed() {
-        if (appBackHandler?.invoke() == true) return
-        super.onBackPressed()
     }
 
     override fun onNewIntent(intent: Intent) {
