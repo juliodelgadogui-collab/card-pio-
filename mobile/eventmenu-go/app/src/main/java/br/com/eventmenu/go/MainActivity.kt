@@ -62,7 +62,13 @@ class MainActivity : FragmentActivity() {
                     app.notificationRepository,
                 )
             )
+            val brandingVm: BrandingViewModel = viewModel(factory = BrandingViewModel.Factory(app.brandingRepository))
             val state by vm.state.collectAsState()
+            val brandingState by brandingVm.state.collectAsState()
+
+            LaunchedEffect(state.session?.user?.tenantId) {
+                if (state.session == null) brandingVm.clear() else brandingVm.refresh()
+            }
 
             SideEffect {
                 appBackHandler = {
@@ -112,7 +118,7 @@ class MainActivity : FragmentActivity() {
                 pendingDeepLink = null
             }
 
-            EventMenuTheme {
+            EventMenuTheme(branding = brandingState.branding) {
                 EventMenuGoApp(
                     viewModel = vm,
                     onScan = { callback -> scanQr(callback) },
