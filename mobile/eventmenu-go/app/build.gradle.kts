@@ -33,7 +33,7 @@ android {
         }
         create("nosumup") {
             dimension = "payments"
-            versionNameSuffix = "-sem-nfc"
+            // O nome técnico da variante não deve aparecer para o usuário final.
             buildConfigField("boolean", "SUMUP_TAP_TO_PAY", "false")
         }
     }
