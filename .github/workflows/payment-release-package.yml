@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: eventmenu-payments-release-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   server:
     name: Server package and PHP validation
@@ -47,12 +51,17 @@ jobs:
           test -f public/sumup-oauth.php
           test -f public/api-go-payments.php
           test -f src/Services/CardPresentService.php
+          test -f src/Services/PosPaymentService.php
           test -f src/Services/Payments/SumUpProvider.php
           test -f src/Services/Payments/PaymentProviderSettingsService.php
           test -f database/migrations/042_payment_provider_core.sql
           test -f database/migrations/043_payment_oauth_states.sql
+          test -f database/migrations/044_payment_runtime_options.sql
           test -f database/sqlite/migrations/042_payment_provider_core.sql
           test -f database/sqlite/migrations/043_payment_oauth_states.sql
+          test -f database/sqlite/migrations/044_payment_runtime_options.sql
+          grep -q 'external-terminal' public/api-go-payments.php
+          grep -q 'external_terminal_payments' database/migrations/044_payment_runtime_options.sql
 
       - name: Build server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-Pagamentos"
@@ -129,26 +138,49 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Compile installable preview APK
+      - name: Restore stable EventMenu GO debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: eventmenu-go-debug-keystore-v1
+
+      - name: Ensure stable debug signing key exists
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=EventMenu GO Development,O=EventMenu,C=BR" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+
+      - name: Compile EventMenu GO without NFC SDK
         working-directory: mobile/eventmenu-go
         run: gradle --no-daemon :app:assembleNosumupDebug
 
-      - name: Prepare preview APK
+      - name: Prepare no-NFC APK
         shell: bash
         run: |
           set -euo pipefail
-          PREVIEW="mobile/eventmenu-go/app/build/outputs/apk/nosumup/debug/app-nosumup-debug.apk"
-          test -f "$PREVIEW"
-          cp "$PREVIEW" EventMenu-GO-Homologacao-sem-SumUp.apk
-          cat > EventMenu-GO-Homologacao-LEIA-ME.txt <<'TXT'
-          EVENTMENU GO — HOMOLOGAÇÃO
+          APK="mobile/eventmenu-go/app/build/outputs/apk/nosumup/debug/app-nosumup-debug.apk"
+          test -f "$APK"
+          cp "$APK" EventMenu-GO-sem-NFC.apk
+          cat > EventMenu-GO-sem-NFC-LEIA-ME.txt <<'TXT'
+          EVENTMENU GO — SEM NFC/TAP TO PAY
 
-          Este APK permite testar login, PDV, eventos, delivery, PIX, impressão e as novas telas de cartão.
-          A cobrança Tap to Pay SumUp real NÃO está embutida nesta variante porque o repositório ainda não possui
-          SUMUP_MAVEN_USERNAME e SUMUP_MAVEN_PASSWORD, credenciais privadas fornecidas pela SumUp após aprovação.
-          O código-fonte da variante SumUp está pronto e é compilado separadamente assim que esses secrets existirem.
+          Esta variante funciona com PIX, dinheiro e confirmação auditada de pagamento feito em maquininha externa.
+          O botão NFC/Tap to Pay não é exibido nesta variante.
+
+          O servidor já possui a chave de ativação do NFC por empresa. Quando o APK com SDK SumUp estiver disponível,
+          a mesma instalação EventMenu GO poderá usar a configuração da conta do restaurante sem APK por cliente.
           TXT
-          sha256sum EventMenu-GO-Homologacao-sem-SumUp.apk > EventMenu-GO-Homologacao-sem-SumUp.sha256
+          sha256sum EventMenu-GO-sem-NFC.apk > EventMenu-GO-sem-NFC.sha256
 
       - name: Compile full SumUp APK when credentials exist
         if: ${{ env.SUMUP_MAVEN_USERNAME != '' && env.SUMUP_MAVEN_PASSWORD != '' }}
@@ -165,10 +197,6 @@ jobs:
           test -f "$UNSIGNED"
           test -f "$DEBUG_APK"
           KEYSTORE="$HOME/.android/debug.keystore"
-          if [ ! -f "$KEYSTORE" ]; then
-            mkdir -p "$HOME/.android"
-            keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=EventMenu Beta,O=EventMenu,C=BR"
-          fi
           BUILD_TOOLS="$ANDROID_HOME/build-tools/36.0.0"
           "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED" EventMenu-GO-SumUp-beta-aligned.apk
           "$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android --ks-key-alias androiddebugkey --out EventMenu-GO-SumUp-beta.apk EventMenu-GO-SumUp-beta-aligned.apk
@@ -181,9 +209,9 @@ jobs:
         with:
           name: EventMenu-GO-APK
           path: |
-            EventMenu-GO-Homologacao-sem-SumUp.apk
-            EventMenu-GO-Homologacao-sem-SumUp.sha256
-            EventMenu-GO-Homologacao-LEIA-ME.txt
+            EventMenu-GO-sem-NFC.apk
+            EventMenu-GO-sem-NFC.sha256
+            EventMenu-GO-sem-NFC-LEIA-ME.txt
             EventMenu-GO-SumUp-beta.apk
             EventMenu-GO-SumUp-debug.apk
             EventMenu-GO-SumUp.sha256
