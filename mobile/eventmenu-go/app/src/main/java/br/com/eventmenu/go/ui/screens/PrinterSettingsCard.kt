@@ -47,15 +47,19 @@ fun PrinterSettingsCard(
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Impressora térmica", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(if (state.settings.deviceAddress.isBlank()) "Nenhuma impressora selecionada" else "${state.settings.deviceName} · ${state.settings.deviceAddress}")
+            Text(
+                if (state.settings.deviceAddress.isBlank()) "Nenhuma impressora selecionada"
+                else state.settings.deviceName.ifBlank { "Impressora selecionada" },
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
             if (!state.hasPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 Button(
                     onClick = { permissionLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT) },
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("PERMITIR BLUETOOTH") }
+                ) { Text("Permitir Bluetooth") }
             } else {
-                OutlinedButton(onClick = { onRefresh(); chooseDevice = true }, modifier = Modifier.fillMaxWidth()) { Text("ESCOLHER IMPRESSORA PAREADA") }
+                OutlinedButton(onClick = { onRefresh(); chooseDevice = true }, modifier = Modifier.fillMaxWidth()) { Text("Escolher impressora") }
             }
 
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -71,29 +75,28 @@ fun PrinterSettingsCard(
                 FilterChip(selected = state.settings.paperWidthMm == 58, onClick = { onPaperWidth(58) }, label = { Text("58 mm") })
                 FilterChip(selected = state.settings.paperWidthMm == 80, onClick = { onPaperWidth(80) }, label = { Text("80 mm") })
             }
-            OutlinedButton(onClick = onPrintTest, enabled = state.settings.enabled && state.hasPermission && !state.loading, modifier = Modifier.fillMaxWidth()) { Text("IMPRIMIR TESTE") }
-            if (state.settings.deviceAddress.isNotBlank()) TextButton(onClick = onClearDevice) { Text("REMOVER IMPRESSORA") }
-            Text("O EventMenu GO usa somente dispositivos Bluetooth já pareados no Android. A configuração da impressora fica neste aparelho e não altera permissões do funcionário.")
+            OutlinedButton(onClick = onPrintTest, enabled = state.settings.enabled && state.hasPermission && !state.loading, modifier = Modifier.fillMaxWidth()) { Text("Imprimir teste") }
+            if (state.settings.deviceAddress.isNotBlank()) TextButton(onClick = onClearDevice) { Text("Remover impressora") }
         }
     }
 
     if (chooseDevice) {
         AlertDialog(
             onDismissRequest = { chooseDevice = false },
-            title = { Text("Impressoras pareadas") },
+            title = { Text("Escolher impressora") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (state.devices.isEmpty()) Text("Nenhum dispositivo Bluetooth pareado encontrado. Faça o pareamento nas configurações do Android e atualize.")
+                    if (state.devices.isEmpty()) Text("Nenhuma impressora pareada foi encontrada. Faça o pareamento nas configurações do aparelho e tente novamente.")
                     state.devices.forEach { device ->
                         OutlinedButton(
                             onClick = { chooseDevice = false; onSelectDevice(device) },
                             modifier = Modifier.fillMaxWidth(),
-                        ) { Text(device.name) }
+                        ) { Text(device.name.ifBlank { "Impressora Bluetooth" }) }
                     }
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { chooseDevice = false }) { Text("FECHAR") } },
+            dismissButton = { TextButton(onClick = { chooseDevice = false }) { Text("Fechar") } },
         )
     }
 }

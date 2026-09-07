@@ -45,7 +45,7 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
     fun close() {
         val state = _state.value
         if (state.order != null && (state.balance?.remainingCents ?: state.order.totalCents) > 0) {
-            _state.update { it.copy(error = "Finalize o pagamento desta venda antes de sair do Bar.") }
+            _state.update { it.copy(error = "Finalize o pagamento desta venda antes de sair do bar.") }
             return
         }
         _state.value = EventBarState(completedVersion = state.completedVersion)
@@ -55,7 +55,7 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
         val product = _state.value.products.firstOrNull { it.id == productId } ?: return
         val current = _state.value.cart[productId] ?: 0
         if (product.trackStock && current + 1 > product.stockQty.toInt()) {
-            _state.update { it.copy(error = "Estoque disponível insuficiente para ${product.name}.") }
+            _state.update { it.copy(error = "Não há estoque suficiente de ${product.name}.") }
             return
         }
         _state.update { it.copy(cart = it.cart + (productId to current + 1)) }
@@ -72,10 +72,10 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
     fun clearCart() = _state.update { it.copy(cart = emptyMap()) }
 
     fun create(notes: String = "") = launchBusy {
-        val eventId = _state.value.eventId ?: throw IllegalStateException("Evento do Bar não selecionado.")
+        val eventId = _state.value.eventId ?: throw IllegalStateException("Selecione um evento.")
         val order = repository.create(eventId, _state.value.cart, notes)
         val balance = repository.balance(order.id)
-        _state.update { it.copy(order = order, balance = balance, cart = emptyMap(), message = "Venda #${order.id} criada. Escolha a forma de pagamento.") }
+        _state.update { it.copy(order = order, balance = balance, cart = emptyMap(), message = "Venda #${order.id} criada. Escolha como receber.") }
     }
 
     fun refreshPayment() = launchBusy {
@@ -84,13 +84,13 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
     }
 
     fun payCash(amountCents: Int) = launchBusy {
-        val orderId = _state.value.order?.id ?: throw IllegalStateException("Venda do Bar não encontrada.")
+        val orderId = _state.value.order?.id ?: throw IllegalStateException("Venda não encontrada.")
         val balance = repository.cash(orderId, amountCents)
         _state.update { it.copy(balance = balance, message = "Dinheiro recebido: ${money(amountCents)}") }
     }
 
     fun requestPix(amountCents: Int, taxId: String) = launchBusy {
-        val orderId = _state.value.order?.id ?: throw IllegalStateException("Venda do Bar não encontrada.")
+        val orderId = _state.value.order?.id ?: throw IllegalStateException("Venda não encontrada.")
         _state.update { it.copy(pixCharge = repository.pix(orderId, amountCents, taxId)) }
     }
 
@@ -101,7 +101,7 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
                 val part = balance.payments.firstOrNull { it.id == charge.paymentId }
                 _state.update { it.copy(balance = balance) }
                 if (part?.status == "paid") {
-                    _state.update { it.copy(pixCharge = null, message = "✅ PIX RECEBIDO — ${money(charge.amountCents)}") }
+                    _state.update { it.copy(pixCharge = null, message = "PIX recebido: ${money(charge.amountCents)}") }
                 }
             }
         }
@@ -110,7 +110,7 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
     fun dismissPix() = _state.update { it.copy(pixCharge = null) }
 
     fun requestNfc(amountCents: Int) = launchBusy {
-        val orderId = _state.value.order?.id ?: throw IllegalStateException("Venda do Bar não encontrada.")
+        val orderId = _state.value.order?.id ?: throw IllegalStateException("Venda não encontrada.")
         _state.update { it.copy(tapOnRequest = repository.nfc(orderId, amountCents)) }
     }
 
@@ -118,21 +118,21 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
 
     fun verifyNfc(request: TapOnRequest, transactionCode: String) = launchBusy {
         val balance = repository.verifyNfc(request.intentToken, transactionCode)
-        _state.update { it.copy(balance = balance, tapOnRequest = null, message = "Cartão confirmado pelo servidor.") }
+        _state.update { it.copy(balance = balance, tapOnRequest = null, message = "Cartão aprovado.") }
     }
 
-    fun nfcCancelled() = _state.update { it.copy(tapOnRequest = null, message = "Pagamento NFC cancelado.") }
+    fun nfcCancelled() = _state.update { it.copy(tapOnRequest = null, message = "Pagamento cancelado.") }
 
     fun finishSale() = launchBusy {
-        val order = _state.value.order ?: throw IllegalStateException("Venda do Bar não encontrada.")
+        val order = _state.value.order ?: throw IllegalStateException("Venda não encontrada.")
         val balance = repository.balance(order.id)
         if (balance.remainingCents != 0 || balance.paymentStatus != "paid") {
             _state.update { it.copy(balance = balance) }
-            throw IllegalStateException("O pagamento ainda não foi confirmado integralmente pelo servidor.")
+            throw IllegalStateException("Ainda falta receber parte desta venda.")
         }
         repository.complete(order.id)
         val nextVersion = _state.value.completedVersion + 1
-        _state.value = EventBarState(completedVersion = nextVersion, message = "✅ Venda #${order.id} entregue e concluída.")
+        _state.value = EventBarState(completedVersion = nextVersion, message = "Venda #${order.id} concluída.")
     }
 
     fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
@@ -140,7 +140,12 @@ class EventBarViewModel(private val repository: EventBarRepository) : ViewModel(
     private fun launchBusy(block: suspend () -> Unit) = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null) }
         runCatching { block() }.onFailure { error ->
-            _state.update { it.copy(error = if (error is ApiException) error.message else error.message ?: "Falha na venda do Bar.") }
+            val message = when {
+                error is ApiException && error.status == 401 -> "Sua sessão expirou. Entre novamente."
+                error is ApiException && error.status in 500..599 -> "Não foi possível concluir agora. Tente novamente."
+                else -> error.message ?: "Não foi possível concluir a operação."
+            }
+            _state.update { it.copy(error = message) }
         }
         _state.update { it.copy(loading = false) }
     }

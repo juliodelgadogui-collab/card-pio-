@@ -22,6 +22,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,8 +64,8 @@ fun TabSplitPaymentScreen(
     if (account == null) {
         Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Dividir conta", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Carregando saldo da comanda...")
-            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("VOLTAR") }
+            Text("Carregando conta...", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Voltar") }
         }
         return
     }
@@ -105,16 +106,15 @@ fun TabSplitPaymentScreen(
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Text("Dividir conta · ${account.tableName}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            if (account.tabLabel.isNotBlank()) Text(account.tabLabel)
-            Text("Comanda #${account.tabId}")
+            account.tabLabel.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         }
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Total"); Text(splitMoney(account.totalCents), fontWeight = FontWeight.Bold) }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Pago"); Text(splitMoney(account.paidCents), fontWeight = FontWeight.Bold) }
+                    if (account.paidCents > 0) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Recebido"); Text(splitMoney(account.paidCents), fontWeight = FontWeight.Bold) }
                     HorizontalDivider()
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("SALDO", fontWeight = FontWeight.Black); Text(splitMoney(account.remainingCents), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Falta receber", fontWeight = FontWeight.Black); Text(splitMoney(account.remainingCents), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black) }
                 }
             }
         }
@@ -122,11 +122,11 @@ fun TabSplitPaymentScreen(
         state.group?.let { group ->
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Grupo #${group.id} · ${splitMethodLabel(group.method)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                        Text("Divisão: ${splitTypeLabel(group.splitType)}")
-                        Text("Valor: ${splitMoney(group.amountCents)}")
-                        Text("Status: ${groupStatusLabel(group.status)}", fontWeight = FontWeight.Bold)
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Text("Parte da conta · ${splitMethodLabel(group.method)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text(splitTypeLabel(group.splitType), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(splitMoney(group.amountCents), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        GroupStatusPill(group.status)
                         group.allocations.forEach { allocation ->
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Pedido #${allocation.orderId}")
@@ -134,19 +134,18 @@ fun TabSplitPaymentScreen(
                             }
                         }
                         if (group.method == "pix" && group.status == "pending" && state.pix != null) {
-                            OutlinedButton(onClick = onShowPix, modifier = Modifier.fillMaxWidth()) { Text("MOSTRAR PIX") }
+                            OutlinedButton(onClick = onShowPix, modifier = Modifier.fillMaxWidth()) { Text("Mostrar PIX") }
                         }
                         if (group.status == "created" && group.providerPaymentId.isBlank()) {
-                            OutlinedButton(onClick = onCancelGroup, modifier = Modifier.fillMaxWidth()) { Text("CANCELAR ESTA DIVISÃO") }
+                            OutlinedButton(onClick = onCancelGroup, modifier = Modifier.fillMaxWidth()) { Text("Cancelar esta divisão") }
                         }
                         if (group.status == "paid") {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { onReceiptGroup(group.id) }, modifier = Modifier.weight(1f)) { Text("ENVIAR") }
-                                OutlinedButton(onClick = { onPrintGroup(group.id) }, modifier = Modifier.weight(1f)) { Text("IMPRIMIR") }
+                                OutlinedButton(onClick = { onReceiptGroup(group.id) }, modifier = Modifier.weight(1f)) { Text("Enviar recibo") }
+                                OutlinedButton(onClick = { onPrintGroup(group.id) }, modifier = Modifier.weight(1f)) { Text("Imprimir") }
                             }
-                            Text("O comprovante desta parte é montado pelo servidor com as alocações reais por pedido.")
                         }
-                        if (group.status == "attention") Text("⚠️ O provedor confirmou o valor, mas a operação exige conferência administrativa.")
+                        if (group.status == "attention") Text("Este pagamento precisa ser conferido por um responsável.", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -165,15 +164,15 @@ fun TabSplitPaymentScreen(
 
             when (split) {
                 "value" -> item { OutlinedTextField(valueText, { valueText = it }, label = { Text("Valor desta parte (R$)") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
-                "percentage" -> item { OutlinedTextField(percentageText, { percentageText = it }, label = { Text("Percentual do saldo atual") }, suffix = { Text("%") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+                "percentage" -> item { OutlinedTextField(percentageText, { percentageText = it }, label = { Text("Percentual do valor restante") }, suffix = { Text("%") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
                 "person" -> item {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         OutlinedTextField(peopleText, { peopleText = it.filter(Char::isDigit).take(3) }, label = { Text("Pessoas que ainda vão dividir") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                        Text("Cada operação paga uma cota do saldo atual. Depois, informe a quantidade de pessoas que ainda faltam.")
+                        Text("O valor restante será dividido pela quantidade informada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
                 "product" -> {
-                    item { Text("Selecione linhas inteiras de produto. Uma linha já usada numa divisão por produto não pode ser usada novamente.") }
+                    item { Text("Selecione os produtos que serão pagos nesta parte.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     items(account.items, key = { it.orderItemId }) { item ->
                         val checked = item.orderItemId in selectedItems
                         Card(Modifier.fillMaxWidth()) {
@@ -185,8 +184,8 @@ fun TabSplitPaymentScreen(
                                 )
                                 Column(Modifier.weight(1f)) {
                                     Text(item.name, fontWeight = FontWeight.Bold)
-                                    Text("Pedido #${item.orderId} · ${item.quantity} un.")
-                                    if (item.splitUsed) Text("Já utilizado em outra divisão por produto")
+                                    Text("${item.quantity} un. · Pedido #${item.orderId}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (item.splitUsed) Text("Já incluído em outro pagamento", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Text(splitMoney(item.totalCents), fontWeight = FontWeight.Black)
                             }
@@ -198,9 +197,8 @@ fun TabSplitPaymentScreen(
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                        Text("Prévia desta parte", fontWeight = FontWeight.Bold)
+                        Text("Valor desta parte", fontWeight = FontWeight.Bold)
                         Text(splitMoney(preview.coerceAtLeast(0)), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-                        Text("A API recalcula e distribui o valor novamente no momento do pagamento.")
                     }
                 }
             }
@@ -210,12 +208,12 @@ fun TabSplitPaymentScreen(
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     if (canCash) item { FilterChip(selected = method == "cash", onClick = { method = "cash" }, label = { Text("Dinheiro") }) }
                     if (canPix) item { FilterChip(selected = method == "pix", onClick = { method = "pix" }, label = { Text("PIX") }) }
-                    if (canNfc) item { FilterChip(selected = method == "nfc", onClick = { method = "nfc" }, label = { Text("NFC") }) }
+                    if (canNfc) item { FilterChip(selected = method == "nfc", onClick = { method = "nfc" }, label = { Text("Cartão") }) }
                 }
             }
-            if (method == "cash" && !cashOpen) item { Text("Abra o caixa financeiro antes de receber dinheiro.") }
+            if (method == "cash" && !cashOpen) item { Text("Abra o caixa antes de receber em dinheiro.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
             if (method == "pix") item {
-                OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF/CNPJ para emitir o PIX") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             }
             item {
                 Button(
@@ -229,16 +227,38 @@ fun TabSplitPaymentScreen(
                     },
                     enabled = splitValid && methodAllowed,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("RECEBER ${splitMoney(preview.coerceAtLeast(0))}") }
+                ) { Text("Receber ${splitMoney(preview.coerceAtLeast(0))}") }
             }
         }
 
-        if (account.remainingCents <= 0) item { Text("✅ COMANDA INTEGRALMENTE PAGA", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
-        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR SALDO") } }
-        item { OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("VOLTAR À CONTA") } }
+        if (account.remainingCents <= 0) {
+            item {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
+                    Text("Conta totalmente paga", modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
+        item { OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("Voltar à conta") } }
     }
 
     if (state.pixVisible) state.pix?.let { charge -> SplitPixDialog(charge.copyPaste, charge.amountCents, charge.expiresAt, onPollPix, onHidePix) }
+}
+
+@Composable
+private fun GroupStatusPill(status: String) {
+    val paid = status == "paid"
+    Surface(
+        color = if (paid) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            groupStatusLabel(status),
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = if (paid) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
 }
 
 @Composable
@@ -248,23 +268,65 @@ private fun SplitPixDialog(copyPaste: String, amountCents: Int, expiresAt: Strin
     LaunchedEffect(copyPaste) { while (true) { delay(2500); onPoll() } }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("PIX da comanda · ${splitMoney(amountCents)}") },
+        title = { Text("PIX · ${splitMoney(amountCents)}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                bitmap?.let { Image(it.asImageBitmap(), contentDescription = "PIX da conta dividida", modifier = Modifier.fillMaxWidth()) }
-                Text("⏳ Aguardando confirmação direta do PagBank…")
-                if (expiresAt.isNotBlank()) Text("Validade: $expiresAt")
-                OutlinedButton(onClick = { copySplitPix(context, copyPaste) }, modifier = Modifier.fillMaxWidth()) { Text("COPIAR PIX") }
+                bitmap?.let { Image(it.asImageBitmap(), contentDescription = "PIX da conta", modifier = Modifier.fillMaxWidth()) }
+                Text("Aguardando pagamento", fontWeight = FontWeight.SemiBold)
+                splitUseful(expiresAt)?.let { Text("Válido até ${splitFriendlyDateTime(it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                OutlinedButton(onClick = { copySplitPix(context, copyPaste) }, modifier = Modifier.fillMaxWidth()) { Text("Copiar PIX") }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("FECHAR") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
     )
 }
 
 private fun copySplitPix(context: Context, text: String) {
-    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("PIX EventMenu Comanda", text))
+    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+        .setPrimaryClip(ClipData.newPlainText("PIX conta", text))
 }
-private fun splitMethodLabel(value: String) = when (value) { "cash" -> "Dinheiro"; "pix" -> "PIX"; "nfc" -> "Cartão NFC"; else -> value }
-private fun splitTypeLabel(value: String) = when (value) { "value" -> "Por valor"; "percentage" -> "Por percentual"; "person" -> "Por pessoa"; "product" -> "Por produto"; else -> value }
-private fun groupStatusLabel(value: String) = when (value) { "created" -> "Aguardando cobrança"; "pending" -> "Processando no provedor"; "paid" -> "Pago"; "attention" -> "Atenção"; "failed" -> "Falhou"; "cancelled" -> "Cancelado"; "refunded" -> "Estornado"; else -> value }
+
+private fun splitMethodLabel(value: String) = when (value) {
+    "cash" -> "Dinheiro"
+    "pix" -> "PIX"
+    "nfc" -> "Cartão por aproximação"
+    else -> "Pagamento"
+}
+
+private fun splitTypeLabel(value: String) = when (value) {
+    "value" -> "Divisão por valor"
+    "percentage" -> "Divisão por percentual"
+    "person" -> "Divisão por pessoa"
+    "product" -> "Divisão por produto"
+    else -> "Divisão da conta"
+}
+
+private fun groupStatusLabel(value: String) = when (value) {
+    "created" -> "Pronto para receber"
+    "pending" -> "Aguardando pagamento"
+    "paid" -> "Pago"
+    "attention" -> "Precisa de conferência"
+    "failed", "cancelled" -> "Não concluído"
+    "refunded" -> "Estornado"
+    else -> "Em andamento"
+}
+
+private fun splitUseful(value: String?): String? {
+    val clean = value?.trim().orEmpty()
+    return clean.takeIf { it.isNotBlank() && !it.equals("null", true) && !it.equals("undefined", true) }
+}
+
+private fun splitFriendlyDateTime(value: String): String {
+    val clean = value.trim().replace('T', ' ')
+    val date = clean.substringBefore(' ')
+    val time = clean.substringAfter(' ', "").take(5)
+    val parts = date.split('-')
+    val formattedDate = if (parts.size == 3) "${parts[2]}/${parts[1]}" else date
+    return when {
+        formattedDate.isNotBlank() && time.isNotBlank() -> "$formattedDate às $time"
+        time.isNotBlank() -> time
+        else -> formattedDate
+    }
+}
+
 private fun splitMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
