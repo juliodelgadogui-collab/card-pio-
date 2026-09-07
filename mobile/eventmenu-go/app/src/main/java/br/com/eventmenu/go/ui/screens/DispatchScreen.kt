@@ -13,6 +13,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -22,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -65,9 +67,9 @@ fun DispatchScreen(
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
-            Text("Balcão · Operação", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Aceitação e despacho são operacionais. Pagamentos continuam protegidos pelo Caixa/Pay.")
-            orderState.error?.let { Text("⚠️ $it", color = MaterialTheme.colorScheme.error) }
+            Text("Saída de pedidos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+            Text("Aceite, organize e libere os pedidos prontos.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            orderState.error?.let { Text("Não foi possível concluir a última ação. Tente novamente.", color = MaterialTheme.colorScheme.error) }
             orderState.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
         }
 
@@ -75,24 +77,24 @@ fun DispatchScreen(
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("⚠️ Delivery sem unidade", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                        Text("${unassignedUnitOrders.size} pedido(s) público(s) aguardam direcionamento para uma filial antes de entrar na operação.")
+                        Text("Pedidos aguardando unidade", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        Text("${unassignedUnitOrders.size} pedido(s) precisam ser encaminhados para uma unidade.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
             items(unassignedUnitOrders, key = { "unit-${it.id}" }) { order ->
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Pedido #${order.id}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                             Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                         }
-                        if (order.customerName.isNotBlank()) Text(order.customerName)
-                        if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
-                        if (order.customerPhone.isNotBlank()) Text(order.customerPhone)
-                        Text("Pagamento: ${if (order.paymentStatus == "paid") "confirmado" else order.paymentStatus}")
+                        useful(order.customerName)?.let { Text(it, fontWeight = FontWeight.SemiBold) }
+                        useful(order.deliveryAddress)?.let { Text(it) }
+                        useful(order.customerPhone)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        DispatchPaymentPill(order.paymentStatus)
                         Button(onClick = { routing = order }, enabled = units.isNotEmpty(), modifier = Modifier.fillMaxWidth()) {
-                            Text(if (units.isEmpty()) "SEM UNIDADE DISPONÍVEL" else "ESCOLHER UNIDADE")
+                            Text(if (units.isEmpty()) "Nenhuma unidade disponível" else "Escolher unidade")
                         }
                     }
                 }
@@ -100,67 +102,68 @@ fun DispatchScreen(
         }
 
         if (pending.isNotEmpty()) {
-            item { Text("NOVOS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
+            item { Text("Novos pedidos", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
             items(pending, key = { "pending-${it.id}" }) { order ->
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Column {
-                                Text("#${order.id} · ${dispatchChannel(order)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                                if (order.customerName.isNotBlank() && order.customerName != "Consumidor") Text(order.customerName)
+                                Text("Pedido #${order.id}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                                Text(dispatchChannel(order), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                useful(order.customerName)?.takeIf { !it.equals("Consumidor", true) }?.let { Text(it, fontWeight = FontWeight.SemiBold) }
                             }
                             Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                         }
-                        if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
-                        Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "⏳ Pagamento ${order.paymentStatus}")
-                        OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
-                        Button(onClick = { orderViewModel.accept(order.id) }, enabled = !orderState.loading, modifier = Modifier.fillMaxWidth()) { Text("ACEITAR PEDIDO") }
+                        useful(order.deliveryAddress)?.let { Text(it) }
+                        DispatchPaymentPill(order.paymentStatus)
+                        OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ver pedido") }
+                        Button(onClick = { orderViewModel.accept(order.id) }, enabled = !orderState.loading, modifier = Modifier.fillMaxWidth()) { Text("Aceitar pedido") }
                     }
                 }
             }
         }
 
-        if (ready.isNotEmpty()) item { Text("PRONTOS", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
+        if (ready.isNotEmpty()) item { Text("Prontos para sair", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
         items(ready, key = { it.id }) { order ->
             val focused = focusOrderId == order.id
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (focused) Text("📷 LIDO NO QR", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Black)
+                    if (focused) Text("Pedido localizado pelo QR", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column {
-                            Text("#${order.id} · ${dispatchChannel(order)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                            if (order.tableName.isNotBlank()) Text(order.tableName)
-                            if (order.customerName.isNotBlank() && order.customerName != "Consumidor") Text(order.customerName)
+                            Text("Pedido #${order.id}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                            Text(dispatchChannel(order), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            useful(order.tableName)?.let { Text(it) }
+                            useful(order.customerName)?.takeIf { !it.equals("Consumidor", true) }?.let { Text(it, fontWeight = FontWeight.SemiBold) }
                         }
                         Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                     }
-                    Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "⏳ Pagamento ainda não concluído")
-                    OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
+                    DispatchPaymentPill(order.paymentStatus)
+                    OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ver pedido") }
 
                     when (order.channel) {
-                        "table" -> Button(onClick = { onDispatch(order) }, modifier = Modifier.fillMaxWidth()) { Text("MARCAR COMO SERVIDO") }
+                        "table" -> Button(onClick = { onDispatch(order) }, modifier = Modifier.fillMaxWidth()) { Text("Marcar como servido") }
                         "counter", "pickup" -> {
-                            Button(onClick = { onDispatch(order) }, enabled = order.paymentStatus == "paid", modifier = Modifier.fillMaxWidth()) { Text("ENTREGAR AO CLIENTE") }
-                            if (order.paymentStatus != "paid") Text("O Balcão não pode confirmar pagamento. Finalize o recebimento no Caixa/Pay.")
+                            Button(onClick = { onDispatch(order) }, enabled = order.paymentStatus == "paid", modifier = Modifier.fillMaxWidth()) { Text("Entregar ao cliente") }
+                            if (order.paymentStatus != "paid") Text("Aguardando recebimento no caixa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         "delivery" -> {
-                            if (order.deliveryName.isNotBlank()) {
-                                Text("🛵 Entregador: ${order.deliveryName}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                if (canAssignDelivery) OutlinedButton(onClick = { assigning = order }, modifier = Modifier.fillMaxWidth()) { Text("TROCAR ENTREGADOR") }
+                            if (useful(order.deliveryName) != null) {
+                                Text("Entregador: ${useful(order.deliveryName)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                if (canAssignDelivery) OutlinedButton(onClick = { assigning = order }, modifier = Modifier.fillMaxWidth()) { Text("Trocar entregador") }
                             } else if (canAssignDelivery) {
-                                Button(onClick = { assigning = order }, modifier = Modifier.fillMaxWidth()) { Text("ESCOLHER ENTREGADOR") }
+                                Button(onClick = { assigning = order }, modifier = Modifier.fillMaxWidth()) { Text("Escolher entregador") }
                             } else {
-                                Text("Aguardando um operador autorizado atribuir o entregador.")
+                                Text("Aguardando atribuição de entregador.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text("Depois da atribuição, o pedido aparece no app do entregador. Só ele poderá retirar e iniciar a rota.")
                         }
                     }
                 }
             }
         }
 
-        if (ready.isEmpty() && pending.isEmpty() && unassignedUnitOrders.isEmpty()) item { Text("Nenhum pedido aguardando ação do balcão.") }
-        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR FILA") } }
+        if (ready.isEmpty() && pending.isEmpty() && unassignedUnitOrders.isEmpty()) item { Text("Nenhum pedido aguardando ação.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
     }
 
     orderState.detail?.let { detail ->
@@ -175,11 +178,10 @@ fun DispatchScreen(
     routing?.let { order ->
         AlertDialog(
             onDismissRequest = { routing = null },
-            title = { Text("Direcionar pedido #${order.id}") },
+            title = { Text("Escolher unidade · Pedido #${order.id}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(order.deliveryAddress.ifBlank { "Endereço não informado" })
-                    Text("Escolha a unidade que assumirá este Delivery:")
+                    Text(useful(order.deliveryAddress) ?: "Endereço não informado")
                     units.forEach { unit ->
                         OutlinedButton(
                             onClick = { routing = null; onAssignUnit(order.id, unit.id) },
@@ -187,14 +189,14 @@ fun DispatchScreen(
                         ) {
                             Column {
                                 Text(unit.name, fontWeight = FontWeight.Bold)
-                                if (unit.address.isNotBlank()) Text(unit.address)
+                                useful(unit.address)?.let { Text(it) }
                             }
                         }
                     }
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { routing = null }) { Text("FECHAR") } },
+            dismissButton = { TextButton(onClick = { routing = null }) { Text("Fechar") } },
         )
     }
 
@@ -208,9 +210,8 @@ fun DispatchScreen(
                     Button(
                         onClick = { assigning = null; onScanDelivery(order.id) },
                         modifier = Modifier.fillMaxWidth(),
-                    ) { Text("📷 LER QR DO ENTREGADOR") }
-                    Text("ou escolha na lista:")
-                    if (available.isEmpty()) Text("Nenhum entregador está com turno de Delivery aberto agora.")
+                    ) { Text("Ler QR do entregador") }
+                    if (available.isEmpty()) Text("Nenhum entregador disponível agora.")
                     available.forEach { user ->
                         OutlinedButton(
                             onClick = { assigning = null; onAssignDelivery(order.id, user.id) },
@@ -218,16 +219,32 @@ fun DispatchScreen(
                         ) {
                             Column {
                                 Text(user.name, fontWeight = FontWeight.Bold)
-                                if (user.startedAt.isNotBlank()) Text("Turno desde ${user.startedAt}")
+                                useful(user.startedAt)?.let { Text("Em turno desde ${dispatchFriendlyTime(it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
                         }
                     }
                     val offline = deliveryUsers.count { !it.onShift }
-                    if (offline > 0) Text("$offline entregador(es) ativo(s) estão sem turno aberto e não podem receber pedido.")
+                    if (offline > 0) Text("$offline entregador(es) estão fora de turno.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { assigning = null }) { Text("FECHAR") } },
+            dismissButton = { TextButton(onClick = { assigning = null }) { Text("Fechar") } },
+        )
+    }
+}
+
+@Composable
+private fun DispatchPaymentPill(status: String) {
+    val paid = status == "paid"
+    Surface(
+        color = if (paid) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            if (paid) "Pago" else if (status == "pending") "Pagamento em processamento" else "A receber",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = if (paid) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }
@@ -237,7 +254,18 @@ private fun dispatchChannel(order: Order): String = when (order.channel) {
     "pickup" -> "Retirada"
     "table" -> "Mesa"
     "delivery" -> "Delivery"
-    else -> order.channel
+    else -> "Pedido"
+}
+
+private fun useful(value: String?): String? {
+    val clean = value?.trim().orEmpty()
+    return clean.takeIf { it.isNotBlank() && !it.equals("null", true) && !it.equals("undefined", true) }
+}
+
+private fun dispatchFriendlyTime(value: String): String {
+    val clean = value.trim().replace('T', ' ')
+    val time = clean.substringAfter(' ', "").take(5)
+    return time.ifBlank { clean.take(5) }
 }
 
 private fun dispatchMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
