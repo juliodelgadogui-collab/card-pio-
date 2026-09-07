@@ -45,29 +45,32 @@ import br.com.eventmenu.go.GoState
 import br.com.eventmenu.go.PrinterState
 import br.com.eventmenu.go.data.ShiftSummary
 import br.com.eventmenu.go.printing.PrinterDevice
+import br.com.eventmenu.go.ui.theme.LocalTenantBrand
 
 @Composable
 fun ShiftStartScreen(state: GoState, onStart: () -> Unit, onChangeMode: (() -> Unit)? = null, onLogout: () -> Unit) {
     val user = state.session?.user ?: return
     val mode = state.mode ?: return
+    val brand = LocalTenantBrand.current
+    val companyName = brand?.displayName?.takeIf { it.isNotBlank() } ?: user.tenantName.takeIf(::isProfileUseful) ?: "Sua empresa"
+
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("EVENTMENU GO", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+        Text(companyName, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
         Spacer(Modifier.height(8.dp))
-        Text("Olá, ${user.name}", style = MaterialTheme.typography.headlineMedium)
-        Text(user.tenantName.ifBlank { "Empresa #${user.tenantId}" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Olá, ${user.name.trim().substringBefore(' ')}", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(22.dp))
         Card(
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text(mode.label, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge)
-                Text("Turno fechado", fontWeight = FontWeight.SemiBold)
-                Text("Inicie seu turno para acessar as funções liberadas pelo servidor.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(modeLabel(mode.wire), color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleLarge)
+                Text("Pronto para começar", fontWeight = FontWeight.SemiBold)
+                Text("Inicie seu turno para acessar suas atividades.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Button(onClick = onStart, enabled = !state.loading, modifier = Modifier.fillMaxWidth().padding(top = 18.dp)) { Text("Iniciar turno") }
-        onChangeMode?.let { OutlinedButton(onClick = it, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Trocar modo") } }
+        onChangeMode?.let { OutlinedButton(onClick = it, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Trocar atividade") } }
         OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Sair") }
     }
 }
@@ -99,8 +102,10 @@ fun EmployeeProfileScreen(
 ) {
     val user = state.session?.user ?: return
     val shift = state.workShift
+    val brand = LocalTenantBrand.current
+    val companyName = brand?.displayName?.takeIf { it.isNotBlank() } ?: user.tenantName.takeIf(::isProfileUseful) ?: "Sua empresa"
     val unitName = displayUnitName(shift?.unitName)
-    val modeName = shift?.mode?.let(::modeLabel) ?: state.mode?.label ?: roleLabelProfile(user.role)
+    val modeName = shift?.mode?.let(::modeLabel) ?: state.mode?.let { modeLabel(it.wire) } ?: roleLabelProfile(user.role)
     var pin by remember { mutableStateOf("") }
 
     LazyColumn(
@@ -122,21 +127,20 @@ fun EmployeeProfileScreen(
                         }
                         Column(Modifier.weight(1f)) {
                             Text(user.name, style = MaterialTheme.typography.titleLarge)
-                            Text(user.email, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                            Text(companyName, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         }
                         StatusPill(if (shift?.status == "open") "Turno aberto" else "Sem turno")
                     }
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .35f))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ProfileInfoTile("Função", modeName, Modifier.weight(1f))
+                        ProfileInfoTile("Atividade", modeName, Modifier.weight(1f))
                         ProfileInfoTile("Unidade", unitName, Modifier.weight(1f))
                     }
-                    Text(user.tenantName.ifBlank { "Empresa #${user.tenantId}" }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Button(onClick = onGenerateMyQr, modifier = Modifier.fillMaxWidth()) {
-                        Text(if (shift?.mode == "delivery") "Mostrar meu QR de entregador" else "Mostrar meu QR de funcionário")
+                        Text(if (shift?.mode == "delivery") "Mostrar meu QR de entregador" else "Mostrar meu QR")
                     }
                     Text(
-                        "O QR identifica você; cargo, permissões e turno continuam sendo validados pelo servidor.",
+                        "Use este QR para se identificar rapidamente nas operações autorizadas.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
@@ -188,22 +192,22 @@ fun EmployeeProfileScreen(
                 item {
                     Card(Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                            Text("Fechamento do entregador", style = MaterialTheme.typography.titleLarge)
+                            Text("Resumo das entregas", style = MaterialTheme.typography.titleLarge)
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                                 ProfileMetric("Entregas", (commission?.deliveries ?: 0).toString(), Modifier.weight(1f))
                                 ProfileMetric("Comissão", profileMoney(commission?.commissionCents ?: 0), Modifier.weight(1f), emphasized = true)
                             }
-                            Text("Valor concluído: ${profileMoney(commission?.revenueCents ?: 0)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Valor das entregas: ${profileMoney(commission?.revenueCents ?: 0)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             val bps = commission?.percentBps ?: 0
                             val fixed = commission?.fixedPerDeliveryCents ?: 0
                             val rules = buildList {
                                 if (bps > 0) add("${formatCommissionPercent(bps)}%")
                                 if (fixed > 0) add("${profileMoney(fixed)} por entrega")
                             }.joinToString(" + ")
-                            Text(if (rules.isBlank()) "Sem comissão configurada" else "Regra: $rules", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (rules.isNotBlank()) Text("Comissão: $rules", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = .3f))
                             ProfileMetric("Dinheiro a entregar ao caixa", profileMoney(cash?.outstandingCents ?: 0), Modifier.fillMaxWidth(), emphasized = true)
-                            Text("Recebido: ${profileMoney(cash?.cashCollectedCents ?: 0)} · Já repassado: ${profileMoney(cash?.confirmedHandoffCents ?: 0)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("Recebido: ${profileMoney(cash?.cashCollectedCents ?: 0)} · Repassado: ${profileMoney(cash?.confirmedHandoffCents ?: 0)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if ((cash?.outstandingCents ?: 0) > 0) Button(onClick = onCreateHandoff, modifier = Modifier.fillMaxWidth()) { Text("Gerar QR para o caixa") }
                             OutlinedButton(onClick = onRefreshDeliveryCash, modifier = Modifier.fillMaxWidth()) { Text("Atualizar valores") }
                         }
@@ -215,7 +219,7 @@ fun EmployeeProfileScreen(
         }
 
         item {
-            Text("Dispositivo e impressão", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
+            Text("Aparelho e impressão", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 4.dp, start = 2.dp))
         }
         item { DeviceStatusCard(deviceState, onRefreshDevice) }
         item {
@@ -234,7 +238,7 @@ fun EmployeeProfileScreen(
         item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(11.dp)) {
-                    Text("Segurança deste aparelho", style = MaterialTheme.typography.titleLarge)
+                    Text("Acesso rápido", style = MaterialTheme.typography.titleLarge)
                     OutlinedTextField(
                         pin,
                         { pin = it.filter(Char::isDigit).take(8) },
@@ -246,11 +250,11 @@ fun EmployeeProfileScreen(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("Biometria", fontWeight = FontWeight.SemiBold)
-                            Text("Acesso rápido neste aparelho", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                            Text("Entrar mais rápido neste aparelho", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         }
                         Switch(checked = state.biometricEnabled, onCheckedChange = onBiometric)
                     }
-                    Text("PIN e biometria apenas desbloqueiam a sessão local. A API continua validando usuário, empresa, aparelho e permissões.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    Text("PIN e biometria facilitam o acesso neste aparelho.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                 }
             }
         }
@@ -266,9 +270,9 @@ fun EmployeeProfileScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(profileMoney(handoff.amountCents), style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
-                    Text("Unidade: $unitName")
+                    Text(unitName)
                     bitmap?.let { Image(it.asImageBitmap(), contentDescription = "QR do repasse", modifier = Modifier.fillMaxWidth()) }
-                    Text("O caixa deve ler este QR no EventMenu GO da mesma unidade. O turno só poderá ser encerrado após a confirmação do recebimento.")
+                    Text("Peça ao caixa para ler este QR. Depois da confirmação, você poderá encerrar o turno.")
                 }
             },
             confirmButton = { TextButton(onClick = onDismissHandoff) { Text("Fechar") } },
@@ -307,12 +311,12 @@ private fun ProfileMetric(label: String, value: String, modifier: Modifier = Mod
     }
 }
 
-private fun modeLabel(mode: String) = when (mode) {
+private fun modeLabel(mode: String) = when (mode.lowercase()) {
     "operation" -> "Operação"
     "delivery" -> "Delivery"
     "events" -> "Eventos"
-    "pay" -> "Pay"
-    else -> mode.ifBlank { "Operação" }
+    "pay" -> "Pagamentos"
+    else -> "Operação"
 }
 
 private fun roleLabelProfile(role: String) = when (role.lowercase()) {
@@ -324,12 +328,17 @@ private fun roleLabelProfile(role: String) = when (role.lowercase()) {
     "manager" -> "Gerente"
     "admin" -> "Administrador"
     "promoter" -> "Promotor"
-    else -> role.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    else -> "Equipe"
 }
 
 private fun displayUnitName(raw: String?): String {
     val clean = raw?.trim().orEmpty()
-    return if (clean.isBlank() || clean.equals("null", ignoreCase = true)) "Principal" else clean
+    return if (clean.isBlank() || clean.equals("null", ignoreCase = true) || clean.equals("undefined", ignoreCase = true)) "Principal" else clean
+}
+
+private fun isProfileUseful(value: String): Boolean {
+    val clean = value.trim()
+    return clean.isNotBlank() && !clean.equals("null", true) && !clean.equals("undefined", true)
 }
 
 private fun profileInitials(name: String): String {
@@ -352,9 +361,9 @@ private fun profileDateTime(value: String): String {
 private fun methodLabel(method: String) = when (method.lowercase()) {
     "cash" -> "Dinheiro"
     "pix" -> "PIX"
-    "nfc", "card", "credit", "debit" -> "Cartão / NFC"
+    "nfc", "card", "credit", "debit" -> "Cartão"
     "handoff" -> "Repasse"
-    else -> method.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+    else -> "Outro"
 }
 
 private fun formatCommissionPercent(bps: Int): String {
