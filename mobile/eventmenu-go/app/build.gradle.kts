@@ -23,6 +23,20 @@ android {
         buildConfigField("String", "API_BASE_URL", "\"$apiBase\"")
     }
 
+    flavorDimensions += "payments"
+    productFlavors {
+        create("sumup") {
+            dimension = "payments"
+            buildConfigField("boolean", "SUMUP_TAP_TO_PAY", "true")
+        }
+        create("nosumup") {
+            dimension = "payments"
+            applicationIdSuffix = ".preview"
+            versionNameSuffix = "-preview"
+            buildConfigField("boolean", "SUMUP_TAP_TO_PAY", "false")
+        }
+    }
+
     buildFeatures {
         compose = true
         buildConfig = true
@@ -50,8 +64,9 @@ dependencies {
     implementation(composeBom)
     androidTestImplementation(composeBom)
 
-    // SumUp Tap-to-Pay nativo: pagamento por aproximação sem abrir outro aplicativo.
-    implementation("com.sumup.tap-to-pay:utopia-sdk:1.1.6")
+    // Somente a variante sumup baixa o artefato privado. A variante nosumup é usada
+    // para homologar o restante do aplicativo enquanto as credenciais Maven não existem.
+    add("sumupImplementation", "com.sumup.tap-to-pay:utopia-sdk:1.1.6")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     // AGP 9.1 suporta compileSdk 36. As versões seguintes de Core/Lifecycle
