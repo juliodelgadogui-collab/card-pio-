@@ -20,6 +20,7 @@ class ApiClient(
     suspend fun post(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api.php", "POST", action, token, emptyMap(), body)
     suspend fun getGo(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go.php", "GET", action, token, query, null)
     suspend fun postGo(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go.php", "POST", action, token, emptyMap(), body)
+    suspend fun getBranding(token: String? = null): JSONObject = request("api-go-branding.php", "GET", "branding", token, emptyMap(), null)
     suspend fun getOrderOps(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-orders.php", "GET", action, token, query, null)
     suspend fun postOrderOps(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-orders.php", "POST", action, token, emptyMap(), body)
     suspend fun getDelivery(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-delivery.php", "GET", action, token, query, null)
