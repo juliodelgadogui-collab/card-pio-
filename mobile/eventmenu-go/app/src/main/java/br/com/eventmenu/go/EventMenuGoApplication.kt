@@ -19,6 +19,8 @@ import br.com.eventmenu.go.data.ReceiptRepository
 import br.com.eventmenu.go.data.TabSplitPaymentRepository
 import br.com.eventmenu.go.data.UniversalQrRepository
 import br.com.eventmenu.go.notifications.OperationNotificationScheduler
+import br.com.eventmenu.go.payments.CardPaymentCoordinator
+import br.com.eventmenu.go.payments.SumUpTapToPaySdk
 import br.com.eventmenu.go.security.DeviceIdentity
 import br.com.eventmenu.go.security.SecureSessionStore
 
@@ -57,6 +59,10 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var paymentRepository: PaymentRepository
         private set
+    lateinit var cardPaymentCoordinator: CardPaymentCoordinator
+        private set
+
+    private lateinit var sumUpTapToPaySdk: SumUpTapToPaySdk
 
     override fun onCreate() {
         super.onCreate()
@@ -79,7 +85,17 @@ class EventMenuGoApplication : Application() {
         discountRepository = DiscountRepository(baseUrl, deviceId, store)
         cancellationRepository = CancellationRepository(baseUrl, deviceId, store)
         financeRepository = FinanceRepository(baseUrl, deviceId, store)
+
         paymentRepository = PaymentRepository(baseUrl, deviceId, store)
+        // Uma única instância do SDK por ciclo de vida do app, conforme orientação SumUp.
+        sumUpTapToPaySdk = SumUpTapToPaySdk(this)
+        cardPaymentCoordinator = CardPaymentCoordinator(paymentRepository) { provider ->
+            when (provider) {
+                "sumup" -> sumUpTapToPaySdk
+                else -> error("Provedor de cartão $provider ainda não possui SDK Android habilitado.")
+            }
+        }
+
         OperationNotificationScheduler.initialize(this)
     }
 }
