@@ -1,5 +1,6 @@
 package br.com.eventmenu.go.ui.screens
 
+import android.graphics.BitmapFactory
 import android.os.Build
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
@@ -29,10 +30,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -46,7 +51,12 @@ import br.com.eventmenu.go.R
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.QrResult
+import br.com.eventmenu.go.data.TenantBrand
 import br.com.eventmenu.go.security.AppPermissionManager
+import br.com.eventmenu.go.ui.theme.LocalTenantBrand
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.net.URL
 
 private fun money(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
 private fun roleLabel(role: String) = when (role) {
@@ -67,6 +77,7 @@ fun LoginScreen(state: GoState, onLogin: (String, String, String) -> Unit, onPin
     var password by remember { mutableStateOf("") }
     var pin by remember { mutableStateOf("") }
     val context = LocalContext.current
+    val brand = LocalTenantBrand.current
     val hasMissingPermissions = AppPermissionManager.missingLabels(context).isNotEmpty()
 
     LazyColumn(
@@ -76,14 +87,20 @@ fun LoginScreen(state: GoState, onLogin: (String, String, String) -> Unit, onPin
     ) {
         item {
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth().padding(top = 28.dp)) {
-                Image(
+                if (brand != null) TenantLogoOrMark(brand) else Image(
                     painter = painterResource(R.drawable.ic_eventmenu_logo),
                     contentDescription = "EventMenu GO",
                     modifier = Modifier.size(76.dp),
                 )
                 Spacer(Modifier.height(14.dp))
-                Text("EventMenu GO", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.ExtraBold)
-                Text("Operação, entregas e eventos", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(brand?.displayName ?: "EventMenu GO", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.ExtraBold)
+                Text(
+                    brand?.tagline?.takeIf { it.isNotBlank() } ?: "Operação, entregas e eventos",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (brand?.showEventMenuBrand == true) {
+                    Text("Tecnologia EventMenu", color = MaterialTheme.colorScheme.outline, style = MaterialTheme.typography.bodyMedium)
+                }
                 Spacer(Modifier.height(24.dp))
             }
         }
@@ -147,8 +164,41 @@ fun LoginScreen(state: GoState, onLogin: (String, String, String) -> Unit, onPin
 }
 
 @Composable
+private fun TenantLogoOrMark(brand: TenantBrand) {
+    val remote by produceState<ImageBitmap?>(initialValue = null, key1 = brand.logoUrl) {
+        value = if (brand.logoUrl.isBlank()) null else withContext(Dispatchers.IO) {
+            runCatching {
+                URL(brand.logoUrl).openStream().use { stream -> BitmapFactory.decodeStream(stream)?.asImageBitmap() }
+            }.getOrNull()
+        }
+    }
+    if (remote != null) {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
+            Image(
+                bitmap = remote!!,
+                contentDescription = "Logo de ${brand.displayName}",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size(76.dp).padding(7.dp),
+            )
+        }
+    } else {
+        Surface(shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.primary) {
+            Text(
+                brand.displayName.trim().take(1).uppercase().ifBlank { "E" },
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 15.dp),
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.ExtraBold,
+            )
+        }
+    }
+}
+
+@Composable
 fun ModePickerScreen(name: String, modes: List<AppMode>, onSelect: (AppMode) -> Unit) {
+    val brand = LocalTenantBrand.current
     Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
+        brand?.let { Text(it.displayName, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge) }
         Text("Olá, ${name.trim().substringBefore(' ')}", style = MaterialTheme.typography.headlineMedium)
         Text("Como você vai trabalhar agora?", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(20.dp))
