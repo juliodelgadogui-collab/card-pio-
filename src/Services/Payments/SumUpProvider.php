@@ -36,9 +36,12 @@ final class SumUpProvider
     {
         $state=trim($state);$code=trim($code);
         if(strlen($state)<32||$code==='')throw new RuntimeException('Retorno OAuth SumUp inválido.');
+        if(!Auth::check())throw new RuntimeException('Entre novamente no EventMenu antes de concluir a conexão SumUp.');
         $pdo=Database::connection();$hash=hash('sha256',$state);
         $q=$pdo->prepare('SELECT * FROM payment_oauth_states WHERE provider="sumup" AND state_hash=? LIMIT 1');$q->execute([$hash]);$oauth=$q->fetch();
         if(!$oauth||$oauth['used_at']!==null||strtotime((string)$oauth['expires_at'])<time())throw new RuntimeException('Autorização SumUp expirada ou já utilizada.');
+        if((int)($oauth['tenant_id']??0)!==(int)(Auth::tenantId()??0)||(int)($oauth['user_id']??0)!==(int)(Auth::id()??0))throw new RuntimeException('A autorização SumUp pertence a outra sessão.');
+        Auth::requirePermission('gateways.manage');
 
         // Chamadas externas são feitas antes da transação de banco para não manter locks durante HTTP.
         $tokens=$this->exchangeToken([
@@ -179,7 +182,7 @@ final class SumUpProvider
             $profile['merchant_code']??null,
             $profile['merchant']['merchant_code']??null,
         ];
-        foreach($candidates as$value){$code=trim((string)$value;if($code!=='')return$code;}
+        foreach($candidates as$value){$code=trim((string)$value);if($code!=='')return$code;}
         return'';
     }
 
