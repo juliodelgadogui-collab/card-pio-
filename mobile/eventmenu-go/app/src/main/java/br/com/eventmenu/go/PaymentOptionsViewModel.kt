@@ -15,12 +15,16 @@ data class PaymentOptionsState(
     val capabilities: PaymentCapabilities? = null,
     val loading: Boolean = false,
     val error: String? = null,
+    val message: String? = null,
+    val completedVersion: Int = 0,
 ) {
     val pixAvailable: Boolean get() = capabilities?.let { it.pixEnabled && it.pixProvider != null } ?: false
     val cashAvailable: Boolean get() = capabilities?.cashEnabled ?: true
     val externalTerminalAvailable: Boolean get() = capabilities?.externalTerminalEnabled ?: true
+    val externalTerminalReferenceRequired: Boolean get() = capabilities?.externalTerminalReferenceRequired ?: true
     val cardPresentConfigured: Boolean get() = capabilities?.let { it.cardPresentEnabled && it.cardPresentProvider != null } ?: false
     val cardPresentAvailableInThisApk: Boolean get() = BuildConfig.SUMUP_TAP_TO_PAY && cardPresentConfigured
+    val nfcConfiguredButUnavailable: Boolean get() = cardPresentConfigured && !BuildConfig.SUMUP_TAP_TO_PAY
 }
 
 class PaymentOptionsViewModel(private val repository: PaymentRepository) : ViewModel() {
@@ -34,7 +38,23 @@ class PaymentOptionsViewModel(private val repository: PaymentRepository) : ViewM
             .onFailure { error -> _state.update { it.copy(loading = false, error = error.message ?: "Falha ao carregar formas de pagamento.") } }
     }
 
-    fun clearError() = _state.update { it.copy(error = null) }
+    fun confirmExternalTerminal(orderId: Int, amountCents: Int, paymentMethod: String, machineLabel: String, transactionReference: String) = viewModelScope.launch {
+        if (_state.value.loading) return@launch
+        _state.update { it.copy(loading = true, error = null, message = null) }
+        runCatching { repository.confirmExternalTerminal(orderId, amountCents, paymentMethod, machineLabel, transactionReference) }
+            .onSuccess {
+                _state.update {
+                    it.copy(
+                        loading = false,
+                        message = "Pagamento da maquininha registrado e auditado.",
+                        completedVersion = it.completedVersion + 1,
+                    )
+                }
+            }
+            .onFailure { error -> _state.update { it.copy(loading = false, error = error.message ?: "Falha ao registrar pagamento da maquininha.") } }
+    }
+
+    fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
 
     class Factory(private val repository: PaymentRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
