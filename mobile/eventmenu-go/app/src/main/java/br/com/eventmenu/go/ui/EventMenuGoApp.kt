@@ -122,6 +122,7 @@ fun EventMenuGoApp(
     val paymentBaseline = remember { mutableStateMapOf<Int, String>() }
     var baselineShiftId by remember { mutableStateOf<Int?>(null) }
     var pendingDeliveryQrOrderId by remember { mutableStateOf<Int?>(null) }
+    var lastNotificationReactionId by remember { mutableStateOf(0) }
 
     fun startScan() {
         onScan { value ->
@@ -178,7 +179,21 @@ fun EventMenuGoApp(
     }
     LaunchedEffect(state.session?.user?.id, state.workShift?.id) { if (state.session != null && state.workShift == null) shiftUnitViewModel.load() }
     LaunchedEffect(shiftUnitState.completedVersion) { if (shiftUnitState.completedVersion > 0) viewModel.restoreSession() }
-    LaunchedEffect(state.notifications) { OperationNotificationScheduler.showUnread(context, state.notifications) }
+    LaunchedEffect(state.notifications, state.screen, state.posOrder?.id) {
+        OperationNotificationScheduler.showUnread(context, state.notifications)
+        val newest = state.notifications.maxOfOrNull { it.id } ?: return@LaunchedEffect
+        if (newest <= lastNotificationReactionId) return@LaunchedEffect
+        val fresh = state.notifications.filter { it.id > lastNotificationReactionId }
+        val orderId = state.posOrder?.id
+        if (state.screen == AppScreen.POS && orderId != null && fresh.any { it.type in setOf("discount.approved", "discount.rejected") && it.entityType == "order" && it.entityId == orderId.toString() }) {
+            discountViewModel.watchOrder(orderId)
+            viewModel.refreshPosPayment()
+        }
+        if (state.screen == AppScreen.MANAGER && state.session?.permissions?.contains("discount_approve") == true && fresh.any { it.type == "discount.requested" }) {
+            discountViewModel.loadPending()
+        }
+        lastNotificationReactionId = newest
+    }
     LaunchedEffect(state.workShift?.id) {
         if (state.workShift?.status != "open") return@LaunchedEffect
         if (state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()
@@ -202,7 +217,7 @@ fun EventMenuGoApp(
         if (eventBarState.balance?.remainingCents == 0) printerViewModel.autoPrintReceipt(orderId)
     }
     LaunchedEffect(state.workShift?.id) {
-        val shiftId = state.workShift?.id; baselineShiftId = shiftId; paymentBaseline.clear(); pendingDeliveryQrOrderId = null; discountViewModel.clearOrder()
+        val shiftId = state.workShift?.id; baselineShiftId = shiftId; paymentBaseline.clear(); pendingDeliveryQrOrderId = null; discountViewModel.clearOrder(); lastNotificationReactionId = 0
         state.orders.forEach { paymentBaseline[it.id] = it.paymentStatus }; profileViewModel.bindShift(shiftId)
     }
     LaunchedEffect(state.orders, state.workShift?.id) {
@@ -221,11 +236,6 @@ fun EventMenuGoApp(
         if (state.screen == AppScreen.DISPATCH && state.workShift?.id != null && ("delivery_assign" in state.session?.permissions.orEmpty() || "orders_manage" in state.session?.permissions.orEmpty())) triageViewModel.refresh()
         if (state.screen == AppScreen.DELIVERY && state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()
         if (state.screen == AppScreen.POS && state.posOrder != null && state.session?.permissions?.contains("discount_request") == true) discountViewModel.watchOrder(state.posOrder!!.id)
-    }
-    LaunchedEffect(state.screen, state.posOrder?.id, discountState.orderRequest?.id, discountState.orderRequest?.status) {
-        val orderId = state.posOrder?.id ?: return@LaunchedEffect
-        if (state.screen != AppScreen.POS || discountState.orderRequest?.status != "pending") return@LaunchedEffect
-        while (true) { delay(5_000); discountViewModel.watchOrder(orderId) }
     }
     LaunchedEffect(managerActionState.changeVersion) { if (managerActionState.changeVersion > 0) { viewModel.refreshManager(); viewModel.refreshOrders(); viewModel.refreshNotifications() } }
     LaunchedEffect(triageState.changedVersion) { if (triageState.changedVersion > 0) { viewModel.refreshOrders(); viewModel.refreshDispatch(); viewModel.refreshManager(); viewModel.refreshNotifications() } }
