@@ -11,6 +11,7 @@ import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.EventOperationsRepository
 import br.com.eventmenu.go.data.ManagerOperationsRepository
 import br.com.eventmenu.go.data.NotificationRepository
+import br.com.eventmenu.go.data.OfflineReadCache
 import br.com.eventmenu.go.data.OperatingUnitRepository
 import br.com.eventmenu.go.data.OrderOperationsRepository
 import br.com.eventmenu.go.data.ReceiptRepository
@@ -59,6 +60,7 @@ class EventMenuGoApplication : Application() {
         super.onCreate()
         val store = SecureSessionStore(this)
         ApiClient.configureSessionStore(store)
+        ApiClient.configureOfflineCache(OfflineReadCache(this))
         val deviceId = DeviceIdentity.id(this)
         val baseUrl = BuildConfig.API_BASE_URL
         repository = EventMenuRepository(baseUrl, deviceId, store)
