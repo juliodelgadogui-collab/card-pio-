@@ -9,6 +9,7 @@ import br.com.eventmenu.go.data.DiscountRepository
 import br.com.eventmenu.go.data.EventBarRepository
 import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.EventOperationsRepository
+import br.com.eventmenu.go.data.FinanceRepository
 import br.com.eventmenu.go.data.ManagerOperationsRepository
 import br.com.eventmenu.go.data.NotificationRepository
 import br.com.eventmenu.go.data.OperatingUnitRepository
@@ -51,6 +52,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var cancellationRepository: CancellationRepository
         private set
+    lateinit var financeRepository: FinanceRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -72,6 +75,7 @@ class EventMenuGoApplication : Application() {
         deliveryProgressRepository = DeliveryProgressRepository(baseUrl, deviceId, store)
         discountRepository = DiscountRepository(baseUrl, deviceId, store)
         cancellationRepository = CancellationRepository(baseUrl, deviceId, store)
+        financeRepository = FinanceRepository(baseUrl, deviceId, store)
         OperationNotificationScheduler.initialize(this)
     }
 }
