@@ -67,7 +67,10 @@ class MainActivity : FragmentActivity() {
             var brand by remember { mutableStateOf(app.brandRepository.cached()) }
 
             LaunchedEffect(state.session?.user?.id) {
-                if (state.session != null) brand = app.brandRepository.load()
+                state.session?.let { session ->
+                    app.pushCoordinator.updateSession(session.user.tenantId, session.user.id)
+                    brand = app.brandRepository.load()
+                }
             }
 
             LaunchedEffect(

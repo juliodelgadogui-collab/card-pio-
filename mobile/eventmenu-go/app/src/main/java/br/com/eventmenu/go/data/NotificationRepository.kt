@@ -42,5 +42,24 @@ class NotificationRepository(baseUrl: String, deviceId: String, private val sess
         api.postNotifications("read-all", requireToken())
     }
 
+    suspend fun registerPushToken(pushToken: String) {
+        val token = pushToken.trim()
+        if (token.length < 20) return
+        api.postNotifications(
+            "push-register",
+            requireToken(),
+            JSONObject()
+                .put("push_token", token)
+                .put("platform", "android"),
+        )
+    }
+
+    suspend fun unregisterPushDevice() {
+        api.postNotifications("push-unregister", requireToken())
+    }
+
+    suspend fun pushStatus(): JSONObject =
+        api.getNotifications("push-status", requireToken()).getJSONObject("push")
+
     private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)
 }

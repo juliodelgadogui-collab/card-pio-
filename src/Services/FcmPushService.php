@@ -36,9 +36,27 @@ final class FcmPushService
 
     private function sendToToken(string $token,array $notification,string $projectId,string $accessToken):array
     {
-        $data=['notification_id'=>(string)$notification['id'],'type'=>(string)$notification['type'],'priority'=>(string)$notification['priority']];
-        foreach(['mode','entity_type','entity_id']as$key)if(!empty($notification[$key]))$data[$key]=(string)$notification[$key];
-        $body=['message'=>['token'=>$token,'notification'=>['title'=>(string)$notification['title'],'body'=>(string)$notification['message']],'data'=>$data,'android'=>['priority'=>in_array((string)$notification['priority'],['critical','warning'],true)?'high':'normal']]];
+        $type=(string)$notification['type'];$mode=(string)($notification['mode']??'');
+        $data=[
+            'notification_id'=>(string)$notification['id'],
+            'notification_type'=>$type,
+            'type'=>$type,
+            'priority'=>(string)$notification['priority'],
+            'tenant_id'=>(string)$notification['tenant_id'],
+            'user_id'=>(string)$notification['user_id'],
+            'title'=>(string)$notification['title'],
+            'message'=>(string)$notification['message'],
+        ];
+        if($mode!==''){$data['notification_mode']=$mode;$data['mode']=$mode;}
+        foreach(['entity_type','entity_id','expires_at']as$key)if(!empty($notification[$key]))$data[$key]=(string)$notification[$key];
+        $body=['message'=>[
+            'token'=>$token,
+            'data'=>$data,
+            'android'=>[
+                'priority'=>in_array((string)$notification['priority'],['critical','warning'],true)?'high':'normal',
+                'ttl'=>'3600s',
+            ],
+        ]];
         $url='https://fcm.googleapis.com/v1/projects/'.rawurlencode($projectId).'/messages:send';$response=$this->request($url,['Authorization: Bearer '.$accessToken,'Content-Type: application/json'],json_encode($body,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR));$http=$response['http'];
         if($http>=200&&$http<300)return['ok'=>true,'invalid'=>false,'error'=>''];
         $decoded=json_decode($response['body'],true);$status=(string)($decoded['error']['status']??'');$message=(string)($decoded['error']['message']??('HTTP '.$http));$invalid=$http===404||($http===400&&preg_match('/registration token|not a valid fcm|unregistered/i',$message));

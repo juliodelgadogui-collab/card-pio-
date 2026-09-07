@@ -18,6 +18,7 @@ import br.com.eventmenu.go.data.ReceiptRepository
 import br.com.eventmenu.go.data.TabSplitPaymentRepository
 import br.com.eventmenu.go.data.TenantBrandRepository
 import br.com.eventmenu.go.data.UniversalQrRepository
+import br.com.eventmenu.go.notifications.FirebasePushCoordinator
 import br.com.eventmenu.go.notifications.OperationNotificationScheduler
 import br.com.eventmenu.go.security.DeviceIdentity
 import br.com.eventmenu.go.security.SecureSessionStore
@@ -55,6 +56,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var brandRepository: TenantBrandRepository
         private set
+    lateinit var pushCoordinator: FirebasePushCoordinator
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -78,6 +81,8 @@ class EventMenuGoApplication : Application() {
         discountRepository = DiscountRepository(baseUrl, deviceId, store)
         cancellationRepository = CancellationRepository(baseUrl, deviceId, store)
         brandRepository = TenantBrandRepository(this, baseUrl, deviceId, store)
+        pushCoordinator = FirebasePushCoordinator(this, notificationRepository, store)
         OperationNotificationScheduler.initialize(this)
+        pushCoordinator.syncCurrentToken()
     }
 }
