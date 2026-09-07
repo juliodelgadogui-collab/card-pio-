@@ -26,6 +26,7 @@ import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.navigation.AppDeepLinkTarget
 import br.com.eventmenu.go.navigation.AppDeepLinks
 import br.com.eventmenu.go.ui.EventMenuGoApp
+import br.com.eventmenu.go.ui.screens.PremiumLoginScreen
 import br.com.eventmenu.go.ui.theme.EventMenuTheme
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -119,12 +120,21 @@ class MainActivity : FragmentActivity() {
             }
 
             EventMenuTheme(branding = brandingState.branding) {
-                EventMenuGoApp(
-                    viewModel = vm,
-                    onScan = { callback -> scanQr(callback) },
-                    onBiometric = { authenticateBiometric(vm) },
-                    onTapOn = ::launchTapOn,
-                )
+                if (state.session == null) {
+                    PremiumLoginScreen(
+                        state = state,
+                        onLogin = vm::login,
+                        onPin = vm::unlockWithPin,
+                        onBiometric = { authenticateBiometric(vm) },
+                    )
+                } else {
+                    EventMenuGoApp(
+                        viewModel = vm,
+                        onScan = { callback -> scanQr(callback) },
+                        onBiometric = { authenticateBiometric(vm) },
+                        onTapOn = ::launchTapOn,
+                    )
+                }
             }
         }
     }
