@@ -11,11 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -25,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -93,12 +92,21 @@ class MainActivity : FragmentActivity() {
             }
 
             EventMenuTheme(brand) {
-                Column(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxSize()) {
+                    EventMenuGoApp(
+                        viewModel = vm,
+                        onScan = { callback -> scanQr(callback) },
+                        onBiometric = { authenticateBiometric(vm) },
+                        onTapOn = ::launchTapOn,
+                    )
                     if (connectivity == ApiConnectivity.OFFLINE) {
                         Surface(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.TopCenter),
                             color = MaterialTheme.colorScheme.tertiaryContainer,
                             contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            tonalElevation = 3.dp,
                         ) {
                             Text(
                                 text = if (state.session != null) {
@@ -110,14 +118,6 @@ class MainActivity : FragmentActivity() {
                                 style = MaterialTheme.typography.labelMedium,
                             )
                         }
-                    }
-                    Box(Modifier.weight(1f)) {
-                        EventMenuGoApp(
-                            viewModel = vm,
-                            onScan = { callback -> scanQr(callback) },
-                            onBiometric = { authenticateBiometric(vm) },
-                            onTapOn = ::launchTapOn,
-                        )
                     }
                 }
             }
