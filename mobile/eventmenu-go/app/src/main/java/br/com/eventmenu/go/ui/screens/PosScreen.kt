@@ -180,12 +180,12 @@ private fun PosPaymentScreen(
                     Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(7.dp)){
                         Text("Desconto",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
                         when(discountRequest?.status){
-                            "pending"->{Text("⏳ Aguardando aprovação do gerente · ${posMoney(discountRequest.requestedCents)}");Text(discountRequest.reason);OutlinedButton(onClick={onRefreshDiscount(order.id)},modifier=Modifier.fillMaxWidth()){Text("ATUALIZAR APROVAÇÃO")}}
-                            "approved"->{Text("✅ Desconto aprovado · ${posMoney(discountRequest.requestedCents)}",fontWeight=FontWeight.Bold);Text("O total exibido acima é recalculado pelo servidor.")}
+                            "pending"->{Text("⏳ Aguardando aprovação · ${discountLabel(discountRequest)}");Text(discountRequest.reason);OutlinedButton(onClick={onRefreshDiscount(order.id)},modifier=Modifier.fillMaxWidth()){Text("ATUALIZAR APROVAÇÃO")}}
+                            "approved"->{Text("✅ Desconto aplicado · ${discountLabel(discountRequest)}",fontWeight=FontWeight.Bold);if(discountRequest.autoApproved)Text("Aprovado automaticamente pela política da empresa.")else Text("Autorizado por gerente/administrador.")}
                             "rejected"->Text("❌ Última solicitação não foi aprovada.")
-                            else->Text("O caixa solicita; somente funcionário com permissão de aprovação altera o total.")
+                            else->Text("O servidor decide se o desconto é automático ou se precisa de aprovação, conforme o limite do seu cargo.")
                         }
-                        if(discountRequest?.status!="pending")OutlinedButton(onClick={discountDialog=true},modifier=Modifier.fillMaxWidth()){Text("SOLICITAR DESCONTO")}
+                        if(discountRequest?.status!="pending")OutlinedButton(onClick={discountDialog=true},modifier=Modifier.fillMaxWidth()){Text("APLICAR DESCONTO")}
                     }
                 }
             }
@@ -207,7 +207,7 @@ private fun PosPaymentScreen(
                         if(!state.cashOpen)Text("Abra o caixa financeiro para receber dinheiro.")
                         Button(onClick={pixTaxDialog=true},enabled=amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("PIX")}
                         Button(onClick={onNfc(amount)},enabled=amount in 100..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("CRÉDITO / DÉBITO · NFC")}
-                        if(discountRequest?.status=="pending")Text("Pagamento bloqueado na tela enquanto o desconto aguarda decisão. O servidor também rejeita alteração de total com cobrança ativa.")
+                        if(discountRequest?.status=="pending")Text("Pagamento bloqueado enquanto o desconto aguarda decisão. O servidor também rejeita alteração de preço com cobrança ativa.")
                     }
                 }
             }
@@ -218,8 +218,32 @@ private fun PosPaymentScreen(
     }
 
     if(discountDialog){
-        var value by remember{mutableStateOf("")};var reason by remember{mutableStateOf("")};val cents=((value.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt()
-        AlertDialog(onDismissRequest={discountDialog=false},title={Text("Solicitar desconto")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Pedido #${order.id}");OutlinedTextField(value,{value=it},label={Text("Valor do desconto (R$)")},singleLine=true);OutlinedTextField(reason,{reason=it.take(500)},label={Text("Motivo obrigatório")},modifier=Modifier.fillMaxWidth());Text("O valor do pedido só muda depois que o servidor registrar a aprovação.")}},confirmButton={Button(onClick={discountDialog=false;onRequestDiscount(order.id,cents,reason)},enabled=cents>0&&reason.isNotBlank()){Text("ENVIAR AO GERENTE")}},dismissButton={TextButton(onClick={discountDialog=false}){Text("CANCELAR")}})
+        var type by remember{mutableStateOf("fixed")}
+        var value by remember{mutableStateOf("")}
+        var reason by remember{mutableStateOf("")}
+        val numeric=value.replace(',','.').toDoubleOrNull()?:0.0
+        val cents=(numeric*100).toInt()
+        val bps=(numeric*100).toInt()
+        val baseTotal=balance?.totalCents?:order.totalCents
+        val estimatedPercentDiscount=(baseTotal*(bps/10000.0)).toInt()
+        val encoded=if(type=="percent")-bps else cents
+        val valid=if(type=="percent")bps in 1..10000 else cents in 1..baseTotal
+        AlertDialog(
+            onDismissRequest={discountDialog=false},
+            title={Text("Aplicar desconto")},
+            text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                Text("Pedido #${order.id} · total atual ${posMoney(baseTotal)}")
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    FilterChip(selected=type=="fixed",onClick={type="fixed";value=""},label={Text("R$")})
+                    FilterChip(selected=type=="percent",onClick={type="percent";value=""},label={Text("%")})
+                }
+                OutlinedTextField(value,{value=it},label={Text(if(type=="percent")"Percentual do desconto" else "Valor do desconto (R$)")},singleLine=true,modifier=Modifier.fillMaxWidth(),supportingText={if(type=="percent"&&bps>0)Text("Estimativa: ${posMoney(estimatedPercentDiscount)}")})
+                OutlinedTextField(reason,{reason=it.take(500)},label={Text("Motivo")},modifier=Modifier.fillMaxWidth())
+                Text("Dentro do limite do seu cargo, o servidor aplica na hora. Acima do limite, envia para aprovação.")
+            }},
+            confirmButton={Button(onClick={discountDialog=false;onRequestDiscount(order.id,encoded,reason)},enabled=valid&&reason.isNotBlank()){Text("CONFIRMAR")}},
+            dismissButton={TextButton(onClick={discountDialog=false}){Text("CANCELAR")}},
+        )
     }
 
     if(pixTaxDialog){
@@ -228,5 +252,6 @@ private fun PosPaymentScreen(
     }
 }
 
+private fun discountLabel(request:DiscountRequest):String=if(request.discountType=="percent"&&request.requestedBps>0)"%.2f%% · %s".format(request.requestedBps/100.0,posMoney(request.requestedCents)) else posMoney(request.requestedCents)
 private fun paymentLabel(provider:String)=when(provider){"manual"->"Dinheiro";"pagbank"->"PagBank";"stripe"->"Stripe";"mercadopago"->"Mercado Pago";else->provider}
 private fun posMoney(cents:Int)="R$ %.2f".format(cents/100.0).replace('.',',')
