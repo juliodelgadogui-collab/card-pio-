@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.CancellationViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.FinanceViewModel
 import br.com.eventmenu.go.ManagerActionsViewModel
 import br.com.eventmenu.go.data.CancellationRequest
 import br.com.eventmenu.go.data.DiscountRequest
@@ -61,6 +62,8 @@ fun ManagerScreen(
     val cancellationState by cancellationViewModel.state.collectAsState()
     val managerActionsViewModel: ManagerActionsViewModel = viewModel(factory = ManagerActionsViewModel.Factory(app.managerOperationsRepository))
     val managerActionState by managerActionsViewModel.state.collectAsState()
+    val financeViewModel: FinanceViewModel = viewModel(factory = FinanceViewModel.Factory(app.financeRepository))
+    val financeState by financeViewModel.state.collectAsState()
     var transferOrder by remember { mutableStateOf<ManagerProblemOrder?>(null) }
     var rejectingDiscount by remember { mutableStateOf<DiscountRequest?>(null) }
     var rejectingCancellation by remember { mutableStateOf<CancellationRequest?>(null) }
@@ -68,6 +71,7 @@ fun ManagerScreen(
     LaunchedEffect(Unit) {
         cancellationViewModel.loadPending()
         managerActionsViewModel.refreshReopenCandidates()
+        financeViewModel.refresh()
     }
     LaunchedEffect(cancellationState.changeVersion) { if (cancellationState.changeVersion > 0) onRefresh() }
     LaunchedEffect(managerActionState.changeVersion) { if (managerActionState.changeVersion > 0) onRefresh() }
@@ -75,8 +79,8 @@ fun ManagerScreen(
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Painel do gerente", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Ações rápidas da operação. Configurações e relatórios completos continuam no painel web.")
-            if (loading || cancellationState.loading || managerActionState.loading) CircularProgressIndicator(Modifier.padding(top = 8.dp))
+            Text("Operação, autorizações e visão financeira da unidade em um só lugar.")
+            if (loading || cancellationState.loading || managerActionState.loading || financeState.loading) CircularProgressIndicator(Modifier.padding(top = 8.dp))
         }
 
         if (canApproveDiscount) {
@@ -95,6 +99,7 @@ fun ManagerScreen(
                             Text("Pedido #${request.orderId}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                             Text(managerMoney(request.requestedCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                         }
+                        if (request.discountType == "percent" && request.requestedBps > 0) Text("${request.requestedBps / 100.0}% de desconto")
                         Text("Solicitado por: ${request.requesterName.ifBlank { "Funcionário" }}")
                         Text("Motivo: ${request.reason}")
                         if (request.totalCents > 0) Text("Total atual: ${managerMoney(request.totalCents)}")
@@ -136,6 +141,28 @@ fun ManagerScreen(
             }
         }
 
+        financeState.summary?.let { finance ->
+            item { HorizontalDivider(); Text("Financeiro · ${finance.unitName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
+            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { ManagerMetric("Resultado", managerMoney(finance.operatingResultCents), Modifier.weight(1f)); ManagerMetric("Caixa no período", managerMoney(finance.cashChangeCents), Modifier.weight(1f)) } }
+            item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) { ManagerMetric("A pagar vencido", managerMoney(finance.overduePayableCents), Modifier.weight(1f)); ManagerMetric("A receber vencido", managerMoney(finance.overdueReceivableCents), Modifier.weight(1f)) } }
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text("Próximos 30 dias", fontWeight = FontWeight.Black)
+                        Text("Entradas previstas: ${managerMoney(finance.forecastIn30dCents)}")
+                        Text("Saídas previstas: ${managerMoney(finance.forecastOut30dCents)}")
+                        Text("Projeção: ${managerMoney(finance.forecastChange30dCents)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    }
+                }
+            }
+            if (finance.openEntries.isNotEmpty()) {
+                item { Text("Próximos compromissos", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) }
+                items(finance.openEntries.take(5), key = { "finance-${it.id}" }) { entry ->
+                    Card(Modifier.fillMaxWidth()) { Row(Modifier.fillMaxWidth().padding(13.dp), horizontalArrangement = Arrangement.SpaceBetween) { Column(Modifier.weight(1f)) { Text(entry.description, fontWeight = FontWeight.Bold); Text("${if (entry.direction == "in") "A receber" else "A pagar"} · ${entry.dueDate}") }; Text(managerMoney(entry.amountCents), fontWeight = FontWeight.Black) } }
+                }
+            }
+        }
+
         if (managerActionState.error?.contains("Acesso negado", ignoreCase = true) != true) {
             item {
                 HorizontalDivider()
@@ -171,10 +198,11 @@ fun ManagerScreen(
 
         cancellationState.error?.takeIf { !it.contains("Acesso negado", ignoreCase = true) }?.let { error -> item { Text("Cancelamentos: $error") } }
         managerActionState.error?.takeIf { !it.contains("Acesso negado", ignoreCase = true) }?.let { error -> item { Text("Gerência: $error") } }
+        financeState.error?.takeIf { !it.contains("Acesso negado", ignoreCase = true) }?.let { error -> item { Text("Financeiro: $error") } }
         managerActionState.message?.let { message -> item { Text("✅ $message") } }
         item {
             OutlinedButton(
-                onClick = { cancellationViewModel.loadPending(); managerActionsViewModel.refreshReopenCandidates(); onRefresh() },
+                onClick = { cancellationViewModel.loadPending(); managerActionsViewModel.refreshReopenCandidates(); financeViewModel.refresh(); onRefresh() },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("ATUALIZAR PAINEL") }
         }
