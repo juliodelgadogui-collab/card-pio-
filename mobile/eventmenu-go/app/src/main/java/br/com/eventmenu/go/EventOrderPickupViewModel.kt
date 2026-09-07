@@ -25,6 +25,7 @@ class EventOrderPickupViewModel(private val repository: EventOperationsRepositor
     val state: StateFlow<EventOrderPickupState> = _state.asStateFlow()
 
     fun resolve(eventId: Int, raw: String) = launchBusy {
+        _state.update { it.copy(order = null, message = null) }
         val order = repository.resolveBarOrder(eventId, raw)
         _state.update { it.copy(order = order) }
     }
@@ -52,7 +53,11 @@ class EventOrderPickupViewModel(private val repository: EventOperationsRepositor
         _state.update { it.copy(loading = true, error = null) }
         runCatching { block() }
             .onFailure { error ->
-                val message = if (error is ApiException) error.message else error.message ?: "Não foi possível consultar o pedido."
+                val message = if (error is ApiException) {
+                    error.message.orEmpty()
+                } else {
+                    error.message ?: "Não foi possível consultar o pedido."
+                }
                 _state.update { it.copy(error = friendly(message)) }
             }
         _state.update { it.copy(loading = false) }
