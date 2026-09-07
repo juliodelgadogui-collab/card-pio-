@@ -11,7 +11,7 @@ use RuntimeException;
 
 final class PaymentService
 {
-    private const PROVIDERS=['stripe','pagbank','mercadopago','manual'];
+    private const PROVIDERS=['stripe','pagbank','mercadopago','pagarme','asaas','openpix','efi','sumup','cielo','manual'];
 
     public function create(int $orderId,string $provider,string $idempotencyKey,?int $amountCents=null):array
     {
@@ -100,7 +100,7 @@ final class PaymentService
                 $notifications->publishToPermissionForTenant($tenantId,'refunds.manage',null,'payment.duplicate','Cobrança duplicada detectada','Uma segunda cobrança de '.$amount.' foi confirmada no pedido #'.$orderId.'. Revise o estorno da transação duplicada.','payment',(string)$payment['id'],'payment:'.$payment['id'].':duplicate','warning',gmdate('Y-m-d H:i:s',time()+604800));return;
             }
             if($payment['status']!=='paid')return;
-            $title=str_contains($source,'pix')?'PIX recebido':(str_contains($source,'nfc')||str_contains($source,'card')?'Cartão aprovado':'Pagamento confirmado');
+            $title=str_contains($source,'pix')?'PIX recebido':(str_contains($source,'nfc')||str_contains($source,'card')||str_contains($source,'tap')?'Cartão aprovado':'Pagamento confirmado');
             $notifications->publishToPermissionForTenant($tenantId,'payments.manage',null,'payment.received',$title,$amount.' confirmado no pedido #'.$orderId.'.','payment',(string)$payment['id'],'payment:'.$payment['id'].':received','success',gmdate('Y-m-d H:i:s',time()+172800));
         }catch(\Throwable){}
     }
