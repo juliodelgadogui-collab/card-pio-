@@ -21,6 +21,7 @@ final class PaymentService
         if(strlen($idempotencyKey)<12)throw new RuntimeException('Chave de idempotência inválida.');
 
         return Database::transaction(function(PDO $pdo)use($tenantId,$orderId,$provider,$idempotencyKey,$amountCents):array{
+            (new OrderPricingService())->recalculate($pdo,$tenantId,$orderId);
             $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$stmt->execute([$orderId,$tenantId]);$order=$stmt->fetch();
             if(!$order)throw new RuntimeException('Pedido não encontrado.');
             if(in_array($order['status'],['cancelled','completed'],true))throw new RuntimeException('Pedido cancelado ou finalizado não pode receber nova cobrança.');
@@ -75,6 +76,8 @@ final class PaymentService
             }
 
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="paid",verified_at=CURRENT_TIMESTAMP,raw_payload=? WHERE id=?')->execute([(string)$verified['provider_payment_id'],json_encode($verified,JSON_UNESCAPED_UNICODE),$payment['id']]);
+            $payment['status']='paid';$payment['provider_payment_id']=(string)$verified['provider_payment_id'];
+            (new FinancialLedgerService())->recordPayment($pdo,$tenantId,$order,$payment,$verified);
             if($paidAfter<$total){$pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=?')->execute([$orderId,$tenantId]);Auth::audit('payment.partial_confirmed','payment',(string)$payment['id'],['order_id'=>$orderId,'paid_cents'=>$paidAfter,'remaining_cents'=>$total-$paidAfter]);return;}
             $pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=?')->execute([$orderId]);
             $order['payment_status']='paid';if($order['status']==='pending')$order['status']='confirmed';
@@ -120,9 +123,10 @@ final class PaymentService
         foreach($tickets->fetchAll() as $row){$qty=(int)$row['qty'];$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=?'))->execute([$qty,$qty,$row['batch_id']]);}
         $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);
         if(!empty($order['coupon_id'])){
+            $couponDiscount=(int)($order['coupon_discount_cents']??$order['discount_cents']??0);
             $r=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM coupon_reservations WHERE tenant_id=? AND order_id=? AND status="reserved" FOR UPDATE'));$r->execute([$tenantId,$orderId]);$reservation=$r->fetch();$insertSql=Database::portableSql($pdo,'INSERT IGNORE INTO coupon_redemptions (tenant_id,coupon_id,order_id,customer_id,discount_cents,idempotency_key) VALUES (?,?,?,?,?,?)');
-            if($reservation){$pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE id=?')->execute([$reservation['id']]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$order['coupon_id'],$tenantId]);$pdo->prepare($insertSql)->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$order['discount_cents'],$settlement.':coupon']);}
-            else{$red=$pdo->prepare($insertSql);$red->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$order['discount_cents'],$settlement.':coupon']);if($red->rowCount()===1)$pdo->prepare('UPDATE coupons SET uses_count=uses_count+1 WHERE id=? AND tenant_id=?')->execute([$order['coupon_id'],$tenantId]);}
+            if($reservation){$pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE id=?')->execute([$reservation['id']]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$order['coupon_id'],$tenantId]);$pdo->prepare($insertSql)->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$couponDiscount,$settlement.':coupon']);}
+            else{$red=$pdo->prepare($insertSql);$red->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$couponDiscount,$settlement.':coupon']);if($red->rowCount()===1)$pdo->prepare('UPDATE coupons SET uses_count=uses_count+1 WHERE id=? AND tenant_id=?')->execute([$order['coupon_id'],$tenantId]);}
         }
         if(!empty($order['customer_id'])){$points=intdiv((int)$order['total_cents'],100);if($points>0){$ins=$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO customer_points_movements (tenant_id,customer_id,order_id,points,type,idempotency_key) VALUES (?,?,?,?,"earn",?)'));$ins->execute([$tenantId,$order['customer_id'],$orderId,$points,$settlement.':points']);if($ins->rowCount()===1)$pdo->prepare('UPDATE customers SET points=points+? WHERE id=? AND tenant_id=?')->execute([$points,$order['customer_id'],$tenantId]);}}
         if(!empty($order['promoter_id'])){
