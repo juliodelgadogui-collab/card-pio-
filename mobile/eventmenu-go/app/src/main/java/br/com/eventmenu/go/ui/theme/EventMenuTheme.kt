@@ -7,12 +7,16 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import br.com.eventmenu.go.data.TenantBrand
+
+val LocalTenantBrand = staticCompositionLocalOf<TenantBrand?> { null }
 
 private val DefaultPurple = Color(0xFF5B34D6)
 private val PurpleDark = Color(0xFF3F1CA6)
@@ -78,10 +82,12 @@ fun EventMenuTheme(brand: TenantBrand? = null, content: @Composable () -> Unit) 
         onError = Color.White,
     )
 
-    MaterialTheme(
-        colorScheme = scheme,
-        typography = typography(ink),
-        shapes = EventMenuShapes,
-        content = content,
-    )
+    CompositionLocalProvider(LocalTenantBrand provides active) {
+        MaterialTheme(
+            colorScheme = scheme,
+            typography = typography(ink),
+            shapes = EventMenuShapes,
+            content = content,
+        )
+    }
 }
