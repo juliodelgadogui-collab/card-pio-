@@ -27,12 +27,12 @@ class DeliveryProgressViewModel(private val repository: DeliveryProgressReposito
         _state.update { it.copy(loading = true, error = null) }
         runCatching { repository.listMine() }
             .onSuccess { rows -> _state.update { it.copy(items = rows.associateBy { row -> row.orderId }, loading = false) } }
-            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao carregar progresso das entregas.") } }
+            .onFailure { _state.update { it.copy(loading = false, error = "Não foi possível atualizar as entregas.") } }
     }
 
-    fun pickup(orderId: Int) = runAction(orderId, "Pedido retirado no balcão.") { repository.pickup(orderId) }
+    fun pickup(orderId: Int) = runAction(orderId, "Pedido retirado.") { repository.pickup(orderId) }
     fun startRoute(orderId: Int) = runAction(orderId, "Rota iniciada.") { repository.startRoute(orderId) }
-    fun arrive(orderId: Int) = runAction(orderId, "Chegada registrada. Pagamento liberado pelo servidor.") { repository.arrive(orderId) }
+    fun arrive(orderId: Int) = runAction(orderId, "Chegada confirmada. Você já pode receber o pagamento, se necessário.") { repository.arrive(orderId) }
     fun complete(orderId: Int) = runAction(orderId, "Entrega concluída.") { repository.complete(orderId) }
 
     private fun runAction(orderId: Int, message: String, block: suspend () -> DeliveryProgress) = viewModelScope.launch {
@@ -48,7 +48,7 @@ class DeliveryProgressViewModel(private val repository: DeliveryProgressReposito
                     )
                 }
             }
-            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao atualizar entrega.") } }
+            .onFailure { _state.update { it.copy(loading = false, error = "Não foi possível atualizar a entrega. Tente novamente.") } }
     }
 
     fun clearFeedback() = _state.update { it.copy(error = null, message = null) }
