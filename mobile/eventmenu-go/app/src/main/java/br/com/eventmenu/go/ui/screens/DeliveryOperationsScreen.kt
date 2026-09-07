@@ -21,6 +21,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -30,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
@@ -80,98 +82,111 @@ fun DeliveryOperationsScreen(
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Minhas entregas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Retirada, rota, chegada e pagamento são confirmados pela API EventMenu.")
+            Text("Acompanhe cada etapa até a entrega ao cliente.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+
         items(deliveries, key = { it.id }) { order ->
             val step = progress[order.id]
             val pickedUp = step?.pickedUp == true
             val routeStarted = step?.routeStarted == true || order.status == "out_for_delivery"
             val arrived = step?.arrived == true
+            val customer = deliveryUseful(order.customerName)?.takeIf { !it.equals("Consumidor", true) }
+            val address = deliveryUseful(order.deliveryAddress)
+            val phone = deliveryUseful(order.customerPhone)
 
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("#${order.id} · ${order.customerName}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Column(Modifier.weight(1f)) {
+                            Text("Pedido #${order.id}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                            customer?.let { Text(it, fontWeight = FontWeight.SemiBold) }
+                        }
                         Text(moneyDelivery(order.totalCents), fontWeight = FontWeight.Black)
                     }
-                    if (order.deliveryAddress.isNotBlank()) Text(order.deliveryAddress)
-                    if (order.customerPhone.isNotBlank()) {
-                        Text("Telefone: ${order.customerPhone}")
+
+                    address?.let { Text(it) }
+                    DeliveryPaymentPill(order.paymentStatus)
+
+                    if (phone != null) {
+                        Text(phone, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { openDialer(context, order.customerPhone) }, modifier = Modifier.weight(1f)) { Text("📞 LIGAR") }
-                            OutlinedButton(onClick = { openMessage(context, order.customerPhone, order.id) }, modifier = Modifier.weight(1f)) { Text("💬 MENSAGEM") }
+                            OutlinedButton(onClick = { openDialer(context, phone) }, modifier = Modifier.weight(1f)) { Text("Ligar") }
+                            OutlinedButton(onClick = { openMessage(context, phone, order.id) }, modifier = Modifier.weight(1f)) { Text("Mensagem") }
                         }
                     }
 
-                    OutlinedButton(onClick = { detailViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("ABRIR PEDIDO") }
+                    OutlinedButton(onClick = { detailViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ver pedido") }
                     if (order.paymentStatus != "paid") {
-                        OutlinedButton(onClick = { cancelOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("SOLICITAR CANCELAMENTO") }
+                        TextButton(onClick = { cancelOrder = order }, modifier = Modifier.align(Alignment.End)) { Text("Solicitar cancelamento") }
                     }
+
                     DeliveryStepIndicator(pickedUp, routeStarted, arrived)
-                    Text(if (order.paymentStatus == "paid") "✅ Pagamento confirmado" else "🔴 Pagamento pendente")
 
                     if (order.status == "ready" && !pickedUp) {
-                        Button(onClick = { onPickup(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("RETIRAR PEDIDO") }
+                        Button(onClick = { onPickup(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Retirar pedido") }
                     }
                     if (order.status == "ready" && pickedUp) {
-                        Button(onClick = { onStartRoute(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("INICIAR ROTA") }
+                        Button(onClick = { onStartRoute(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Iniciar rota") }
                     }
 
                     if (order.status == "out_for_delivery") {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { openGoogleMaps(context, order.deliveryAddress) }, modifier = Modifier.weight(1f)) { Text("MAPS") }
-                            OutlinedButton(onClick = { openWaze(context, order.deliveryAddress) }, modifier = Modifier.weight(1f)) { Text("WAZE") }
+                        if (address != null) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedButton(onClick = { openGoogleMaps(context, address) }, modifier = Modifier.weight(1f)) { Text("Google Maps") }
+                                OutlinedButton(onClick = { openWaze(context, address) }, modifier = Modifier.weight(1f)) { Text("Waze") }
+                            }
                         }
 
                         if (!arrived) {
-                            Button(onClick = { onArrive(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CHEGUEI") }
-                            Text("PIX, cartão NFC e dinheiro serão liberados somente depois que o servidor registrar sua chegada.")
+                            Button(onClick = { onArrive(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Cheguei ao cliente") }
+                            Text("Depois de confirmar a chegada, você poderá receber o pagamento se necessário.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } else if (order.paymentStatus != "paid") {
-                            Text("✅ Chegada confirmada · Como o cliente deseja pagar?", fontWeight = FontWeight.Bold)
+                            Text("Como o cliente vai pagar?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                             Button(onClick = { pixOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("PIX") }
-                            Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO NFC") }
-                            OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("DINHEIRO") }
+                            Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Cartão por aproximação") }
+                            OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("Dinheiro") }
                         } else {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("ENVIAR") }
-                                OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("IMPRIMIR") }
+                                OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("Enviar recibo") }
+                                OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("Imprimir") }
                             }
-                            Button(onClick = { onComplete(order.id) }, enabled = arrived, modifier = Modifier.fillMaxWidth()) { Text("CONCLUIR ENTREGA") }
+                            Button(onClick = { onComplete(order.id) }, enabled = arrived, modifier = Modifier.fillMaxWidth()) { Text("Concluir entrega") }
                         }
                     }
                 }
             }
         }
-        if (deliveries.isEmpty()) item { Text("Nenhuma entrega atribuída agora.") }
-        cancellationState.message?.let { msg -> item { Text(msg, fontWeight = FontWeight.Bold) } }
-        cancellationState.error?.let { error -> item { Text(error) } }
-        item { OutlinedButton(onClick = onRefreshProgress, modifier = Modifier.fillMaxWidth()) { Text("ATUALIZAR ETAPAS") } }
+
+        if (deliveries.isEmpty()) item { Text("Nenhuma entrega atribuída agora.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        cancellationState.message?.let { msg -> item { Text(msg, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold) } }
+        cancellationState.error?.let { item { Text("Não foi possível atualizar o cancelamento. Tente novamente.", color = MaterialTheme.colorScheme.error) } }
+        item { OutlinedButton(onClick = onRefreshProgress, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
     }
 
     detailState.detail?.let { detail ->
         OrderDetailDialog(detail = detail, canAccept = false, onAccept = {}, onDismiss = detailViewModel::close)
     }
-    detailState.error?.let { error ->
+    detailState.error?.let {
         AlertDialog(
             onDismissRequest = detailViewModel::clearFeedback,
             title = { Text("Não foi possível abrir o pedido") },
-            text = { Text(error) },
-            confirmButton = { TextButton(onClick = detailViewModel::clearFeedback) { Text("FECHAR") } },
+            text = { Text("Tente novamente em alguns instantes.") },
+            confirmButton = { TextButton(onClick = detailViewModel::clearFeedback) { Text("Fechar") } },
         )
     }
     cancelOrder?.let { order ->
         var reason by remember(order.id) { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { cancelOrder = null },
-            title = { Text("Solicitar cancelamento · Pedido #${order.id}") },
+            title = { Text("Cancelar pedido #${order.id}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("O pedido não será cancelado agora. O Gerente/ADM precisará autorizar no servidor.")
-                    OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("Motivo *") }, modifier = Modifier.fillMaxWidth())
+                    Text("Um responsável precisa aprovar o cancelamento antes que ele seja concluído.")
+                    OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("Motivo") }, modifier = Modifier.fillMaxWidth())
                 }
             },
-            confirmButton = { Button(onClick = { cancelOrder = null; cancellationViewModel.request(order.id, reason) }, enabled = reason.isNotBlank()) { Text("ENVIAR SOLICITAÇÃO") } },
-            dismissButton = { TextButton(onClick = { cancelOrder = null }) { Text("VOLTAR") } },
+            confirmButton = { Button(onClick = { cancelOrder = null; cancellationViewModel.request(order.id, reason) }, enabled = reason.isNotBlank()) { Text("Enviar solicitação") } },
+            dismissButton = { TextButton(onClick = { cancelOrder = null }) { Text("Voltar") } },
         )
     }
     pixOrder?.let { order ->
@@ -184,33 +199,62 @@ fun DeliveryOperationsScreen(
 }
 
 @Composable
+private fun DeliveryPaymentPill(status: String) {
+    val paid = status == "paid"
+    Surface(
+        color = if (paid) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            if (paid) "Pago" else if (status == "pending") "Pagamento em processamento" else "A receber",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = if (paid) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
 private fun DeliveryStepIndicator(pickedUp: Boolean, routeStarted: Boolean, arrived: Boolean) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Etapas", fontWeight = FontWeight.Bold)
-            Text((if (pickedUp) "✅" else "○") + " Pedido retirado")
-            Text((if (routeStarted) "✅" else "○") + " Rota iniciada")
-            Text((if (arrived) "✅" else "○") + " Cheguei ao cliente")
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("Andamento", fontWeight = FontWeight.Bold)
+            DeliveryStepRow("Pedido retirado", pickedUp)
+            DeliveryStepRow("Rota iniciada", routeStarted)
+            DeliveryStepRow("Chegada confirmada", arrived)
         }
+    }
+}
+
+@Composable
+private fun DeliveryStepRow(label: String, done: Boolean) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+        Text(label)
+        Text(
+            if (done) "Concluído" else "Pendente",
+            color = if (done) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold,
+        )
     }
 }
 
 @Composable
 private fun CashReceiveDialog(order: Order, onDismiss: () -> Unit, onConfirm: (Int) -> Unit) {
     var received by remember { mutableStateOf("") }
-    val receivedCents=((received.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt()
-    val change=(receivedCents-order.totalCents).coerceAtLeast(0)
+    val receivedCents = ((received.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).toInt()
+    val change = (receivedCents - order.totalCents).coerceAtLeast(0)
     AlertDialog(
-        onDismissRequest=onDismiss,
-        title={Text("Dinheiro · Pedido #${order.id}")},
-        text={Column(verticalArrangement=Arrangement.spacedBy(10.dp)){
-            Text("Total: ${moneyDelivery(order.totalCents)}",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)
-            OutlinedTextField(received,{received=it},label={Text("Cliente entregou (R$)")},singleLine=true,modifier=Modifier.fillMaxWidth())
-            Text("Troco: ${moneyDelivery(change)}",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
-            Text("O valor do pedido será lançado no turno do entregador. O troco não é receita.")
-        }},
-        confirmButton={Button(onClick={onConfirm(receivedCents)},enabled=receivedCents>=order.totalCents){Text("RECEBI O DINHEIRO")}},
-        dismissButton={TextButton(onClick=onDismiss){Text("CANCELAR")}},
+        onDismissRequest = onDismiss,
+        title = { Text("Dinheiro · Pedido #${order.id}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Total: ${moneyDelivery(order.totalCents)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                OutlinedTextField(received, { received = it }, label = { Text("Valor recebido (R$)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Text("Troco: ${moneyDelivery(change)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+        },
+        confirmButton = { Button(onClick = { onConfirm(receivedCents) }, enabled = receivedCents >= order.totalCents) { Text("Confirmar recebimento") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
 
@@ -220,9 +264,15 @@ private fun TaxIdDialog(orderId: Int, amountCents: Int, onDismiss: () -> Unit, o
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("PIX · Pedido #$orderId") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Total ${moneyDelivery(amountCents)}"); Text("O PagBank exige CPF/CNPJ do pagador para emitir este QR PIX."); OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true) } },
-        confirmButton = { Button(onClick = { onConfirm(taxId) }, enabled = taxId.length in setOf(11,14)) { Text("GERAR PIX") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("CANCELAR") } },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Total: ${moneyDelivery(amountCents)}")
+                Text("Informe CPF ou CNPJ para gerar o PIX.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true)
+            }
+        },
+        confirmButton = { Button(onClick = { onConfirm(taxId) }, enabled = taxId.length in setOf(11, 14)) { Text("Gerar PIX") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
 
@@ -237,24 +287,67 @@ private fun PixWaitingDialog(charge: PixCharge, onPoll: () -> Unit, onDismiss: (
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 qr?.let { Image(it.asImageBitmap(), contentDescription = "QR Code PIX", modifier = Modifier.fillMaxWidth()) }
-                Text("⏳ Aguardando confirmação do PagBank…")
-                if (charge.expiresAt.isNotBlank()) Text("Validade: ${charge.expiresAt}")
-                OutlinedButton(onClick = { copy(context, charge.copyPaste) }, modifier = Modifier.fillMaxWidth()) { Text("COPIAR CÓDIGO PIX") }
+                Text("Aguardando pagamento", fontWeight = FontWeight.SemiBold)
+                deliveryUseful(charge.expiresAt)?.let { Text("Válido até ${deliveryFriendlyDateTime(it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                OutlinedButton(onClick = { copy(context, charge.copyPaste) }, modifier = Modifier.fillMaxWidth()) { Text("Copiar código PIX") }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("FECHAR") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
     )
 }
 
 internal fun qrBitmap(text: String): Bitmap? = runCatching {
-    val size = 720; val matrix = MultiFormatWriter().encode(text, BarcodeFormat.QR_CODE, size, size); val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
-    for (x in 0 until size) for (y in 0 until size) bitmap.setPixel(x, y, if (matrix[x,y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+    val size = 720
+    val matrix = MultiFormatWriter().encode(text, BarcodeFormat.QR_CODE, size, size)
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.RGB_565)
+    for (x in 0 until size) for (y in 0 until size) bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
     bitmap
 }.getOrNull()
 
-private fun copy(context: Context, text: String) { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("PIX EventMenu", text)) }
-private fun openDialer(context: Context, phone: String) { context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(phone)))) }
-private fun openMessage(context: Context, phone: String, orderId: Int) { context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phone))).putExtra("sms_body", "Olá! Estou chegando com seu pedido EventMenu #$orderId.")) }
-private fun openGoogleMaps(context: Context, address: String) { val uri=Uri.parse("google.navigation:q="+Uri.encode(address)); val intent=Intent(Intent.ACTION_VIEW,uri).setPackage("com.google.android.apps.maps"); runCatching{context.startActivity(intent)}.onFailure{context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("geo:0,0?q="+Uri.encode(address))))} }
-private fun openWaze(context: Context, address: String) { val uri=Uri.parse("https://waze.com/ul?q="+Uri.encode(address)+"&navigate=yes"); context.startActivity(Intent(Intent.ACTION_VIEW,uri)) }
-internal fun moneyDelivery(cents:Int)="R$ %.2f".format(cents/100.0).replace('.',',')
+private fun deliveryUseful(value: String?): String? {
+    val clean = value?.trim().orEmpty()
+    return clean.takeIf { it.isNotBlank() && !it.equals("null", true) && !it.equals("undefined", true) }
+}
+
+private fun deliveryFriendlyDateTime(value: String): String {
+    val clean = value.trim().replace('T', ' ')
+    val date = clean.substringBefore(' ')
+    val time = clean.substringAfter(' ', "").take(5)
+    val parts = date.split('-')
+    val formattedDate = if (parts.size == 3) "${parts[2]}/${parts[1]}" else date
+    return when {
+        formattedDate.isNotBlank() && time.isNotBlank() -> "$formattedDate às $time"
+        time.isNotBlank() -> time
+        else -> formattedDate
+    }
+}
+
+private fun copy(context: Context, text: String) {
+    (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+        .setPrimaryClip(ClipData.newPlainText("PIX pedido", text))
+}
+
+private fun openDialer(context: Context, phone: String) {
+    context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(phone))))
+}
+
+private fun openMessage(context: Context, phone: String, orderId: Int) {
+    context.startActivity(
+        Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phone)))
+            .putExtra("sms_body", "Olá! Estou chegando com seu pedido #$orderId.")
+    )
+}
+
+private fun openGoogleMaps(context: Context, address: String) {
+    val uri = Uri.parse("google.navigation:q=" + Uri.encode(address))
+    val intent = Intent(Intent.ACTION_VIEW, uri).setPackage("com.google.android.apps.maps")
+    runCatching { context.startActivity(intent) }
+        .onFailure { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("geo:0,0?q=" + Uri.encode(address)))) }
+}
+
+private fun openWaze(context: Context, address: String) {
+    val uri = Uri.parse("https://waze.com/ul?q=" + Uri.encode(address) + "&navigate=yes")
+    context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+}
+
+internal fun moneyDelivery(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
