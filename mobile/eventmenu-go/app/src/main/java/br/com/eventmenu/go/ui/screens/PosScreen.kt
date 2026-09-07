@@ -20,15 +20,21 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.AppScreen
+import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.GoState
+import br.com.eventmenu.go.PaymentOptionsViewModel
 import br.com.eventmenu.go.data.DiscountRequest
 
 @Composable
@@ -36,12 +42,6 @@ fun PosScreen(
     state: GoState,
     discountRequest: DiscountRequest?,
     canRequestDiscount: Boolean,
-    pixAvailable: Boolean,
-    cashAvailable: Boolean,
-    externalTerminalAvailable: Boolean,
-    externalTerminalReferenceRequired: Boolean,
-    nfcAvailable: Boolean,
-    nfcConfiguredButUnavailable: Boolean,
     onRequestDiscount: (Int, Int, String) -> Unit,
     onRefreshDiscount: (Int) -> Unit,
     onAdd: (Int) -> Unit,
@@ -50,7 +50,6 @@ fun PosScreen(
     onCreate: (String,String,String,String,String) -> Unit,
     onCash: (Int) -> Unit,
     onPix: (Int,String) -> Unit,
-    onExternalTerminal: (Int,String,String,String) -> Unit,
     onNfc: (Int,String,Int) -> Unit,
     onReceipt: (Int) -> Unit,
     onPrintReceipt: (Int) -> Unit,
@@ -58,27 +57,37 @@ fun PosScreen(
     onFinishFlow: () -> Unit,
     onClearTable: () -> Unit,
 ) {
+    val app=LocalContext.current.applicationContext as EventMenuGoApplication
+    val paymentOptionsViewModel:PaymentOptionsViewModel=viewModel(factory=PaymentOptionsViewModel.Factory(app.paymentRepository))
+    val paymentOptions by paymentOptionsViewModel.state.collectAsState()
     val order=state.posOrder
+
+    LaunchedEffect(order?.id){if(order!=null)paymentOptionsViewModel.refresh()}
+    LaunchedEffect(paymentOptions.completedVersion){if(paymentOptions.completedVersion>0)onRefreshPayment()}
+
     if(order!=null){
         PosPaymentScreen(
             state=state,
             discountRequest=discountRequest,
             canRequestDiscount=canRequestDiscount,
-            pixAvailable=pixAvailable,
-            cashAvailable=cashAvailable,
-            externalTerminalAvailable=externalTerminalAvailable,
-            externalTerminalReferenceRequired=externalTerminalReferenceRequired,
-            nfcAvailable=nfcAvailable,
-            nfcConfiguredButUnavailable=nfcConfiguredButUnavailable,
+            pixAvailable=paymentOptions.pixAvailable,
+            cashAvailable=paymentOptions.cashAvailable,
+            externalTerminalAvailable=paymentOptions.externalTerminalAvailable,
+            externalTerminalReferenceRequired=paymentOptions.externalTerminalReferenceRequired,
+            nfcAvailable=paymentOptions.cardPresentAvailableInThisApk,
+            nfcConfiguredButUnavailable=paymentOptions.nfcConfiguredButUnavailable,
+            paymentOptionsLoading=paymentOptions.loading,
+            paymentOptionsError=paymentOptions.error,
+            paymentOptionsMessage=paymentOptions.message,
             onRequestDiscount=onRequestDiscount,
             onRefreshDiscount=onRefreshDiscount,
             onCash=onCash,
             onPix=onPix,
-            onExternalTerminal=onExternalTerminal,
+            onExternalTerminal={amount,method,machine,reference->paymentOptionsViewModel.confirmExternalTerminal(order.id,amount,method,machine,reference)},
             onNfc=onNfc,
             onReceipt=onReceipt,
             onPrintReceipt=onPrintReceipt,
-            onRefresh=onRefreshPayment,
+            onRefresh={paymentOptionsViewModel.refresh();onRefreshPayment()},
             onFinishFlow=onFinishFlow,
         )
         return
@@ -180,6 +189,9 @@ private fun PosPaymentScreen(
     externalTerminalReferenceRequired: Boolean,
     nfcAvailable: Boolean,
     nfcConfiguredButUnavailable: Boolean,
+    paymentOptionsLoading:Boolean,
+    paymentOptionsError:String?,
+    paymentOptionsMessage:String?,
     onRequestDiscount: (Int, Int, String) -> Unit,
     onRefreshDiscount: (Int) -> Unit,
     onCash: (Int) -> Unit,
@@ -208,6 +220,9 @@ private fun PosPaymentScreen(
             Text("Total: ${(balance?.totalCents?:order.totalCents).toMoney()}")
             Text("Pago: ${(balance?.paidCents?:0).toMoney()}")
             Text("Restante: ${remaining.toMoney()}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
+            if(paymentOptionsLoading)Text("Atualizando formas de pagamento…")
+            paymentOptionsError?.let{Text("⚠️ $it")}
+            paymentOptionsMessage?.let{Text("✅ $it")}
         }
 
         if(canRequestDiscount && (balance?.paidCents?:0)==0 && remaining>0){
