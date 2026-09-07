@@ -71,3 +71,12 @@ data class MultiProviderPixCharge(
     val imageBase64: String,
     val expiresAt: String,
 )
+
+data class PixVerification(
+    val paid: Boolean,
+    val provider: String,
+    val paymentId: Int,
+    val status: String,
+    val remainingCents: Int,
+    val paymentStatus: String,
+)
