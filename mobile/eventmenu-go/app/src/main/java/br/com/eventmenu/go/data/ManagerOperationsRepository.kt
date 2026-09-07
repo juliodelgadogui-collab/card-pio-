@@ -37,13 +37,13 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
         val cash = buildList {
             for (i in 0 until cashJson.length()) {
                 val item = cashJson.getJSONObject(i)
-                add(ManagerCashSession(item.optInt("id"), item.optInt("user_id"), item.optString("user_name"), item.optInt("opening_cash_cents"), item.optString("opened_at")))
+                add(ManagerCashSession(item.optInt("id"), item.optInt("user_id"), friendly(item.optString("user_name"), "Funcionário"), item.optInt("opening_cash_cents"), item.optString("opened_at")))
             }
         }
         val delivery = buildList {
             for (i in 0 until deliveryJson.length()) {
                 val item = deliveryJson.getJSONObject(i)
-                add(ManagerDeliveryShift(item.optInt("shift_id"), item.optInt("user_id"), item.optString("user_name"), item.optString("started_at"), item.optInt("active_orders")))
+                add(ManagerDeliveryShift(item.optInt("shift_id"), item.optInt("user_id"), friendly(item.optString("user_name"), "Funcionário"), item.optString("started_at"), item.optInt("active_orders")))
             }
         }
         val problems = buildList {
@@ -56,9 +56,9 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
                         status = item.optString("status"),
                         paymentStatus = item.optString("payment_status"),
                         totalCents = item.optInt("total_cents"),
-                        customerName = item.optString("customer_name").ifBlank { "Consumidor" },
+                        customerName = friendly(item.optString("customer_name"), ""),
                         deliveryUserId = if (item.isNull("assigned_delivery_user_id")) null else item.optInt("assigned_delivery_user_id"),
-                        deliveryName = item.optString("delivery_name"),
+                        deliveryName = friendly(item.optString("delivery_name"), ""),
                         updatedAt = item.optString("updated_at"),
                         problemType = item.optString("problem_type"),
                     )
@@ -79,11 +79,11 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
                         channel = item.optString("channel"),
                         paymentStatus = item.optString("payment_status"),
                         totalCents = item.optInt("total_cents"),
-                        customerName = item.optString("customer_name").ifBlank { "Consumidor" },
-                        tableName = item.optString("table_name"),
+                        customerName = friendly(item.optString("customer_name"), "Consumidor"),
+                        tableName = friendly(item.optString("table_name"), ""),
                         updatedAt = item.optString("updated_at"),
                         eligible = item.optInt("reopen_eligible") == 1,
-                        blockReason = item.optString("reopen_block_reason"),
+                        blockReason = friendly(item.optString("reopen_block_reason"), ""),
                     )
                 )
             }
@@ -99,4 +99,9 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
     }
 
     private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)
+
+    private fun friendly(value: String, fallback: String): String {
+        val clean = value.trim()
+        return if (clean.isBlank() || clean.equals("null", true) || clean.equals("undefined", true)) fallback else clean
+    }
 }

@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -50,6 +51,11 @@ class MainActivity : FragmentActivity() {
                 )
             )
             val state by vm.state.collectAsState()
+            var brand by remember { mutableStateOf(app.brandRepository.cached()) }
+
+            LaunchedEffect(state.session?.user?.id) {
+                if (state.session != null) brand = app.brandRepository.load()
+            }
 
             LaunchedEffect(
                 pendingDeepLink,
@@ -72,7 +78,7 @@ class MainActivity : FragmentActivity() {
                 pendingDeepLink = null
             }
 
-            EventMenuTheme {
+            EventMenuTheme(brand) {
                 EventMenuGoApp(
                     viewModel = vm,
                     onScan = { callback -> scanQr(callback) },
@@ -154,8 +160,6 @@ class MainActivity : FragmentActivity() {
         if (Build.VERSION.SDK_INT < 33) return
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) return
 
-        // FragmentActivity valida requestCode em 16 bits. Usar um código fixo baixo evita
-        // o crash causado pelo ActivityResultRegistry em combinações antigas de Fragment/Biometric.
         ActivityCompat.requestPermissions(
             this,
             arrayOf(Manifest.permission.POST_NOTIFICATIONS),

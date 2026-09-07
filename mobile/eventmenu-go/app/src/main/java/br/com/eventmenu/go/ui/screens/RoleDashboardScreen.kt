@@ -9,19 +9,36 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.ConfirmationNumber
+import androidx.compose.material.icons.filled.DeliveryDining
+import androidx.compose.material.icons.filled.LocalShipping
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.Restaurant
+import androidx.compose.material.icons.filled.TableRestaurant
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.GoState
 import br.com.eventmenu.go.data.AppMode
+import br.com.eventmenu.go.ui.theme.LocalTenantBrand
+
+private data class DashboardShortcutItem(val icon: ImageVector, val label: String, val screen: AppScreen)
 
 @Composable
 fun RoleDashboardScreen(
@@ -34,47 +51,44 @@ fun RoleDashboardScreen(
     val permissions = session.permissions
     val mode = state.mode ?: return
     val shift = state.workShift
-    val tenant = session.user.tenantName.ifBlank { "Empresa #${session.user.tenantId}" }
+    val brand = LocalTenantBrand.current
+    val tenant = brand?.displayName?.takeIf { it.isNotBlank() } ?: session.user.tenantName.ifBlank { "Sua empresa" }
     val unit = dashboardUnitName(shift?.unitName)
     val shortcuts = buildList {
-        if ("orders_view" in permissions || "orders_manage" in permissions) add(Triple("🧾", "Pedidos", AppScreen.ORDERS))
-        if ("tables" in permissions) add(Triple("🍽️", "Mesas", AppScreen.TABLES))
-        if ("orders_create" in permissions) add(Triple("🛒", "PDV", AppScreen.POS))
-        if ("cash" in permissions) add(Triple("💳", "Caixa", AppScreen.CASH))
-        if ("orders_kitchen" in permissions) add(Triple("👨‍🍳", "KDS", AppScreen.KITCHEN))
-        if ("orders_dispatch" in permissions || "delivery_assign" in permissions) add(Triple("📦", "Saída", AppScreen.DISPATCH))
-        if (mode == AppMode.DELIVERY || "orders_delivery" in permissions) add(Triple("🛵", "Entregas", AppScreen.DELIVERY))
-        if (mode == AppMode.EVENTS || "events" in permissions || "tickets" in permissions) add(Triple("🎟️", "Eventos", AppScreen.EVENTS))
-        add(Triple("•••", "Mais", AppScreen.PROFILE))
-    }.distinctBy { it.second }.take(8)
+        if ("orders_view" in permissions || "orders_manage" in permissions) add(DashboardShortcutItem(Icons.Default.ReceiptLong, "Pedidos", AppScreen.ORDERS))
+        if ("tables" in permissions) add(DashboardShortcutItem(Icons.Default.TableRestaurant, "Mesas", AppScreen.TABLES))
+        if ("orders_create" in permissions) add(DashboardShortcutItem(Icons.Default.PointOfSale, "Nova venda", AppScreen.POS))
+        if ("cash" in permissions) add(DashboardShortcutItem(Icons.Default.AccountBalanceWallet, "Caixa", AppScreen.CASH))
+        if ("orders_kitchen" in permissions) add(DashboardShortcutItem(Icons.Default.Restaurant, "Cozinha", AppScreen.KITCHEN))
+        if ("orders_dispatch" in permissions || "delivery_assign" in permissions) add(DashboardShortcutItem(Icons.Default.LocalShipping, "Saída", AppScreen.DISPATCH))
+        if (mode == AppMode.DELIVERY || "orders_delivery" in permissions) add(DashboardShortcutItem(Icons.Default.DeliveryDining, "Entregas", AppScreen.DELIVERY))
+        if (mode == AppMode.EVENTS || "events" in permissions || "tickets" in permissions) add(DashboardShortcutItem(Icons.Default.ConfirmationNumber, "Eventos", AppScreen.EVENTS))
+        add(DashboardShortcutItem(Icons.Default.MoreHoriz, "Mais", AppScreen.PROFILE))
+    }.distinctBy { it.label }.take(8)
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("Olá, ${firstName(session.user.name)} 👋", style = MaterialTheme.typography.headlineMedium)
-                Text("$tenant · $unit", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (!shift?.startedAt.isNullOrBlank()) Text("Turno aberto desde ${dashboardTime(shift!!.startedAt)}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Olá, ${firstName(session.user.name)}", style = MaterialTheme.typography.headlineMedium)
+                Text(tenant, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                Text(unit, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                if (!shift?.startedAt.isNullOrBlank()) Text("Turno iniciado às ${dashboardTime(shift!!.startedAt)}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
             }
         }
 
-        shortcuts.chunked(4).forEach { row ->
+        shortcuts.chunked(2).forEach { row ->
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    row.forEach { (emoji, label, screen) -> DashboardShortcut(emoji, label, Modifier.weight(1f)) { onNavigate(screen) } }
-                    repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { shortcut -> DashboardShortcut(shortcut, Modifier.weight(1f)) { onNavigate(shortcut.screen) } }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
 
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Resumo de hoje", style = MaterialTheme.typography.titleLarge)
-                Text("Ver mais", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-            }
-        }
+        item { Text("Resumo de hoje", style = MaterialTheme.typography.titleLarge) }
 
         when (mode) {
             AppMode.DELIVERY -> {
@@ -101,7 +115,7 @@ fun RoleDashboardScreen(
 
             AppMode.PAY -> {
                 val cash = state.cashSummary
-                item { DashboardStatusCard("Caixa financeiro", if (state.cashOpen) "Aberto" else "Fechado", state.cashOpen) }
+                item { DashboardStatusCard("Caixa", if (state.cashOpen) "Aberto" else "Fechado", state.cashOpen) }
                 item { MetricRow("Saldo esperado", dashboardMoney(cash?.expectedCashCents ?: 0), "Movimentos", (cash?.movements?.size ?: 0).toString(), emphasizeA = true) }
                 val pix = cash?.digital?.filter { it.provider.contains("pag", true) || it.provider.contains("pix", true) }?.sumOf { it.totalCents } ?: 0
                 val cards = cash?.digital?.filterNot { it.provider.contains("pix", true) }?.sumOf { it.totalCents } ?: 0
@@ -115,23 +129,25 @@ fun RoleDashboardScreen(
                 val pendingPayments = manager?.pendingPayments ?: state.orders.count { it.paymentStatus != "paid" && it.status !in setOf("completed", "cancelled") }
                 val avgTicket = if (state.orders.isNotEmpty()) todayRevenue / state.orders.size else 0
                 item { MetricRow("Vendas", dashboardMoney(todayRevenue), "Pedidos", activeOrders.toString(), emphasizeA = true) }
-                item { MetricRow("Ticket médio", dashboardMoney(avgTicket), "Pendências", pendingPayments.toString()) }
+                item { MetricRow("Ticket médio", dashboardMoney(avgTicket), "A receber", pendingPayments.toString()) }
                 if ("reports" in permissions && manager != null) item { MetricRow("Cozinha atrasada", manager.kitchenDelayed.toString(), "Entregadores", manager.deliveryOnline.toString()) }
             }
         }
 
-        item { OutlinedButton(onClick = onScan, modifier = Modifier.fillMaxWidth()) { Text("Escanear QR") } }
-        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar operação") } }
+        item { OutlinedButton(onClick = onScan, modifier = Modifier.fillMaxWidth()) { Text("Ler QR Code") } }
+        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
         item { Spacer(Modifier.height(8.dp)) }
     }
 }
 
 @Composable
-private fun DashboardShortcut(emoji: String, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun DashboardShortcut(item: DashboardShortcutItem, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Card(onClick = onClick, modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(vertical = 13.dp, horizontal = 6.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text(emoji, style = MaterialTheme.typography.titleLarge)
-            Text(label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium) {
+                Icon(item.icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(9.dp))
+            }
+            Text(item.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
     }
 }
@@ -167,7 +183,7 @@ private fun DashboardCard(title: String, text: String) {
 @Composable
 private fun DashboardStatusCard(title: String, status: String, active: Boolean) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = if (active) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.fillMaxWidth().padding(17.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(17.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(status, color = if (active) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Bold)
         }

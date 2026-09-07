@@ -59,7 +59,16 @@ final class ApiAuthService
         if($user['device_hash']){if(strlen($deviceId)<8||!hash_equals((string)$user['device_hash'],hash('sha256',$deviceId)))throw new RuntimeException('Token não pertence a este aparelho.');}
         $pdo->prepare('UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$user['token_id']]);
         $_SESSION['user_id']=(int)$user['id'];$_SESSION['tenant_id']=(int)$user['tenant_id'];$_SESSION['role']=(string)$user['role'];$_SESSION['name']=(string)$user['name'];unset($_SESSION['acting_tenant_id']);
-        return ['id'=>(int)$user['id'],'tenant_id'=>(int)$user['tenant_id'],'tenant_name'=>(string)$user['tenant_name'],'name'=>(string)$user['name'],'email'=>(string)$user['email'],'role'=>(string)$user['role'],'token_id'=>(int)$user['token_id']];
+        return [
+            'id'=>(int)$user['id'],
+            'tenant_id'=>(int)$user['tenant_id'],
+            'tenant_name'=>(string)$user['tenant_name'],
+            'name'=>(string)$user['name'],
+            'email'=>(string)$user['email'],
+            'role'=>(string)$user['role'],
+            'token_id'=>(int)$user['token_id'],
+            'brand'=>(new TenantBrandService())->get((int)$user['tenant_id']),
+        ];
     }
 
     public function revoke(string $rawToken):void
@@ -98,7 +107,16 @@ final class ApiAuthService
 
     private function userPayload(array $user):array
     {
-        return ['id'=>(int)$user['id'],'tenant_id'=>(int)$user['tenant_id'],'tenant_name'=>(string)($user['tenant_name']??''),'name'=>(string)$user['name'],'email'=>(string)$user['email'],'role'=>(string)$user['role']];
+        $tenantId=(int)$user['tenant_id'];
+        return [
+            'id'=>(int)$user['id'],
+            'tenant_id'=>$tenantId,
+            'tenant_name'=>(string)($user['tenant_name']??''),
+            'name'=>(string)$user['name'],
+            'email'=>(string)$user['email'],
+            'role'=>(string)$user['role'],
+            'brand'=>(new TenantBrandService())->get($tenantId),
+        ];
     }
 
     private function audit(int $tenantId,int $userId,string $action,array $metadata):void

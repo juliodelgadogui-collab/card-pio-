@@ -15,6 +15,7 @@ import br.com.eventmenu.go.data.OperatingUnitRepository
 import br.com.eventmenu.go.data.OrderOperationsRepository
 import br.com.eventmenu.go.data.ReceiptRepository
 import br.com.eventmenu.go.data.TabSplitPaymentRepository
+import br.com.eventmenu.go.data.TenantBrandRepository
 import br.com.eventmenu.go.data.UniversalQrRepository
 import br.com.eventmenu.go.notifications.OperationNotificationScheduler
 import br.com.eventmenu.go.security.DeviceIdentity
@@ -51,6 +52,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var cancellationRepository: CancellationRepository
         private set
+    lateinit var brandRepository: TenantBrandRepository
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -72,6 +75,7 @@ class EventMenuGoApplication : Application() {
         deliveryProgressRepository = DeliveryProgressRepository(baseUrl, deviceId, store)
         discountRepository = DiscountRepository(baseUrl, deviceId, store)
         cancellationRepository = CancellationRepository(baseUrl, deviceId, store)
+        brandRepository = TenantBrandRepository(this, baseUrl, deviceId, store)
         OperationNotificationScheduler.initialize(this)
     }
 }
