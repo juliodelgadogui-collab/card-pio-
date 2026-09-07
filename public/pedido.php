@@ -15,9 +15,9 @@ $error=null;
 
 function p_money(int $c):string{return 'R$ '.number_format($c/100,2,',','.');}
 function p_qty(float|int|string $v):string{$q=(float)$v;return abs($q-round($q))<0.0005?(string)(int)round($q):rtrim(rtrim(number_format($q,3,',','.'),'0'),',');}
-function p_channel(string $c):string{return match($c){'pickup'=>'Retirada no local','counter'=>'Balcão','delivery'=>'Delivery','table'=>'Mesa','event'=>'Evento','event_bar'=>'Bar do evento',default=>'Pedido'};}
+function p_channel(string $c):string{return match($c){'pickup'=>'Retirada no local','counter'=>'Balcão','delivery'=>'Delivery','table'=>'Mesa','event'=>'Evento','bar','event_bar'=>'Bar do evento',default=>'Pedido'};}
 function p_payment_status(string $s):string{return match(strtolower($s)){'paid'=>'Pago','pending','processing'=>'Pagamento em processamento','refunded'=>'Estornado','failed','cancelled'=>'Pagamento não concluído',default=>'Aguardando pagamento'};}
-function p_order_status(string $s):string{return match(strtolower($s)){'pending'=>'Recebido','confirmed'=>'Confirmado','preparing'=>'Em preparo','ready'=>'Pronto','out_for_delivery'=>'Saiu para entrega','served','completed'=>'Concluído','cancelled'=>'Cancelado',default=>'Em andamento'};}
+function p_order_status(string $s):string{return match(strtolower($s)){'pending'=>'Recebido','confirmed'=>'Confirmado','preparing'=>'Em preparo','ready'=>'Pronto para retirada','out_for_delivery'=>'Saiu para entrega','served','completed'=>'Concluído','cancelled'=>'Cancelado',default=>'Em andamento'};}
 function p_friendly_error(Throwable $e):string{
     $message=trim((string)$e->getMessage());
     if($message==='')return 'Não foi possível iniciar o pagamento. Tente novamente.';
@@ -61,14 +61,18 @@ $items=$pdo->prepare('SELECT * FROM order_items WHERE order_id=? ORDER BY id');$
 $g=$pdo->prepare('SELECT provider FROM payment_gateways WHERE tenant_id=? AND active=1 AND provider IN ("stripe","pagbank","mercadopago") ORDER BY provider');$g->execute([$order['tenant_id']]);$gateways=$g->fetchAll(PDO::FETCH_COLUMN);
 $tickets=$pdo->prepare('SELECT t.*,e.name event_name,e.starts_at event_starts_at,e.venue event_venue,e.address event_address,b.name batch_name,tt.name ticket_type_name FROM tickets t JOIN events e ON e.id=t.event_id JOIN ticket_batches b ON b.id=t.batch_id LEFT JOIN ticket_types tt ON tt.id=b.ticket_type_id WHERE t.order_id=? ORDER BY t.id');$tickets->execute([$order['id']]);$tickets=$tickets->fetchAll();
 $eventInfo=$tickets?$tickets[0]:null;
-$fulfillment=new OrderFulfillmentService();
-$hasOrderQr=$fulfillment->supportsChannel((string)$order['channel'])&&!empty($order['public_token']);
-$qrDataUri=$hasOrderQr?$fulfillment->qrDataUri((string)$order['public_token'],300):null;
-try{$progress=$hasOrderQr?$fulfillment->publicProgress((int)$order['tenant_id'],(int)$order['id']):null;}catch(Throwable){$progress=null;}
+if(!$eventInfo&&!empty($order['event_id'])){$ev=$pdo->prepare('SELECT name event_name,starts_at event_starts_at,venue event_venue,address event_address FROM events WHERE id=? AND tenant_id=? LIMIT 1');$ev->execute([(int)$order['event_id'],(int)$order['tenant_id']]);$eventInfo=$ev->fetch()?:null;if($eventInfo){$eventInfo['ticket_type_name']='';$eventInfo['batch_name']='';}}
 $paid=(string)$order['payment_status']==='paid';
 $cancelled=(string)$order['status']==='cancelled';
+$isEventBar=in_array((string)$order['channel'],['bar','event_bar'],true)&&!empty($order['event_id']);
+$fulfillment=new OrderFulfillmentService();
+$hasOrderQr=($fulfillment->supportsChannel((string)$order['channel'])||$isEventBar)&&!empty($order['public_token']);
+$showOrderQr=$hasOrderQr&&(!$isEventBar||$paid);
+$qrDataUri=$showOrderQr?$fulfillment->qrDataUri((string)$order['public_token'],300):null;
+try{$progress=$hasOrderQr&&!$isEventBar?$fulfillment->publicProgress((int)$order['tenant_id'],(int)$order['id']):null;}catch(Throwable){$progress=null;}
 $customer=trim((string)($order['customer_name']??''));
 if($customer===''||strtolower($customer)==='null')$customer='Cliente';
+$autoRefresh=!$cancelled&&(!$paid||($isEventBar&&!in_array((string)$order['status'],['completed','cancelled'],true)));
 ?>
 <!doctype html>
 <html lang="pt-BR">
@@ -103,7 +107,7 @@ if($customer===''||strtolower($customer)==='null')$customer='Cliente';
     </div>
   </div>
 
-<?php if($eventInfo):?><div class="event-box"><small>SEU EVENTO</small><h2><?= Security::e($eventInfo['event_name']) ?></h2><div class="event-meta"><span><?= Security::e(date('d/m/Y · H:i',strtotime((string)$eventInfo['event_starts_at']))) ?></span><?php if($eventInfo['event_venue']):?><span>• <?= Security::e($eventInfo['event_venue']) ?></span><?php endif;?><?php if($eventInfo['ticket_type_name']):?><span>• <?= Security::e($eventInfo['ticket_type_name']) ?></span><?php endif;?></div></div><?php endif;?>
+<?php if($eventInfo):?><div class="event-box"><small><?= $isEventBar?'PEDIDO NO EVENTO':'SEU EVENTO' ?></small><h2><?= Security::e($eventInfo['event_name']) ?></h2><div class="event-meta"><span><?= Security::e(date('d/m/Y · H:i',strtotime((string)$eventInfo['event_starts_at']))) ?></span><?php if($eventInfo['event_venue']):?><span>• <?= Security::e($eventInfo['event_venue']) ?></span><?php endif;?><?php if($eventInfo['ticket_type_name']):?><span>• <?= Security::e($eventInfo['ticket_type_name']) ?></span><?php endif;?></div></div><?php endif;?>
 <?php if($error):?><div class="alert error"><?= Security::e($error) ?></div><?php endif;?>
 
 <div class="items"><?php foreach($items as$i):?><div class="item"><div><strong><?= Security::e($i['name_snapshot']) ?></strong><small><?= p_qty($i['quantity']) ?> × <?= p_money((int)$i['unit_price_cents']) ?></small></div><strong><?= p_money((int)$i['total_cents']) ?></strong></div><?php endforeach;?></div>
@@ -112,18 +116,18 @@ if($customer===''||strtolower($customer)==='null')$customer='Cliente';
 <?php if($cancelled):?>
   <div class="alert error">Este pedido foi cancelado.</div>
 <?php elseif($paid):?>
-  <div class="alert ok">Pagamento confirmado. Continue acompanhando o andamento do pedido por aqui.</div>
+  <div class="alert ok"><?= $isEventBar&&$order['status']==='ready'?'Seu pedido está pronto. Vá ao bar e apresente o QR abaixo.':'Pagamento confirmado. Continue acompanhando o andamento do pedido por aqui.' ?></div>
 <?php elseif((int)$order['total_cents']>0):?>
   <div class="section-title"><h2>Escolha como pagar</h2></div>
   <?php if($gateways):?><div class="pay-grid"><?php foreach($gateways as$provider):?><form method="post"><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="provider" value="<?= Security::e($provider) ?>"><button class="primary">Pagar com <?= Security::e(['stripe'=>'Stripe','mercadopago'=>'Mercado Pago','pagbank'=>'PagBank'][$provider]??'pagamento online') ?></button></form><?php endforeach;?></div><p style="color:var(--muted);font-size:12px">Você será direcionado com segurança para concluir o pagamento.</p><?php else:?><div class="alert">O pagamento online não está disponível para este pedido. Entre em contato com <?= Security::e($brandName) ?>.</div><?php endif;?>
 <?php endif;?>
 
-<?php if($hasOrderQr):?><section class="qr-card"><div class="qr-box"><img src="<?= Security::e((string)$qrDataUri) ?>" alt="QR do pedido"></div><div><small style="font-weight:900;color:var(--primary)">QR DO PEDIDO</small><h2><?= $order['channel']==='pickup'?'Apresente na retirada':'Identificação do pedido' ?></h2><p style="color:var(--muted)"><?= $order['channel']==='pickup'?'Mostre este QR ao responsável pela retirada.':'Use este QR quando a equipe solicitar a identificação do pedido.' ?></p><?php if($progress):?><div class="progress"><div><small>Pedido</small><strong><?= p_qty($progress['ordered_quantity']) ?></strong></div><div><small>Entregue</small><strong><?= p_qty($progress['fulfilled_quantity']) ?></strong></div><div><small>Falta</small><strong><?= p_qty($progress['remaining_quantity']) ?></strong></div></div><?php endif;?></div></section><?php elseif($order['channel']==='table'):?><div class="alert ok">Pedido vinculado à mesa. Não é necessário apresentar QR.</div><?php endif;?>
+<?php if($showOrderQr):?><section class="qr-card"><div class="qr-box"><img src="<?= Security::e((string)$qrDataUri) ?>" alt="QR do pedido"></div><div><small style="font-weight:900;color:var(--primary)">QR DO PEDIDO</small><h2><?= $isEventBar?'Apresente no bar':($order['channel']==='pickup'?'Apresente na retirada':'Identificação do pedido') ?></h2><p style="color:var(--muted)"><?= $isEventBar?'Quando o pedido estiver pronto, mostre este QR no bar. A equipe confere os itens e confirma a entrega pelo EventMenu GO.':($order['channel']==='pickup'?'Mostre este QR ao responsável pela retirada.':'Use este QR quando a equipe solicitar a identificação do pedido.') ?></p><?php if($progress):?><div class="progress"><div><small>Pedido</small><strong><?= p_qty($progress['ordered_quantity']) ?></strong></div><div><small>Entregue</small><strong><?= p_qty($progress['fulfilled_quantity']) ?></strong></div><div><small>Falta</small><strong><?= p_qty($progress['remaining_quantity']) ?></strong></div></div><?php endif;?></div></section><?php elseif($isEventBar&&!$paid):?><div class="alert">O QR de retirada será liberado aqui assim que o pagamento for confirmado.</div><?php elseif($order['channel']==='table'):?><div class="alert ok">Pedido vinculado à mesa. Não é necessário apresentar QR.</div><?php endif;?>
 
 <?php if($paid&&$tickets):?><div class="section-title"><h2>Seus ingressos</h2></div><div class="ticket-list"><?php foreach($tickets as$t):$ticketUrl=app_url('ingresso.php?t='.rawurlencode((string)$t['qr_token']));?><a class="ticket-link" href="<?= Security::e($ticketUrl) ?>"><div><strong><?= Security::e($t['ticket_type_name']?:'Ingresso') ?></strong><br><small><?= Security::e($t['batch_name']) ?> · <?= Security::e($t['code']) ?></small></div><span>Abrir ingresso →</span></a><?php endforeach;?></div><?php endif;?>
 </section>
 <div class="foot"><?= $showEventMenu?'Tecnologia EventMenu':Security::e($tagline!==''?$tagline:$brandName) ?></div>
 </main>
-<?php if(!$cancelled&&!$paid):?><script>setTimeout(()=>location.reload(),20000);</script><?php endif;?>
+<?php if($autoRefresh):?><script>setTimeout(()=>location.reload(),15000);</script><?php endif;?>
 </body>
 </html>
