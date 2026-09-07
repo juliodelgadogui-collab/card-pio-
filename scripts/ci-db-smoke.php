@@ -164,6 +164,7 @@ try {
 
     $health = (new SystemHealthService())->snapshot();
     assert_ci(isset($health['checks']['database'],$health['checks']['queue'],$health['checks']['backup']), 'Snapshot de saúde incompleto.');
+    assert_ci(($health['checks']['queue']['state'] ?? null) === 'ok', 'Fila vazia gerou alerta falso no health check.');
 
     echo "CI DB smoke OK ({$driver})\n";
 } catch (\Throwable $e) {
