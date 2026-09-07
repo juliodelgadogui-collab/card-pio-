@@ -36,6 +36,12 @@ fun PosScreen(
     state: GoState,
     discountRequest: DiscountRequest?,
     canRequestDiscount: Boolean,
+    pixAvailable: Boolean,
+    cashAvailable: Boolean,
+    externalTerminalAvailable: Boolean,
+    externalTerminalReferenceRequired: Boolean,
+    nfcAvailable: Boolean,
+    nfcConfiguredButUnavailable: Boolean,
     onRequestDiscount: (Int, Int, String) -> Unit,
     onRefreshDiscount: (Int) -> Unit,
     onAdd: (Int) -> Unit,
@@ -44,6 +50,7 @@ fun PosScreen(
     onCreate: (String,String,String,String,String) -> Unit,
     onCash: (Int) -> Unit,
     onPix: (Int,String) -> Unit,
+    onExternalTerminal: (Int,String,String,String) -> Unit,
     onNfc: (Int,String,Int) -> Unit,
     onReceipt: (Int) -> Unit,
     onPrintReceipt: (Int) -> Unit,
@@ -53,7 +60,27 @@ fun PosScreen(
 ) {
     val order=state.posOrder
     if(order!=null){
-        PosPaymentScreen(state,discountRequest,canRequestDiscount,onRequestDiscount,onRefreshDiscount,onCash,onPix,onNfc,onReceipt,onPrintReceipt,onRefreshPayment,onFinishFlow)
+        PosPaymentScreen(
+            state=state,
+            discountRequest=discountRequest,
+            canRequestDiscount=canRequestDiscount,
+            pixAvailable=pixAvailable,
+            cashAvailable=cashAvailable,
+            externalTerminalAvailable=externalTerminalAvailable,
+            externalTerminalReferenceRequired=externalTerminalReferenceRequired,
+            nfcAvailable=nfcAvailable,
+            nfcConfiguredButUnavailable=nfcConfiguredButUnavailable,
+            onRequestDiscount=onRequestDiscount,
+            onRefreshDiscount=onRefreshDiscount,
+            onCash=onCash,
+            onPix=onPix,
+            onExternalTerminal=onExternalTerminal,
+            onNfc=onNfc,
+            onReceipt=onReceipt,
+            onPrintReceipt=onPrintReceipt,
+            onRefresh=onRefreshPayment,
+            onFinishFlow=onFinishFlow,
+        )
         return
     }
 
@@ -90,7 +117,7 @@ fun PosScreen(
                         Text(product.name,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)
                         Text(product.categoryName)
                         if(product.description.isNotBlank())Text(product.description,maxLines=2)
-                        Text(posMoney(product.priceCents),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)
+                        Text(product.priceCents.toMoney(),style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)
                         if(product.trackStock)Text("Disponível: ${product.stockQty}")
                     }
                     Button(onClick={onAdd(product.id)},enabled=!product.trackStock||product.stockQty>0){Text("+")}
@@ -109,14 +136,14 @@ fun PosScreen(
                         Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween){
                             Text("${qty}× ${product.name}")
                             Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
-                                Text(posMoney(product.priceCents*qty),fontWeight=FontWeight.Bold)
+                                Text((product.priceCents*qty).toMoney(),fontWeight=FontWeight.Bold)
                                 OutlinedButton(onClick={onRemove(product.id)}){Text("−")}
                                 OutlinedButton(onClick={onAdd(product.id)}){Text("+")}
                             }
                         }
                     }
                     HorizontalDivider()
-                    Text("TOTAL ${posMoney(previewTotal)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
+                    Text("TOTAL ${previewTotal.toMoney()}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
                 }
             }
         }
@@ -147,10 +174,17 @@ private fun PosPaymentScreen(
     state: GoState,
     discountRequest: DiscountRequest?,
     canRequestDiscount: Boolean,
+    pixAvailable: Boolean,
+    cashAvailable: Boolean,
+    externalTerminalAvailable: Boolean,
+    externalTerminalReferenceRequired: Boolean,
+    nfcAvailable: Boolean,
+    nfcConfiguredButUnavailable: Boolean,
     onRequestDiscount: (Int, Int, String) -> Unit,
     onRefreshDiscount: (Int) -> Unit,
     onCash: (Int) -> Unit,
     onPix: (Int,String) -> Unit,
+    onExternalTerminal: (Int,String,String,String) -> Unit,
     onNfc: (Int,String,Int) -> Unit,
     onReceipt: (Int) -> Unit,
     onPrintReceipt: (Int) -> Unit,
@@ -165,14 +199,15 @@ private fun PosPaymentScreen(
     var pixTaxDialog by remember{mutableStateOf(false)}
     var discountDialog by remember{mutableStateOf(false)}
     var cardDialog by remember{mutableStateOf(false)}
+    var terminalDialog by remember{mutableStateOf(false)}
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         item{
             Text("Pagamento · Pedido #${order.id}",style=MaterialTheme.typography.headlineMedium,fontWeight=FontWeight.Black)
             if(state.posReturnScreen==AppScreen.TABLE_ACCOUNT)Text("Recebimento vinculado à comanda da mesa.")
-            Text("Total: ${posMoney(balance?.totalCents?:order.totalCents)}")
-            Text("Pago: ${posMoney(balance?.paidCents?:0)}")
-            Text("Restante: ${posMoney(remaining)}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
+            Text("Total: ${(balance?.totalCents?:order.totalCents).toMoney()}")
+            Text("Pago: ${(balance?.paidCents?:0).toMoney()}")
+            Text("Restante: ${remaining.toMoney()}",style=MaterialTheme.typography.headlineSmall,fontWeight=FontWeight.Black)
         }
 
         if(canRequestDiscount && (balance?.paidCents?:0)==0 && remaining>0){
@@ -193,8 +228,20 @@ private fun PosPaymentScreen(
         }
 
         if(balance?.payments?.isNotEmpty()==true){
-            item{Text("Parcelas",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)}
-            items(balance.payments,key={it.id}){part->Card(Modifier.fillMaxWidth()){Row(Modifier.fillMaxWidth().padding(14.dp),horizontalArrangement=Arrangement.SpaceBetween){Column{Text("${paymentLabel(part.provider)} · #${part.id}",fontWeight=FontWeight.Bold);Text(part.status)};Text(posMoney(part.amountCents),fontWeight=FontWeight.Black)}}}
+            item{Text("Pagamentos",style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.Bold)}
+            items(balance.payments,key={it.id}){part->
+                Card(Modifier.fillMaxWidth()){
+                    Row(Modifier.fillMaxWidth().padding(14.dp),horizontalArrangement=Arrangement.SpaceBetween){
+                        Column(Modifier.weight(1f)){
+                            Text("${paymentLabel(part.provider)} · #${part.id}",fontWeight=FontWeight.Bold)
+                            Text(part.status)
+                            if(part.paymentMethod.isNotBlank())Text(if(part.paymentMethod=="debit")"Débito" else if(part.paymentMethod=="credit")"Crédito" else part.paymentMethod)
+                            if(part.machineLabel.isNotBlank())Text(part.machineLabel)
+                        }
+                        Text(part.amountCents.toMoney(),fontWeight=FontWeight.Black)
+                    }
+                }
+            }
         }
         if(remaining>0){
             item{
@@ -203,11 +250,26 @@ private fun PosPaymentScreen(
                         Text("Adicionar pagamento",style=MaterialTheme.typography.titleLarge,fontWeight=FontWeight.Black)
                         Text("Para pagamento dividido, informe o valor desta parcela.")
                         OutlinedTextField(amountText,{amountText=it},label={Text("Valor da parcela (R$)")},singleLine=true,modifier=Modifier.fillMaxWidth())
-                        Text("Saldo máximo: ${posMoney(remaining)}")
-                        Button(onClick={onCash(amount)},enabled=state.cashOpen&&amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("DINHEIRO")}
-                        if(!state.cashOpen)Text("Abra o caixa financeiro para receber dinheiro.")
-                        Button(onClick={pixTaxDialog=true},enabled=amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("PIX")}
-                        Button(onClick={cardDialog=true},enabled=amount in 100..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("CRÉDITO / DÉBITO · APROXIMAÇÃO")}
+                        Text("Saldo máximo: ${remaining.toMoney()}")
+
+                        if(cashAvailable){
+                            Button(onClick={onCash(amount)},enabled=state.cashOpen&&amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("DINHEIRO")}
+                            if(!state.cashOpen)Text("Abra o caixa financeiro para receber dinheiro.")
+                        }
+                        if(pixAvailable){
+                            Button(onClick={pixTaxDialog=true},enabled=amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("PIX · GERAR QR CODE")}
+                        }
+                        if(externalTerminalAvailable){
+                            OutlinedButton(onClick={terminalDialog=true},enabled=amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("PAGO NA MAQUININHA")}
+                        }
+                        if(nfcAvailable){
+                            Button(onClick={cardDialog=true},enabled=amount in 100..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("CRÉDITO / DÉBITO · APROXIMAÇÃO")}
+                        }else if(nfcConfiguredButUnavailable){
+                            Text("NFC está habilitado no servidor, mas esta versão do EventMenu GO foi instalada sem o SDK Tap to Pay.")
+                        }
+                        if(!pixAvailable&&!cashAvailable&&!externalTerminalAvailable&&!nfcAvailable){
+                            Text("Nenhuma forma de pagamento está liberada para esta empresa. Solicite ao administrador.")
+                        }
                         if(discountRequest?.status=="pending")Text("Pagamento bloqueado enquanto o desconto aguarda decisão. O servidor também rejeita alteração de preço com cobrança ativa.")
                     }
                 }
@@ -233,12 +295,12 @@ private fun PosPaymentScreen(
             onDismissRequest={discountDialog=false},
             title={Text("Aplicar desconto")},
             text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
-                Text("Pedido #${order.id} · total atual ${posMoney(baseTotal)}")
+                Text("Pedido #${order.id} · total atual ${baseTotal.toMoney()}")
                 Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
                     FilterChip(selected=type=="fixed",onClick={type="fixed";value=""},label={Text("R$")})
                     FilterChip(selected=type=="percent",onClick={type="percent";value=""},label={Text("%")})
                 }
-                OutlinedTextField(value,{value=it},label={Text(if(type=="percent")"Percentual do desconto" else "Valor do desconto (R$)")},singleLine=true,modifier=Modifier.fillMaxWidth(),supportingText={if(type=="percent"&&bps>0)Text("Estimativa: ${posMoney(estimatedPercentDiscount)}")})
+                OutlinedTextField(value,{value=it},label={Text(if(type=="percent")"Percentual do desconto" else "Valor do desconto (R$)")},singleLine=true,modifier=Modifier.fillMaxWidth(),supportingText={if(type=="percent"&&bps>0)Text("Estimativa: ${estimatedPercentDiscount.toMoney()}")})
                 OutlinedTextField(reason,{reason=it.take(500)},label={Text("Motivo")},modifier=Modifier.fillMaxWidth())
                 Text("Dentro do limite do seu cargo, o servidor aplica na hora. Acima do limite, envia para aprovação.")
             }},
@@ -249,7 +311,38 @@ private fun PosPaymentScreen(
 
     if(pixTaxDialog){
         var taxId by remember{mutableStateOf("")}
-        AlertDialog(onDismissRequest={pixTaxDialog=false},title={Text("PIX · ${posMoney(amount)}")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("CPF/CNPJ pode ser exigido pelo provedor para emitir o QR PIX e não é salvo pelo app.");OutlinedTextField(taxId,{taxId=it.filter(Char::isDigit).take(14)},label={Text("CPF ou CNPJ")},singleLine=true)}},confirmButton={Button(onClick={pixTaxDialog=false;onPix(amount,taxId)},enabled=taxId.length in setOf(11,14)){Text("GERAR PIX")}},dismissButton={TextButton(onClick={pixTaxDialog=false}){Text("CANCELAR")}})
+        AlertDialog(
+            onDismissRequest={pixTaxDialog=false},
+            title={Text("PIX · ${amount.toMoney()}")},
+            text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){
+                Text("O EventMenu gera o QR/copia-e-cola no provedor configurado e só confirma após validar o pagamento no servidor.")
+                OutlinedTextField(taxId,{taxId=it.filter(Char::isDigit).take(14)},label={Text("CPF ou CNPJ")},singleLine=true)
+            }},
+            confirmButton={Button(onClick={pixTaxDialog=false;onPix(amount,taxId)},enabled=taxId.length in setOf(11,14)){Text("GERAR PIX")}},
+            dismissButton={TextButton(onClick={pixTaxDialog=false}){Text("CANCELAR")}},
+        )
+    }
+
+    if(terminalDialog){
+        var method by remember{mutableStateOf("credit")}
+        var machine by remember{mutableStateOf("")}
+        var reference by remember{mutableStateOf("")}
+        AlertDialog(
+            onDismissRequest={terminalDialog=false},
+            title={Text("Pago na maquininha · ${amount.toMoney()}")},
+            text={Column(verticalArrangement=Arrangement.spacedBy(9.dp)){
+                Text("Use somente depois que a maquininha externa mostrar APROVADO. Este registro fica vinculado ao operador, pedido e aparelho.")
+                Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){
+                    FilterChip(selected=method=="credit",onClick={method="credit"},label={Text("Crédito")})
+                    FilterChip(selected=method=="debit",onClick={method="debit"},label={Text("Débito")})
+                }
+                OutlinedTextField(machine,{machine=it.take(120)},label={Text("Maquininha (opcional)")},placeholder={Text("Ex.: Cielo balcão")},modifier=Modifier.fillMaxWidth())
+                OutlinedTextField(reference,{reference=it.take(190)},label={Text(if(externalTerminalReferenceRequired)"NSU / código da transação *" else "NSU / código da transação")},modifier=Modifier.fillMaxWidth())
+                Text("O EventMenu não consegue consultar uma máquina sem integração. Por isso o NSU é recomendado para conferência e evita registro duplicado.")
+            }},
+            confirmButton={Button(onClick={terminalDialog=false;onExternalTerminal(amount,method,machine,reference)},enabled=amount in 1..remaining&&(!externalTerminalReferenceRequired||reference.isNotBlank())){Text("CONFIRMAR PAGO")}},
+            dismissButton={TextButton(onClick={terminalDialog=false}){Text("CANCELAR")}},
+        )
     }
 
     if(cardDialog){
@@ -261,6 +354,6 @@ private fun PosPaymentScreen(
     }
 }
 
-private fun discountLabel(request:DiscountRequest):String=if(request.discountType=="percent"&&request.requestedBps>0)"%.2f%% · %s".format(request.requestedBps/100.0,posMoney(request.requestedCents)) else posMoney(request.requestedCents)
-private fun paymentLabel(provider:String)=when(provider){"manual"->"Dinheiro";"sumup"->"SumUp";"pagbank"->"PagBank";"stripe"->"Stripe";"mercadopago"->"Mercado Pago";else->provider}
-private fun posMoney(cents:Int)="R$ %.2f".format(cents/100.0).replace('.',',')
+private fun discountLabel(request:DiscountRequest):String=if(request.discountType=="percent"&&request.requestedBps>0)"%.2f%% · %s".format(request.requestedBps/100.0,request.requestedCents.toMoney()) else request.requestedCents.toMoney()
+private fun paymentLabel(provider:String)=when(provider){"manual"->"Dinheiro";"terminal_manual"->"Maquininha";"sumup"->"SumUp";"pagbank"->"PagBank";"stripe"->"Stripe";"mercadopago"->"Mercado Pago";"pagarme"->"Pagar.me";"asaas"->"Asaas";"openpix"->"OpenPix";else->provider}
+private fun Int.toMoney()="R$ %.2f".format(this/100.0).replace('.',',')
