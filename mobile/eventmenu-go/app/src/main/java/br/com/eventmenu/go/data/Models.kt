@@ -76,7 +76,16 @@ data class Product(
 )
 
 data class CreatedOrder(val id: Int, val publicToken: String, val channel: String, val totalCents: Int)
-data class PaymentPart(val id: Int, val provider: String, val amountCents: Int, val status: String, val verifiedAt: String = "")
+data class PaymentPart(
+    val id: Int,
+    val provider: String,
+    val amountCents: Int,
+    val status: String,
+    val verifiedAt: String = "",
+    val paymentMethod: String = "",
+    val machineLabel: String = "",
+    val transactionReference: String = "",
+)
 data class PaymentBalance(val orderId: Int, val totalCents: Int, val paidCents: Int, val remainingCents: Int, val paymentStatus: String, val payments: List<PaymentPart> = emptyList())
 
 data class CashSession(
