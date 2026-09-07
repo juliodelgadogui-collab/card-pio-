@@ -7,7 +7,6 @@ namespace EventMenu\Services\Payments;
 use EventMenu\Core\Auth;
 use EventMenu\Core\Crypto;
 use EventMenu\Core\Database;
-use PDO;
 use RuntimeException;
 
 final class PaymentProviderRegistry
@@ -19,9 +18,17 @@ final class PaymentProviderRegistry
         'pagarme' => ['label'=>'Pagar.me','card_present'=>false,'pix'=>true,'webhook'=>true,'connection'=>'secret_key'],
         'efi' => ['label'=>'Efí','card_present'=>false,'pix'=>true,'webhook'=>true,'connection'=>'oauth_mtls'],
         'asaas' => ['label'=>'Asaas','card_present'=>false,'pix'=>true,'webhook'=>true,'connection'=>'api_key'],
-        'openpix' => ['label'=>'OpenPix','card_present'=>false,'pix'=>true,'webhook'=>true,'connection'=>'app_id'],
+        'openpix' => ['label'=>'OpenPix / Woovi','card_present'=>false,'pix'=>true,'webhook'=>true,'connection'=>'app_id'],
         'cielo' => ['label'=>'Cielo','card_present'=>true,'pix'=>false,'webhook'=>true,'connection'=>'merchant_credentials'],
         'stripe' => ['label'=>'Stripe','card_present'=>false,'pix'=>false,'webhook'=>true,'connection'=>'secret_key'],
+    ];
+
+    private const RUNTIME_DEFAULTS = [
+        'card_present_enabled'=>false,
+        'pix_enabled'=>true,
+        'cash_enabled'=>true,
+        'external_terminal_enabled'=>true,
+        'external_terminal_reference_required'=>true,
     ];
 
     public function catalog(): array { return self::PROVIDERS; }
@@ -37,6 +44,33 @@ final class PaymentProviderRegistry
     {
         $column=match($capability){'card_present'=>'card_present_provider','pix'=>'pix_provider',default=>throw new RuntimeException('Capacidade de pagamento inválida.')};$q=Database::connection()->prepare('SELECT '.$column.' FROM payment_provider_preferences WHERE tenant_id=?');$q->execute([$tenantId]);$preferred=$q->fetchColumn();if(is_string($preferred)&&$preferred!==''&&$this->supports($preferred,$capability)&&$this->isActive($tenantId,$preferred))return$preferred;
         foreach(self::PROVIDERS as$code=>$meta)if(!empty($meta[$capability])&&$this->isActive($tenantId,$code))return$code;return null;
+    }
+
+    public function runtimeOptions(int $tenantId): array
+    {
+        try{
+            $q=Database::connection()->prepare('SELECT card_present_enabled,pix_enabled,cash_enabled,external_terminal_enabled,external_terminal_reference_required FROM payment_provider_preferences WHERE tenant_id=? LIMIT 1');$q->execute([$tenantId]);$row=$q->fetch();
+            if(!$row)return self::RUNTIME_DEFAULTS;
+            return [
+                'card_present_enabled'=>(bool)$row['card_present_enabled'],
+                'pix_enabled'=>(bool)$row['pix_enabled'],
+                'cash_enabled'=>(bool)$row['cash_enabled'],
+                'external_terminal_enabled'=>(bool)$row['external_terminal_enabled'],
+                'external_terminal_reference_required'=>(bool)$row['external_terminal_reference_required'],
+            ];
+        }catch(\Throwable){return self::RUNTIME_DEFAULTS;}
+    }
+
+    public function setRuntimeOptions(bool $cardPresent,bool $pix,bool $cash,bool $externalTerminal,bool $referenceRequired): void
+    {
+        Auth::requirePermission('gateways.manage');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');$pdo=Database::connection();
+        if(Database::isSqlite($pdo)){
+            $sql='INSERT INTO payment_provider_preferences (tenant_id,card_present_enabled,pix_enabled,cash_enabled,external_terminal_enabled,external_terminal_reference_required,updated_by,updated_at) VALUES (?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(tenant_id) DO UPDATE SET card_present_enabled=excluded.card_present_enabled,pix_enabled=excluded.pix_enabled,cash_enabled=excluded.cash_enabled,external_terminal_enabled=excluded.external_terminal_enabled,external_terminal_reference_required=excluded.external_terminal_reference_required,updated_by=excluded.updated_by,updated_at=CURRENT_TIMESTAMP';
+        }else{
+            $sql='INSERT INTO payment_provider_preferences (tenant_id,card_present_enabled,pix_enabled,cash_enabled,external_terminal_enabled,external_terminal_reference_required,updated_by) VALUES (?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE card_present_enabled=VALUES(card_present_enabled),pix_enabled=VALUES(pix_enabled),cash_enabled=VALUES(cash_enabled),external_terminal_enabled=VALUES(external_terminal_enabled),external_terminal_reference_required=VALUES(external_terminal_reference_required),updated_by=VALUES(updated_by),updated_at=CURRENT_TIMESTAMP';
+        }
+        $pdo->prepare($sql)->execute([$tenantId,$cardPresent?1:0,$pix?1:0,$cash?1:0,$externalTerminal?1:0,$referenceRequired?1:0,Auth::id()]);
+        Auth::audit('payment.runtime_options','tenant',(string)$tenantId,['card_present'=>$cardPresent,'pix'=>$pix,'cash'=>$cash,'external_terminal'=>$externalTerminal,'external_terminal_reference_required'=>$referenceRequired]);
     }
 
     public function setPreferences(?string $cardProvider,?string $pixProvider,?string $pixFallback): void
