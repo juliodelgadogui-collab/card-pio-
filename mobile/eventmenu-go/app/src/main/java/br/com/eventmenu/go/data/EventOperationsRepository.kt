@@ -2,6 +2,7 @@ package br.com.eventmenu.go.data
 
 import br.com.eventmenu.go.security.SecureSessionStore
 import org.json.JSONArray
+import org.json.JSONObject
 
 class EventOperationsRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
     private val api = ApiClient(baseUrl, deviceId)
@@ -51,6 +52,59 @@ class EventOperationsRepository(baseUrl: String, deviceId: String, private val s
                 )
             }
         }
+    }
+
+    suspend fun resolveBarOrder(eventId: Int, value: String): EventPickupOrder {
+        if (eventId < 1) throw ApiException("Selecione o evento antes de ler o pedido.")
+        if (value.isBlank()) throw ApiException("QR do pedido vazio.")
+        val order = api.getEvents(
+            "bar-order-resolve",
+            requireToken(),
+            mapOf("event_id" to eventId.toString(), "value" to value.trim()),
+        ).getJSONObject("order")
+        return parsePickup(order)
+    }
+
+    suspend fun deliverBarOrder(eventId: Int, value: String): EventPickupOrder {
+        if (eventId < 1) throw ApiException("Selecione o evento antes de entregar o pedido.")
+        val order = api.postEvents(
+            "bar-order-deliver",
+            requireToken(),
+            JSONObject().put("event_id", eventId).put("value", value.trim()),
+        ).getJSONObject("order")
+        return parsePickup(order)
+    }
+
+    private fun parsePickup(order: JSONObject): EventPickupOrder {
+        val array = order.optJSONArray("items") ?: JSONArray()
+        val items = buildList {
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                add(
+                    EventPickupItem(
+                        id = item.getInt("id"),
+                        name = item.optString("name_snapshot").ifBlank { "Item" },
+                        quantity = item.optDouble("quantity", 0.0),
+                        unitPriceCents = item.optInt("unit_price_cents"),
+                        totalCents = item.optInt("total_cents"),
+                    )
+                )
+            }
+        }
+        return EventPickupOrder(
+            id = order.getInt("id"),
+            eventId = order.getInt("event_id"),
+            eventName = order.optString("event_name"),
+            publicToken = order.optString("public_token"),
+            status = order.optString("status"),
+            paymentStatus = order.optString("payment_status"),
+            totalCents = order.optInt("total_cents"),
+            customerName = order.optString("customer_name"),
+            customerPhone = order.optString("customer_phone"),
+            alreadyDelivered = order.optBoolean("already_delivered", false),
+            canDeliver = order.optBoolean("can_deliver", false),
+            items = items,
+        )
     }
 
     private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)

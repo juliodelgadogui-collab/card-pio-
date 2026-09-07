@@ -158,6 +158,29 @@ data class EventEntry(
     val operatorName: String,
 )
 
+data class EventPickupItem(
+    val id: Int,
+    val name: String,
+    val quantity: Double,
+    val unitPriceCents: Int,
+    val totalCents: Int,
+)
+
+data class EventPickupOrder(
+    val id: Int,
+    val eventId: Int,
+    val eventName: String,
+    val publicToken: String,
+    val status: String,
+    val paymentStatus: String,
+    val totalCents: Int,
+    val customerName: String,
+    val customerPhone: String,
+    val alreadyDelivered: Boolean,
+    val canDeliver: Boolean,
+    val items: List<EventPickupItem>,
+)
+
 data class ManagerAlert(val level: String, val title: String, val message: String)
 data class ManagerOverview(
     val ordersNow: Int,

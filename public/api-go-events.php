@@ -6,6 +6,7 @@ require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\EventOperationsService;
+use EventMenu\Services\EventOrderPickupService;
 use EventMenu\Services\GuestService;
 use EventMenu\Services\TicketService;
 use EventMenu\Services\WorkShiftService;
@@ -28,6 +29,14 @@ try{
 
     if($action==='overview')goe_out(['ok'=>true,'events'=>$service->overview()]);
     if($action==='recent'){$eventId=(int)($_GET['event_id']??0);goe_out(['ok'=>true]+$service->recentEntries($eventId));}
+    if($action==='bar-order-resolve'){
+        $eventId=(int)($_GET['event_id']??0);$value=(string)($_GET['value']??'');
+        goe_out(['ok'=>true,'order'=>(new EventOrderPickupService())->resolve($eventId,$value)]);
+    }
+    if($action==='bar-order-deliver'){
+        goe_method('POST');$body=goe_body();$eventId=(int)($body['event_id']??0);$value=(string)($body['value']??'');
+        goe_out(['ok'=>true,'order'=>(new EventOrderPickupService())->deliver($eventId,$value)]);
+    }
     if($action==='ticket-checkin'){goe_method('POST');$body=goe_body();$result=(new TicketService())->checkIn((string)($body['token']??''));goe_out(['ok'=>true,'result'=>$result]);}
     if($action==='guest-checkin'){goe_method('POST');$body=goe_body();$guest=(new GuestService())->checkIn((string)($body['code']??''));goe_out(['ok'=>true,'guest'=>$guest]);}
 
