@@ -14,6 +14,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,11 +58,11 @@ fun OrderDetailDialog(
             ) {
                 item {
                     Text("${orderChannelLabel(detail.channel)} · ${orderStatusLabel(detail.status)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
-                    Text(if (detail.paymentStatus == "paid") "✅ Pagamento confirmado" else "Pagamento: ${detail.paymentStatus}")
-                    if (detail.customerName.isNotBlank()) Text(detail.customerName)
-                    if (detail.customerPhone.isNotBlank()) Text(detail.customerPhone)
-                    if (detail.deliveryAddress.isNotBlank()) Text(detail.deliveryAddress)
-                    if (detail.notes.isNotBlank()) Text("Observações: ${detail.notes}")
+                    PaymentStatePill(detail.paymentStatus)
+                    usefulOrderText(detail.customerName)?.let { Text(it, fontWeight = FontWeight.SemiBold) }
+                    usefulOrderText(detail.customerPhone)?.let { Text(it) }
+                    usefulOrderText(detail.deliveryAddress)?.let { Text(it) }
+                    usefulOrderText(detail.notes)?.let { Text("Observações: $it") }
                 }
                 item { HorizontalDivider() }
                 item { Text("Itens", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) }
@@ -69,7 +70,7 @@ fun OrderDetailDialog(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
                             Text("${formatQty(item.quantity)}× ${item.name}", fontWeight = FontWeight.Bold)
-                            if (item.notes.isNotBlank()) Text(item.notes)
+                            usefulOrderText(item.notes)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                         }
                         Text(orderMoney(item.totalCents), fontWeight = FontWeight.Bold)
                     }
@@ -79,18 +80,18 @@ fun OrderDetailDialog(
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Subtotal"); Text(orderMoney(detail.subtotalCents)) }
                     if (detail.deliveryFeeCents > 0) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Entrega"); Text(orderMoney(detail.deliveryFeeCents)) }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("TOTAL", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text("Total", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                         Text(orderMoney(detail.totalCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     }
                 }
                 item { HorizontalDivider() }
-                item { Text("Histórico", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) }
-                if (detail.timeline.isEmpty()) item { Text("Nenhuma movimentação registrada.") }
+                item { Text("Histórico do pedido", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) }
+                if (detail.timeline.isEmpty()) item { Text("Nenhuma atualização registrada.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 items(detail.timeline, key = { it.id }) { entry -> TimelineRow(entry) }
                 if (detail.status == "pending" && canAccept) {
                     item {
                         Button(onClick = { onAccept(detail.orderId) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
-                            Text("ACEITAR PEDIDO")
+                            Text("Aceitar pedido")
                         }
                     }
                 }
@@ -99,38 +100,59 @@ fun OrderDetailDialog(
                     item {
                         when (cancellation?.status) {
                             "pending" -> {
-                                Text("⏳ Cancelamento aguardando autorização", fontWeight = FontWeight.Bold)
-                                if (cancellation.reason.isNotBlank()) Text("Motivo: ${cancellation.reason}")
+                                Text("Cancelamento aguardando aprovação", fontWeight = FontWeight.Bold)
+                                usefulOrderText(cancellation.reason)?.let { Text("Motivo: $it") }
                             }
-                            "approved" -> Text("✅ Cancelamento autorizado pelo servidor.", fontWeight = FontWeight.Bold)
+                            "approved" -> Text("Cancelamento autorizado.", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                             "rejected" -> {
-                                Text("⚠️ Solicitação anterior não foi aprovada.", fontWeight = FontWeight.Bold)
-                                OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("SOLICITAR NOVAMENTE") }
+                                Text("A solicitação anterior não foi aprovada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("Solicitar novamente") }
                             }
-                            else -> OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("SOLICITAR CANCELAMENTO") }
+                            else -> OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("Solicitar cancelamento") }
                         }
-                        cancellationState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        cancellationState.error?.let { Text("Não foi possível atualizar o cancelamento. Tente novamente.", color = MaterialTheme.colorScheme.error) }
                         cancellationState.message?.let { Text(it, fontWeight = FontWeight.Bold) }
                     }
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("FECHAR") } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
     )
 
     if (requestCancellation) {
         var reason by remember(detail.orderId) { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { requestCancellation = false },
-            title = { Text("Solicitar cancelamento · Pedido #${detail.orderId}") },
+            title = { Text("Cancelar pedido #${detail.orderId}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("O pedido só será cancelado depois de autorização do Gerente/ADM no servidor.")
-                    OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("Motivo *") }, modifier = Modifier.fillMaxWidth())
+                    Text("Um responsável precisa aprovar o cancelamento antes que ele seja concluído.")
+                    OutlinedTextField(reason, { reason = it.take(500) }, label = { Text("Motivo") }, modifier = Modifier.fillMaxWidth())
                 }
             },
-            confirmButton = { Button(onClick = { requestCancellation = false; cancellationViewModel.request(detail.orderId, reason) }, enabled = reason.isNotBlank()) { Text("ENVIAR") } },
-            dismissButton = { TextButton(onClick = { requestCancellation = false }) { Text("VOLTAR") } },
+            confirmButton = { Button(onClick = { requestCancellation = false; cancellationViewModel.request(detail.orderId, reason) }, enabled = reason.isNotBlank()) { Text("Enviar solicitação") } },
+            dismissButton = { TextButton(onClick = { requestCancellation = false }) { Text("Voltar") } },
+        )
+    }
+}
+
+@Composable
+private fun PaymentStatePill(status: String) {
+    val paid = status == "paid"
+    Surface(
+        color = if (paid) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            when (status.lowercase()) {
+                "paid" -> "Pago"
+                "pending" -> "Pagamento em processamento"
+                "refunded" -> "Estornado"
+                else -> "A receber"
+            },
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            color = if (paid) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }
@@ -138,60 +160,63 @@ fun OrderDetailDialog(
 @Composable
 private fun TimelineRow(entry: OrderTimelineEntry) {
     Column(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
-        Text("${timelineIcon(entry.toStatus)} ${orderStatusLabel(entry.toStatus)}", fontWeight = FontWeight.Bold)
-        Text(entry.createdAt)
-        val actor = entry.userName.ifBlank { sourceLabel(entry.source) }
-        if (actor.isNotBlank()) Text(actor)
-        if (entry.notes.isNotBlank()) Text(entry.notes)
+        Text(orderStatusLabel(entry.toStatus), fontWeight = FontWeight.Bold)
+        friendlyOrderDateTime(entry.createdAt)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        val actor = usefulOrderText(entry.userName) ?: sourceLabel(entry.source)
+        if (actor.isNotBlank()) Text(actor, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        usefulOrderText(entry.notes)?.let { Text(it) }
     }
 }
 
-private fun orderStatusLabel(status: String) = when (status) {
+private fun orderStatusLabel(status: String) = when (status.lowercase()) {
     "draft" -> "Rascunho"
     "pending" -> "Pedido criado"
     "confirmed" -> "Aceito"
-    "preparing" -> "Preparação iniciada"
+    "preparing" -> "Em preparo"
     "ready" -> "Pronto"
     "served" -> "Servido"
     "out_for_delivery" -> "Em rota"
     "completed" -> "Finalizado"
     "cancelled" -> "Cancelado"
-    else -> status
+    else -> "Em andamento"
 }
 
-private fun orderChannelLabel(channel: String) = when (channel) {
+private fun orderChannelLabel(channel: String) = when (channel.lowercase()) {
     "counter" -> "Balcão"
     "pickup" -> "Retirada"
     "table" -> "Mesa"
     "delivery" -> "Delivery"
-    "bar" -> "Bar"
-    else -> channel
+    "bar", "event_bar" -> "Bar"
+    else -> "Pedido"
 }
 
-private fun sourceLabel(source: String) = when (source) {
+private fun sourceLabel(source: String) = when (source.lowercase()) {
     "public" -> "Cardápio digital"
     "staff" -> "Equipe"
     "event_bar" -> "Bar do evento"
     "accept" -> "Atendimento"
     "kitchen" -> "Cozinha"
     "dispatch" -> "Balcão"
-    "delivery" -> "Delivery"
+    "delivery" -> "Entrega"
     "cancellation_approved" -> "Gerência"
     "panel" -> "Painel"
-    "migration" -> "Histórico importado"
-    else -> source
+    "migration" -> "Histórico"
+    else -> "Equipe"
 }
 
-private fun timelineIcon(status: String) = when (status) {
-    "pending" -> "🧾"
-    "confirmed" -> "✅"
-    "preparing" -> "🍳"
-    "ready" -> "🔔"
-    "served" -> "🍽"
-    "out_for_delivery" -> "🛵"
-    "completed" -> "🏁"
-    "cancelled" -> "⛔"
-    else -> "•"
+private fun usefulOrderText(value: String?): String? {
+    val clean = value?.trim().orEmpty()
+    return clean.takeIf { it.isNotBlank() && !it.equals("null", true) && !it.equals("undefined", true) }
+}
+
+private fun friendlyOrderDateTime(value: String?): String? {
+    val clean = usefulOrderText(value) ?: return null
+    val normalized = clean.replace('T', ' ')
+    val date = normalized.substringBefore(' ')
+    val time = normalized.substringAfter(' ', "").take(5)
+    val parts = date.split('-')
+    val formattedDate = if (parts.size == 3) "${parts[2]}/${parts[1]} às $time" else time.ifBlank { date }
+    return formattedDate.trimEnd().removeSuffix("às")
 }
 
 private fun formatQty(qty: Double): String = if (qty % 1.0 == 0.0) qty.toInt().toString() else qty.toString()
