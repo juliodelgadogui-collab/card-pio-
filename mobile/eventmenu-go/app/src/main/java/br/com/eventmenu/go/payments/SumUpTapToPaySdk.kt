@@ -95,10 +95,29 @@ class SumUpTapToPaySdk(context: Context) : CardPresentSdk {
                 is PaymentEvent.CVMRequested -> emit(CardSdkEvent.Processing)
                 is PaymentEvent.CVMPresented -> emit(CardSdkEvent.Processing)
                 is PaymentEvent.TransactionDone -> {
-                    emit(CardSdkEvent.Approved(event.paymentOutput.toProviderResult()))
+                    val output = event.paymentOutput
+                    emit(
+                        CardSdkEvent.Approved(
+                            CardProviderResult(
+                                transactionCode = output.txCode,
+                                serverTransactionId = output.serverTransactionId,
+                                merchantCode = output.merchantCode.orEmpty(),
+                            )
+                        )
+                    )
                 }
                 is PaymentEvent.TransactionResultUnknown -> {
-                    emit(CardSdkEvent.ResultUnknown(event.paymentOutput?.toProviderResultOrNull()))
+                    val output = event.paymentOutput
+                    val candidate = output?.let {
+                        runCatching {
+                            CardProviderResult(
+                                transactionCode = it.txCode,
+                                serverTransactionId = it.serverTransactionId,
+                                merchantCode = it.merchantCode.orEmpty(),
+                            )
+                        }.getOrNull()
+                    }
+                    emit(CardSdkEvent.ResultUnknown(candidate))
                 }
                 is PaymentEvent.TransactionCanceled -> {
                     emit(CardSdkEvent.Cancelled("Pagamento cancelado no Tap-to-Pay."))
@@ -125,14 +144,4 @@ class SumUpTapToPaySdk(context: Context) : CardPresentSdk {
             affiliateKey = ""
         }
     }
-
-    private fun com.sumup.taptopay.payment.domain.model.api.PaymentOutput.toProviderResult(): CardProviderResult =
-        CardProviderResult(
-            transactionCode = txCode,
-            serverTransactionId = serverTransactionId,
-            merchantCode = merchantCode.orEmpty(),
-        )
-
-    private fun com.sumup.taptopay.payment.domain.model.api.PaymentOutput.toProviderResultOrNull(): CardProviderResult? =
-        runCatching { toProviderResult() }.getOrNull()
 }
