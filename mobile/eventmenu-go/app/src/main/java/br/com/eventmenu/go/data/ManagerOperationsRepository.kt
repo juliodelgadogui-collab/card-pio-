@@ -13,7 +13,7 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
         val alerts = buildList {
             for (i in 0 until alertsJson.length()) {
                 val a = alertsJson.getJSONObject(i)
-                add(ManagerAlert(a.optString("level"), a.optString("title"), a.optString("message")))
+                add(ManagerAlert(a.cleanString("level"), a.cleanString("title"), a.cleanString("message")))
             }
         }
         return ManagerOverview(
@@ -37,13 +37,29 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
         val cash = buildList {
             for (i in 0 until cashJson.length()) {
                 val item = cashJson.getJSONObject(i)
-                add(ManagerCashSession(item.optInt("id"), item.optInt("user_id"), item.optString("user_name"), item.optInt("opening_cash_cents"), item.optString("opened_at")))
+                add(
+                    ManagerCashSession(
+                        item.optInt("id"),
+                        item.optInt("user_id"),
+                        item.cleanString("user_name", "Funcionário"),
+                        item.optInt("opening_cash_cents"),
+                        item.cleanString("opened_at"),
+                    )
+                )
             }
         }
         val delivery = buildList {
             for (i in 0 until deliveryJson.length()) {
                 val item = deliveryJson.getJSONObject(i)
-                add(ManagerDeliveryShift(item.optInt("shift_id"), item.optInt("user_id"), item.optString("user_name"), item.optString("started_at"), item.optInt("active_orders")))
+                add(
+                    ManagerDeliveryShift(
+                        item.optInt("shift_id"),
+                        item.optInt("user_id"),
+                        item.cleanString("user_name", "Funcionário"),
+                        item.cleanString("started_at"),
+                        item.optInt("active_orders"),
+                    )
+                )
             }
         }
         val problems = buildList {
@@ -52,15 +68,15 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
                 add(
                     ManagerProblemOrder(
                         id = item.optInt("id"),
-                        channel = item.optString("channel"),
-                        status = item.optString("status"),
-                        paymentStatus = item.optString("payment_status"),
+                        channel = item.cleanString("channel"),
+                        status = item.cleanString("status"),
+                        paymentStatus = item.cleanString("payment_status"),
                         totalCents = item.optInt("total_cents"),
-                        customerName = item.optString("customer_name").ifBlank { "Consumidor" },
+                        customerName = item.cleanString("customer_name"),
                         deliveryUserId = if (item.isNull("assigned_delivery_user_id")) null else item.optInt("assigned_delivery_user_id"),
-                        deliveryName = item.optString("delivery_name"),
-                        updatedAt = item.optString("updated_at"),
-                        problemType = item.optString("problem_type"),
+                        deliveryName = item.cleanString("delivery_name"),
+                        updatedAt = item.cleanString("updated_at"),
+                        problemType = item.cleanString("problem_type"),
                     )
                 )
             }
@@ -76,14 +92,14 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
                 add(
                     ManagerReopenCandidate(
                         id = item.optInt("id"),
-                        channel = item.optString("channel"),
-                        paymentStatus = item.optString("payment_status"),
+                        channel = item.cleanString("channel"),
+                        paymentStatus = item.cleanString("payment_status"),
                         totalCents = item.optInt("total_cents"),
-                        customerName = item.optString("customer_name").ifBlank { "Consumidor" },
-                        tableName = item.optString("table_name"),
-                        updatedAt = item.optString("updated_at"),
+                        customerName = item.cleanString("customer_name"),
+                        tableName = item.cleanString("table_name"),
+                        updatedAt = item.cleanString("updated_at"),
                         eligible = item.optInt("reopen_eligible") == 1,
-                        blockReason = item.optString("reopen_block_reason"),
+                        blockReason = item.cleanString("reopen_block_reason"),
                     )
                 )
             }
@@ -99,4 +115,10 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
     }
 
     private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)
+
+    private fun JSONObject.cleanString(key: String, fallback: String = ""): String {
+        if (!has(key) || isNull(key)) return fallback
+        val value = optString(key).trim()
+        return if (value.isBlank() || value.equals("null", ignoreCase = true)) fallback else value
+    }
 }
