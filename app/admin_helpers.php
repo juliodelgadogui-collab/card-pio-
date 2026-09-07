@@ -7,6 +7,7 @@ use EventMenu\Core\Database;
 use EventMenu\Core\Security;
 use EventMenu\Core\TenantFeatures;
 use EventMenu\Services\OperatingUnitService;
+use EventMenu\Services\TenantBrandingService;
 
 $pdo = Database::connection();
 Auth::enforceCurrentUser();
@@ -75,15 +76,9 @@ function em_asset_version(string $relative): string
 
 function em_can_nav(string $permission): bool
 {
-    if ($permission === 'platform.manage') {
-        return Auth::isSuperAdmin();
-    }
-    if (Auth::isSuperAdmin() && !Auth::tenantId()) {
-        return false;
-    }
-    if ($permission === 'reports.any') {
-        return Auth::can('reports.view') || Auth::can('reports.own');
-    }
+    if ($permission === 'platform.manage') return Auth::isSuperAdmin();
+    if (Auth::isSuperAdmin() && !Auth::tenantId()) return false;
+    if ($permission === 'reports.any') return Auth::can('reports.view') || Auth::can('reports.own');
     return Auth::can($permission);
 }
 
@@ -124,16 +119,10 @@ function em_nav(): array
 
 function em_context_tenant_name(): ?string
 {
-    if (!Auth::isSuperAdmin() || !Auth::tenantId()) {
-        return null;
-    }
-
+    if (!Auth::isSuperAdmin() || !Auth::tenantId()) return null;
     static $name = null;
     static $loaded = false;
-    if ($loaded) {
-        return $name;
-    }
-
+    if ($loaded) return $name;
     $loaded = true;
     $stmt = Database::connection()->prepare('SELECT name FROM tenants WHERE id=?');
     $stmt->execute([Auth::tenantId()]);
@@ -144,16 +133,10 @@ function em_context_tenant_name(): ?string
 
 function em_operational_unit_context(): array
 {
-    if (!Auth::tenantId()) {
-        return ['units' => [], 'current' => null];
-    }
-
+    if (!Auth::tenantId()) return ['units' => [], 'current' => null];
     try {
         $service = new OperatingUnitService();
-        return [
-            'units' => $service->availableForCurrentUser(),
-            'current' => $service->current(),
-        ];
+        return ['units' => $service->availableForCurrentUser(), 'current' => $service->current()];
     } catch (Throwable) {
         return ['units' => [], 'current' => null];
     }
@@ -172,28 +155,46 @@ function em_header(string $title, string $active): void
     $units = $unitContext['units'];
     $currentUnit = $unitContext['current'];
     $homeRoute = Auth::isSuperAdmin() && !$currentTenantId ? 'super' : 'dashboard';
+
+    $branding = null;
+    $brandCss = '';
+    if ($currentTenantId) {
+        try {
+            $brandService = new TenantBrandingService();
+            $branding = $brandService->forTenant($currentTenantId);
+            $brandCss = $brandService->cssVariables($currentTenantId);
+        } catch (Throwable) {}
+    }
+    $brandActive = $branding && !empty($branding['apply_panel']);
+    $brandName = $brandActive ? (string)$branding['display_name'] : 'EventMenu Premium';
+    $brandLogo = $brandActive ? (string)$branding['logo_url'] : '';
+    $themeColor = $brandActive ? (string)$branding['primary_color'] : '#21134f';
+    $subtitleCompany = $brandActive ? $brandName : ($context ?: null);
     ?>
 <!doctype html>
 <html lang="pt-BR">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-    <meta name="theme-color" content="#21134f">
+    <meta name="theme-color" content="<?= Security::e($themeColor) ?>">
     <meta name="color-scheme" content="light">
-    <title><?= Security::e($title) ?> — EventMenu Premium</title>
+    <title><?= Security::e($title) ?> — <?= Security::e($brandName) ?></title>
     <link rel="manifest" href="<?= $manifest ?>">
     <link rel="stylesheet" href="<?= $css ?>">
     <link rel="stylesheet" href="<?= $premiumCss ?>">
 </head>
-<body>
+<body<?= $brandCss!=='' ? ' style="'.Security::e($brandCss).'"' : '' ?>>
 <div class="layout">
     <aside class="sidebar" aria-label="Navegação principal">
         <div class="sidebar-head">
-            <a class="brand" href="<?= Security::e(app_url('?route=' . $homeRoute)) ?>">EventMenu <span>Premium</span></a>
+            <a class="brand tenant-brand" href="<?= Security::e(app_url('?route=' . $homeRoute)) ?>">
+                <?php if ($brandLogo !== ''): ?><img class="tenant-brand-logo" src="<?= Security::e($brandLogo) ?>" alt="" loading="lazy"><?php endif; ?>
+                <span class="tenant-brand-copy"><b><?= Security::e($brandName) ?></b><?php if($brandActive):?><small>EventMenu</small><?php endif;?></span>
+            </a>
             <button type="button" class="nav-toggle" aria-label="Abrir menu" aria-expanded="false"><span></span><span></span><span></span></button>
         </div>
 
-        <?php if ($context): ?>
+        <?php if ($context && !$brandActive): ?>
             <div class="tenant-context">
                 <small>Empresa em contexto</small>
                 <strong><?= Security::e($context) ?></strong>
@@ -204,12 +205,8 @@ function em_header(string $title, string $active): void
         <nav class="nav">
             <?php foreach (em_nav() as [$route, $label, $permission]): ?>
                 <?php
-                if (!em_can_nav($permission)) {
-                    continue;
-                }
-                if ($currentTenantId && !TenantFeatures::routeEnabled($route, $currentTenantId)) {
-                    continue;
-                }
+                if (!em_can_nav($permission)) continue;
+                if ($currentTenantId && !TenantFeatures::routeEnabled($route, $currentTenantId)) continue;
                 ?>
                 <a data-route="<?= Security::e($route) ?>" class="<?= $active === $route ? 'active' : '' ?>" href="<?= Security::e(app_url('?route=' . urlencode($route))) ?>"><?= Security::e($label) ?></a>
             <?php endforeach; ?>
@@ -233,7 +230,7 @@ function em_header(string $title, string $active): void
                 <span class="top-eyebrow"><?= Auth::isSuperAdmin() && !$currentTenantId ? 'PLATAFORMA' : 'PAINEL' ?></span>
                 <h1><?= Security::e($title) ?></h1>
                 <div class="muted top-subtitle">
-                    <?= $context ? Security::e($context) . ' · ' : '' ?><?= $type ? Security::e($type) : 'Gestão multiempresa' ?>
+                    <?= $subtitleCompany ? Security::e($subtitleCompany) . ' · ' : '' ?><?= $type ? Security::e($type) : 'Gestão multiempresa' ?>
                     <?php if ($currentUnit): ?> · <strong><?= Security::e($currentUnit['name']) ?></strong><?php endif; ?>
                 </div>
             </div>
@@ -253,8 +250,8 @@ function em_header(string $title, string $active): void
                     </form>
                 <?php elseif ($currentUnit): ?>
                     <span class="context-pill"><?= Security::e($currentUnit['name']) ?></span>
-                <?php elseif ($context): ?>
-                    <span class="context-pill"><?= Security::e($context) ?></span>
+                <?php elseif ($subtitleCompany): ?>
+                    <span class="context-pill"><?= Security::e($subtitleCompany) ?></span>
                 <?php endif; ?>
             </div>
         </header>
@@ -326,9 +323,7 @@ function em_footer(): void
                     host.prepend(a);
                 }
             }
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.register(<?= $sw ?>).catch(() => {});
-            }
+            if ('serviceWorker' in navigator) navigator.serviceWorker.register(<?= $sw ?>).catch(() => {});
         })();
         </script>
     </main>
@@ -342,9 +337,7 @@ function em_require_tenant(): int
 {
     $id = Auth::tenantId();
     if (!$id) {
-        if (Auth::isSuperAdmin()) {
-            em_go('super');
-        }
+        if (Auth::isSuperAdmin()) em_go('super');
         http_response_code(403);
         exit('Selecione uma empresa.');
     }
