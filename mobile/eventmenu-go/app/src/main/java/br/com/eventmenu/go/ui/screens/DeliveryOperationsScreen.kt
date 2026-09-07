@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import br.com.eventmenu.go.BuildConfig
 import br.com.eventmenu.go.CancellationViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.OrderOperationsViewModel
@@ -75,6 +76,7 @@ fun DeliveryOperationsScreen(
     var cashOrder by remember { mutableStateOf<Order?>(null) }
     var cancelOrder by remember { mutableStateOf<Order?>(null) }
     val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
+    val nfcAvailableInThisApk = BuildConfig.SUMUP_TAP_TO_PAY
 
     LaunchedEffect(deliveries.map { it.id }) { onRefreshProgress() }
 
@@ -126,11 +128,11 @@ fun DeliveryOperationsScreen(
 
                         if (!arrived) {
                             Button(onClick = { onArrive(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("CHEGUEI") }
-                            Text("PIX, cartão por aproximação e dinheiro serão liberados somente depois que o servidor registrar sua chegada.")
+                            Text(if(nfcAvailableInThisApk)"PIX, aproximação e dinheiro serão liberados somente depois que o servidor registrar sua chegada." else "PIX e dinheiro serão liberados somente depois que o servidor registrar sua chegada.")
                         } else if (order.paymentStatus != "paid") {
                             Text("✅ Chegada confirmada · Como o cliente deseja pagar?", fontWeight = FontWeight.Bold)
                             Button(onClick = { pixOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("PIX") }
-                            Button(onClick = { cardOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO POR APROXIMAÇÃO") }
+                            if(nfcAvailableInThisApk)Button(onClick = { cardOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("CARTÃO POR APROXIMAÇÃO") }
                             OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth()) { Text("DINHEIRO") }
                         } else {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -178,7 +180,7 @@ fun DeliveryOperationsScreen(
     pixOrder?.let { order ->
         TaxIdDialog(orderId = order.id, amountCents = order.totalCents, onDismiss = { pixOrder = null }, onConfirm = { taxId -> pixOrder = null; onPix(order.id, taxId) })
     }
-    cardOrder?.let { order ->
+    if(nfcAvailableInThisApk)cardOrder?.let { order ->
         CardMethodDialog(
             amountCents = 0,
             onDismiss = { cardOrder = null },
