@@ -9,6 +9,7 @@ use EventMenu\Core\Migrator;
 use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\BackgroundJobService;
 use EventMenu\Services\GatewayService;
+use EventMenu\Services\ProductionService;
 use EventMenu\Services\RuntimeStatusService;
 use EventMenu\Services\SystemHealthService;
 
@@ -143,6 +144,23 @@ try {
     try { $rate->assertAllowed('ci.bucket',$rateSubject,1,60); }
     catch (\RuntimeException) { $blocked = true; }
     assert_ci($blocked, 'Rate limit não bloqueou o excesso.');
+
+    $unitCode = 'ci-unit-' . bin2hex(random_bytes(3));
+    $pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,"Bar CI",1)')->execute([$tenantId,$unitCode]);
+    $unitId = (int)$pdo->lastInsertId();
+    assert_ci($unitId > 0, 'Unidade de teste do evento não foi criada.');
+    $eventSlug = 'ci-event-' . bin2hex(random_bytes(4));
+    $pdo->prepare('INSERT INTO events (tenant_id,name,slug,starts_at,status,bar_enabled,bar_unit_id) VALUES (?,?,?,CURRENT_TIMESTAMP,"published",1,?)')->execute([$tenantId,'Evento CI',$eventSlug,$unitId]);
+    $eventId = (int)$pdo->lastInsertId();
+    assert_ci($eventId > 0, 'Evento de teste do bar não foi criado.');
+    $pdo->prepare('INSERT INTO orders (public_token,tenant_id,unit_id,event_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?,?,?,?,"event_bar","confirmed","paid",1000,1000,?)')->execute([bin2hex(random_bytes(20)),$tenantId,$unitId,$eventId,$userId]);
+    $eventOrderId = (int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents) VALUES (?, ?, "Bebida pronta CI", 1000, 1, 1000)')->execute([$eventOrderId,$productId]);
+    Database::transaction(function (\PDO $tx) use ($tenantId,$eventOrderId): void {
+        (new ProductionService())->ensureOrderJobs($tx,$tenantId,$eventOrderId,null);
+    });
+    $s=$pdo->prepare('SELECT status FROM orders WHERE id=? AND tenant_id=?');$s->execute([$eventOrderId,$tenantId]);
+    assert_ci((string)$s->fetchColumn()==='ready','Pedido event_bar sem preparo não ficou pronto automaticamente.');
 
     $health = (new SystemHealthService())->snapshot();
     assert_ci(isset($health['checks']['database'],$health['checks']['queue'],$health['checks']['backup']), 'Snapshot de saúde incompleto.');
