@@ -15,7 +15,8 @@ android {
 
     defaultConfig {
         applicationId = "br.com.eventmenu.go"
-        minSdk = 23
+        // SumUp Tap-to-Pay 1.1.6 exige Android 11 / API 30 ou superior.
+        minSdk = 30
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
@@ -28,12 +29,15 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
 
     buildTypes {
         release {
+            // Obrigatório para attestation de pagamentos reais SumUp.
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -45,6 +49,10 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
+
+    // SumUp Tap-to-Pay nativo: pagamento por aproximação sem abrir outro aplicativo.
+    implementation("com.sumup.tap-to-pay:utopia-sdk:1.1.6")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     // AGP 9.1 suporta compileSdk 36. As versões seguintes de Core/Lifecycle
     // passaram a exigir API 37; mantenha estes pins até a migração coordenada do AGP.
