@@ -35,6 +35,11 @@ try{
     if($action==='card-verify'){
         $providerResult=is_array($body['provider_result']??null)?$body['provider_result']:[];$result=(new CardPresentService())->verifyIntent((string)($body['intent_token']??''),$providerResult,$deviceId);gopay_out($result);
     }
+    if($action==='card-reconcile'){
+        // Sem confiar no APK: o provider usa os dados persistidos da intenção (incluindo
+        // client_transaction_id) para consultar a transação diretamente no adquirente.
+        $result=(new CardPresentService())->verifyIntent((string)($body['intent_token']??''),[],$deviceId);gopay_out($result);
+    }
     if($action==='card-fail'){
         (new CardPresentService())->failIntent((string)($body['intent_token']??''),(string)($body['reason']??'Falha no SDK'),$deviceId);gopay_out(['ok'=>true]);
     }
