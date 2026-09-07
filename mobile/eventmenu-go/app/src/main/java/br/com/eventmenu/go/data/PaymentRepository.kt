@@ -2,9 +2,10 @@ package br.com.eventmenu.go.data
 
 import br.com.eventmenu.go.security.SecureSessionStore
 import org.json.JSONObject
+import java.util.UUID
 
 /**
- * Fonte única do app para pagamentos digitais.
+ * Fonte única do app para pagamentos digitais/presenciais.
  *
  * Credenciais permanentes de provedor nunca são persistidas aqui. A sessão curta do SDK
  * vem do servidor somente quando o operador inicia a cobrança e permanece em memória.
@@ -31,10 +32,16 @@ class PaymentRepository(
                 connection = meta.optString("connection"),
             )
         }.sortedBy { it.label.lowercase() }.toList()
+        val runtime = root.optJSONObject("runtime") ?: JSONObject()
         return PaymentCapabilities(
             cardPresentProvider = root.optString("card_present_provider").takeIf { it.isNotBlank() },
             pixProvider = root.optString("pix_provider").takeIf { it.isNotBlank() },
             providers = providers,
+            cardPresentEnabled = runtime.optBoolean("card_present_enabled", false),
+            pixEnabled = runtime.optBoolean("pix_enabled", true),
+            cashEnabled = runtime.optBoolean("cash_enabled", true),
+            externalTerminalEnabled = runtime.optBoolean("external_terminal_enabled", true),
+            externalTerminalReferenceRequired = runtime.optBoolean("external_terminal_reference_required", true),
         )
     }
 
@@ -146,6 +153,28 @@ class PaymentRepository(
             status = data.optString("status"),
             remainingCents = balance.optInt("remaining_cents"),
             paymentStatus = balance.optString("payment_status"),
+        )
+    }
+
+    suspend fun confirmExternalTerminal(
+        orderId: Int,
+        amountCents: Int,
+        paymentMethod: String,
+        machineLabel: String,
+        transactionReference: String,
+    ) {
+        require(paymentMethod in setOf("credit", "debit")) { "Escolha crédito ou débito." }
+        require(amountCents > 0) { "Valor inválido." }
+        api.postPayments(
+            "external-terminal",
+            requireToken(),
+            JSONObject()
+                .put("order_id", orderId)
+                .put("amount_cents", amountCents)
+                .put("payment_method", paymentMethod)
+                .put("machine_label", machineLabel.take(120))
+                .put("transaction_reference", transactionReference.take(190))
+                .put("idempotency_key", "go-terminal-${UUID.randomUUID()}"),
         )
     }
 
