@@ -44,7 +44,7 @@ fun PosScreen(
     onCreate: (String,String,String,String,String) -> Unit,
     onCash: (Int) -> Unit,
     onPix: (Int,String) -> Unit,
-    onNfc: (Int) -> Unit,
+    onNfc: (Int,String,Int) -> Unit,
     onReceipt: (Int) -> Unit,
     onPrintReceipt: (Int) -> Unit,
     onRefreshPayment: () -> Unit,
@@ -151,7 +151,7 @@ private fun PosPaymentScreen(
     onRefreshDiscount: (Int) -> Unit,
     onCash: (Int) -> Unit,
     onPix: (Int,String) -> Unit,
-    onNfc: (Int) -> Unit,
+    onNfc: (Int,String,Int) -> Unit,
     onReceipt: (Int) -> Unit,
     onPrintReceipt: (Int) -> Unit,
     onRefresh: () -> Unit,
@@ -164,6 +164,7 @@ private fun PosPaymentScreen(
     val amount=((amountText.replace(',','.').toDoubleOrNull()?:0.0)*100).toInt()
     var pixTaxDialog by remember{mutableStateOf(false)}
     var discountDialog by remember{mutableStateOf(false)}
+    var cardDialog by remember{mutableStateOf(false)}
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){
         item{
@@ -206,7 +207,7 @@ private fun PosPaymentScreen(
                         Button(onClick={onCash(amount)},enabled=state.cashOpen&&amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("DINHEIRO")}
                         if(!state.cashOpen)Text("Abra o caixa financeiro para receber dinheiro.")
                         Button(onClick={pixTaxDialog=true},enabled=amount in 1..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("PIX")}
-                        Button(onClick={onNfc(amount)},enabled=amount in 100..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("CRÉDITO / DÉBITO · NFC")}
+                        Button(onClick={cardDialog=true},enabled=amount in 100..remaining&&discountRequest?.status!="pending",modifier=Modifier.fillMaxWidth()){Text("CRÉDITO / DÉBITO · APROXIMAÇÃO")}
                         if(discountRequest?.status=="pending")Text("Pagamento bloqueado enquanto o desconto aguarda decisão. O servidor também rejeita alteração de preço com cobrança ativa.")
                     }
                 }
@@ -248,10 +249,18 @@ private fun PosPaymentScreen(
 
     if(pixTaxDialog){
         var taxId by remember{mutableStateOf("")}
-        AlertDialog(onDismissRequest={pixTaxDialog=false},title={Text("PIX · ${posMoney(amount)}")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("CPF/CNPJ é exigido pelo PagBank para emitir o QR PIX e não é salvo pelo app.");OutlinedTextField(taxId,{taxId=it.filter(Char::isDigit).take(14)},label={Text("CPF ou CNPJ")},singleLine=true)}},confirmButton={Button(onClick={pixTaxDialog=false;onPix(amount,taxId)},enabled=taxId.length in setOf(11,14)){Text("GERAR PIX")}},dismissButton={TextButton(onClick={pixTaxDialog=false}){Text("CANCELAR")}})
+        AlertDialog(onDismissRequest={pixTaxDialog=false},title={Text("PIX · ${posMoney(amount)}")},text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){Text("CPF/CNPJ pode ser exigido pelo provedor para emitir o QR PIX e não é salvo pelo app.");OutlinedTextField(taxId,{taxId=it.filter(Char::isDigit).take(14)},label={Text("CPF ou CNPJ")},singleLine=true)}},confirmButton={Button(onClick={pixTaxDialog=false;onPix(amount,taxId)},enabled=taxId.length in setOf(11,14)){Text("GERAR PIX")}},dismissButton={TextButton(onClick={pixTaxDialog=false}){Text("CANCELAR")}})
+    }
+
+    if(cardDialog){
+        CardMethodDialog(
+            amountCents=amount,
+            onDismiss={cardDialog=false},
+            onConfirm={method,installments->cardDialog=false;onNfc(amount,method,installments)},
+        )
     }
 }
 
 private fun discountLabel(request:DiscountRequest):String=if(request.discountType=="percent"&&request.requestedBps>0)"%.2f%% · %s".format(request.requestedBps/100.0,posMoney(request.requestedCents)) else posMoney(request.requestedCents)
-private fun paymentLabel(provider:String)=when(provider){"manual"->"Dinheiro";"pagbank"->"PagBank";"stripe"->"Stripe";"mercadopago"->"Mercado Pago";else->provider}
+private fun paymentLabel(provider:String)=when(provider){"manual"->"Dinheiro";"sumup"->"SumUp";"pagbank"->"PagBank";"stripe"->"Stripe";"mercadopago"->"Mercado Pago";else->provider}
 private fun posMoney(cents:Int)="R$ %.2f".format(cents/100.0).replace('.',',')
