@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.CardPaymentPhase
 import br.com.eventmenu.go.CardPaymentUiState
 
@@ -35,10 +36,14 @@ fun CardMethodDialog(
         onDismissRequest = onDismiss,
         title = { Text("Cartão por aproximação") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(androidx.compose.ui.unit.dp(10f))) {
-                Text("Valor: ${cardMoney(amountCents)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (amountCents > 0) {
+                    Text("Valor: ${cardMoney(amountCents)}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                } else {
+                    Text("O saldo restante será recalculado pelo servidor antes da cobrança.", fontWeight = FontWeight.Bold)
+                }
                 Text("O cliente aproxima o cartão ou carteira digital diretamente no celular com NFC.")
-                Row(horizontalArrangement = Arrangement.spacedBy(androidx.compose.ui.unit.dp(8f))) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(
                         selected = method == "credit",
                         onClick = { method = "credit" },
@@ -95,8 +100,13 @@ fun CardPaymentStatusDialog(
         onDismissRequest = { if (!state.blocking) onDismiss() },
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(androidx.compose.ui.unit.dp(8f))) {
-                state.orderId?.let { Text("Pedido #$it · ${cardMoney(state.amountCents)}", fontWeight = FontWeight.Bold) }
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.orderId?.let {
+                    Text(
+                        if (state.amountCents > 0) "Pedido #$it · ${cardMoney(state.amountCents)}" else "Pedido #$it",
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
                 if (state.provider.isNotBlank()) Text("Provedor: ${state.provider.uppercase()}")
                 Text(state.message ?: "Aguarde…")
                 if (state.phase == CardPaymentPhase.PENDING_CONFIRMATION) {
