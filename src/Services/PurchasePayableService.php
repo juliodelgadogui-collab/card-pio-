@@ -35,6 +35,8 @@ final class PurchasePayableService
     {
         $q=$pdo->prepare(Database::portableSql($pdo,'SELECT po.*,s.name supplier_name FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=? AND po.tenant_id=? FOR UPDATE'));$q->execute([$orderId,$tenantId]);$order=$q->fetch();if(!$order)throw new RuntimeException('Compra não encontrada.');
         if((string)$order['status']!=='received')return[];$total=max(0,(int)$order['total_cents']);if($total<=0)return[];
+        if(!empty($order['finance_generated_at']))return$this->installmentsInTransaction($pdo,$tenantId,$orderId);
+
         $count=max(1,min(48,(int)($order['installments_count']??1)));$interval=max(0,min(365,(int)($order['installment_interval_days']??30)));
         $receivedDate=substr((string)($order['received_at']?:date('Y-m-d')),0,10);$first=$this->normalizeDate($order['first_due_date']??null)?:$receivedDate;
         $method=in_array((string)($order['payment_method']??'other'),self::METHODS,true)?(string)$order['payment_method']:'other';
@@ -45,7 +47,7 @@ final class PurchasePayableService
             if(!$inst){$pdo->prepare('INSERT INTO purchase_payment_installments (tenant_id,purchase_order_id,installment_no,amount_cents,due_date,status) VALUES (?,?,?,?,?,"open")')->execute([$tenantId,$orderId,$n,$amount,$due]);$instId=(int)$pdo->lastInsertId();}
             else{$instId=(int)$inst['id'];if(!$inst['financial_entry_id'])$pdo->prepare('UPDATE purchase_payment_installments SET amount_cents=?,due_date=? WHERE id=?')->execute([$amount,$due,$instId]);}
             $key=$n===1?'purchase:'.$orderId.':received':'purchase:'.$orderId.':installment:'.$n;
-            $sql=Database::portableSql($pdo,'INSERT IGNORE INTO financial_entries (tenant_id,unit_id,purchase_order_id,supplier_id,category_id,direction,entry_type,description,gross_cents,fee_cents,net_cents,affects_result,affects_cash,status,competence_date,due_date,idempotency_key,metadata,created_by) VALUES (?,?,?,?,?,"out","inventory_purchase_payable",?,?,0,?,0,1,"open",?,?,?, ?,?)');
+            $sql=Database::portableSql($pdo,'INSERT IGNORE INTO financial_entries (tenant_id,unit_id,purchase_order_id,supplier_id,category_id,direction,entry_type,description,gross_cents,fee_cents,net_cents,affects_result,affects_cash,status,competence_date,due_date,idempotency_key,metadata,created_by) VALUES (?,?,?,?,?,"out","inventory_purchase_payable",?,?,0,?,0,1,"open",?,?,?,?,?)');
             $description='Compra #'.$orderId.' · parcela '.$n.'/'.$count.(!empty($order['supplier_name'])?' · '.$order['supplier_name']:'');
             $pdo->prepare($sql)->execute([$tenantId,$order['unit_id']?:null,$orderId,$order['supplier_id']?:null,$categoryId,$description,$amount,$amount,$receivedDate,$due,$key,json_encode(['payment_method'=>$method,'installment_no'=>$n,'installments_count'=>$count],JSON_UNESCAPED_UNICODE),Auth::id()]);
             $f=$pdo->prepare('SELECT id,status,settled_at FROM financial_entries WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$f->execute([$tenantId,$key]);$entry=$f->fetch();if($entry){$pdo->prepare('UPDATE purchase_payment_installments SET financial_entry_id=?,status=?,settled_at=? WHERE id=?')->execute([(int)$entry['id'],$entry['status']==='settled'?'paid':'open',$entry['settled_at']??null,$instId]);}
@@ -57,12 +59,34 @@ final class PurchasePayableService
 
     public function installments(int $orderId):array
     {
-        $tenantId=Auth::tenantId();if(!$tenantId)return[];$q=Database::connection()->prepare('SELECT i.*,fe.status financial_status,fe.settled_at financial_settled_at,fa.name account_name FROM purchase_payment_installments i LEFT JOIN financial_entries fe ON fe.id=i.financial_entry_id LEFT JOIN financial_accounts fa ON fa.id=fe.account_id WHERE i.tenant_id=? AND i.purchase_order_id=? ORDER BY i.installment_no');$q->execute([$tenantId,$orderId]);return$q->fetchAll();
+        $tenantId=Auth::tenantId();if(!$tenantId)return[];return$this->installmentsInTransaction(Database::connection(),$tenantId,$orderId);
     }
 
     public function syncReceivedPurchases(int $tenantId,int $limit=200):int
     {
-        $pdo=Database::connection();$q=$pdo->prepare('SELECT id FROM purchase_orders WHERE tenant_id=? AND status="received" AND finance_generated_at IS NULL ORDER BY id LIMIT '.max(1,min(500,$limit)));$q->execute([$tenantId]);$count=0;foreach($q->fetchAll()as$row){try{Database::transaction(function(PDO$tx)use($tenantId,$row):void{$this->generateForOrderInTransaction($tx,$tenantId,(int)$row['id']);});$count++;}catch(\Throwable){}}return$count;
+        $pdo=Database::connection();$q=$pdo->prepare('SELECT id FROM purchase_orders WHERE tenant_id=? AND status="received" AND finance_generated_at IS NULL ORDER BY id LIMIT '.max(1,min(500,$limit)));$q->execute([$tenantId]);$count=0;
+        foreach($q->fetchAll()as$row){
+            try{
+                Database::transaction(function(PDO$tx)use($tenantId,$row):void{
+                    $orderId=(int)$row['id'];$legacy=$tx->prepare('SELECT * FROM financial_entries WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$legacy->execute([$tenantId,'purchase:'.$orderId.':received']);$entry=$legacy->fetch();
+                    if($entry){
+                        $order=$tx->prepare(Database::portableSql($tx,'SELECT * FROM purchase_orders WHERE id=? AND tenant_id=? FOR UPDATE'));$order->execute([$orderId,$tenantId]);$purchase=$order->fetch();if(!$purchase)return;
+                        $due=(string)($entry['due_date']?:substr((string)($purchase['received_at']?:date('Y-m-d')),0,10));$amount=(int)$entry['net_cents'];
+                        $insert=Database::portableSql($tx,'INSERT IGNORE INTO purchase_payment_installments (tenant_id,purchase_order_id,installment_no,amount_cents,due_date,status,financial_entry_id,settled_at) VALUES (?,?,1,?,?,?, ?,?)');
+                        $tx->prepare($insert)->execute([$tenantId,$orderId,$amount,$due,$entry['status']==='settled'?'paid':'open',(int)$entry['id'],$entry['settled_at']??null]);
+                        $tx->prepare('UPDATE purchase_orders SET installments_count=1,first_due_date=COALESCE(first_due_date,?),finance_generated_at=COALESCE(finance_generated_at,CURRENT_TIMESTAMP) WHERE id=? AND tenant_id=?')->execute([$due,$orderId,$tenantId]);
+                        return;
+                    }
+                    $this->generateForOrderInTransaction($tx,$tenantId,$orderId);
+                });$count++;
+            }catch(\Throwable){}
+        }
+        return$count;
+    }
+
+    private function installmentsInTransaction(PDO$pdo,int$tenantId,int$orderId):array
+    {
+        $q=$pdo->prepare('SELECT i.*,fe.status financial_status,fe.settled_at financial_settled_at,fa.name account_name FROM purchase_payment_installments i LEFT JOIN financial_entries fe ON fe.id=i.financial_entry_id LEFT JOIN financial_accounts fa ON fa.id=fe.account_id WHERE i.tenant_id=? AND i.purchase_order_id=? ORDER BY i.installment_no');$q->execute([$tenantId,$orderId]);return$q->fetchAll();
     }
 
     private function categoryId(PDO $pdo,int $tenantId):?int
