@@ -86,6 +86,8 @@ CREATE TABLE financial_entries (
   gross_cents INTEGER NOT NULL,
   fee_cents INTEGER NOT NULL DEFAULT 0,
   net_cents INTEGER NOT NULL,
+  affects_result INTEGER NOT NULL DEFAULT 1,
+  affects_cash INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
   competence_date TEXT NOT NULL,
   due_date TEXT NULL,
@@ -101,6 +103,8 @@ CREATE TABLE financial_entries (
 CREATE INDEX idx_fin_entry_scope ON financial_entries(tenant_id,unit_id,competence_date,direction,status);
 CREATE INDEX idx_fin_entry_due ON financial_entries(tenant_id,status,due_date);
 CREATE INDEX idx_fin_entry_event ON financial_entries(tenant_id,event_id,competence_date);
+CREATE INDEX idx_fin_entry_result ON financial_entries(tenant_id,affects_result,competence_date);
+CREATE INDEX idx_fin_entry_cash ON financial_entries(tenant_id,affects_cash,status,due_date);
 
 CREATE TABLE payment_fee_rules (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
