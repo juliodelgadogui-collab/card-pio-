@@ -77,7 +77,9 @@ final class ApiAuthService
         Database::transaction(function(PDO $tx)use($row,$hash,$deviceId):void{
             $tx->prepare('UPDATE api_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE token_hash=? AND revoked_at IS NULL')->execute([$hash]);
             if($row['device_hash'])$tx->prepare('UPDATE api_refresh_tokens SET revoked_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND device_hash=? AND revoked_at IS NULL')->execute([$row['tenant_id'],$row['user_id'],$row['device_hash']]);
-            if($deviceId!==''&&$row['device_hash']&&hash_equals((string)$row['device_hash'],hash('sha256',$deviceId))){$tx->prepare('UPDATE push_devices SET active=0,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND device_id=?')->execute([$row['tenant_id'],$row['user_id'],$deviceId]);}
+            $deviceHash=(string)($row['device_hash']??'');if($deviceHash==='')return;
+            if($deviceId!==''&&hash_equals($deviceHash,hash('sha256',$deviceId))){$tx->prepare('UPDATE push_devices SET active=0,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND user_id=? AND device_id=?')->execute([$row['tenant_id'],$row['user_id'],$deviceId]);return;}
+            $d=$tx->prepare('SELECT id,device_id FROM push_devices WHERE tenant_id=? AND user_id=? AND active=1');$d->execute([$row['tenant_id'],$row['user_id']]);$u=$tx->prepare('UPDATE push_devices SET active=0,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND user_id=?');foreach($d->fetchAll()as$pushDevice){if(hash_equals($deviceHash,hash('sha256',(string)$pushDevice['device_id'])))$u->execute([$pushDevice['id'],$row['tenant_id'],$row['user_id']]);}
         });
         $this->audit((int)$row['tenant_id'],(int)$row['user_id'],'api.logout',[]);
     }
