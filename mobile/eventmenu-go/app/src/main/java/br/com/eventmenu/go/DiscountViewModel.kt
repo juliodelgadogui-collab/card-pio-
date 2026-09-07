@@ -27,8 +27,6 @@ class DiscountViewModel(private val repository: DiscountRepository) : ViewModel(
     private val _state = MutableStateFlow(DiscountState())
     val state: StateFlow<DiscountState> = _state.asStateFlow()
 
-    init { loadPolicy() }
-
     fun loadPolicy() = viewModelScope.launch {
         runCatching { repository.policy() }
             .onSuccess { policy -> _state.update { it.copy(policy = policy) } }
