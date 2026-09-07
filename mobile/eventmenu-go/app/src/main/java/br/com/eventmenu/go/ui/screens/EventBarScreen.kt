@@ -50,7 +50,7 @@ fun EventBarScreen(
     onCreate: (String) -> Unit,
     onCash: (Int) -> Unit,
     onPix: (Int, String) -> Unit,
-    onNfc: (Int) -> Unit,
+    onNfc: (Int,String,Int) -> Unit,
     onRefreshPayment: () -> Unit,
     onPollPix: () -> Unit,
     onDismissPix: () -> Unit,
@@ -151,7 +151,7 @@ private fun EventBarPayment(
     canNfc: Boolean,
     onCash: (Int) -> Unit,
     onPix: (Int, String) -> Unit,
-    onNfc: (Int) -> Unit,
+    onNfc: (Int,String,Int) -> Unit,
     onRefresh: () -> Unit,
     onReceipt: (Int) -> Unit,
     onPrint: (Int) -> Unit,
@@ -163,6 +163,7 @@ private fun EventBarPayment(
     var amountText by remember(remaining) { mutableStateOf("%.2f".format(remaining / 100.0).replace('.', ',')) }
     val amount = ((amountText.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).toInt()
     var pixDialog by remember { mutableStateOf(false) }
+    var cardDialog by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -197,7 +198,7 @@ private fun EventBarPayment(
                             if (!cashOpen) Text("Abra o caixa financeiro para receber dinheiro.")
                         }
                         if (canPix) Button(onClick = { pixDialog = true }, enabled = amount in 1..remaining, modifier = Modifier.fillMaxWidth()) { Text("PIX") }
-                        if (canNfc) Button(onClick = { onNfc(amount) }, enabled = amount in 100..remaining, modifier = Modifier.fillMaxWidth()) { Text("CRÉDITO / DÉBITO · NFC") }
+                        if (canNfc) Button(onClick = { cardDialog = true }, enabled = amount in 100..remaining, modifier = Modifier.fillMaxWidth()) { Text("CRÉDITO / DÉBITO · APROXIMAÇÃO") }
                         if (!canCash && !canPix && !canNfc) Text("Sua conta pode lançar consumo no Bar, mas não possui permissão de recebimento. Solicite um Caixa/operador Pay.")
                     }
                 }
@@ -226,12 +227,20 @@ private fun EventBarPayment(
             title = { Text("PIX · ${barMoney(amount)}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("CPF/CNPJ é usado somente para emissão da cobrança PagBank.")
+                    Text("CPF/CNPJ pode ser exigido pelo provedor para emitir o QR PIX e não é salvo pelo app.")
                     OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true)
                 }
             },
             confirmButton = { Button(onClick = { pixDialog = false; onPix(amount, taxId) }, enabled = taxId.length in setOf(11, 14)) { Text("GERAR PIX") } },
             dismissButton = { TextButton(onClick = { pixDialog = false }) { Text("CANCELAR") } },
+        )
+    }
+
+    if (cardDialog) {
+        CardMethodDialog(
+            amountCents = amount,
+            onDismiss = { cardDialog = false },
+            onConfirm = { method, installments -> cardDialog = false; onNfc(amount, method, installments) },
         )
     }
 }
@@ -267,6 +276,7 @@ private fun copyPix(context: Context, text: String) {
 
 private fun barPaymentLabel(provider: String) = when (provider) {
     "manual" -> "Dinheiro"
+    "sumup" -> "SumUp"
     "pagbank" -> "PagBank"
     "stripe" -> "Stripe"
     "mercadopago" -> "Mercado Pago"
