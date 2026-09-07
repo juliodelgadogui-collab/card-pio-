@@ -74,7 +74,7 @@ $manual=[
     'openpix'=>['label'=>'OpenPix / Woovi','account'=>'Identificação da conta','fields'=>[['app_id','App ID','password']]],
 ];
 
-em_header('Provedores de pagamento','gateways');
+em_header('Provedores de pagamento','payment-providers');
 ?>
 <section class="page-hero">
     <div><span class="eyebrow">PAGAMENTOS INTEGRADOS</span><h2>Conta do restaurante e provedores</h2><p>Conecte a conta que receberá o dinheiro. O aplicativo nunca guarda segredo permanente: ele solicita ao servidor somente a sessão necessária para cada cobrança.</p></div>
