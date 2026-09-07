@@ -29,15 +29,15 @@ final class FinancialLedgerService
     {
         $this->ensureDefaults($pdo,$tenantId);$paymentId=(int)$payment['id'];$amount=(int)$payment['amount_cents'];$provider=(string)$payment['provider'];
         $source=strtolower((string)($verified['payment_method_type']??$verified['source']??''));$method=$this->paymentMethod($provider,$source);$rule=$this->feeRule($pdo,$tenantId,$provider,$method);
-        $fee=min($amount,max(0,(int)round($amount*((int)$rule['percent_bps']/10000))+(int)$rule['fixed_cents']));$net=$amount-$fee;$days=max(0,(int)$rule['settlement_days']);
+        $fee=min($amount,max(0,(int)round($amount*((int)$rule['percent_bps']/10000))+(int)$rule['fixed_cents']));$expectedNet=$amount-$fee;$days=max(0,(int)$rule['settlement_days']);
         $date=date('Y-m-d');$due=date('Y-m-d',strtotime('+'.$days.' days'));$status=$days===0?'settled':'open';$settled=$days===0?date('Y-m-d H:i:s'):null;
         $eventId=$this->eventForOrder($pdo,$tenantId,(int)$order['id']);$accountId=$this->accountForPayment($pdo,$tenantId,$order['unit_id']!==null?(int)$order['unit_id']:null,$provider,$method);
         $categoryId=$this->categoryId($pdo,$tenantId,'Vendas','in');
         $this->insert($pdo,[
             'tenant_id'=>$tenantId,'unit_id'=>$order['unit_id']?:null,'event_id'=>$eventId,'order_id'=>(int)$order['id'],'payment_id'=>$paymentId,
             'account_id'=>$accountId,'category_id'=>$categoryId,'direction'=>'in','entry_type'=>'sale_receipt','description'=>'Recebimento do pedido #'.$order['id'],
-            'gross_cents'=>$amount,'fee_cents'=>$fee,'net_cents'=>$net,'status'=>$status,'competence_date'=>$date,'due_date'=>$due,'settled_at'=>$settled,
-            'external_reference'=>(string)($verified['provider_payment_id']??''),'idempotency_key'=>'payment:'.$paymentId.':receipt','metadata'=>['provider'=>$provider,'method'=>$method,'source'=>$source],
+            'gross_cents'=>$amount,'fee_cents'=>$fee,'net_cents'=>$amount,'status'=>$status,'competence_date'=>$date,'due_date'=>$due,'settled_at'=>$settled,
+            'external_reference'=>(string)($verified['provider_payment_id']??''),'idempotency_key'=>'payment:'.$paymentId.':receipt','metadata'=>['provider'=>$provider,'method'=>$method,'source'=>$source,'expected_net_cents'=>$expectedNet],
         ]);
         if($fee>0){
             $feeCategory=$this->categoryId($pdo,$tenantId,'Taxas de pagamento','out');
@@ -71,7 +71,7 @@ final class FinancialLedgerService
 
     public function summary(int $tenantId,array $unitIds,string $from,string $to):array
     {
-        $this->ensureDefaults(Database::connection(),$tenantId);$pdo=Database::connection();$args=[$tenantId,$from,$to];$unitSql='';if($unitIds){$unitSql=' AND unit_id IN ('.implode(',',array_fill(0,count($unitIds),'?')).')';array_splice($args,1,0,$unitIds);}
+        $this->ensureDefaults(Database::connection(),$tenantId);$pdo=Database::connection();$args=[$tenantId,$from,$to];$unitSql='';if($unitIds){$unitSql=' AND fe.unit_id IN ('.implode(',',array_fill(0,count($unitIds),'?')).')';array_splice($args,1,0,$unitIds);}
         $q=$pdo->prepare('SELECT direction,dre_group,COALESCE(SUM(net_cents),0) total FROM financial_entries fe LEFT JOIN financial_categories fc ON fc.id=fe.category_id WHERE fe.tenant_id=?'.$unitSql.' AND fe.competence_date BETWEEN ? AND ? AND fe.status<>"cancelled" GROUP BY direction,dre_group');$q->execute($args);$groups=[];$income=0;$expense=0;foreach($q->fetchAll()as$r){$groups[$r['dre_group']]=(int)$r['total'];if($r['direction']==='in')$income+=(int)$r['total'];else$expense+=(int)$r['total'];}
         $dueArgs=[$tenantId,date('Y-m-d')];$dueSql='';if($unitIds){$dueSql=' AND unit_id IN ('.implode(',',array_fill(0,count($unitIds),'?')).')';array_splice($dueArgs,1,0,$unitIds);}$q=$pdo->prepare('SELECT direction,COALESCE(SUM(net_cents),0) total FROM financial_entries WHERE tenant_id=?'.$dueSql.' AND status="open" AND due_date IS NOT NULL AND due_date<=? GROUP BY direction');$q->execute($dueArgs);$overdueIn=0;$overdueOut=0;foreach($q->fetchAll()as$r){if($r['direction']==='in')$overdueIn=(int)$r['total'];else$overdueOut=(int)$r['total'];}
         return ['income_cents'=>$income,'expense_cents'=>$expense,'result_cents'=>$income-$expense,'groups'=>$groups,'overdue_receivable_cents'=>$overdueIn,'overdue_payable_cents'=>$overdueOut];
