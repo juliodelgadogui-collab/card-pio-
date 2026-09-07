@@ -28,6 +28,9 @@ try{
     if($action==='card-session'){
         Auth::requirePermission('nfc.collect');$provider=$registry->preference($tenantId,'card_present');if(!$provider)throw new RuntimeException('Nenhum provedor NFC está ativo.');$session=match($provider){'sumup'=>(new SumUpProvider())->sdkSession($tenantId),default=>['provider'=>$provider]};gopay_out(['ok'=>true,'provider'=>$provider,'session'=>$session]);
     }
+    if($action==='pix-status'){
+        if($_SERVER['REQUEST_METHOD']!=='GET')gopay_out(['ok'=>false,'error'=>'Método não permitido.'],405);$paymentId=(int)($_GET['payment_id']??0);$status=(new NativePixService())->verifyPayment($paymentId);gopay_out(['ok'=>true,'pix'=>$status]);
+    }
     if($_SERVER['REQUEST_METHOD']!=='POST')gopay_out(['ok'=>false,'error'=>'Método não permitido.'],405);$body=gopay_body();
     if($action==='card-intent'){
         $result=(new CardPresentService())->createIntent((int)($body['order_id']??0),$deviceId,isset($body['amount_cents'])?(int)$body['amount_cents']:null,(string)($body['payment_method']??'credit'),(int)($body['installments_count']??1),trim((string)($body['provider']??''))?:null);gopay_out(['ok'=>true,'card_present'=>$result],201);
