@@ -1,0 +1,23 @@
+<?php
+
+declare(strict_types=1);
+
+require __DIR__.'/../app/bootstrap.php';
+
+use EventMenu\Core\Security;
+use EventMenu\Services\PasswordResetService;
+
+$service=new PasswordResetService();
+$token=strtolower(trim((string)($_GET['token']??$_POST['token']??'')));
+$user=$service->validate($token);$error=null;$success=false;
+if($_SERVER['REQUEST_METHOD']==='POST'){
+    if(!Security::validateCsrf($_POST['_csrf']??null))$error='Sessão expirada. Atualize a página.';
+    elseif(!$user)$error='Este link de redefinição é inválido ou expirou.';
+    else{
+        $password=(string)($_POST['password']??'');$confirm=(string)($_POST['password_confirm']??'');
+        if($password!==$confirm)$error='As duas senhas precisam ser iguais.';
+        else{try{$service->reset($token,$password);$success=true;$user=null;}catch(Throwable $e){$error=$e->getMessage();}}
+    }
+}
+$css=Security::e(app_url('assets/auth-v2.css'));
+?><!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#5b34d6"><title>Nova senha — EventMenu</title><link rel="stylesheet" href="<?= $css ?>"></head><body class="auth-v2"><div class="auth-shell"><section class="auth-showcase"><div class="auth-brandline"><span class="auth-brandmark">E</span><div>EventMenu<small>Gestão conectada</small></div></div><div class="auth-pitch"><span class="auth-kicker">NOVA SENHA</span><h1>Um acesso novo, com o histórico protegido.</h1><p>Ao concluir a redefinição, o link deixa de funcionar e os tokens móveis existentes daquele usuário são revogados.</p></div><div class="auth-showcase-foot">EventMenu Premium · redefinição de uso único</div></section><main class="auth-main"><section class="auth-panel"><div class="auth-mobile-brand"><span class="auth-brandmark">E</span> EventMenu</div><a class="auth-back" href="<?= Security::e(app_url('?route=login')) ?>">← Voltar para o login</a><?php if($success):?><div class="auth-panel-head"><h2>Senha alterada</h2><p>Seu acesso foi atualizado com sucesso.</p></div><div class="auth-alert ok">A nova senha já pode ser usada. Por segurança, acessos móveis anteriores foram revogados.</div><a class="auth-submit" style="display:grid;place-items:center;text-decoration:none" href="<?= Security::e(app_url('?route=login')) ?>">Entrar no EventMenu</a><?php elseif(!$user):?><div class="auth-panel-head"><h2>Link indisponível</h2><p>O link pode ter expirado ou já ter sido usado.</p></div><div class="auth-alert error"><?= Security::e($error?:'Este link de redefinição não é mais válido.') ?></div><a class="auth-submit" style="display:grid;place-items:center;text-decoration:none" href="<?= Security::e(app_url('forgot-password.php')) ?>">Solicitar outro link</a><?php else:?><div class="auth-panel-head"><h2>Criar nova senha</h2><p>Redefinindo o acesso de <strong><?= Security::e($user['email']) ?></strong>.</p></div><?php if($error):?><div class="auth-alert error"><?= Security::e($error) ?></div><?php endif;?><form method="post" class="auth-form" data-auth-form><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="token" value="<?= Security::e($token) ?>"><label class="auth-field"><span>Nova senha</span><span class="auth-input-wrap has-toggle"><input id="new-password" type="password" name="password" minlength="8" maxlength="200" autocomplete="new-password" required><button class="password-toggle" type="button" data-toggle="#new-password">Mostrar</button></span></label><label class="auth-field"><span>Confirmar senha</span><span class="auth-input-wrap has-toggle"><input id="confirm-password" type="password" name="password_confirm" minlength="8" maxlength="200" autocomplete="new-password" required><button class="password-toggle" type="button" data-toggle="#confirm-password">Mostrar</button></span></label><p class="auth-token-note">Use pelo menos 8 caracteres. Evite reutilizar a senha de outros serviços.</p><button class="auth-submit" type="submit"><span class="label">Salvar nova senha</span><span class="busy">Salvando…</span></button></form><?php endif;?></section></main></div><script>document.querySelectorAll('[data-toggle]').forEach(b=>b.addEventListener('click',()=>{const i=document.querySelector(b.dataset.toggle);if(!i)return;const show=i.type==='password';i.type=show?'text':'password';b.textContent=show?'Ocultar':'Mostrar'}));document.querySelector('[data-auth-form]')?.addEventListener('submit',e=>{const b=e.currentTarget.querySelector('.auth-submit');if(b){b.disabled=true;b.classList.add('is-loading')}});</script></body></html>
