@@ -22,7 +22,7 @@ Opções:
   --warmup=N                 Requisições sequenciais de aquecimento. Padrão: 3 (máx. 100)
   --timeout=SEG              Timeout por requisição. Padrão: 10 (máx. 60)
   --expected=LISTA           HTTP aceitos, separados por vírgula. Padrão: 200
-  --fail-error-rate=PCT      Sai com erro se a taxa de falha ultrapassar o percentual.
+  --fail-error-rate=PCT      Taxa máxima de falha aceita. Padrão: 0
   --fail-p95-ms=MS           Sai com erro se o p95 ultrapassar o limite em ms.
   --allow-remote             Libera alvo que não seja localhost.
   --confirm-host=HOST        Confirma exatamente o host remoto informado em --url.
@@ -302,8 +302,9 @@ $result = [
 ];
 
 $thresholdFailures = [];
-if ($failErrorRate !== null && $errorRate > $failErrorRate) {
-    $thresholdFailures[] = sprintf('taxa de falha %.3f%% > limite %.3f%%', $errorRate, $failErrorRate);
+$errorLimit = $failErrorRate ?? 0.0;
+if ($errorRate > $errorLimit) {
+    $thresholdFailures[] = sprintf('taxa de falha %.3f%% > limite %.3f%%', $errorRate, $errorLimit);
 }
 if ($failP95Ms !== null && (float)$result['latency_ms']['p95'] > $failP95Ms) {
     $thresholdFailures[] = sprintf('p95 %.2f ms > limite %.2f ms', (float)$result['latency_ms']['p95'], $failP95Ms);
