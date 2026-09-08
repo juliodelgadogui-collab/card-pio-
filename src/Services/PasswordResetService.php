@@ -42,7 +42,7 @@ final class PasswordResetService
             $tx->prepare('INSERT INTO password_reset_tokens (user_id,token_hash,expires_at,request_ip) VALUES (?,?,?,?)')->execute([(int)$user['id'],$hash,$expiresAt,mb_substr($ip,0,64)]);
         });
 
-        $url = app_url('?route=reset-password&token='.rawurlencode($token));
+        $url = app_url('reset-password.php?token='.rawurlencode($token));
         $name = trim((string)$user['name']) ?: 'usuário';
         $subject = 'Redefinição de senha — EventMenu';
         $safeName = htmlspecialchars($name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
