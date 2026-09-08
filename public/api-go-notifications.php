@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\ApiRateLimitExceededException;
 use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\NotificationService;
 use EventMenu\Services\PushDeviceService;
@@ -32,4 +33,4 @@ try{
         gon_out(['ok'=>true,'push'=>$push->status($deviceId)]);
     }
     gon_out(['ok'=>false,'error'=>'Endpoint de notificações não encontrado.'],404);
-}catch(RuntimeException $e){gon_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))gon_out(['ok'=>false,'error'=>$e->getMessage()],500);gon_out(['ok'=>false,'error'=>'Erro interno.'],500);}
+}catch(ApiRateLimitExceededException $e){gon_out(['ok'=>false,'error'=>$e->getMessage()],429);}catch(RuntimeException $e){gon_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))gon_out(['ok'=>false,'error'=>$e->getMessage()],500);gon_out(['ok'=>false,'error'=>'Erro interno.'],500);}
