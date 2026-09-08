@@ -84,6 +84,33 @@ fun OrderDetailDialog(
                         Text(orderMoney(detail.totalCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     }
                 }
+
+                if (detail.status !in setOf("completed", "cancelled")) {
+                    val cancellation = cancellationState.orderRequest?.takeIf { it.orderId == detail.orderId }
+                    item {
+                        HorizontalDivider()
+                        Text("Cancelamento", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        when {
+                            detail.paymentStatus == "paid" -> {
+                                Text("Este pedido já foi pago.", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                                Text("Faça o estorno do pagamento antes de solicitar o cancelamento.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            cancellation?.status == "pending" -> {
+                                Text("Cancelamento aguardando aprovação", fontWeight = FontWeight.Bold)
+                                usefulOrderText(cancellation.reason)?.let { Text("Motivo: $it") }
+                            }
+                            cancellation?.status == "approved" -> Text("Cancelamento autorizado.", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                            cancellation?.status == "rejected" -> {
+                                Text("A solicitação anterior não foi aprovada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("Solicitar novamente") }
+                            }
+                            else -> OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("Solicitar cancelamento") }
+                        }
+                        cancellationState.error?.let { Text("Não foi possível atualizar o cancelamento. Tente novamente.", color = MaterialTheme.colorScheme.error) }
+                        cancellationState.message?.let { Text(it, fontWeight = FontWeight.Bold) }
+                    }
+                }
+
                 item { HorizontalDivider() }
                 item { Text("Histórico do pedido", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black) }
                 if (detail.timeline.isEmpty()) item { Text("Nenhuma atualização registrada.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -93,25 +120,6 @@ fun OrderDetailDialog(
                         Button(onClick = { onAccept(detail.orderId) }, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
                             Text("Aceitar pedido")
                         }
-                    }
-                }
-                if (detail.status !in setOf("completed", "cancelled") && detail.paymentStatus != "paid") {
-                    val cancellation = cancellationState.orderRequest?.takeIf { it.orderId == detail.orderId }
-                    item {
-                        when (cancellation?.status) {
-                            "pending" -> {
-                                Text("Cancelamento aguardando aprovação", fontWeight = FontWeight.Bold)
-                                usefulOrderText(cancellation.reason)?.let { Text("Motivo: $it") }
-                            }
-                            "approved" -> Text("Cancelamento autorizado.", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
-                            "rejected" -> {
-                                Text("A solicitação anterior não foi aprovada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("Solicitar novamente") }
-                            }
-                            else -> OutlinedButton(onClick = { requestCancellation = true }, modifier = Modifier.fillMaxWidth()) { Text("Solicitar cancelamento") }
-                        }
-                        cancellationState.error?.let { Text("Não foi possível atualizar o cancelamento. Tente novamente.", color = MaterialTheme.colorScheme.error) }
-                        cancellationState.message?.let { Text(it, fontWeight = FontWeight.Bold) }
                     }
                 }
             }

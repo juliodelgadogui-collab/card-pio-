@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.DeliveryDining
 import androidx.compose.material.icons.filled.LocalShipping
@@ -55,6 +56,7 @@ fun RoleDashboardScreen(
     val tenant = brand?.displayName?.takeIf { it.isNotBlank() } ?: session.user.tenantName.ifBlank { "Sua empresa" }
     val unit = dashboardUnitName(shift?.unitName)
     val shortcuts = buildList {
+        if ("cancellation_approve" in permissions || "discount_approve" in permissions || "reports" in permissions) add(DashboardShortcutItem(Icons.Default.Assessment, "Gestão", AppScreen.MANAGER))
         if ("orders_view" in permissions || "orders_manage" in permissions) add(DashboardShortcutItem(Icons.Default.ReceiptLong, "Pedidos", AppScreen.ORDERS))
         if ("tables" in permissions) add(DashboardShortcutItem(Icons.Default.TableRestaurant, "Mesas", AppScreen.TABLES))
         if ("orders_create" in permissions) add(DashboardShortcutItem(Icons.Default.PointOfSale, "Nova venda", AppScreen.POS))

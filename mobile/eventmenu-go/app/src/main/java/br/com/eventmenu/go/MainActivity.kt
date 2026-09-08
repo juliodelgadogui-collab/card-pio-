@@ -156,20 +156,23 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun routeDeepLink(vm: MainViewModel, state: GoState, target: AppDeepLinkTarget) {
-        if (target.mode.isNotBlank() && target.mode != state.workShift?.mode) {
+        val permissions = state.session?.permissions.orEmpty()
+        val notificationType = target.notificationType.lowercase()
+        val entityType = target.entityType.lowercase()
+        val approvalRequest = entityType in setOf("cancellation_request", "discount_request")
+
+        // Solicitações de aprovação precisam abrir a Gestão mesmo quando a notificação
+        // veio sem modo ou com um modo antigo. A API continua validando a permissão
+        // e o turno no servidor antes de aprovar qualquer ação.
+        if (!approvalRequest && target.mode.isNotBlank() && target.mode != state.workShift?.mode) {
             vm.navigate(AppScreen.NOTIFICATIONS)
             return
         }
 
-        val permissions = state.session?.permissions.orEmpty()
-        val notificationType = target.notificationType.lowercase()
-        val entityType = target.entityType.lowercase()
         val destination = when {
-            entityType == "cancellation_request" &&
-                "cancellation_approve" in permissions && state.mode in setOf(AppMode.OPERATION, AppMode.PAY) -> AppScreen.MANAGER
+            entityType == "cancellation_request" -> AppScreen.MANAGER
 
-            entityType == "discount_request" &&
-                "discount_approve" in permissions && state.mode in setOf(AppMode.OPERATION, AppMode.PAY) -> AppScreen.MANAGER
+            entityType == "discount_request" -> AppScreen.MANAGER
 
             notificationType == "order.new" && "orders_kitchen" in permissions && state.mode == AppMode.OPERATION -> AppScreen.KITCHEN
 
