@@ -18,6 +18,28 @@ val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_I
 val firebaseAppId = envValue("EVENTMENU_FIREBASE_APP_ID")
 val firebaseApiKey = envValue("EVENTMENU_FIREBASE_API_KEY")
 val firebaseSenderId = envValue("EVENTMENU_FIREBASE_SENDER_ID")
+val firebaseConfig = linkedMapOf(
+    "EVENTMENU_FIREBASE_PROJECT_ID" to firebaseProjectId,
+    "EVENTMENU_FIREBASE_APP_ID" to firebaseAppId,
+    "EVENTMENU_FIREBASE_API_KEY" to firebaseApiKey,
+    "EVENTMENU_FIREBASE_SENDER_ID" to firebaseSenderId,
+)
+val firebaseConfiguredCount = firebaseConfig.values.count { it.isNotBlank() }
+val firebaseEnabled = firebaseConfiguredCount == firebaseConfig.size
+val firebasePartial = firebaseConfiguredCount in 1 until firebaseConfig.size
+val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val firebaseRequired = envValue("EVENTMENU_REQUIRE_FCM").equals("true", ignoreCase = true) || releaseRequested
+
+if (firebasePartial) {
+    val missing = firebaseConfig.filterValues { it.isBlank() }.keys.joinToString(", ")
+    throw GradleException("Configuração Firebase incompleta. Faltando: $missing")
+}
+if (firebaseRequired && !firebaseEnabled) {
+    throw GradleException(
+        "Firebase Cloud Messaging é obrigatório neste build. Configure EVENTMENU_FIREBASE_PROJECT_ID, " +
+            "EVENTMENU_FIREBASE_APP_ID, EVENTMENU_FIREBASE_API_KEY e EVENTMENU_FIREBASE_SENDER_ID."
+    )
+}
 
 android {
     namespace = "br.com.eventmenu.go"
@@ -30,6 +52,7 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         buildConfigField("String", "API_BASE_URL", "\"$apiBase\"")
+        buildConfigField("boolean", "FIREBASE_ENABLED", firebaseEnabled.toString())
         buildConfigField("String", "FIREBASE_PROJECT_ID", buildConfigString(firebaseProjectId))
         buildConfigField("String", "FIREBASE_APP_ID", buildConfigString(firebaseAppId))
         buildConfigField("String", "FIREBASE_API_KEY", buildConfigString(firebaseApiKey))

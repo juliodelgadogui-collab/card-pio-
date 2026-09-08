@@ -41,11 +41,7 @@ object FirebasePushConfig {
         }
     }
 
-    fun isConfigured(): Boolean =
-        BuildConfig.FIREBASE_PROJECT_ID.isNotBlank() &&
-            BuildConfig.FIREBASE_APP_ID.isNotBlank() &&
-            BuildConfig.FIREBASE_API_KEY.isNotBlank() &&
-            BuildConfig.FIREBASE_SENDER_ID.isNotBlank()
+    fun isConfigured(): Boolean = BuildConfig.FIREBASE_ENABLED
 }
 
 class FirebasePushCoordinator(
