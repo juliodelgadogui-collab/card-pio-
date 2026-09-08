@@ -79,7 +79,7 @@ final class BackgroundJobService
         $payload=json_decode((string)($job['payload']??'{}'),true);if(!is_array($payload))$payload=[];
         match((string)$job['type']){
             'push.notification'=>(new FcmPushService())->sendNotification((int)($payload['notification_id']??0)),
-            'backup.daily'=>(new BackupService())->runScheduled(),
+            'backup.daily'=>(new VerifiedBackupService())->runScheduled(),
             default=>throw new RuntimeException('Tipo de tarefa não suportado: '.(string)$job['type']),
         };
     }

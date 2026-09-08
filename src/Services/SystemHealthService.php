@@ -71,13 +71,32 @@ final class SystemHealthService
             $checks['push'] = $this->check('warning', 'Push ainda não disponível.', ['error' => $this->safe($e->getMessage())]);
         }
 
-        $backup = $runtime->get('backup.last_success');
+        $backup = $runtime->get('backup.last_verified');
         $backupAge = $this->age($backup['checked_at'] ?? null);
-        $backupState = $backup === null || $backupAge > 36 * 3600 ? 'warning' : 'ok';
+        $backupMeta = is_array($backup['metadata'] ?? null) ? $backup['metadata'] : [];
+        $backupVerified = $backup !== null && ($backup['state'] ?? null) === 'ok' && !empty($backupMeta['verified']);
+        $backupRecent = $backupVerified && $backupAge <= 36 * 3600;
+        $lastAttempt = $runtime->get('backup.last_run');
+        $lastVerification = $runtime->get('backup.last_verification');
         $checks['backup'] = $this->check(
-            $backupState,
-            $backupState === 'ok' ? 'Backup recente disponível.' : 'Backup automático ainda não está recente.',
-            ['seconds_since_backup' => $backupAge, 'last_backup' => $backup['metadata'] ?? null]
+            $backupRecent ? 'ok' : 'warning',
+            $backupRecent ? 'Backup recente e verificado disponível.' : 'Ainda não há backup verificado recente.',
+            [
+                'seconds_since_verified_backup' => $backupAge,
+                'last_verified' => $backup ? [
+                    'checked_at' => $backup['checked_at'] ?? null,
+                    'metadata' => $backupMeta,
+                ] : null,
+                'last_attempt' => $lastAttempt ? [
+                    'state' => $lastAttempt['state'] ?? null,
+                    'checked_at' => $lastAttempt['checked_at'] ?? null,
+                ] : null,
+                'last_verification' => $lastVerification ? [
+                    'state' => $lastVerification['state'] ?? null,
+                    'checked_at' => $lastVerification['checked_at'] ?? null,
+                    'metadata' => $lastVerification['metadata'] ?? [],
+                ] : null,
+            ]
         );
 
         try {

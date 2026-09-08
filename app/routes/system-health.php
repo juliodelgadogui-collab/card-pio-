@@ -6,17 +6,17 @@ use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
 use EventMenu\Core\Security;
 use EventMenu\Services\BackgroundJobService;
-use EventMenu\Services\BackupService;
 use EventMenu\Services\FcmPushService;
 use EventMenu\Services\RuntimeStatusService;
 use EventMenu\Services\SystemHealthService;
+use EventMenu\Services\VerifiedBackupService;
 
 if(!Auth::isSuperAdmin()){http_response_code(403);exit('Acesso restrito ao Super ADM.');}
 
 if($_SERVER['REQUEST_METHOD']==='POST'){
     em_post_csrf();$action=(string)($_POST['action']??'');
     try{
-        if($action==='backup'){$result=(new BackupService())->run();em_flash('ok','Backup concluído: '.($result['file']??'arquivo criado').'.');}
+        if($action==='backup'){$result=(new VerifiedBackupService())->run();em_flash('ok','Backup verificado: '.($result['file']??'arquivo criado').'.');}
         elseif($action==='jobs'){$result=(new BackgroundJobService())->runBatch(80,'super-admin');em_flash('ok','Fila processada: '.(int)$result['completed'].' concluída(s), '.(int)$result['retried'].' reagendada(s).');}
         elseif($action==='push-test'){
             $target=trim((string)($_POST['target']??''));
@@ -68,7 +68,7 @@ em_header('Saúde do sistema','system-health');
 <section class="card"><div class="section-head"><div><span class="eyebrow"><?= Security::e(strtoupper($labels[$key]??$key)) ?></span><h2 style="margin-top:5px"><?= Security::e($stateLabel[$state]??$state) ?></h2></div><span class="status-pill <?= $state==='ok'?'active':($state==='error'?'cancelled':'pending') ?>"><?= Security::e($stateLabel[$state]??$state) ?></span></div><p><?= Security::e((string)$check['message']) ?></p><?php if(!empty($check['details'])):?><details><summary>Detalhes</summary><pre style="white-space:pre-wrap;font-size:11px;overflow:auto"><?= Security::e(json_encode($check['details'],JSON_PRETTY_PRINT|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)) ?></pre></details><?php endif;?></section>
 <?php endforeach;?>
 </div>
-<section class="card" style="margin-top:18px"><div class="section-head"><div><span class="eyebrow">MANUTENÇÃO</span><h2>Ações seguras</h2><p class="muted">O cron deve executar a cada minuto. Backup diário e notificações pendentes são processados pela fila.</p></div></div><div class="actions"><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="jobs"><button class="primary">Processar fila agora</button></form><form method="post" onsubmit="return confirm('Executar um backup agora?')"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="backup"><button class="secondary">Executar backup agora</button></form></div></section>
+<section class="card" style="margin-top:18px"><div class="section-head"><div><span class="eyebrow">MANUTENÇÃO</span><h2>Ações seguras</h2><p class="muted">O cron deve executar a cada minuto. Backup diário e notificações pendentes são processados pela fila.</p></div></div><div class="actions"><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="jobs"><button class="primary">Processar fila agora</button></form><form method="post" onsubmit="return confirm('Executar e verificar um backup agora?')"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="backup"><button class="secondary">Executar backup verificado</button></form></div></section>
 <section class="card" style="margin-top:18px"><div class="section-head"><div><span class="eyebrow">AGENDAMENTO</span><h2>Manutenção automática</h2><p class="muted"><?= $cronHealthy?'Cron e worker estão respondendo normalmente.':'Configure este agendamento no servidor para processar fila, expirações, limpeza e backup automático.' ?></p></div><span class="status-pill <?= $cronHealthy?'active':'pending' ?>"><?= $cronHealthy?'Ativo':'Configurar' ?></span></div><p>Em cPanel/Linux, crie uma tarefa a cada minuto com o comando abaixo:</p><pre style="white-space:pre-wrap;overflow:auto"><code><?= Security::e($cronCommand) ?></code></pre><p class="muted">O modo CLI não precisa expor o <code>CRON_SECRET</code>. Depois de salvar o agendamento, aguarde até 2 minutos e atualize esta página; Cron e Worker devem aparecer como OK.</p></section>
 <section class="card" style="margin-top:18px"><div class="section-head"><div><span class="eyebrow">TESTE DE PUSH</span><h2>Validar notificação em um aparelho</h2><p class="muted">Envia uma única notificação de diagnóstico. Nenhum token, ID do aparelho ou credencial é exibido.</p></div></div><?php if($pushTargets):?><form method="post" class="form-grid" style="align-items:end"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="push-test"><label style="grid-column:span 2">Empresa e usuário<select name="target" required><option value="">Selecione</option><?php foreach($pushTargets as$target):?><option value="<?= (int)$target['tenant_id'] ?>:<?= (int)$target['user_id'] ?>"><?= Security::e((string)$target['tenant_name'].' — '.(string)$target['user_name'].' · '.(int)$target['devices'].' aparelho(s)') ?></option><?php endforeach;?></select></label><div><button class="primary">Enviar teste</button></div></form><?php else:?><p class="muted">Nenhum aparelho ativo registrado no EventMenu GO. Abra o aplicativo, faça login e aguarde o registro do push para testar.</p><?php endif;?></section>
 <?php em_footer();

@@ -118,6 +118,7 @@ jobs:
           php scripts/ci-db-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
+          php scripts/ci-backup-smoke.php
 
   mysql:
     runs-on: ubuntu-latest
