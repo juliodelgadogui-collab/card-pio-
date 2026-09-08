@@ -21,16 +21,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.AppScreen
+import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.GoState
 import br.com.eventmenu.go.data.DiscountRequest
+import br.com.eventmenu.go.data.LoyaltyOrderSummary
+import kotlinx.coroutines.launch
 
 @Composable
 fun PosScreen(
@@ -177,6 +183,35 @@ private fun PosPaymentScreen(
     val amount = ((amountText.replace(',', '.').toDoubleOrNull() ?: 0.0) * 100).toInt()
     var pixTaxDialog by remember { mutableStateOf(false) }
     var discountDialog by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val app = context.applicationContext as EventMenuGoApplication
+    val scope = rememberCoroutineScope()
+    val canRedeemLoyalty = "loyalty_redeem" in state.session?.permissions.orEmpty()
+    var loyalty by remember(order.id) { mutableStateOf<LoyaltyOrderSummary?>(null) }
+    var loyaltyLoaded by remember(order.id) { mutableStateOf(false) }
+    var loyaltyBusy by remember(order.id) { mutableStateOf(false) }
+    var loyaltyError by remember(order.id) { mutableStateOf<String?>(null) }
+    var loyaltyPointsText by remember(order.id) { mutableStateOf("") }
+
+    fun refreshLoyalty() {
+        if (!canRedeemLoyalty || loyaltyBusy) return
+        loyaltyBusy = true
+        loyaltyError = null
+        scope.launch {
+            runCatching { app.orderOperationsRepository.detail(order.id).loyalty }
+                .onSuccess { loyalty = it; loyaltyLoaded = true }
+                .onFailure { loyaltyError = it.message ?: "Não foi possível consultar os pontos." }
+            loyaltyBusy = false
+        }
+    }
+
+    LaunchedEffect(order.id, canRedeemLoyalty) {
+        if (canRedeemLoyalty) {
+            runCatching { app.orderOperationsRepository.detail(order.id).loyalty }
+                .onSuccess { loyalty = it; loyaltyLoaded = true }
+                .onFailure { loyaltyError = it.message ?: "Não foi possível consultar os pontos."; loyaltyLoaded = true }
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -185,6 +220,67 @@ private fun PosPaymentScreen(
             Text("Total: ${posMoney(balance?.totalCents ?: order.totalCents)}")
             if ((balance?.paidCents ?: 0) > 0) Text("Recebido: ${posMoney(balance?.paidCents ?: 0)}")
             Text("Falta receber: ${posMoney(remaining)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+        }
+
+        if (canRedeemLoyalty && loyaltyLoaded && loyalty != null && remaining > 0) {
+            item {
+                val current = loyalty!!
+                val reservation = current.orderReservation?.takeIf { it.status == "reserved" }
+                val requested = loyaltyPointsText.toIntOrNull() ?: 0
+                val validBlock = current.redeemPoints > 0 && requested % current.redeemPoints == 0
+                val canApply = current.enabled && reservation == null && (balance?.paidCents ?: 0) == 0 && requested >= current.minRedeemPoints && requested <= current.available && validBlock && !loyaltyBusy
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Pontos do cliente", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                        Text("${current.available} pontos disponíveis", fontWeight = FontWeight.Bold)
+                        if (!current.enabled) {
+                            Text("O programa de pontos está desativado para esta empresa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else if ((balance?.paidCents ?: 0) > 0) {
+                            Text("O pedido já possui valor recebido. Os pontos não podem mais ser alterados.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        } else if (reservation != null) {
+                            Text("${reservation.points} pontos reservados · desconto de ${posMoney(reservation.discountCents)}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                            OutlinedButton(
+                                onClick = {
+                                    loyaltyBusy = true; loyaltyError = null
+                                    scope.launch {
+                                        runCatching { app.orderOperationsRepository.removeLoyalty(order.id) }
+                                            .onSuccess { updated -> loyalty = updated; loyaltyPointsText = ""; onRefresh() }
+                                            .onFailure { loyaltyError = it.message ?: "Não foi possível remover os pontos." }
+                                        loyaltyBusy = false
+                                    }
+                                },
+                                enabled = !loyaltyBusy,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text("Remover pontos deste pedido") }
+                        } else {
+                            Text("${current.redeemPoints} pontos = ${posMoney(current.redeemValueCents)} · mínimo ${current.minRedeemPoints} pontos", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("O desconto pode cobrir até ${current.maxRedeemPercent}% do pedido.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            OutlinedTextField(
+                                loyaltyPointsText,
+                                { loyaltyPointsText = it.filter(Char::isDigit).take(8) },
+                                label = { Text("Pontos para usar") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                            Button(
+                                onClick = {
+                                    loyaltyBusy = true; loyaltyError = null
+                                    scope.launch {
+                                        runCatching { app.orderOperationsRepository.applyLoyalty(order.id, requested) }
+                                            .onSuccess { updated -> loyalty = updated; onRefresh() }
+                                            .onFailure { loyaltyError = it.message ?: "Não foi possível usar os pontos." }
+                                        loyaltyBusy = false
+                                    }
+                                },
+                                enabled = canApply,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(if (loyaltyBusy) "Aplicando..." else "Usar pontos") }
+                        }
+                        loyaltyError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        OutlinedButton(onClick = ::refreshLoyalty, enabled = !loyaltyBusy, modifier = Modifier.fillMaxWidth()) { Text("Atualizar saldo") }
+                    }
+                }
+            }
         }
 
         if (canRequestDiscount && (balance?.paidCents ?: 0) == 0 && remaining > 0) {
@@ -256,7 +352,7 @@ private fun PosPaymentScreen(
             }
         }
 
-        item { OutlinedButton(onClick = { onRefresh(); onRefreshDiscount(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
+        item { OutlinedButton(onClick = { onRefresh(); onRefreshDiscount(order.id); refreshLoyalty() }, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
     }
 
     if (discountDialog) {
