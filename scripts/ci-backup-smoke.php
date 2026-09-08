@@ -7,7 +7,6 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 use EventMenu\Services\RuntimeStatusService;
 use EventMenu\Services\SystemHealthService;
 use EventMenu\Services\VerifiedBackupService;
-use PDO;
 
 function backup_fail(string $message): never { fwrite(STDERR, "BACKUP CI FAIL: {$message}\n"); exit(1); }
 function backup_assert(bool $ok, string $message): void { if (!$ok) backup_fail($message); }
