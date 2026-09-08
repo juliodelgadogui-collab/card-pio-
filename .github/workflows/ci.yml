@@ -34,6 +34,14 @@ jobs:
           APP_BASE_PATH: /1
           APP_URL: https://example.test
         run: php scripts/ci-url-smoke.php
+      - name: Load test safety checks
+        run: |
+          php scripts/load-test.php --dry-run --url=http://127.0.0.1:8080/ --requests=10 --concurrency=2
+          if php scripts/load-test.php --dry-run --url=https://staging.example.test/ --requests=10 --concurrency=2; then
+            echo "Remote target should have been blocked without explicit confirmation."
+            exit 1
+          fi
+          php scripts/load-test.php --dry-run --url=https://staging.example.test/ --requests=10 --concurrency=2 --allow-remote --confirm-host=staging.example.test
 
   android:
     runs-on: ubuntu-latest
