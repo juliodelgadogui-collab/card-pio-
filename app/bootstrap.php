@@ -83,6 +83,19 @@ function app_rewrite_root_urls(string $html): string
     ) ?? $html;
 }
 
+if (PHP_SAPI !== 'cli' && !headers_sent()) {
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: SAMEORIGIN');
+    header('Referrer-Policy: strict-origin-when-cross-origin');
+    // O leitor QR do painel usa a câmera do próprio domínio; microfone e geolocalização não são necessários.
+    header('Permissions-Policy: camera=(self), microphone=(), geolocation=()');
+    $production = strtolower(trim((string)env('APP_ENV', 'production'))) === 'production';
+    $httpsConfigured = strtolower((string)parse_url((string)env('APP_URL', ''), PHP_URL_SCHEME)) === 'https';
+    if ($production && $httpsConfigured) {
+        header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+    }
+}
+
 $vendor = __DIR__ . '/../vendor/autoload.php';
 if (is_file($vendor)) require_once $vendor;
 
