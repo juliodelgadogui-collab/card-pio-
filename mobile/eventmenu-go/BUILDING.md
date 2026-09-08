@@ -68,7 +68,7 @@ O workflow `EventMenu CI` também executa `:app:assembleDebug` em push e pull re
 
 ## Firebase Cloud Messaging
 
-O aplicativo compila normalmente mesmo sem um projeto Firebase configurado. Nesse caso, a sincronização periódica de notificações continua funcionando e o FCM permanece desativado.
+O APK de debug compila normalmente quando nenhuma configuração Firebase foi fornecida. Nesse caso, a sincronização periódica de notificações continua funcionando e o FCM permanece desativado.
 
 Para ativar push em tempo real no APK, defina no ambiente de compilação:
 
@@ -78,6 +78,8 @@ export EVENTMENU_FIREBASE_APP_ID="1:000000000000:android:0000000000000000"
 export EVENTMENU_FIREBASE_API_KEY="sua-chave-do-app-android"
 export EVENTMENU_FIREBASE_SENDER_ID="000000000000"
 ```
+
+As quatro variáveis formam uma configuração única: se apenas parte delas estiver preenchida, o build falha informando quais dados faltam. Builds `release` exigem obrigatoriamente as quatro variáveis. Um build de debug também pode exigir FCM definindo `EVENTMENU_REQUIRE_FCM=true`.
 
 `EVENTMENU_FIREBASE_PROJECT_ID` também aceita `FCM_PROJECT_ID` como fallback. Esses valores pertencem à configuração do app Android no projeto Firebase. A conta de serviço usada pelo servidor continua separada e é configurada no backend por `FCM_SERVICE_ACCOUNT_PATH` ou `FCM_SERVICE_ACCOUNT_BASE64`.
 
