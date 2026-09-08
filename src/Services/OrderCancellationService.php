@@ -63,7 +63,7 @@ final class OrderCancellationService
         $result=Database::transaction(function(PDO $pdo)use($tenantId,$deciderId,$shift,$requestId):array{
             $q=$pdo->prepare(Database::portableSql($pdo,'SELECT r.*,u.name requester_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by WHERE r.id=? AND r.tenant_id=? FOR UPDATE'));$q->execute([$requestId,$tenantId]);$request=$q->fetch();if(!$request)throw new RuntimeException('Solicitação de cancelamento não encontrada.');if($request['status']!=='pending')throw new RuntimeException('Esta solicitação já foi decidida.');
             $order=$this->lockOrder($pdo,$tenantId,(int)$request['order_id']);$this->assertUnit($order,$shift);$this->assertRequestable($pdo,$order);
-            $current=(string)$order['status'];(new StockReservationService())->release($pdo,$tenantId,(int)$order['id']);
+            $current=(string)$order['status'];(new StockReservationService())->release($pdo,$tenantId,(int)$order['id']);(new LoyaltyPointsService())->releaseForOrder($pdo,$tenantId,(int)$order['id']);
             $pdo->prepare('UPDATE orders SET status="cancelled" WHERE id=? AND tenant_id=?')->execute([$order['id'],$tenantId]);
             $pdo->prepare('UPDATE order_cancellation_requests SET status="approved",decided_by=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND status="pending"')->execute([$deciderId,$requestId]);
             $pdo->prepare('UPDATE order_cancellation_requests SET status="cancelled",decided_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND order_id=? AND id<>? AND status="pending"')->execute([$tenantId,$order['id'],$requestId]);
