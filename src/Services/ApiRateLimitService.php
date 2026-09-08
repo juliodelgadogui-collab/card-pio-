@@ -6,7 +6,6 @@ namespace EventMenu\Services;
 
 use EventMenu\Core\Database;
 use PDO;
-use RuntimeException;
 
 final class ApiRateLimitService
 {
@@ -17,7 +16,7 @@ final class ApiRateLimitService
             $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM api_rate_limits WHERE key_hash=? LIMIT 1 FOR UPDATE'));$s->execute([$key]);$row=$s->fetch();
             if(!$row){$i=$pdo->prepare('INSERT INTO api_rate_limits (key_hash,bucket,hits,window_started_at,expires_at) VALUES (?,?,1,?,?)');$i->execute([$key,$bucket,$start,$expires]);return;}
             $expiry=strtotime((string)$row['expires_at']);if($expiry===false||$expiry<=$now){$u=$pdo->prepare('UPDATE api_rate_limits SET bucket=?,hits=1,window_started_at=?,expires_at=?,updated_at=CURRENT_TIMESTAMP WHERE key_hash=?');$u->execute([$bucket,$start,$expires,$key]);return;}
-            if((int)$row['hits']>=$limit)throw new RuntimeException($message);$u=$pdo->prepare('UPDATE api_rate_limits SET hits=hits+1,updated_at=CURRENT_TIMESTAMP WHERE key_hash=?');$u->execute([$key]);
+            if((int)$row['hits']>=$limit)throw new ApiRateLimitExceededException($message);$u=$pdo->prepare('UPDATE api_rate_limits SET hits=hits+1,updated_at=CURRENT_TIMESTAMP WHERE key_hash=?');$u->execute([$key]);
         });
     }
 
