@@ -1,5 +1,4 @@
 <?php
-
 declare(strict_types=1);
 
 use EventMenu\Core\Auth;
@@ -61,7 +60,6 @@ function em_flash(?string $type = null, ?string $message = null): ?array
         $_SESSION['_flash'] = [$type, $message];
         return null;
     }
-
     $flash = $_SESSION['_flash'] ?? null;
     unset($_SESSION['_flash']);
     return $flash;
@@ -77,6 +75,7 @@ function em_asset_version(string $relative): string
 function em_can_nav(string $permission): bool
 {
     if ($permission === 'platform.manage') return Auth::isSuperAdmin();
+    if ($permission === 'email.manage') return Auth::isSuperAdmin() || (Auth::tenantId() !== null && Auth::can('settings.manage'));
     if (Auth::isSuperAdmin() && !Auth::tenantId()) return false;
     if ($permission === 'reports.any') return Auth::can('reports.view') || Auth::can('reports.own');
     return Auth::can($permission);
@@ -112,6 +111,7 @@ function em_nav(): array
         ['reports', 'Relatórios', 'reports.any'],
         ['audit', 'Auditoria', 'audit.view'],
         ['settings', 'Configurações', 'settings.manage'],
+        ['email-settings', 'E-mail', 'email.manage'],
     ];
 }
 
