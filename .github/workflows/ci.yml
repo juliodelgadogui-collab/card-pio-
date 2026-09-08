@@ -118,6 +118,7 @@ jobs:
         run: |
           rm -f /tmp/eventmenu-ci.sqlite /tmp/eventmenu-ci.sqlite-shm /tmp/eventmenu-ci.sqlite-wal
           php scripts/ci-db-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
@@ -163,6 +164,7 @@ jobs:
           SESSION_NAME: eventmenu_ci_mysql
         run: |
           php scripts/ci-db-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
@@ -205,6 +207,7 @@ jobs:
           test -f "$PACKAGE/src/Services/ProductionReadinessService.php"
           test -f "$PACKAGE/src/Services/ApiRateLimitExceededException.php"
           test -f "$PACKAGE/src/Services/SensitiveApiRateLimitService.php"
+          test -f "$PACKAGE/src/Services/LoyaltyPointsService.php"
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
           grep -q '^DB_SQLITE_PATH=storage/eventmenu.sqlite$' "$PACKAGE/.env.example"
