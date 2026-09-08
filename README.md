@@ -76,6 +76,44 @@ O modo CLI é preferido porque não precisa colocar `CRON_SECRET` na linha de co
 
 No painel, entre como **Super ADM → Saúde do sistema**. A tela mostra o caminho real do `cron.php` daquela instalação e verifica separadamente **Cron** e **Worker da fila**. Após configurar, os dois devem aparecer como `OK` em até alguns minutos.
 
+## Teste de carga controlado
+
+O repositório inclui `scripts/load-test.php` para medir páginas públicas e endpoints GET em ambiente local ou staging. Ele informa **requisições por segundo, taxa de falha e latências min/média/p50/p95/p99/max**.
+
+Por segurança, o utilitário:
+
+- envia somente `GET` e descarta o corpo da resposta sem armazená-lo;
+- limita cada execução a no máximo 5.000 requisições e concorrência 50;
+- bloqueia qualquer host que não seja localhost por padrão;
+- para alvo remoto, exige ao mesmo tempo `--allow-remote` e `--confirm-host=HOST` com o host exato;
+- possui `--dry-run`, que valida toda a configuração sem fazer rede;
+- permite reprovar automaticamente o teste por taxa de erro ou p95 com `--fail-error-rate` e `--fail-p95-ms`.
+
+Exemplo local:
+
+```bash
+php scripts/load-test.php \
+  --url=http://127.0.0.1:8080/1/evento.php?evento=teste \
+  --requests=500 \
+  --concurrency=20 \
+  --expected=200
+```
+
+Exemplo para staging autorizado:
+
+```bash
+php scripts/load-test.php \
+  --url=https://staging.exemplo.com/1/evento.php?evento=teste \
+  --requests=1000 \
+  --concurrency=25 \
+  --allow-remote \
+  --confirm-host=staging.exemplo.com \
+  --fail-error-rate=1 \
+  --fail-p95-ms=1500
+```
+
+Não use esse utilitário para webhooks, checkout, Pix, cartão, NFC ou qualquer endpoint que altere dados. O arquivo `scripts/load-test.php` fica no repositório de desenvolvimento e **não é incluído no pacote de produção** gerado para o servidor.
+
 ## Atualizações do servidor
 
 Ao atualizar uma instalação existente:
@@ -173,7 +211,7 @@ O núcleo está em `src/Services/PaymentService.php`, enquanto `GatewayService.p
 app/                 bootstrap, helpers e rotas administrativas
 database/            schema/migrations MySQL e SQLite
 public/              frontends públicos, painel, instalador, APIs, PWA e assets
-scripts/             smoke tests e gerador do pacote do servidor
+scripts/             smoke tests, teste de carga controlado e gerador do pacote do servidor
 src/Core/            banco, autenticação e segurança
 src/Services/        pagamentos, gateways, ingressos e domínio
 ```
