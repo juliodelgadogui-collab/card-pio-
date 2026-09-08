@@ -6,6 +6,7 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 
 use EventMenu\Core\Database;
 use EventMenu\Services\CashService;
+use EventMenu\Services\OperatingUnitService;
 use EventMenu\Services\OrderCancellationService;
 use EventMenu\Services\OrderService;
 
@@ -47,16 +48,19 @@ try{$cancelService->approveFromPanel((int)$request['id'],$panelUnitId+999);ops_f
 $approved=$cancelService->approveFromPanel((int)$request['id'],$panelUnitId);ops_assert($approved['status']==='approved','Gerente não aprovou cancelamento pelo painel.');
 $panelCancelStatus=$pdo->query('SELECT status FROM orders WHERE id='.(int)$panelCancelOrder)->fetchColumn();ops_assert($panelCancelStatus==='cancelled','Pedido não ficou cancelado após aprovação no painel.');
 
+// O restante do smoke usa o contexto oficial da mesma unidade do painel.
+(new OperatingUnitService())->selectCurrent($panelUnitId);
 $cash=new CashService();
 $cashSession=$cash->open(10000,'CI abertura');
 ops_assert((int)$cashSession['opening_cash_cents']===10000,'Abertura do caixa falhou.');
+ops_assert((int)$cashSession['unit_id']===$panelUnitId,'Caixa não abriu na unidade selecionada.');
 try{$cash->open(100);ops_fail('Segundo caixa foi aberto para o mesmo operador.');}catch(RuntimeException){}
 $cash->addManualMovement('supply',2000,'Suprimento CI');
 $cash->addManualMovement('withdrawal',1000,'Sangria CI');
 $cash->addManualMovement('adjustment',500,'Ajuste CI','out');
 
 $cashToken=bin2hex(random_bytes(20));
-$pdo->prepare('INSERT INTO orders (public_token,tenant_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?, ?, "counter", "confirmed", "paid", 3000, 3000, ?)')->execute([$cashToken,$tenantId,$adminId]);
+$pdo->prepare('INSERT INTO orders (public_token,tenant_id,unit_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?, ?, ?, "counter", "confirmed", "paid", 3000, 3000, ?)')->execute([$cashToken,$tenantId,$panelUnitId,$adminId]);
 $cashOrder=(int)$pdo->lastInsertId();
 $providerPaymentId='CASH-CI-'.strtoupper(bin2hex(random_bytes(6)));
 $paymentKey='cash-ci-'.$uid;
