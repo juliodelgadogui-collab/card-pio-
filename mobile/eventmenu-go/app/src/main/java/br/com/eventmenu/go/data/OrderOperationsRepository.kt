@@ -23,6 +23,25 @@ data class OrderTimelineEntry(
     val userName: String,
 )
 
+data class LoyaltyOrderReservation(
+    val points: Int,
+    val discountCents: Int,
+    val status: String,
+)
+
+data class LoyaltyOrderSummary(
+    val enabled: Boolean,
+    val customerId: Int,
+    val balance: Int,
+    val reserved: Int,
+    val available: Int,
+    val redeemPoints: Int,
+    val redeemValueCents: Int,
+    val minRedeemPoints: Int,
+    val maxRedeemPercent: Int,
+    val orderReservation: LoyaltyOrderReservation?,
+)
+
 data class OrderOperationalDetail(
     val orderId: Int,
     val channel: String,
@@ -37,6 +56,7 @@ data class OrderOperationalDetail(
     val notes: String,
     val items: List<OrderDetailItem>,
     val timeline: List<OrderTimelineEntry>,
+    val loyalty: LoyaltyOrderSummary? = null,
 )
 
 class OrderOperationsRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
@@ -44,6 +64,20 @@ class OrderOperationsRepository(baseUrl: String, deviceId: String, private val s
 
     suspend fun accept(orderId: Int) {
         api.postOrderOps("accept", requireToken(), JSONObject().put("order_id", orderId))
+    }
+
+    suspend fun applyLoyalty(orderId: Int, points: Int): LoyaltyOrderSummary? {
+        val root = api.postOrderOps(
+            "loyalty-apply",
+            requireToken(),
+            JSONObject().put("order_id", orderId).put("points", points),
+        )
+        return parseLoyalty(root.optJSONObject("loyalty"))
+    }
+
+    suspend fun removeLoyalty(orderId: Int): LoyaltyOrderSummary? {
+        val root = api.postOrderOps("loyalty-remove", requireToken(), JSONObject().put("order_id", orderId))
+        return parseLoyalty(root.optJSONObject("loyalty"))
     }
 
     suspend fun detail(orderId: Int): OrderOperationalDetail {
@@ -97,6 +131,30 @@ class OrderOperationsRepository(baseUrl: String, deviceId: String, private val s
             notes = order.optString("notes"),
             items = items,
             timeline = timeline,
+            loyalty = parseLoyalty(root.optJSONObject("loyalty")),
+        )
+    }
+
+    private fun parseLoyalty(json: JSONObject?): LoyaltyOrderSummary? {
+        if (json == null) return null
+        val reservation = json.optJSONObject("order_reservation")?.let {
+            LoyaltyOrderReservation(
+                points = it.optInt("points"),
+                discountCents = it.optInt("discount_cents"),
+                status = it.optString("status"),
+            )
+        }
+        return LoyaltyOrderSummary(
+            enabled = json.optBoolean("enabled", false),
+            customerId = json.optInt("customer_id"),
+            balance = json.optInt("balance"),
+            reserved = json.optInt("reserved"),
+            available = json.optInt("available"),
+            redeemPoints = json.optInt("redeem_points", 100),
+            redeemValueCents = json.optInt("redeem_value_cents", 0),
+            minRedeemPoints = json.optInt("min_redeem_points", 100),
+            maxRedeemPercent = json.optInt("max_redeem_percent", 30),
+            orderReservation = reservation,
         )
     }
 
