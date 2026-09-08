@@ -27,14 +27,23 @@ final class SystemHealthService
         $checks['cron'] = $cron === null
             ? $this->check('warning', 'Cron ainda não registrou execução.')
             : ($cronAge > 300
-                ? $this->check('warning', 'Cron está atrasado.', ['seconds_since_run' => $cronAge])
+                ? $this->check('warning', 'Cron está atrasado.', ['seconds_since_run' => $cronAge, 'last_state' => $cron['state'] ?? null])
                 : $this->check((string)($cron['state'] ?? 'ok'), 'Cron executando.', ['seconds_since_run' => $cronAge, 'last_result' => $cron['metadata'] ?? []]));
+
+        $worker = $runtime->get('queue.worker.last_run');
+        $workerAge = $this->age($worker['checked_at'] ?? null);
+        $checks['worker'] = $worker === null
+            ? $this->check('warning', 'Worker da fila ainda não registrou execução.')
+            : ($workerAge > 300
+                ? $this->check('warning', 'Worker da fila está atrasado.', ['seconds_since_run' => $workerAge, 'last_state' => $worker['state'] ?? null])
+                : $this->check((string)($worker['state'] ?? 'ok'), 'Worker da fila executando.', ['seconds_since_run' => $workerAge, 'last_result' => $worker['metadata'] ?? []]));
 
         try {
             $queue = (new BackgroundJobService())->stats();
             $waiting = (int)$queue['pending'] + (int)$queue['retry'];
             $oldestAge = $waiting > 0 ? $this->age($queue['oldest_pending_at'] ?? null) : 0;
-            $state = (int)$queue['failed'] > 0 || $waiting > 100 || ($waiting > 0 && $oldestAge > 180) ? 'warning' : 'ok';
+            $staleProcessing = (int)($queue['stale_processing'] ?? 0);
+            $state = (int)$queue['failed'] > 0 || $staleProcessing > 0 || $waiting > 100 || ($waiting > 0 && $oldestAge > 180) ? 'warning' : 'ok';
             $checks['queue'] = $this->check(
                 $state,
                 $state === 'ok' ? 'Fila em dia.' : 'Fila precisa de atenção.',
@@ -47,10 +56,16 @@ final class SystemHealthService
         try {
             $pushConfigured = (new FcmPushService())->configured();
             $devices = (int)$pdo->query('SELECT COUNT(*) FROM push_devices WHERE active=1')->fetchColumn();
+            $lastTest = $runtime->get('push.last_test');
+            $details = ['active_devices' => $devices, 'configured' => $pushConfigured, 'last_test' => $lastTest ? [
+                'state' => $lastTest['state'] ?? null,
+                'checked_at' => $lastTest['checked_at'] ?? null,
+                'metadata' => $lastTest['metadata'] ?? [],
+            ] : null];
             $checks['push'] = $this->check(
                 $pushConfigured ? 'ok' : 'warning',
                 $pushConfigured ? 'Firebase Cloud Messaging configurado.' : 'Push instantâneo ainda sem credencial Firebase.',
-                ['active_devices' => $devices, 'configured' => $pushConfigured]
+                $details
             );
         } catch (Throwable $e) {
             $checks['push'] = $this->check('warning', 'Push ainda não disponível.', ['error' => $this->safe($e->getMessage())]);
