@@ -1,6 +1,5 @@
 package br.com.eventmenu.go.data
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,17 +8,18 @@ import org.junit.Test
 class TenantBrandTest {
     @Test
     fun parsesValidTenantBrand() {
-        val brand = TenantBrand.from(
-            JSONObject()
-                .put("display_name", "Restaurante Exemplo")
-                .put("tagline", "Sabor da casa")
-                .put("primary_color", "#123456")
-                .put("secondary_color", "#abcdef")
-                .put("background_color", "#f1f2f3")
-                .put("surface_color", "#ffffff")
-                .put("text_color", "#111111")
-                .put("apply_app", true)
-                .put("show_eventmenu_brand", false)
+        val brand = TenantBrand.fromValues(
+            mapOf(
+                "display_name" to "Restaurante Exemplo",
+                "tagline" to "Sabor da casa",
+                "primary_color" to "#123456",
+                "secondary_color" to "#abcdef",
+                "background_color" to "#f1f2f3",
+                "surface_color" to "#ffffff",
+                "text_color" to "#111111",
+                "apply_app" to true,
+                "show_eventmenu_brand" to false,
+            )
         )
 
         assertEquals("Restaurante Exemplo", brand.displayName)
@@ -32,15 +32,29 @@ class TenantBrandTest {
 
     @Test
     fun invalidOrNullLikeValuesFallBackSafely() {
-        val brand = TenantBrand.from(
-            JSONObject()
-                .put("display_name", "null")
-                .put("primary_color", "red")
-                .put("secondary_color", "#12")
+        val brand = TenantBrand.fromValues(
+            mapOf(
+                "display_name" to "null",
+                "primary_color" to "red",
+                "secondary_color" to "#12",
+            )
         )
 
         assertEquals("EventMenu", brand.displayName)
         assertEquals("#5b34d6", brand.primaryColor)
         assertEquals("#159b63", brand.secondaryColor)
+    }
+
+    @Test
+    fun booleanWireValuesAreNormalized() {
+        val brand = TenantBrand.fromValues(
+            mapOf(
+                "apply_app" to "1",
+                "show_eventmenu_brand" to "false",
+            )
+        )
+
+        assertTrue(brand.applyApp)
+        assertFalse(brand.showEventMenuBrand)
     }
 }
