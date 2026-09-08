@@ -128,6 +128,7 @@ jobs:
         run: |
           rm -f /tmp/eventmenu-ci.sqlite /tmp/eventmenu-ci.sqlite-shm /tmp/eventmenu-ci.sqlite-wal
           php scripts/ci-db-smoke.php
+          php scripts/ci-auth-mail-smoke.php
           php scripts/ci-loyalty-points-smoke.php
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
@@ -174,6 +175,7 @@ jobs:
           SESSION_NAME: eventmenu_ci_mysql
         run: |
           php scripts/ci-db-smoke.php
+          php scripts/ci-auth-mail-smoke.php
           php scripts/ci-loyalty-points-smoke.php
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
@@ -205,11 +207,16 @@ jobs:
           test -f "$PACKAGE/api-go.php"
           test -f "$PACKAGE/mesa.php"
           test -f "$PACKAGE/webhook.php"
+          test -f "$PACKAGE/forgot-password.php"
+          test -f "$PACKAGE/reset-password.php"
+          test -f "$PACKAGE/media.php"
           test -f "$PACKAGE/manifest.webmanifest"
           test -f "$PACKAGE/sw.js"
           test -f "$PACKAGE/.htaccess"
           test -f "$PACKAGE/.env.example"
+          test -f "$PACKAGE/assets/auth-v2.css"
           test -f "$PACKAGE/database/sqlite/schema.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/043_auth_mail_onboarding.sql"
           test -d "$PACKAGE/database/sqlite/migrations"
           test -d "$PACKAGE/vendor"
           test -d "$PACKAGE/storage"
@@ -218,6 +225,11 @@ jobs:
           test -f "$PACKAGE/src/Services/ApiRateLimitExceededException.php"
           test -f "$PACKAGE/src/Services/SensitiveApiRateLimitService.php"
           test -f "$PACKAGE/src/Services/LoyaltyPointsService.php"
+          test -f "$PACKAGE/src/Services/MailSettingsService.php"
+          test -f "$PACKAGE/src/Services/SmtpMailerService.php"
+          test -f "$PACKAGE/src/Services/PasswordResetService.php"
+          test -f "$PACKAGE/src/Services/BrandingMediaService.php"
+          test -f "$PACKAGE/src/Services/OnboardingService.php"
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
           grep -q '^DB_SQLITE_PATH=storage/eventmenu.sqlite$' "$PACKAGE/.env.example"
