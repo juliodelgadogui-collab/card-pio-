@@ -5,22 +5,117 @@ declare(strict_types=1);
 use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
 use EventMenu\Core\Security;
+use EventMenu\Services\LoyaltyPointsService;
 
-Auth::requirePermission('customers.manage');$tenantId=em_require_tenant();
+Auth::requirePermission('customers.manage');
+$tenantId=em_require_tenant();
+$loyalty=new LoyaltyPointsService();
+$tenantStmt=$pdo->prepare('SELECT settings FROM tenants WHERE id=?');$tenantStmt->execute([$tenantId]);$tenantSettings=json_decode((string)($tenantStmt->fetchColumn()?:'{}'),true)?:[];
+$pointsConfig=$loyalty->normalizeConfig($tenantSettings);
+
+$moneyToCents=static function(mixed$value):int{$raw=trim((string)$value);$raw=str_replace(['.',' '],['',''],$raw);$raw=str_replace(',','.',$raw);return(int)round(((float)$raw)*100);};
+
 if($_SERVER['REQUEST_METHOD']==='POST'){
     em_post_csrf();$action=(string)($_POST['action']??'');
+
+    if($action==='points-config'){
+        if(!Auth::can('settings.manage'))exit('Seu perfil não pode alterar a configuração do programa de pontos.');
+        $earn=max(1,$moneyToCents($_POST['points_earn_amount']??'1,00'));
+        $redeemPoints=max(1,(int)($_POST['points_redeem_points']??100));
+        $redeemValue=max(1,$moneyToCents($_POST['points_redeem_value']??'5,00'));
+        $minimum=max(1,(int)($_POST['points_min_redeem_points']??100));
+        $maxPercent=max(1,min(90,(int)($_POST['points_max_redeem_percent']??30)));
+        $normalized=$loyalty->normalizeConfig([
+            'points_enabled'=>isset($_POST['points_enabled']),
+            'points_earn_amount_cents'=>$earn,
+            'points_redeem_points'=>$redeemPoints,
+            'points_redeem_value_cents'=>$redeemValue,
+            'points_min_redeem_points'=>$minimum,
+            'points_max_redeem_percent'=>$maxPercent,
+        ]);
+        $tenantSettings=array_merge($tenantSettings,[
+            'points_enabled'=>$normalized['enabled'],
+            'points_earn_amount_cents'=>$normalized['earn_amount_cents'],
+            'points_redeem_points'=>$normalized['redeem_points'],
+            'points_redeem_value_cents'=>$normalized['redeem_value_cents'],
+            'points_min_redeem_points'=>$normalized['min_redeem_points'],
+            'points_max_redeem_percent'=>$normalized['max_redeem_percent'],
+        ]);
+        $pdo->prepare('UPDATE tenants SET settings=? WHERE id=?')->execute([json_encode($tenantSettings,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$tenantId]);
+        Auth::audit('customer.points_config_updated','tenant',(string)$tenantId,$normalized);em_flash('ok','Programa de pontos atualizado.');em_go('customers');
+    }
+
     if($action==='customer-save'){
         $id=(int)($_POST['id']??0);$name=trim((string)($_POST['name']??''));$email=mb_strtolower(trim((string)($_POST['email']??'')));$phone=trim((string)($_POST['phone']??''));if($name==='')exit('Cliente inválido.');if($email!==''&&!filter_var($email,FILTER_VALIDATE_EMAIL))exit('E-mail inválido.');
         if($id){$s=$pdo->prepare('UPDATE customers SET name=?,phone=?,email=?,document=? WHERE id=? AND tenant_id=?');$s->execute([$name,$phone?:null,$email?:null,trim((string)($_POST['document']??''))?:null,$id,$tenantId]);}
         else{$s=$pdo->prepare('INSERT INTO customers (tenant_id,name,phone,email,document) VALUES (?,?,?,?,?)');$s->execute([$tenantId,$name,$phone?:null,$email?:null,trim((string)($_POST['document']??''))?:null]);$id=(int)$pdo->lastInsertId();}
-        Auth::audit('customer.saved','customer',(string)$id);em_flash('ok','Cliente salvo.');em_go('customers');
+        Auth::audit('customer.saved','customer',(string)$id);em_flash('ok','Cliente salvo.');em_go('customers',['view'=>$id]);
     }
+
     if($action==='points-adjust'){
         $id=(int)($_POST['id']??0);$points=(int)($_POST['points']??0);if($points===0)exit('Informe pontos diferentes de zero.');$key='adjust:'.Auth::id().':'.$id.':'.bin2hex(random_bytes(8));
-        try{Database::transaction(function(PDO $tx)use($id,$tenantId,$points,$key):void{$s=$tx->prepare(Database::portableSql($tx,'SELECT points FROM customers WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$id,$tenantId]);$current=$s->fetchColumn();if($current===false)throw new RuntimeException('Cliente não encontrado.');if((int)$current+$points<0)throw new RuntimeException('Saldo não pode ficar negativo.');$tx->prepare('INSERT INTO customer_points_movements (tenant_id,customer_id,points,type,idempotency_key) VALUES (?,?,?,"adjustment",?)')->execute([$tenantId,$id,$points,$key]);$tx->prepare('UPDATE customers SET points=points+? WHERE id=?')->execute([$points,$id]);});Auth::audit('customer.points_adjusted','customer',(string)$id,['points'=>$points]);em_flash('ok','Pontos ajustados.');}catch(Throwable $e){em_flash('error',$e->getMessage());}em_go('customers');
+        try{Database::transaction(function(PDO$tx)use($id,$tenantId,$points,$key):void{
+            $s=$tx->prepare(Database::portableSql($tx,'SELECT points FROM customers WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$id,$tenantId]);$current=$s->fetchColumn();if($current===false)throw new RuntimeException('Cliente não encontrado.');
+            $r=$tx->prepare('SELECT COALESCE(SUM(points),0) FROM customer_points_reservations WHERE tenant_id=? AND customer_id=? AND status="reserved"');$r->execute([$tenantId,$id]);$reserved=(int)$r->fetchColumn();if((int)$current+$points<$reserved)throw new RuntimeException('O ajuste deixaria o saldo menor que os pontos já reservados em pedidos.');
+            $tx->prepare('INSERT INTO customer_points_movements (tenant_id,customer_id,points,type,idempotency_key) VALUES (?,?,?,"adjustment",?)')->execute([$tenantId,$id,$points,$key]);$tx->prepare('UPDATE customers SET points=points+? WHERE id=? AND tenant_id=?')->execute([$points,$id,$tenantId]);
+        });Auth::audit('customer.points_adjusted','customer',(string)$id,['points'=>$points]);em_flash('ok','Pontos ajustados.');}catch(Throwable$e){em_flash('error',$e->getMessage());}em_go('customers',['view'=>$id]);
+    }
+
+    if($action==='points-apply'){
+        $id=(int)($_POST['id']??0);$orderId=(int)($_POST['order_id']??0);$points=(int)($_POST['points']??0);
+        try{$result=$loyalty->applyToExistingOrder($tenantId,$id,$orderId,$points);Auth::audit('customer.points_reserved','order',(string)$orderId,['customer_id'=>$id,'points'=>$points,'discount_cents'=>$result['discount_cents']]);em_flash('ok',$points.' pontos reservados. Desconto de '.em_money($result['discount_cents']).' aplicado ao pedido #'.$orderId.'.');}catch(Throwable$e){em_flash('error',$e->getMessage());}em_go('customers',['view'=>$id]);
+    }
+
+    if($action==='points-remove'){
+        $id=(int)($_POST['id']??0);$orderId=(int)($_POST['order_id']??0);
+        try{Database::transaction(function(PDO$tx)use($loyalty,$tenantId,$orderId):void{if($loyalty->releaseForOrder($tx,$tenantId,$orderId,true)!==1)throw new RuntimeException('Este pedido não possui pontos reservados.');});Auth::audit('customer.points_reservation_removed','order',(string)$orderId,['customer_id'=>$id]);em_flash('ok','Pontos liberados e desconto removido do pedido.');}catch(Throwable$e){em_flash('error',$e->getMessage());}em_go('customers',['view'=>$id]);
     }
 }
+
 $editId=(int)($_GET['edit']??0);$edit=null;if($editId){$s=$pdo->prepare('SELECT * FROM customers WHERE id=? AND tenant_id=?');$s->execute([$editId,$tenantId]);$edit=$s->fetch()?:null;}
-$q=trim((string)($_GET['q']??''));$sql='SELECT c.*,(SELECT COUNT(*) FROM orders o WHERE o.customer_id=c.id AND o.payment_status="paid") paid_orders,(SELECT COALESCE(SUM(o.total_cents),0) FROM orders o WHERE o.customer_id=c.id AND o.payment_status="paid") lifetime_value FROM customers c WHERE c.tenant_id=?';$args=[$tenantId];if($q!==''){$sql.=' AND (c.name LIKE ? OR c.phone LIKE ? OR c.email LIKE ?)';$like='%'.$q.'%';array_push($args,$like,$like,$like);}$sql.=' ORDER BY c.id DESC LIMIT 200';$s=$pdo->prepare($sql);$s->execute($args);$customers=$s->fetchAll();
+$viewId=(int)($_GET['view']??0);$view=null;$movements=[];$reservations=[];$summary=null;
+if($viewId){$s=$pdo->prepare('SELECT * FROM customers WHERE id=? AND tenant_id=?');$s->execute([$viewId,$tenantId]);$view=$s->fetch()?:null;if($view){$summary=$loyalty->summary($tenantId,$viewId,$pdo);$m=$pdo->prepare('SELECT m.*,o.total_cents,o.status order_status,o.payment_status FROM customer_points_movements m LEFT JOIN orders o ON o.id=m.order_id AND o.tenant_id=m.tenant_id WHERE m.tenant_id=? AND m.customer_id=? ORDER BY m.id DESC LIMIT 100');$m->execute([$tenantId,$viewId]);$movements=$m->fetchAll();$r=$pdo->prepare('SELECT r.*,o.status order_status,o.payment_status,o.total_cents FROM customer_points_reservations r JOIN orders o ON o.id=r.order_id AND o.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.customer_id=? AND r.status="reserved" ORDER BY r.id DESC');$r->execute([$tenantId,$viewId]);$reservations=$r->fetchAll();}}
+
+$q=trim((string)($_GET['q']??''));$sql='SELECT c.*,(SELECT COUNT(*) FROM orders o WHERE o.customer_id=c.id AND o.payment_status="paid") paid_orders,(SELECT COALESCE(SUM(o.total_cents),0) FROM orders o WHERE o.customer_id=c.id AND o.payment_status="paid") lifetime_value,(SELECT COALESCE(SUM(r.points),0) FROM customer_points_reservations r WHERE r.tenant_id=c.tenant_id AND r.customer_id=c.id AND r.status="reserved") reserved_points FROM customers c WHERE c.tenant_id=?';$args=[$tenantId];if($q!==''){$sql.=' AND (c.name LIKE ? OR c.phone LIKE ? OR c.email LIKE ?)';$like='%'.$q.'%';array_push($args,$like,$like,$like);}$sql.=' ORDER BY c.id DESC LIMIT 200';$s=$pdo->prepare($sql);$s->execute($args);$customers=$s->fetchAll();
+
+$earnLabel=number_format($pointsConfig['earn_amount_cents']/100,2,',','.');$redeemLabel=em_money($pointsConfig['redeem_value_cents']);
 em_header('Clientes e pontos','customers');
-?><div class="grid" style="grid-template-columns:minmax(280px,1fr) minmax(0,2fr)"><section class="card"><h2><?= $edit?'Editar cliente':'Novo cliente' ?></h2><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="customer-save"><input type="hidden" name="id" value="<?= (int)($edit['id']??0) ?>"><label class="span-2">Nome<input name="name" required value="<?= Security::e($edit['name']??'') ?>"></label><label>Telefone<input name="phone" value="<?= Security::e($edit['phone']??'') ?>"></label><label>E-mail<input type="email" name="email" value="<?= Security::e($edit['email']??'') ?>"></label><label class="span-2">Documento<input name="document" value="<?= Security::e($edit['document']??'') ?>"></label><button class="primary span-2">Salvar</button></form></section><section class="card"><form method="get" class="actions"><input type="hidden" name="route" value="customers"><input name="q" value="<?= Security::e($q) ?>" placeholder="Buscar nome, telefone ou e-mail"><button class="secondary">Buscar</button></form><div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Pedidos pagos</th><th>Valor histórico</th><th>Pontos</th><th>Ações</th></tr></thead><tbody><?php foreach($customers as $c):?><tr><td><strong><?= Security::e($c['name']) ?></strong><br><span class="muted"><?= Security::e($c['phone']??'') ?> <?= Security::e($c['email']??'') ?></span></td><td><?= (int)$c['paid_orders'] ?></td><td><?= em_money($c['lifetime_value']) ?></td><td><strong><?= (int)$c['points'] ?></strong><form method="post" class="actions" style="margin-top:6px"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="points-adjust"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>"><input type="number" name="points" style="width:90px" placeholder="+/-"><button class="secondary">Ajustar</button></form></td><td><a class="button secondary" href="/?route=customers&edit=<?= (int)$c['id'] ?>">Editar</a></td></tr><?php endforeach;?></tbody></table></div></section></div><?php em_footer();
+?>
+<section class="page-hero"><div><span class="eyebrow">CRM · FIDELIDADE</span><h2>Clientes e programa de pontos</h2><p>Cadastre clientes, acompanhe compras e controle ganhos, reservas e uso de pontos com histórico.</p></div><div class="hero-actions"><span class="status-pill <?= $pointsConfig['enabled']?'active':'' ?>"><?= $pointsConfig['enabled']?'Pontos ativos':'Pontos desativados' ?></span></div></section>
+
+<section class="card" style="margin-bottom:16px">
+  <div class="section-head"><div><span class="eyebrow">PROGRAMA DE PONTOS</span><h2>Regra de fidelidade</h2><p class="muted">O cliente só ganha pontos depois do pagamento confirmado. Pontos usados ficam reservados até o pagamento e voltam ao saldo quando um estorno integral é concluído.</p></div></div>
+  <?php if(Auth::can('settings.manage')):?>
+  <form method="post" class="form-grid">
+    <input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="points-config">
+    <label class="checkbox span-2"><input type="checkbox" name="points_enabled"<?= em_checked($pointsConfig['enabled']) ?>> Programa de pontos ativo</label>
+    <label>A cada valor pago (R$)<input name="points_earn_amount" inputmode="decimal" value="<?= Security::e(number_format($pointsConfig['earn_amount_cents']/100,2,',','')) ?>"><small class="muted">A cada <?= Security::e($earnLabel) ?> pago, o cliente ganha 1 ponto.</small></label>
+    <label>Pontos por bloco de resgate<input type="number" min="1" name="points_redeem_points" value="<?= (int)$pointsConfig['redeem_points'] ?>"><small class="muted">Ex.: 100 pontos por bloco.</small></label>
+    <label>Valor do bloco (R$)<input name="points_redeem_value" inputmode="decimal" value="<?= Security::e(number_format($pointsConfig['redeem_value_cents']/100,2,',','')) ?>"><small class="muted"><?= (int)$pointsConfig['redeem_points'] ?> pontos = <?= $redeemLabel ?> de desconto.</small></label>
+    <label>Mínimo para usar<input type="number" min="1" name="points_min_redeem_points" value="<?= (int)$pointsConfig['min_redeem_points'] ?>"></label>
+    <label>Máximo do pedido coberto por pontos (%)<input type="number" min="1" max="90" name="points_max_redeem_percent" value="<?= (int)$pointsConfig['max_redeem_percent'] ?>"></label>
+    <div class="span-2"><button class="primary">Salvar programa de pontos</button></div>
+  </form>
+  <?php else:?><div class="alert">Seu perfil pode consultar clientes e pontos, mas somente um administrador autorizado pode alterar as regras do programa.</div><?php endif;?>
+</section>
+
+<?php if($view):?>
+<section class="card" style="margin-bottom:16px">
+  <div class="section-head"><div><span class="eyebrow">CLIENTE</span><h2><?= Security::e($view['name']) ?></h2><p class="muted"><?= Security::e($view['phone']??'') ?> <?= Security::e($view['email']??'') ?></p></div><div class="actions"><a class="button secondary" href="/?route=customers&edit=<?= (int)$view['id'] ?>">Editar cadastro</a><a class="button secondary" href="/?route=customers">Fechar</a></div></div>
+  <div class="metric-grid" style="margin:14px 0"><div class="metric-card"><span>Saldo total</span><strong><?= (int)$summary['balance'] ?></strong><small>pontos</small></div><div class="metric-card"><span>Reservados</span><strong><?= (int)$summary['reserved'] ?></strong><small>em pedidos ainda não pagos</small></div><div class="metric-card"><span>Disponíveis</span><strong><?= (int)$summary['available'] ?></strong><small>para novo resgate</small></div></div>
+  <?php if($pointsConfig['enabled']):?>
+  <div class="grid" style="grid-template-columns:minmax(260px,1fr) minmax(260px,1fr);gap:12px">
+    <div><h3>Usar pontos em um pedido</h3><p class="muted">Informe um pedido não pago deste cliente. O desconto fica reservado e só consome os pontos quando o pagamento for confirmado.</p><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="points-apply"><input type="hidden" name="id" value="<?= (int)$view['id'] ?>"><label>Pedido<input type="number" min="1" name="order_id" required placeholder="Ex.: 152"></label><label>Pontos<input type="number" min="<?= (int)$pointsConfig['min_redeem_points'] ?>" step="<?= (int)$pointsConfig['redeem_points'] ?>" name="points" required placeholder="<?= (int)$pointsConfig['min_redeem_points'] ?>"></label><button class="primary span-2">Reservar pontos no pedido</button></form></div>
+    <div><h3>Reservas ativas</h3><?php if(!$reservations):?><p class="muted">Nenhum ponto reservado agora.</p><?php else:?><div class="table-wrap"><table class="table"><thead><tr><th>Pedido</th><th>Pontos</th><th>Desconto</th><th></th></tr></thead><tbody><?php foreach($reservations as$r):?><tr><td>#<?= (int)$r['order_id'] ?></td><td><?= (int)$r['points'] ?></td><td><?= em_money($r['discount_cents']) ?></td><td><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="points-remove"><input type="hidden" name="id" value="<?= (int)$view['id'] ?>"><input type="hidden" name="order_id" value="<?= (int)$r['order_id'] ?>"><button class="secondary compact">Remover</button></form></td></tr><?php endforeach;?></tbody></table></div><?php endif;?></div>
+  </div>
+  <?php endif;?>
+  <h3 style="margin-top:18px">Extrato de pontos</h3>
+  <?php if(!$movements):?><p class="muted">Ainda não há movimentações de pontos.</p><?php else:?><div class="table-wrap"><table class="table"><thead><tr><th>Data</th><th>Movimento</th><th>Pedido</th><th>Pontos</th></tr></thead><tbody><?php foreach($movements as$m):$label=match($m['type']){'earn'=>'Ganho por compra','redeem'=>'Usado em compra','adjustment'=>'Ajuste manual','reversal'=>(int)$m['points']>=0?'Pontos devolvidos':'Pontos revertidos',default=>'Movimento'};?><tr><td><?= Security::e((string)$m['created_at']) ?></td><td><?= Security::e($label) ?></td><td><?= $m['order_id']?'#'.(int)$m['order_id']:'—' ?></td><td><strong><?= (int)$m['points']>0?'+':'' ?><?= (int)$m['points'] ?></strong></td></tr><?php endforeach;?></tbody></table></div><?php endif;?>
+</section>
+<?php endif;?>
+
+<div class="grid" style="grid-template-columns:minmax(280px,1fr) minmax(0,2fr)">
+<section class="card"><h2><?= $edit?'Editar cliente':'Novo cliente' ?></h2><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="customer-save"><input type="hidden" name="id" value="<?= (int)($edit['id']??0) ?>"><label class="span-2">Nome<input name="name" required value="<?= Security::e($edit['name']??'') ?>"></label><label>Telefone<input name="phone" value="<?= Security::e($edit['phone']??'') ?>"></label><label>E-mail<input type="email" name="email" value="<?= Security::e($edit['email']??'') ?>"></label><label class="span-2">Documento<input name="document" value="<?= Security::e($edit['document']??'') ?>"></label><button class="primary span-2">Salvar cliente</button></form></section>
+<section class="card"><form method="get" class="actions"><input type="hidden" name="route" value="customers"><input name="q" value="<?= Security::e($q) ?>" placeholder="Buscar nome, telefone ou e-mail"><button class="secondary">Buscar</button></form><div class="table-wrap"><table class="table"><thead><tr><th>Cliente</th><th>Pedidos pagos</th><th>Valor histórico</th><th>Pontos</th><th>Ações</th></tr></thead><tbody><?php foreach($customers as$c):$available=max(0,(int)$c['points']-(int)$c['reserved_points']);?><tr><td><strong><?= Security::e($c['name']) ?></strong><br><span class="muted"><?= Security::e($c['phone']??'') ?> <?= Security::e($c['email']??'') ?></span></td><td><?= (int)$c['paid_orders'] ?></td><td><?= em_money($c['lifetime_value']) ?></td><td><strong><?= $available ?> disponíveis</strong><?php if((int)$c['reserved_points']>0):?><br><span class="muted"><?= (int)$c['reserved_points'] ?> reservados · <?= (int)$c['points'] ?> total</span><?php endif;?><form method="post" class="actions" style="margin-top:6px"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="points-adjust"><input type="hidden" name="id" value="<?= (int)$c['id'] ?>"><input type="number" name="points" style="width:90px" placeholder="+/-"><button class="secondary compact">Ajustar</button></form></td><td><div class="actions"><a class="button primary compact" href="/?route=customers&view=<?= (int)$c['id'] ?>">Ver pontos</a><a class="button secondary compact" href="/?route=customers&edit=<?= (int)$c['id'] ?>">Editar</a></div></td></tr><?php endforeach;?></tbody></table></div></section>
+</div>
+<?php em_footer();
