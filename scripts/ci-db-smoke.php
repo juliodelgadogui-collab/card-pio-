@@ -136,6 +136,15 @@ try {
     assert_ci($sameJobId === $jobId, 'Dedupe da fila não é idempotente.');
     $jobResult = $jobs->runBatch(5,'ci-worker');
     assert_ci((int)$jobResult['completed'] >= 1, 'Worker não concluiu tarefa segura de CI.');
+    $workerHeartbeat = $runtime->get('queue.worker.last_run');
+    assert_ci(is_array($workerHeartbeat) && $workerHeartbeat['state'] === 'ok', 'Worker não registrou heartbeat saudável.');
+    $jobStats = $jobs->stats();
+    assert_ci(array_key_exists('stale_processing',$jobStats), 'Estatística de tarefa travada não foi exposta.');
+    $staleAt = gmdate('Y-m-d H:i:s', time() - 700);
+    $s=$pdo->prepare('UPDATE background_jobs SET status="processing",locked_at=?,locked_by="ci-stale",completed_at=NULL WHERE id=?');$s->execute([$staleAt,$jobId]);
+    $staleStats=$jobs->stats();
+    assert_ci((int)$staleStats['stale_processing'] >= 1, 'Worker não detectou tarefa presa em processamento.');
+    $s=$pdo->prepare('UPDATE background_jobs SET status="completed",completed_at=CURRENT_TIMESTAMP,locked_at=NULL,locked_by=NULL,last_error=NULL WHERE id=?');$s->execute([$jobId]);
 
     $rate = new ApiRateLimitService();
     $rateSubject = 'ci-' . bin2hex(random_bytes(6));
@@ -163,7 +172,8 @@ try {
     assert_ci((string)$s->fetchColumn()==='ready','Pedido event_bar sem preparo não ficou pronto automaticamente.');
 
     $health = (new SystemHealthService())->snapshot();
-    assert_ci(isset($health['checks']['database'],$health['checks']['queue'],$health['checks']['backup']), 'Snapshot de saúde incompleto.');
+    assert_ci(isset($health['checks']['database'],$health['checks']['worker'],$health['checks']['queue'],$health['checks']['backup']), 'Snapshot de saúde incompleto.');
+    assert_ci(($health['checks']['worker']['state'] ?? null) === 'ok', 'Heartbeat recente do worker não apareceu saudável no health check.');
     assert_ci(($health['checks']['queue']['state'] ?? null) === 'ok', 'Fila vazia gerou alerta falso no health check.');
 
     echo "CI DB smoke OK ({$driver})\n";
