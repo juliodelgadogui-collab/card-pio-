@@ -6,6 +6,8 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 
 use EventMenu\Core\Database;
 use EventMenu\Services\CashService;
+use EventMenu\Services\OperatingUnitService;
+use EventMenu\Services\OrderCancellationService;
 use EventMenu\Services\OrderService;
 
 function ops_fail(string $message): never { fwrite(STDERR,"OPS CI FAIL: {$message}\n"); exit(1); }
@@ -37,16 +39,28 @@ $paidCancel=bin2hex(random_bytes(20));$pdo->prepare('INSERT INTO orders (public_
 $_SESSION['user_id']=$adminId;$_SESSION['role']='admin';$_SESSION['name']='Ops Admin';
 try{$service->changeStatus($paidOrder,'cancelled','panel');ops_fail('Pedido pago foi cancelado sem estorno.');}catch(RuntimeException){}
 
+// O painel web precisa conseguir solicitar/analisar cancelamento pela unidade sem depender de turno do app.
+$unitCode='ops-unit-'.bin2hex(random_bytes(3));$pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,"Operação Web CI",1)')->execute([$tenantId,$unitCode]);$panelUnitId=(int)$pdo->lastInsertId();
+$cancelToken=bin2hex(random_bytes(20));$pdo->prepare('INSERT INTO orders (public_token,tenant_id,unit_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?,?,?,"counter","confirmed","unpaid",1500,1500,?)')->execute([$cancelToken,$tenantId,$panelUnitId,$adminId]);$panelCancelOrder=(int)$pdo->lastInsertId();
+$cancelService=new OrderCancellationService();$request=$cancelService->requestFromPanel($panelCancelOrder,'Cliente desistiu',$panelUnitId);ops_assert((int)$request['order_id']===$panelCancelOrder,'Painel não criou solicitação de cancelamento.');
+$pending=$cancelService->pendingForUnit($panelUnitId);ops_assert(count(array_filter($pending,fn(array$r):bool=>(int)$r['id']===(int)$request['id']))===1,'Solicitação não apareceu na fila da gerência.');
+try{$cancelService->approveFromPanel((int)$request['id'],$panelUnitId+999);ops_fail('Cancelamento foi aprovado por unidade incorreta.');}catch(RuntimeException){}
+$approved=$cancelService->approveFromPanel((int)$request['id'],$panelUnitId);ops_assert($approved['status']==='approved','Gerente não aprovou cancelamento pelo painel.');
+$panelCancelStatus=$pdo->query('SELECT status FROM orders WHERE id='.(int)$panelCancelOrder)->fetchColumn();ops_assert($panelCancelStatus==='cancelled','Pedido não ficou cancelado após aprovação no painel.');
+
+// O restante do smoke usa o contexto oficial da mesma unidade do painel.
+(new OperatingUnitService())->selectCurrent($panelUnitId);
 $cash=new CashService();
 $cashSession=$cash->open(10000,'CI abertura');
 ops_assert((int)$cashSession['opening_cash_cents']===10000,'Abertura do caixa falhou.');
+ops_assert((int)$cashSession['unit_id']===$panelUnitId,'Caixa não abriu na unidade selecionada.');
 try{$cash->open(100);ops_fail('Segundo caixa foi aberto para o mesmo operador.');}catch(RuntimeException){}
 $cash->addManualMovement('supply',2000,'Suprimento CI');
 $cash->addManualMovement('withdrawal',1000,'Sangria CI');
 $cash->addManualMovement('adjustment',500,'Ajuste CI','out');
 
 $cashToken=bin2hex(random_bytes(20));
-$pdo->prepare('INSERT INTO orders (public_token,tenant_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?, ?, "counter", "confirmed", "paid", 3000, 3000, ?)')->execute([$cashToken,$tenantId,$adminId]);
+$pdo->prepare('INSERT INTO orders (public_token,tenant_id,unit_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?, ?, ?, "counter", "confirmed", "paid", 3000, 3000, ?)')->execute([$cashToken,$tenantId,$panelUnitId,$adminId]);
 $cashOrder=(int)$pdo->lastInsertId();
 $providerPaymentId='CASH-CI-'.strtoupper(bin2hex(random_bytes(6)));
 $paymentKey='cash-ci-'.$uid;

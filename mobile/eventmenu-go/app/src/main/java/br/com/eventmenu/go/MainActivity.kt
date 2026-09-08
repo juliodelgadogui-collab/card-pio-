@@ -165,8 +165,11 @@ class MainActivity : FragmentActivity() {
         val notificationType = target.notificationType.lowercase()
         val entityType = target.entityType.lowercase()
         val destination = when {
-            entityType in setOf("discount_request", "cancellation_request") &&
-                "reports" in permissions && state.mode in setOf(AppMode.OPERATION, AppMode.PAY) -> AppScreen.MANAGER
+            entityType == "cancellation_request" &&
+                "cancellation_approve" in permissions && state.mode in setOf(AppMode.OPERATION, AppMode.PAY) -> AppScreen.MANAGER
+
+            entityType == "discount_request" &&
+                "discount_approve" in permissions && state.mode in setOf(AppMode.OPERATION, AppMode.PAY) -> AppScreen.MANAGER
 
             notificationType == "order.new" && "orders_kitchen" in permissions && state.mode == AppMode.OPERATION -> AppScreen.KITCHEN
 
@@ -191,6 +194,7 @@ class MainActivity : FragmentActivity() {
         }
 
         if (destination == AppScreen.EVENTS) target.entityId.toIntOrNull()?.let(vm::selectEvent)
+        if (destination == AppScreen.MANAGER) vm.refreshManager()
         vm.navigate(destination)
     }
 
