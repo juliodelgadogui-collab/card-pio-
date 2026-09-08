@@ -7,8 +7,11 @@ require __DIR__.'/../app/bootstrap.php';
 use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
 use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\ApiRateLimitExceededException;
+use EventMenu\Services\LoyaltyPointsService;
 use EventMenu\Services\OrderHistoryService;
 use EventMenu\Services\OrderService;
+use EventMenu\Services\SensitiveApiRateLimitService;
 use EventMenu\Services\WorkShiftService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -26,6 +29,23 @@ function goo_assert_unit(int $tenantId,int $orderId,?array $shift):array{
     if($shiftUnit!==$orderUnit)throw new RuntimeException('Este pedido não pertence à unidade do turno atual.');
     return $order;
 }
+function goo_loyalty(PDO $pdo,int $tenantId,array $order):?array{
+    $customerId=(int)($order['customer_id']??0);if($customerId<1||!Auth::can('loyalty.redeem'))return null;
+    $service=new LoyaltyPointsService();$config=$service->config($tenantId,$pdo);$summary=$service->summary($tenantId,$customerId,$pdo);
+    $r=$pdo->prepare('SELECT points,discount_cents,status FROM customer_points_reservations WHERE tenant_id=? AND order_id=? LIMIT 1');$r->execute([$tenantId,(int)$order['id']]);$reservation=$r->fetch()?:null;
+    return [
+        'enabled'=>(bool)$config['enabled'],
+        'customer_id'=>$customerId,
+        'balance'=>(int)$summary['balance'],
+        'reserved'=>(int)$summary['reserved'],
+        'available'=>(int)$summary['available'],
+        'redeem_points'=>(int)$config['redeem_points'],
+        'redeem_value_cents'=>(int)$config['redeem_value_cents'],
+        'min_redeem_points'=>(int)$config['min_redeem_points'],
+        'max_redeem_percent'=>(int)$config['max_redeem_percent'],
+        'order_reservation'=>$reservation?['points'=>(int)$reservation['points'],'discount_cents'=>(int)$reservation['discount_cents'],'status'=>(string)$reservation['status']]:null,
+    ];
+}
 
 try{
     $auth=new ApiAuthService();$token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')goo_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
@@ -38,6 +58,22 @@ try{
         goo_out(['ok'=>true,'order'=>(new OrderService())->changeStatus($orderId,'confirmed','accept')]);
     }
 
+    if($action==='loyalty-apply'){
+        goo_method('POST');if(!Auth::can('loyalty.redeem'))throw new RuntimeException('Sua função não pode usar pontos em pedidos.');
+        (new SensitiveApiRateLimitService())->assertAllowed('loyalty.apply',$user,$deviceId);
+        $body=goo_body();$orderId=(int)($body['order_id']??0);$points=(int)($body['points']??0);$order=goo_assert_unit($tenantId,$orderId,$shift);$customerId=(int)($order['customer_id']??0);if($customerId<1)throw new RuntimeException('Identifique o cliente antes de usar pontos.');
+        $result=(new LoyaltyPointsService())->applyToExistingOrder($tenantId,$customerId,$orderId,$points);Auth::audit('customer.points_reserved','order',(string)$orderId,['customer_id'=>$customerId,'points'=>$points,'discount_cents'=>$result['discount_cents'],'source'=>'eventmenu_go']);
+        $fresh=goo_assert_unit($tenantId,$orderId,$shift);goo_out(['ok'=>true,'result'=>$result,'loyalty'=>goo_loyalty(Database::connection(),$tenantId,$fresh),'order_total_cents'=>(int)$fresh['total_cents']]);
+    }
+
+    if($action==='loyalty-remove'){
+        goo_method('POST');if(!Auth::can('loyalty.redeem'))throw new RuntimeException('Sua função não pode alterar o resgate de pontos.');
+        (new SensitiveApiRateLimitService())->assertAllowed('loyalty.remove',$user,$deviceId);
+        $body=goo_body();$orderId=(int)($body['order_id']??0);$order=goo_assert_unit($tenantId,$orderId,$shift);$customerId=(int)($order['customer_id']??0);if($customerId<1)throw new RuntimeException('Este pedido não possui cliente identificado.');
+        Database::transaction(function(PDO $tx)use($tenantId,$orderId):void{if((new LoyaltyPointsService())->releaseForOrder($tx,$tenantId,$orderId,true)!==1)throw new RuntimeException('Este pedido não possui pontos reservados.');});Auth::audit('customer.points_reservation_removed','order',(string)$orderId,['customer_id'=>$customerId,'source'=>'eventmenu_go']);
+        $fresh=goo_assert_unit($tenantId,$orderId,$shift);goo_out(['ok'=>true,'loyalty'=>goo_loyalty(Database::connection(),$tenantId,$fresh),'order_total_cents'=>(int)$fresh['total_cents']]);
+    }
+
     if($action==='detail'){
         $orderId=(int)($_GET['order_id']??0);$order=goo_assert_unit($tenantId,$orderId,$shift);
         $allowed=Auth::can('orders.view')||Auth::can('orders.manage')||Auth::can('orders.kitchen')||Auth::can('orders.dispatch')||Auth::can('payments.manage');
@@ -45,8 +81,8 @@ try{
         $pdo=Database::connection();$items=$pdo->prepare('SELECT id,name_snapshot,quantity,unit_price_cents,total_cents,notes FROM order_items WHERE order_id=? ORDER BY id');$items->execute([$orderId]);
         $customer=null;if($order['customer_id']){$c=$pdo->prepare('SELECT id,name,phone,email FROM customers WHERE id=? AND tenant_id=? LIMIT 1');$c->execute([$order['customer_id'],$tenantId]);$customer=$c->fetch()?:null;}
         $timeline=(new OrderHistoryService())->timeline($orderId);
-        goo_out(['ok'=>true,'detail'=>['order'=>$order,'customer'=>$customer,'items'=>$items->fetchAll(),'timeline'=>$timeline]]);
+        goo_out(['ok'=>true,'detail'=>['order'=>$order,'customer'=>$customer,'items'=>$items->fetchAll(),'timeline'=>$timeline,'loyalty'=>goo_loyalty($pdo,$tenantId,$order)]]);
     }
 
     goo_out(['ok'=>false,'error'=>'Endpoint operacional de pedido não encontrado.'],404);
-}catch(RuntimeException $e){goo_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))goo_out(['ok'=>false,'error'=>$e->getMessage()],500);goo_out(['ok'=>false,'error'=>'Erro interno.'],500);}
+}catch(ApiRateLimitExceededException $e){goo_out(['ok'=>false,'error'=>$e->getMessage()],429);}catch(RuntimeException $e){goo_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))goo_out(['ok'=>false,'error'=>$e->getMessage()],500);goo_out(['ok'=>false,'error'=>'Erro interno.'],500);}
