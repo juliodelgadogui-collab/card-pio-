@@ -62,6 +62,20 @@ O pacote contém wrappers públicos na raiz de `/1`, dependências de produção
 
 Para Nginx, replique esses bloqueios no virtual host.
 
+## Cron obrigatório em produção
+
+Depois da instalação, configure uma tarefa de cron **a cada minuto**. Ela executa expiração de reservas e sessões, limpeza, fila assíncrona, notificações push e agendamento de backup.
+
+No pacote instalado em `/1`, o formato recomendado em cPanel/Linux é:
+
+```cron
+* * * * * php /CAMINHO/DO/SITE/1/cron.php >/dev/null 2>&1
+```
+
+O modo CLI é preferido porque não precisa colocar `CRON_SECRET` na linha de comando. O endpoint HTTP continua protegido pelo cabeçalho `X-Cron-Secret` para ambientes que realmente precisem de execução remota.
+
+No painel, entre como **Super ADM → Saúde do sistema**. A tela mostra o caminho real do `cron.php` daquela instalação e verifica separadamente **Cron** e **Worker da fila**. Após configurar, os dois devem aparecer como `OK` em até alguns minutos.
+
 ## Atualizações do servidor
 
 Ao atualizar uma instalação existente:
