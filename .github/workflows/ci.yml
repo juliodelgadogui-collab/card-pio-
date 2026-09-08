@@ -36,7 +36,9 @@ jobs:
         run: php scripts/ci-url-smoke.php
       - name: Production readiness rules
         run: php scripts/ci-production-readiness-smoke.php
-      - name: Load test safety checks
+      - name: Permission rules
+        run: php scripts/ci-permission-smoke.php
+      - name: Load test and HTTP security checks
         run: |
           php scripts/load-test.php --dry-run --url=http://127.0.0.1:8080/ --requests=10 --concurrency=2
           if php scripts/load-test.php --dry-run --url=https://staging.example.test/ --requests=10 --concurrency=2; then
@@ -44,10 +46,16 @@ jobs:
             exit 1
           fi
           php scripts/load-test.php --dry-run --url=https://staging.example.test/ --requests=10 --concurrency=2 --allow-remote --confirm-host=staging.example.test
-          php -S 127.0.0.1:18080 -t public >/tmp/eventmenu-load-test-server.log 2>&1 &
+          APP_ENV=production APP_URL=https://example.test php -S 127.0.0.1:18080 -t public >/tmp/eventmenu-load-test-server.log 2>&1 &
           SERVER_PID=$!
           trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
           sleep 1
+          curl -sS -D /tmp/eventmenu-headers.txt -o /dev/null 'http://127.0.0.1:18080/index.php?route=login'
+          grep -qi '^X-Content-Type-Options: nosniff' /tmp/eventmenu-headers.txt
+          grep -qi '^X-Frame-Options: SAMEORIGIN' /tmp/eventmenu-headers.txt
+          grep -qi '^Referrer-Policy: strict-origin-when-cross-origin' /tmp/eventmenu-headers.txt
+          grep -qi '^Permissions-Policy: camera=(self), microphone=(), geolocation=()' /tmp/eventmenu-headers.txt
+          grep -qi '^Strict-Transport-Security: max-age=31536000; includeSubDomains' /tmp/eventmenu-headers.txt
           php scripts/load-test.php --url=http://127.0.0.1:18080/manifest.webmanifest --requests=20 --concurrency=4 --warmup=1 --expected=200 --fail-p95-ms=5000
 
   android:
@@ -86,6 +94,8 @@ jobs:
               -keysize 2048 \
               -validity 10000
           fi
+      - name: Run EventMenu GO unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
       - name: Assemble EventMenu GO debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
       - name: Upload EventMenu GO debug APK

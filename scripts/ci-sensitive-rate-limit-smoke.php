@@ -14,6 +14,7 @@ $service=new SensitiveApiRateLimitService();
 $required=[
     'cancel.request','cancel.approve','cancel.reject',
     'discount.request','discount.approve','discount.reject',
+    'loyalty.apply','loyalty.remove',
     'qr.issue','qr.revoke','device.request_nfc',
     'tab.group_create','tab.group_cancel','tab.pix_create','tab.nfc_intent','tab.nfc_verify',
 ];
