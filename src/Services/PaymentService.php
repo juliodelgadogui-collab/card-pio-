@@ -115,16 +115,18 @@ final class PaymentService
 
     private function settleOrderEffects(PDO $pdo,int $tenantId,array $order,int $orderId):void
     {
-        $settlement='settlement:order:'.$orderId;(new StockReservationService())->consumeForSettlement($pdo,$tenantId,$orderId,$settlement);
+        $settlement='settlement:order:'.$orderId;$loyalty=new LoyaltyPointsService();(new StockReservationService())->consumeForSettlement($pdo,$tenantId,$orderId,$settlement);
         $tickets=$pdo->prepare(Database::portableSql($pdo,'SELECT batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="reserved" GROUP BY batch_id FOR UPDATE'));$tickets->execute([$tenantId,$orderId]);
         foreach($tickets->fetchAll() as $row){$qty=(int)$row['qty'];$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=?'))->execute([$qty,$qty,$row['batch_id']]);}
         $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);
         if(!empty($order['coupon_id'])){
             $r=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM coupon_reservations WHERE tenant_id=? AND order_id=? AND status="reserved" FOR UPDATE'));$r->execute([$tenantId,$orderId]);$reservation=$r->fetch();$insertSql=Database::portableSql($pdo,'INSERT IGNORE INTO coupon_redemptions (tenant_id,coupon_id,order_id,customer_id,discount_cents,idempotency_key) VALUES (?,?,?,?,?,?)');
-            if($reservation){$pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE id=?')->execute([$reservation['id']]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$order['coupon_id'],$tenantId]);$pdo->prepare($insertSql)->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$order['discount_cents'],$settlement.':coupon']);}
-            else{$red=$pdo->prepare($insertSql);$red->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$order['discount_cents'],$settlement.':coupon']);if($red->rowCount()===1)$pdo->prepare('UPDATE coupons SET uses_count=uses_count+1 WHERE id=? AND tenant_id=?')->execute([$order['coupon_id'],$tenantId]);}
+            $loyaltyDiscount=$loyalty->discountForOrder($pdo,$tenantId,$orderId);$couponDiscount=$reservation?(int)$reservation['discount_cents']:max(0,(int)$order['discount_cents']-$loyaltyDiscount);
+            if($reservation){$pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE id=?')->execute([$reservation['id']]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$order['coupon_id'],$tenantId]);$pdo->prepare($insertSql)->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$couponDiscount,$settlement.':coupon']);}
+            else{$red=$pdo->prepare($insertSql);$red->execute([$tenantId,$order['coupon_id'],$orderId,$order['customer_id']?:null,$couponDiscount,$settlement.':coupon']);if($red->rowCount()===1)$pdo->prepare('UPDATE coupons SET uses_count=uses_count+1 WHERE id=? AND tenant_id=?')->execute([$order['coupon_id'],$tenantId]);}
         }
-        if(!empty($order['customer_id'])){$points=intdiv((int)$order['total_cents'],100);if($points>0){$ins=$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO customer_points_movements (tenant_id,customer_id,order_id,points,type,idempotency_key) VALUES (?,?,?,?,"earn",?)'));$ins->execute([$tenantId,$order['customer_id'],$orderId,$points,$settlement.':points']);if($ins->rowCount()===1)$pdo->prepare('UPDATE customers SET points=points+? WHERE id=? AND tenant_id=?')->execute([$points,$order['customer_id'],$tenantId]);}}
+        $loyalty->settleForOrder($pdo,$tenantId,$orderId,$settlement);
+        $loyalty->earnForOrder($pdo,$tenantId,$order,$orderId,$settlement);
         if(!empty($order['promoter_id'])){
             $p=$pdo->prepare('SELECT commission_percent FROM promoters WHERE id=? AND tenant_id=? AND active=1');$p->execute([$order['promoter_id'],$tenantId]);$percent=$p->fetchColumn();
             if($percent!==false){
