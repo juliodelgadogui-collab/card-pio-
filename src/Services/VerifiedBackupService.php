@@ -25,6 +25,7 @@ final class VerifiedBackupService
     public function run(): array
     {
         $runtime = new RuntimeStatusService();
+        $file = null;
         try {
             $result = (new BackupService())->run();
             $file = $this->backupFile((string)($result['file'] ?? ''));
@@ -34,10 +35,21 @@ final class VerifiedBackupService
             $runtime->set('backup.last_verified', 'ok', 'Último backup verificado e disponível.', $meta);
             return $meta;
         } catch (Throwable $e) {
-            $runtime->set('backup.last_verification', 'error', 'O backup não passou na verificação.', [
-                'verified' => false,
-                'error' => $this->safe($e->getMessage()),
-            ]);
+            if ($file !== null) {
+                @unlink($file . '.sha256');
+                @unlink($file);
+                $runtime->set('backup.last_run', 'error', 'Backup descartado por falha na verificação.', [
+                    'file' => basename($file),
+                    'verified' => false,
+                    'error' => $this->safe($e->getMessage()),
+                ]);
+            }
+            $runtime->set(
+                'backup.last_verification',
+                'error',
+                $file !== null ? 'O backup não passou na verificação e foi descartado.' : 'O backup falhou antes da etapa de verificação.',
+                ['verified' => false, 'error' => $this->safe($e->getMessage())]
+            );
             throw $e;
         }
     }
