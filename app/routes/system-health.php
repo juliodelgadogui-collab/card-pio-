@@ -7,6 +7,7 @@ use EventMenu\Core\Database;
 use EventMenu\Core\Security;
 use EventMenu\Services\BackgroundJobService;
 use EventMenu\Services\FcmPushService;
+use EventMenu\Services\ProductionReadinessService;
 use EventMenu\Services\RuntimeStatusService;
 use EventMenu\Services\SystemHealthService;
 use EventMenu\Services\VerifiedBackupService;
@@ -49,6 +50,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 }
 
 $health=(new SystemHealthService())->snapshot();
+$readiness=(new ProductionReadinessService())->evaluate($health);
 $labels=['database'=>'Banco de dados','cron'=>'Cron / manutenção','worker'=>'Worker da fila','queue'=>'Fila assíncrona','push'=>'Notificações push','backup'=>'Backup','gateways'=>'Gateways','webhooks'=>'Webhooks','storage'=>'Armazenamento'];
 $stateLabel=['ok'=>'OK','warning'=>'Atenção','error'=>'Erro','disabled'=>'Desativado'];
 $overall=$health['overall'];
@@ -62,6 +64,30 @@ $cronHealthy=(string)($health['checks']['cron']['state']??'warning')==='ok'&&(st
 em_header('Saúde do sistema','system-health');
 ?>
 <section class="page-hero"><div><span class="eyebrow">INFRAESTRUTURA</span><h2>Saúde do EventMenu</h2><p>Banco, cron, worker, fila, push, backups, pagamentos e armazenamento em uma única visão.</p></div><div class="hero-actions"><a class="button secondary" href="<?= Security::e(app_url('?route=system-health')) ?>">Atualizar</a></div></section>
+
+<section class="card" style="margin-bottom:18px;border-width:2px">
+    <div class="section-head">
+        <div>
+            <span class="eyebrow">PRONTIDÃO PARA PRODUÇÃO</span>
+            <h2 style="margin-top:5px"><?= $readiness['ready']?'Pronto para produção':'Bloqueado para produção' ?></h2>
+            <p class="muted"><?= $readiness['ready']?'Os requisitos obrigatórios de infraestrutura e segurança estão atendidos. Revise os avisos antes de liberar pagamentos reais.':'Existem requisitos obrigatórios pendentes. Corrija os itens abaixo antes de liberar a operação real.' ?></p>
+        </div>
+        <span class="status-pill <?= $readiness['ready']?'active':'cancelled' ?>"><?= $readiness['ready']?'PRONTO':'BLOQUEADO' ?></span>
+    </div>
+    <div class="metric-grid" style="margin-top:14px">
+        <div class="metric-card"><span>Bloqueadores</span><strong><?= count($readiness['blockers']) ?></strong><small>precisam chegar a zero</small></div>
+        <div class="metric-card"><span>Avisos</span><strong><?= count($readiness['warnings']) ?></strong><small>não bloqueiam a operação</small></div>
+        <div class="metric-card"><span>Verificações aprovadas</span><strong><?= count($readiness['passed']) ?></strong><small>requisitos e integrações confirmadas</small></div>
+    </div>
+    <?php if($readiness['blockers']):?>
+    <div style="margin-top:16px"><strong>Corrigir antes do go-live</strong><ul style="margin:8px 0 0 20px"><?php foreach($readiness['blockers']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></div>
+    <?php endif;?>
+    <?php if($readiness['warnings']):?>
+    <div style="margin-top:16px"><strong>Avisos de produção</strong><ul style="margin:8px 0 0 20px"><?php foreach($readiness['warnings']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></div>
+    <?php endif;?>
+    <details style="margin-top:16px"><summary>Ver verificações aprovadas</summary><ul style="margin:8px 0 0 20px"><?php foreach($readiness['passed']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></details>
+</section>
+
 <section class="metric-grid" style="margin-bottom:18px"><div class="metric-card"><span>Estado geral</span><strong><?= Security::e($stateLabel[$overall]??$overall) ?></strong><small><?= Security::e(date('d/m/Y H:i:s')) ?></small></div><div class="metric-card"><span>Ambiente</span><strong><?= Security::e(strtoupper((string)$health['app']['environment'])) ?></strong><small><?= !empty($health['app']['debug'])?'debug ligado':'debug desligado' ?></small></div><div class="metric-card"><span>Versão mínima GO</span><strong><?= Security::e((string)$health['app']['min_app_version']) ?></strong><small>compatibilidade do aplicativo</small></div></section>
 <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px">
 <?php foreach($health['checks']as$key=>$check):$state=(string)$check['state'];?>

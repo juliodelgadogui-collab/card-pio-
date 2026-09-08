@@ -34,6 +34,8 @@ jobs:
           APP_BASE_PATH: /1
           APP_URL: https://example.test
         run: php scripts/ci-url-smoke.php
+      - name: Production readiness rules
+        run: php scripts/ci-production-readiness-smoke.php
       - name: Load test safety checks
         run: |
           php scripts/load-test.php --dry-run --url=http://127.0.0.1:8080/ --requests=10 --concurrency=2
@@ -197,6 +199,8 @@ jobs:
           test -d "$PACKAGE/database/sqlite/migrations"
           test -d "$PACKAGE/vendor"
           test -d "$PACKAGE/storage"
+          test -f "$PACKAGE/src/Services/VerifiedBackupService.php"
+          test -f "$PACKAGE/src/Services/ProductionReadinessService.php"
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
           grep -q '^DB_SQLITE_PATH=storage/eventmenu.sqlite$' "$PACKAGE/.env.example"
