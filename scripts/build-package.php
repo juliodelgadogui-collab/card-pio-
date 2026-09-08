@@ -120,6 +120,18 @@ INSTALAÇÃO DO ZERO
    - usuário Super ADM;
    - storage/installed.lock para bloquear nova instalação.
 10. Entre em https://SEU-DOMINIO/1/.
+11. Configure o cron do servidor para executar a cada minuto:
+
+   * * * * * php /CAMINHO/DO/SITE/1/cron.php >/dev/null 2>&1
+
+12. Entre como Super ADM, abra "Saúde do sistema" e confirme que Cron e Worker aparecem como OK.
+
+CRON / MANUTENÇÃO AUTOMÁTICA
+- O cron é obrigatório em produção e deve executar a cada minuto.
+- Ele processa a fila assíncrona, notificações push, expirações, limpezas e o agendamento do backup automático.
+- Prefira a execução CLI acima: ela NÃO precisa expor o CRON_SECRET.
+- Se o seu provedor só aceitar chamada HTTP, o endpoint cron.php exige o cabeçalho X-Cron-Secret com o valor protegido do .env.
+- O painel Super ADM > Saúde do sistema mostra o caminho real do cron.php e informa se Cron/Worker estão atrasados.
 
 BANCO INICIAL
 - Banco: SQLite.
