@@ -30,12 +30,15 @@ final class ProductionReadinessService
             else $blockers[] = ['key' => $key, 'message' => $fallback];
         }
 
-        $environment = strtolower(trim((string)($health['app']['environment'] ?? env('APP_ENV', 'production'))));
-        $debug = (bool)($health['app']['debug'] ?? filter_var(env('APP_DEBUG', 'false'), FILTER_VALIDATE_BOOL));
-        $appUrl = trim((string)env('APP_URL', ''));
+        $app = is_array($health['app'] ?? null) ? $health['app'] : [];
+        $environment = strtolower(trim((string)($app['environment'] ?? env('APP_ENV', 'production'))));
+        $debug = (bool)($app['debug'] ?? filter_var(env('APP_DEBUG', 'false'), FILTER_VALIDATE_BOOL));
+        $appUrl = trim((string)($app['url'] ?? env('APP_URL', '')));
         $scheme = strtolower((string)parse_url($appUrl, PHP_URL_SCHEME));
         $https = $scheme === 'https';
-        $sessionSecure = filter_var(env('SESSION_SECURE', 'false'), FILTER_VALIDATE_BOOL);
+        $sessionSecure = (bool)($app['session_secure'] ?? filter_var(env('SESSION_SECURE', 'false'), FILTER_VALIDATE_BOOL));
+        $appKey = (string)($app['key'] ?? env('APP_KEY', ''));
+        $appKeyStrong = $this->strongSecret($appKey);
 
         if ($environment !== 'production') {
             $blockers[] = ['key' => 'environment', 'message' => 'APP_ENV precisa estar em production antes do go-live.'];
@@ -57,16 +60,40 @@ final class ProductionReadinessService
         } else {
             $passed[] = ['key' => 'session_secure', 'message' => 'Cookies de sessão estão marcados como seguros.'];
         }
+        if (!$appKeyStrong) {
+            $blockers[] = ['key' => 'app_key', 'message' => 'APP_KEY precisa ser um segredo forte e exclusivo antes do go-live.'];
+        } else {
+            $passed[] = ['key' => 'app_key', 'message' => 'Chave principal da aplicação está configurada.'];
+        }
 
-        $optional = [
-            'gateways' => 'Nenhum gateway eletrônico ativo. Dinheiro/operação local pode funcionar, mas cartão/Pix online exigem configuração.',
-            'push' => 'Push instantâneo não está totalmente pronto. O app ainda pode usar sincronização periódica.',
-            'webhooks' => 'Webhooks ainda não foram comprovados em operação real ou precisam de atenção.',
-        ];
-        foreach ($optional as $key => $message) {
-            $check = is_array($checks[$key] ?? null) ? $checks[$key] : [];
-            if (($check['state'] ?? 'warning') === 'ok') $passed[] = ['key' => $key, 'message' => (string)($check['message'] ?? $message)];
-            else $warnings[] = ['key' => $key, 'message' => $message];
+        $gateway = is_array($checks['gateways'] ?? null) ? $checks['gateways'] : [];
+        if (($gateway['state'] ?? 'warning') === 'ok') {
+            $passed[] = ['key' => 'gateways', 'message' => (string)($gateway['message'] ?? 'Gateways ativos encontrados.')];
+        } else {
+            $warnings[] = ['key' => 'gateways', 'message' => 'Nenhum gateway eletrônico ativo. Dinheiro/operação local pode funcionar, mas cartão/Pix online exigem configuração.'];
+        }
+
+        $push = is_array($checks['push'] ?? null) ? $checks['push'] : [];
+        if (($push['state'] ?? 'warning') === 'ok') {
+            $passed[] = ['key' => 'push', 'message' => (string)($push['message'] ?? 'Push instantâneo configurado.')];
+        } else {
+            $warnings[] = ['key' => 'push', 'message' => 'Push instantâneo não está totalmente pronto. O app ainda pode usar sincronização periódica.'];
+        }
+
+        $webhooks = is_array($checks['webhooks'] ?? null) ? $checks['webhooks'] : [];
+        $webhookLast = $webhooks['details']['last'] ?? null;
+        if (($webhooks['state'] ?? 'warning') === 'ok' && is_array($webhookLast) && $webhookLast !== []) {
+            $passed[] = ['key' => 'webhooks', 'message' => (string)($webhooks['message'] ?? 'Webhooks estão sendo registrados.')];
+        } else {
+            $warnings[] = ['key' => 'webhooks', 'message' => 'Webhooks ainda não foram comprovados em operação real ou precisam de atenção.'];
+        }
+
+        $driver = strtolower((string)($checks['database']['details']['driver'] ?? ''));
+        if ($driver === 'sqlite') {
+            $warnings[] = [
+                'key' => 'database_capacity',
+                'message' => 'SQLite está funcional, mas para alto volume e muitos operadores simultâneos prefira MySQL/MariaDB antes de escalar a operação.',
+            ];
         }
 
         return [
@@ -80,7 +107,19 @@ final class ProductionReadinessService
                 'debug' => $debug,
                 'https' => $https,
                 'session_secure' => $sessionSecure,
+                'app_key_strong' => $appKeyStrong,
             ],
         ];
+    }
+
+    private function strongSecret(string $value): bool
+    {
+        $value = trim($value);
+        if (strlen($value) < 32) return false;
+        $lower = strtolower($value);
+        foreach (['change-me', 'changeme', 'example', 'default', 'password'] as $unsafe) {
+            if (str_contains($lower, $unsafe)) return false;
+        }
+        return true;
     }
 }
