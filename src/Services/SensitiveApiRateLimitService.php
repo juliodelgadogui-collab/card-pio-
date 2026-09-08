@@ -16,6 +16,8 @@ final class SensitiveApiRateLimitService
         'discount.request' => ['bucket'=>'discount.request','limit'=>30,'window'=>300,'message'=>'Muitas solicitações de desconto em pouco tempo. Aguarde alguns minutos.'],
         'discount.approve' => ['bucket'=>'discount.approve','limit'=>60,'window'=>300,'message'=>'Muitas aprovações de desconto em pouco tempo. Aguarde alguns instantes.'],
         'discount.reject' => ['bucket'=>'discount.reject','limit'=>60,'window'=>300,'message'=>'Muitas recusas de desconto em pouco tempo. Aguarde alguns instantes.'],
+        'loyalty.apply' => ['bucket'=>'loyalty.apply','limit'=>30,'window'=>300,'message'=>'Muitas tentativas de uso de pontos em pouco tempo. Aguarde alguns instantes.'],
+        'loyalty.remove' => ['bucket'=>'loyalty.remove','limit'=>60,'window'=>300,'message'=>'Muitas alterações de resgate de pontos em pouco tempo. Aguarde alguns instantes.'],
         'qr.issue' => ['bucket'=>'qr.issue','limit'=>30,'window'=>3600,'message'=>'Muitos QR Codes emitidos por este aparelho. Aguarde antes de emitir novos códigos.'],
         'qr.revoke' => ['bucket'=>'qr.revoke','limit'=>60,'window'=>3600,'message'=>'Muitas revogações de QR Code em pouco tempo. Aguarde alguns minutos.'],
         'device.request_nfc' => ['bucket'=>'device.request_nfc','limit'=>5,'window'=>3600,'message'=>'Muitas solicitações de autorização NFC. Aguarde antes de tentar novamente.'],
