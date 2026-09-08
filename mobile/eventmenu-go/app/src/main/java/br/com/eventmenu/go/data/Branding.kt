@@ -27,18 +27,46 @@ data class TenantBrand(
     companion object {
         fun from(json: JSONObject?): TenantBrand {
             if (json == null) return TenantBrand()
-            return TenantBrand(
-                displayName = json.optString("display_name", "EventMenu").clean("EventMenu"),
-                tagline = json.optString("tagline").clean(""),
-                logoUrl = json.optString("logo_url").clean(""),
-                primaryColor = json.optString("primary_color").validHex("#5b34d6"),
-                secondaryColor = json.optString("secondary_color").validHex("#159b63"),
-                backgroundColor = json.optString("background_color").validHex("#f6f7fb"),
-                surfaceColor = json.optString("surface_color").validHex("#ffffff"),
-                textColor = json.optString("text_color").validHex("#1e1b2b"),
-                applyApp = json.optBoolean("apply_app", true),
-                showEventMenuBrand = json.optBoolean("show_eventmenu_brand", true),
+            return fromValues(
+                mapOf(
+                    "display_name" to json.optString("display_name", "EventMenu"),
+                    "tagline" to json.optString("tagline"),
+                    "logo_url" to json.optString("logo_url"),
+                    "primary_color" to json.optString("primary_color"),
+                    "secondary_color" to json.optString("secondary_color"),
+                    "background_color" to json.optString("background_color"),
+                    "surface_color" to json.optString("surface_color"),
+                    "text_color" to json.optString("text_color"),
+                    "apply_app" to json.optBoolean("apply_app", true),
+                    "show_eventmenu_brand" to json.optBoolean("show_eventmenu_brand", true),
+                )
             )
+        }
+
+        internal fun fromValues(values: Map<String, Any?>): TenantBrand = TenantBrand(
+            displayName = values.string("display_name").clean("EventMenu"),
+            tagline = values.string("tagline").clean(""),
+            logoUrl = values.string("logo_url").clean(""),
+            primaryColor = values.string("primary_color").validHex("#5b34d6"),
+            secondaryColor = values.string("secondary_color").validHex("#159b63"),
+            backgroundColor = values.string("background_color").validHex("#f6f7fb"),
+            surfaceColor = values.string("surface_color").validHex("#ffffff"),
+            textColor = values.string("text_color").validHex("#1e1b2b"),
+            applyApp = values.boolean("apply_app", true),
+            showEventMenuBrand = values.boolean("show_eventmenu_brand", true),
+        )
+
+        private fun Map<String, Any?>.string(key: String): String = this[key]?.toString().orEmpty()
+
+        private fun Map<String, Any?>.boolean(key: String, fallback: Boolean): Boolean = when (val value = this[key]) {
+            is Boolean -> value
+            is Number -> value.toInt() != 0
+            is String -> when (value.trim().lowercase()) {
+                "true", "1", "yes", "sim" -> true
+                "false", "0", "no", "nao", "não" -> false
+                else -> fallback
+            }
+            else -> fallback
         }
 
         private fun String.clean(fallback: String): String {
