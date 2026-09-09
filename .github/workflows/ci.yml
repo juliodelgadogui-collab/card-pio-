@@ -152,6 +152,7 @@ jobs:
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
+          php scripts/ci-delivery-tracking-smoke.php
           php scripts/ci-backup-smoke.php
 
   mysql:
@@ -200,6 +201,7 @@ jobs:
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
+          php scripts/ci-delivery-tracking-smoke.php
 
   package:
     if: github.event_name == 'push'
@@ -228,6 +230,10 @@ jobs:
           test -f "$PACKAGE/update.php"
           test -f "$PACKAGE/api.php"
           test -f "$PACKAGE/api-go.php"
+          test -f "$PACKAGE/api-go-delivery.php"
+          test -f "$PACKAGE/api-delivery-track.php"
+          test -f "$PACKAGE/api-delivery-manager-live.php"
+          test -f "$PACKAGE/rastreio.php"
           test -f "$PACKAGE/mesa.php"
           test -f "$PACKAGE/webhook.php"
           test -f "$PACKAGE/forgot-password.php"
@@ -242,12 +248,16 @@ jobs:
           test -f "$PACKAGE/assets/auth-v2.css"
           test -f "$PACKAGE/database/sqlite/schema.sql"
           test -f "$PACKAGE/database/sqlite/migrations/043_auth_mail_onboarding.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/099_delivery_live_tracking.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/100_delivery_tracking_tokens.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/101_delivery_tracking_telemetry.sql"
           test -d "$PACKAGE/database/sqlite/migrations"
           test -d "$PACKAGE/vendor"
           test -d "$PACKAGE/storage"
           test ! -f "$PACKAGE/.env"
           test -f "$PACKAGE/src/Services/VerifiedBackupService.php"
           test -f "$PACKAGE/src/Services/ProductionReadinessService.php"
+          test -f "$PACKAGE/src/Services/DeliveryTrackingService.php"
           test -f "$PACKAGE/src/Services/ApiRateLimitExceededException.php"
           test -f "$PACKAGE/src/Services/SensitiveApiRateLimitService.php"
           test -f "$PACKAGE/src/Services/LoyaltyPointsService.php"
@@ -260,6 +270,7 @@ jobs:
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
           grep -q '^DB_SQLITE_PATH=storage/eventmenu.sqlite$' "$PACKAGE/.env.example"
+          grep -q '^DELIVERY_GPS_HISTORY_DAYS=7$' "$PACKAGE/.env.example"
           grep -q '"package_profile": "production"' "$PACKAGE/BUILD-MANIFEST.json"
           grep -q '${{ github.sha }}' "$PACKAGE/BUILD-MANIFEST.json"
           grep -q 'BUILD-MANIFEST\\.json' "$PACKAGE/.htaccess"
