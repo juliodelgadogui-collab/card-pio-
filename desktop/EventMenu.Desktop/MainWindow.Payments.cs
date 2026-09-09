@@ -13,6 +13,7 @@ public partial class MainWindow
     private TextBox? _paymentAmountBox;
     private Button? _paymentRefreshButton;
     private Button? _paymentCashButton;
+    private Button? _paymentPixButton;
     private bool _paymentControlsReady;
     private bool _canPayments;
 
@@ -46,7 +47,7 @@ public partial class MainWindow
             Width = 105,
             Height = 36,
             Margin = new Thickness(0, 0, 8, 8),
-            ToolTip = "Valor a receber em dinheiro"
+            ToolTip = "Valor a receber"
         };
         _paymentRefreshButton = new Button
         {
@@ -64,6 +65,14 @@ public partial class MainWindow
         };
         _paymentCashButton.Click += async (_, _) => await ReceiveSelectedCashAsync();
 
+        _paymentPixButton = new Button
+        {
+            Content = "Gerar PIX",
+            Height = 36,
+            Padding = new Thickness(12, 5, 12, 5)
+        };
+        _paymentPixButton.Click += async (_, _) => await OpenPixWindowAsync();
+
         _paymentPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -74,6 +83,7 @@ public partial class MainWindow
         _paymentPanel.Children.Add(_paymentAmountBox);
         _paymentPanel.Children.Add(_paymentRefreshButton);
         _paymentPanel.Children.Add(_paymentCashButton);
+        _paymentPanel.Children.Add(_paymentPixButton);
         actions.Children.Insert(0, _paymentPanel);
 
         OrdersGrid.SelectionChanged += async (_, _) => await RefreshSelectedPaymentAsync(false);
@@ -99,6 +109,8 @@ public partial class MainWindow
             _paymentPanel.Visibility = _canPayments ? Visibility.Visible : Visibility.Collapsed;
             if (_paymentCashButton is not null)
                 _paymentCashButton.Visibility = _canPayments && Can("cash") ? Visibility.Visible : Visibility.Collapsed;
+            if (_paymentPixButton is not null)
+                _paymentPixButton.Visibility = _canPayments ? Visibility.Visible : Visibility.Collapsed;
         }
         catch
         {
@@ -137,6 +149,8 @@ public partial class MainWindow
             var orderClosed = order.Status is "cancelled" or "completed";
             if (_paymentCashButton is not null)
                 _paymentCashButton.IsEnabled = remaining > 0 && !orderClosed && Can("cash");
+            if (_paymentPixButton is not null)
+                _paymentPixButton.IsEnabled = remaining > 0 && !orderClosed;
         }
         catch (Exception ex)
         {
@@ -199,6 +213,32 @@ public partial class MainWindow
         {
             if (_paymentCashButton is not null) _paymentCashButton.IsEnabled = true;
         }
+    }
+
+    private async Task OpenPixWindowAsync()
+    {
+        if (!_canPayments || _api is null || _paymentAmountBox is null || OrdersGrid.SelectedItem is not Order order) return;
+        if (!HasShift)
+        {
+            MessageBox.Show("Inicie um turno antes de cobrar PIX.", "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (order.Status is "cancelled" or "completed")
+        {
+            MessageBox.Show("Este pedido está encerrado e não pode receber nova cobrança.", "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        if (!TryMoney(_paymentAmountBox.Text, out var amountCents, false))
+        {
+            await RefreshSelectedPaymentAsync(true);
+            if (!TryMoney(_paymentAmountBox.Text, out amountCents, false)) return;
+        }
+
+        var window = new PixPaymentWindow(_api, order.Id, amountCents) { Owner = this };
+        window.ShowDialog();
+        await RefreshSelectedPaymentAsync(false);
+        await TryLoadOrdersAsync(false);
+        if (Can("tables") && ShiftIs("operation")) await TryLoadTablesAsync(false);
     }
 
     private static int PaymentInt(Dictionary<string, JsonElement>? data, string key)
