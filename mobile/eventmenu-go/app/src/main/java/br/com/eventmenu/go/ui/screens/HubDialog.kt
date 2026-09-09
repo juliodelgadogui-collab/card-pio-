@@ -41,6 +41,10 @@ import br.com.eventmenu.go.data.HubLink
 @Composable
 fun HubDialog(
     state: HubState,
+    canPrintOrder: Boolean,
+    canPrintReceipt: Boolean,
+    canShowCustomer: Boolean,
+    canSendAlert: Boolean,
     canTerminalRequest: Boolean,
     canOpenDrawer: Boolean,
     onDismiss: () -> Unit,
@@ -64,6 +68,8 @@ fun HubDialog(
     var paymentType by remember { mutableStateOf("debit") }
     var installmentsText by remember { mutableStateOf("1") }
     var alertText by remember { mutableStateOf("") }
+    val hasOrderAction = canPrintOrder || canPrintReceipt || canShowCustomer || canTerminalRequest
+    val hasHardwareAction = hasOrderAction || canOpenDrawer || canSendAlert
 
     LaunchedEffect(Unit) { onRefresh() }
     LaunchedEffect(state.selectedLinkId, canTerminalRequest) {
@@ -135,28 +141,48 @@ fun HubDialog(
                         ) { Text("Vincular") }
                     }
 
-                    if (state.selected != null) {
+                    if (state.selected != null && hasHardwareAction) {
                         item { HorizontalDivider(); SectionTitle("Ações no computador") }
-                        item {
-                            OutlinedTextField(
-                                value = orderText,
-                                onValueChange = { orderText = it.filter(Char::isDigit) },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Número do pedido") },
-                                singleLine = true,
-                            )
+
+                        if (hasOrderAction) {
+                            item {
+                                OutlinedTextField(
+                                    value = orderText,
+                                    onValueChange = { orderText = it.filter(Char::isDigit) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("Número do pedido") },
+                                    singleLine = true,
+                                )
+                            }
                         }
-                        item {
-                            val orderId = orderText.toIntOrNull() ?: 0
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    OutlinedButton(onClick = { onPrintOrder(orderId) }, enabled = orderId > 0 && state.selected?.online == true) { Text("Imprimir pedido") }
-                                    OutlinedButton(onClick = { onPrintReceipt(orderId) }, enabled = orderId > 0 && state.selected?.online == true) { Text("Imprimir recibo") }
+
+                        if (canPrintOrder || canPrintReceipt || canShowCustomer) {
+                            item {
+                                val orderId = orderText.toIntOrNull() ?: 0
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    if (canPrintOrder || canPrintReceipt) {
+                                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            if (canPrintOrder) {
+                                                OutlinedButton(
+                                                    onClick = { onPrintOrder(orderId) },
+                                                    enabled = orderId > 0 && state.selected?.online == true,
+                                                ) { Text("Imprimir pedido") }
+                                            }
+                                            if (canPrintReceipt) {
+                                                OutlinedButton(
+                                                    onClick = { onPrintReceipt(orderId) },
+                                                    enabled = orderId > 0 && state.selected?.online == true,
+                                                ) { Text("Imprimir recibo") }
+                                            }
+                                        }
+                                    }
+                                    if (canShowCustomer) {
+                                        OutlinedButton(
+                                            onClick = { onShowCustomer(orderId) },
+                                            enabled = orderId > 0 && state.selected?.online == true && state.selected?.hardware?.customerDisplay?.isNotBlank() == true,
+                                        ) { Text("Mostrar para o cliente") }
+                                    }
                                 }
-                                OutlinedButton(
-                                    onClick = { onShowCustomer(orderId) },
-                                    enabled = orderId > 0 && state.selected?.online == true && state.selected?.hardware?.customerDisplay?.isNotBlank() == true,
-                                ) { Text("Mostrar para o cliente") }
                             }
                         }
 
@@ -218,22 +244,28 @@ fun HubDialog(
                             }
                         }
 
-                        item {
-                            SectionTitle("Aviso no computador")
-                            OutlinedTextField(
-                                value = alertText,
-                                onValueChange = { alertText = it.take(300) },
-                                modifier = Modifier.fillMaxWidth(),
-                                label = { Text("Mensagem") },
-                            )
-                            OutlinedButton(
-                                onClick = { onAlert(alertText) },
-                                enabled = alertText.isNotBlank() && state.selected?.online == true,
-                            ) { Text("Enviar alerta") }
+                        if (canSendAlert) {
+                            item {
+                                SectionTitle("Aviso no computador")
+                                OutlinedTextField(
+                                    value = alertText,
+                                    onValueChange = { alertText = it.take(300) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("Mensagem") },
+                                )
+                                OutlinedButton(
+                                    onClick = { onAlert(alertText) },
+                                    enabled = alertText.isNotBlank() && state.selected?.online == true,
+                                ) { Text("Enviar alerta") }
+                            }
                         }
+                    }
 
+                    if (state.selected != null) {
                         item {
-                            TextButton(onClick = onRevoke, enabled = !state.loading) { Text("Desvincular este celular do computador") }
+                            TextButton(onClick = onRevoke, enabled = !state.loading) {
+                                Text("Desvincular este celular do computador")
+                            }
                         }
                     }
 
