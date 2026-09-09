@@ -42,7 +42,7 @@ final class PasswordResetService
             $tx->prepare('INSERT INTO password_reset_tokens (user_id,token_hash,expires_at,request_ip) VALUES (?,?,?,?)')->execute([(int)$user['id'],$hash,$expiresAt,mb_substr($ip,0,64)]);
         });
 
-        $url = app_url('reset-password.php?token='.rawurlencode($token));
+        $url = app_absolute_url('reset-password.php?token='.rawurlencode($token));
         $name = trim((string)$user['name']) ?: 'usuário';
         $subject = 'Redefinição de senha — EventMenu';
         $safeName = htmlspecialchars($name, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -84,7 +84,7 @@ final class PasswordResetService
     {
         $token = strtolower(trim($token));
         if (!preg_match('/^[a-f0-9]{64}$/', $token)) throw new RuntimeException('Este link de redefinição é inválido ou expirou.');
-        if (strlen($password) < 8) throw new RuntimeException('A nova senha precisa ter pelo menos 8 caracteres.');
+        if (strlen($password) < 10) throw new RuntimeException('A nova senha precisa ter pelo menos 10 caracteres.');
         if (strlen($password) > 200) throw new RuntimeException('Senha inválida.');
         $hash = hash('sha256', $token);
 
