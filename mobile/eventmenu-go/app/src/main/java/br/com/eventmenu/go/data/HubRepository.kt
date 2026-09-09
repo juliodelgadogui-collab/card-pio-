@@ -41,6 +41,9 @@ data class HubCommand(
     val error: String = "",
     val createdAt: String = "",
     val completedAt: String = "",
+    val approvedLocal: Boolean? = null,
+    val verified: Boolean? = null,
+    val resultMessage: String = "",
 )
 
 class HubRepository(
@@ -196,14 +199,22 @@ class HubRepository(
         return parseCommand(root.getJSONObject("command"))
     }
 
-    private fun parseCommand(item: JSONObject) = HubCommand(
-        id = item.optInt("id"),
-        commandType = item.optString("command_type"),
-        status = item.optString("status"),
-        error = item.optString("error_message"),
-        createdAt = item.optString("created_at"),
-        completedAt = item.optString("completed_at"),
-    )
+    private fun parseCommand(item: JSONObject): HubCommand {
+        val result = item.optJSONObject("result")
+        val approved = if (result?.has("approved_local") == true) result.optBoolean("approved_local") else null
+        val verified = if (result?.has("verified") == true) result.optBoolean("verified") else null
+        return HubCommand(
+            id = item.optInt("id"),
+            commandType = item.optString("command_type"),
+            status = item.optString("status"),
+            error = item.optString("error_message"),
+            createdAt = item.optString("created_at"),
+            completedAt = item.optString("completed_at"),
+            approvedLocal = approved,
+            verified = verified,
+            resultMessage = result?.optString("message").orEmpty(),
+        )
+    }
 
     private fun requireToken(): String = sessionStore.token()?.takeIf { it.isNotBlank() }
         ?: throw ApiException("Faça login novamente.", 401)
