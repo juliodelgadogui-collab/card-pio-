@@ -123,7 +123,18 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
             val result = runCatching { repository.commandStatus(commandId) }.getOrNull() ?: return@launch
             _state.update { it.copy(lastCommand = result) }
             when (result.status) {
-                "completed" -> { _state.update { it.copy(message = "Comando concluído no computador.") }; return@launch }
+                "completed" -> {
+                    when {
+                        result.commandType == "tef_charge" && result.approvedLocal == false ->
+                            _state.update { it.copy(error = result.resultMessage.ifBlank { "A cobrança não foi aprovada no PINPad." }) }
+                        result.commandType == "tef_charge" && result.verified == true ->
+                            _state.update { it.copy(message = "Pagamento confirmado pelo servidor/provedor.") }
+                        result.commandType == "tef_charge" && result.approvedLocal == true ->
+                            _state.update { it.copy(message = "PINPad aprovou. Aguardando confirmação do provedor; o pedido ainda não foi marcado como pago.") }
+                        else -> _state.update { it.copy(message = "Comando concluído no computador.") }
+                    }
+                    return@launch
+                }
                 "failed" -> { _state.update { it.copy(error = result.error.ifBlank { "O computador não conseguiu concluir a operação." }) }; return@launch }
                 "expired", "cancelled" -> { _state.update { it.copy(error = "A solicitação expirou ou foi cancelada.") }; return@launch }
             }
