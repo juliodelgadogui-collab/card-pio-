@@ -39,11 +39,25 @@ fun EventMenuGoHubShell(
     val hubViewModel: HubViewModel = composeViewModel(factory = HubViewModel.Factory(app.hubRepository))
     val hubState by hubViewModel.state.collectAsState()
     var showHub by remember { mutableStateOf(false) }
+    val permissions = state.session?.permissions.orEmpty()
+    val canUseHub = permissions.any {
+        it in setOf(
+            "orders_view",
+            "orders_create",
+            "orders_manage",
+            "orders_kitchen",
+            "orders_dispatch",
+            "payments",
+            "cash",
+            "terminal_request",
+            "terminal_collect",
+        )
+    }
 
     val hubAwareScan: (((String) -> Unit) -> Unit) = { fallback ->
         onScan { raw ->
             val value = raw.trim()
-            if (value.startsWith("EVENTMENU:HUB:", ignoreCase = true)) {
+            if (canUseHub && value.startsWith("EVENTMENU:HUB:", ignoreCase = true)) {
                 hubViewModel.claimPairing(value, "Celular EventMenu GO")
                 showHub = true
             } else {
@@ -60,7 +74,8 @@ fun EventMenuGoHubShell(
             onTapOn = onTapOn,
         )
 
-        val canShowHub = state.session != null &&
+        val canShowHub = canUseHub &&
+            state.session != null &&
             state.workShift?.status == "open" &&
             state.screen == AppScreen.PROFILE
 
@@ -76,8 +91,7 @@ fun EventMenuGoHubShell(
         }
     }
 
-    if (showHub) {
-        val permissions = state.session?.permissions.orEmpty()
+    if (showHub && canUseHub) {
         HubDialog(
             state = hubState,
             canPrintOrder = permissions.any { it in setOf("orders_view", "orders_create", "orders_manage") },
