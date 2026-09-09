@@ -18,6 +18,7 @@ public partial class MainWindow
     {
         if (_posStockUxReady) return;
         _posStockUxReady = true;
+        EnsureOrdersUx();
 
         ProductsGrid.LoadingRow += ProductsGrid_StockLoadingRow;
         ProductsGrid.PreviewMouseDoubleClick += ProductsGrid_StockPreviewMouseDoubleClick;
@@ -198,6 +199,7 @@ public partial class MainWindow
     private void DisposePosStockUx()
     {
         if (!_posStockUxReady) return;
+        DisposeOrdersUx();
         ProductsGrid.LoadingRow -= ProductsGrid_StockLoadingRow;
         ProductsGrid.PreviewMouseDoubleClick -= ProductsGrid_StockPreviewMouseDoubleClick;
         ProductSearchBox.PreviewKeyDown -= ProductSearchBox_PosPreviewKeyDown;
