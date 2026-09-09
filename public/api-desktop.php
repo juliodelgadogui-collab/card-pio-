@@ -10,8 +10,12 @@ use EventMenu\Core\PermissionCatalog;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DesktopHardwareService;
 use EventMenu\Services\FiscalCertificateService;
+use EventMenu\Services\FiscalContingencyVerifierFactory;
+use EventMenu\Services\FiscalLifecycleService;
+use EventMenu\Services\FiscalLifecycleTransmissionService;
 use EventMenu\Services\FiscalService;
 use EventMenu\Services\FiscalTransmissionService;
+use EventMenu\Services\FiscalTransmitterFactory;
 use EventMenu\Services\OperatingUnitService;
 use EventMenu\Services\TerminalPaymentService;
 
@@ -24,15 +28,16 @@ if($_SERVER['REQUEST_METHOD']==='OPTIONS'){header('Allow: GET, POST, OPTIONS');h
 function desktop_out(array $data,int $status=200):never{http_response_code($status);echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
 function desktop_body():array{$raw=file_get_contents('php://input');if($raw===false||trim($raw)==='')return $_POST?:[];try{$data=json_decode($raw,true,512,JSON_THROW_ON_ERROR);return is_array($data)?$data:[];}catch(Throwable){desktop_out(['ok'=>false,'error'=>'JSON inválido.'],400);}}
 function desktop_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)desktop_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
+function desktop_device(string $sessionDevice,array $body):string{$reported=mb_substr(trim((string)($body['device_id']??$sessionDevice)),0,190);if($sessionDevice!==''&&$reported!==''&&!hash_equals($sessionDevice,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');if($reported==='')throw new RuntimeException('Dispositivo não identificado.');return$reported;}
 function desktop_fiscal_product_ready(array $product):bool{return !empty($product['ready'])&&(int)($product['fiscal_enabled']??0)===1;}
 function desktop_normalize_fiscal_products(array $products):array{foreach($products as &$product)$product['ready']=desktop_fiscal_product_ready($product);unset($product);return$products;}
 function desktop_fiscal_documents(FiscalService $fiscal,int $limit):array{
     $documents=$fiscal->documents($limit);if(!$documents)return[];$tenantId=Auth::tenantId();if(!$tenantId)return$documents;
     $ids=array_values(array_filter(array_map(static fn(array $row):int=>(int)($row['id']??0),$documents),static fn(int $id):bool=>$id>0));if(!$ids)return$documents;
     $placeholders=implode(',',array_fill(0,count($ids),'?'));$args=array_merge([$tenantId],$ids);
-    $s=Database::connection()->prepare('SELECT id,transmission_attempts,transmission_started_at,last_transmission_at FROM fiscal_documents WHERE tenant_id=? AND id IN ('.$placeholders.')');$s->execute($args);$extra=[];
+    $s=Database::connection()->prepare('SELECT id,transmission_attempts,transmission_started_at,last_transmission_at,contingency_mode,contingency_reason,contingency_started_at,contingency_synced_at,contingency_emitted_at,contingency_device_id FROM fiscal_documents WHERE tenant_id=? AND id IN ('.$placeholders.')');$s->execute($args);$extra=[];
     foreach($s->fetchAll() as $row)$extra[(int)$row['id']]=$row;
-    foreach($documents as &$document){$id=(int)($document['id']??0);$document['transmission_attempts']=(int)($extra[$id]['transmission_attempts']??0);$document['transmission_started_at']=$extra[$id]['transmission_started_at']??null;$document['last_transmission_at']=$extra[$id]['last_transmission_at']??null;}unset($document);
+    foreach($documents as &$document){$id=(int)($document['id']??0);$document['transmission_attempts']=(int)($extra[$id]['transmission_attempts']??0);$document['transmission_started_at']=$extra[$id]['transmission_started_at']??null;$document['last_transmission_at']=$extra[$id]['last_transmission_at']??null;$document['contingency_mode']=$extra[$id]['contingency_mode']??null;$document['contingency_reason']=$extra[$id]['contingency_reason']??null;$document['contingency_started_at']=$extra[$id]['contingency_started_at']??null;$document['contingency_synced_at']=$extra[$id]['contingency_synced_at']??null;$document['contingency_emitted_at']=$extra[$id]['contingency_emitted_at']??null;$document['contingency_device_id']=$extra[$id]['contingency_device_id']??null;}unset($document);
     return$documents;
 }
 
@@ -43,7 +48,7 @@ try{
     if($token==='')desktop_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
     $user=$auth->authenticate($token,$deviceId);
     $action=(string)($_GET['action']??'context');
-    $fiscal=new FiscalService();$certificates=new FiscalCertificateService();$hardware=new DesktopHardwareService();$terminalPayments=new TerminalPaymentService();
+    $fiscal=new FiscalService();$certificates=new FiscalCertificateService();$hardware=new DesktopHardwareService();$terminalPayments=new TerminalPaymentService();$fiscalLifecycle=new FiscalLifecycleService();
 
     if($action==='context'){
         $effective=Auth::effectivePermissions();
@@ -52,78 +57,56 @@ try{
             'permissions'=>PermissionCatalog::appPermissionMap($effective),
             'permission_names'=>$effective,
             'units'=>(new OperatingUnitService())->availableForCurrentUser(),
+            'fiscal_runtime'=>[
+                'transmitter_configured'=>FiscalTransmitterFactory::isConfigured(),
+                'lifecycle_supported'=>FiscalTransmitterFactory::supportsLifecycle(),
+                'contingency_verifier_configured'=>FiscalContingencyVerifierFactory::isConfigured(),
+            ],
         ]);
     }
 
-    if($action==='fiscal-profile'){
-        $unitId=(int)($_GET['unit_id']??0);$profile=$fiscal->profileForUnit($unitId);
-        desktop_out(['ok'=>true,'profile'=>$profile?:null]);
-    }
-    if($action==='fiscal-profile-save'){
-        desktop_method('POST');desktop_out(['ok'=>true,'profile'=>$fiscal->saveProfile(desktop_body())]);
-    }
-    if($action==='fiscal-products'){
-        desktop_method('GET');desktop_out(['ok'=>true,'products'=>desktop_normalize_fiscal_products($fiscal->products())]);
-    }
-    if($action==='fiscal-product-save'){
-        desktop_method('POST');$product=$fiscal->saveProductFiscal(desktop_body());$product['ready']=desktop_fiscal_product_ready($product);desktop_out(['ok'=>true,'product'=>$product]);
-    }
+    if($action==='fiscal-profile'){$unitId=(int)($_GET['unit_id']??0);$profile=$fiscal->profileForUnit($unitId);desktop_out(['ok'=>true,'profile'=>$profile?:null]);}
+    if($action==='fiscal-profile-save'){desktop_method('POST');desktop_out(['ok'=>true,'profile'=>$fiscal->saveProfile(desktop_body())]);}
+    if($action==='fiscal-products'){desktop_method('GET');desktop_out(['ok'=>true,'products'=>desktop_normalize_fiscal_products($fiscal->products())]);}
+    if($action==='fiscal-product-save'){desktop_method('POST');$product=$fiscal->saveProductFiscal(desktop_body());$product['ready']=desktop_fiscal_product_ready($product);desktop_out(['ok'=>true,'product'=>$product]);}
     if($action==='fiscal-readiness'){
         desktop_method('GET');$readiness=$fiscal->readiness((int)($_GET['unit_id']??0));$products=desktop_normalize_fiscal_products($fiscal->products());$missing=[];
         foreach($products as $product)if((int)($product['active']??0)===1&&empty($product['ready']))$missing[]=['product_id'=>(int)$product['product_id'],'name'=>(string)$product['name']];
         $readiness['products_missing']=$missing;$readiness['ready']=!empty($readiness['profile_ready'])&&!empty($readiness['certificate_ready'])&&$missing===[];
         desktop_out(['ok'=>true,'readiness'=>$readiness]);
     }
-    if($action==='certificate-save-a1'){
-        desktop_method('POST');$body=desktop_body();
-        desktop_out(['ok'=>true,'certificate'=>$certificates->saveA1((int)($body['profile_id']??0),(string)($body['pfx_base64']??''),(string)($body['password']??''),(string)($body['storage_scope']??'server'))],201);
-    }
-    if($action==='certificate-register-a3'){
-        desktop_method('POST');$body=desktop_body();
-        desktop_out(['ok'=>true,'certificate'=>$certificates->registerA3Reference((int)($body['profile_id']??0),(string)($body['subject']??''),(string)($body['serial_number']??''),(string)($body['thumbprint']??''),isset($body['valid_until'])?(string)$body['valid_until']:null)],201);
-    }
-    if($action==='fiscal-queue'){
-        desktop_method('POST');$body=desktop_body();
-        desktop_out(['ok'=>true,'document'=>$fiscal->queueForOrder((int)($body['order_id']??0),(string)($body['document']??''))],201);
-    }
+    if($action==='certificate-save-a1'){desktop_method('POST');$body=desktop_body();desktop_out(['ok'=>true,'certificate'=>$certificates->saveA1((int)($body['profile_id']??0),(string)($body['pfx_base64']??''),(string)($body['password']??''),(string)($body['storage_scope']??'server'))],201);}
+    if($action==='certificate-register-a3'){desktop_method('POST');$body=desktop_body();desktop_out(['ok'=>true,'certificate'=>$certificates->registerA3Reference((int)($body['profile_id']??0),(string)($body['subject']??''),(string)($body['serial_number']??''),(string)($body['thumbprint']??''),isset($body['valid_until'])?(string)$body['valid_until']:null)],201);}
+    if($action==='fiscal-queue'){desktop_method('POST');$body=desktop_body();desktop_out(['ok'=>true,'document'=>$fiscal->queueForOrder((int)($body['order_id']??0),(string)($body['document']??''))],201);}
     if($action==='fiscal-documents'){desktop_method('GET');desktop_out(['ok'=>true,'documents'=>desktop_fiscal_documents($fiscal,(int)($_GET['limit']??100))]);}
-    if($action==='fiscal-retry'){
-        desktop_method('POST');Auth::requirePermission('fiscal.issue');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');$body=desktop_body();
-        desktop_out(['ok'=>true,'document'=>(new FiscalTransmissionService())->retryError($tenantId,(int)($body['document_id']??0))]);
+    if($action==='fiscal-retry'){desktop_method('POST');Auth::requirePermission('fiscal.issue');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');$body=desktop_body();desktop_out(['ok'=>true,'document'=>(new FiscalTransmissionService())->retryError($tenantId,(int)($body['document_id']??0))]);}
+
+    if($action==='fiscal-events'){desktop_method('GET');desktop_out(['ok'=>true,'events'=>$fiscalLifecycle->events((int)($_GET['limit']??100))]);}
+    if($action==='fiscal-cancel'){desktop_method('POST');$body=desktop_body();desktop_out(['ok'=>true,'event'=>$fiscalLifecycle->requestCancellation((int)($body['document_id']??0),(string)($body['reason']??''))],201);}
+    if($action==='fiscal-event-retry'){desktop_method('POST');$body=desktop_body();desktop_out(['ok'=>true,'event'=>$fiscalLifecycle->retryEvent((int)($body['event_id']??0))]);}
+    if($action==='fiscal-inutilizations'){desktop_method('GET');desktop_out(['ok'=>true,'inutilizations'=>$fiscalLifecycle->inutilizations((int)($_GET['limit']??100))]);}
+    if($action==='fiscal-inutilize'){desktop_method('POST');$body=desktop_body();desktop_out(['ok'=>true,'inutilization'=>$fiscalLifecycle->requestInutilization((int)($body['unit_id']??0),(string)($body['document']??''),(int)($body['year']??0),(int)($body['series']??0),(int)($body['number_start']??0),(int)($body['number_end']??0),(string)($body['reason']??''))],201);}
+    if($action==='fiscal-inutilization-retry'){desktop_method('POST');$body=desktop_body();desktop_out(['ok'=>true,'inutilization'=>$fiscalLifecycle->retryInutilization((int)($body['inutilization_id']??0))]);}
+    if($action==='fiscal-contingency-prepare'){desktop_method('POST');$body=desktop_body();$reported=desktop_device($deviceId,$body);desktop_out(['ok'=>true,'document'=>$fiscalLifecycle->prepareContingency((int)($body['document_id']??0),(string)($body['reason']??''),$reported)]);}
+    if($action==='fiscal-contingency-register'){desktop_method('POST');$body=desktop_body();$reported=desktop_device($deviceId,$body);desktop_out(['ok'=>true,'document'=>$fiscalLifecycle->registerContingencyXml((int)($body['document_id']??0),$reported,(string)($body['signed_xml']??''),FiscalContingencyVerifierFactory::make())]);}
+    if($action==='fiscal-query'){
+        desktop_method('POST');Auth::requirePermission('fiscal.issue');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');if(!FiscalTransmitterFactory::supportsLifecycle())throw new RuntimeException('O transmissor fiscal configurado não suporta consulta oficial.');$body=desktop_body();
+        desktop_out(['ok'=>true,'result'=>(new FiscalLifecycleTransmissionService())->queryDocument($tenantId,(int)($body['document_id']??0),FiscalTransmitterFactory::makeLifecycle())]);
     }
 
     if($action==='terminal-list')desktop_out(['ok'=>true,'terminals'=>$hardware->terminalConfigs((int)($_GET['unit_id']??0))]);
-    if($action==='terminal-save'){
-        desktop_method('POST');desktop_out(['ok'=>true,'terminal'=>$hardware->saveTerminal(desktop_body())]);
-    }
+    if($action==='terminal-save'){desktop_method('POST');desktop_out(['ok'=>true,'terminal'=>$hardware->saveTerminal(desktop_body())]);}
     if($action==='terminal-intent-create'){
-        desktop_method('POST');$body=desktop_body();
-        $reported=(string)($body['device_id']??$deviceId);
-        if($deviceId!==''&&$reported!==''&&!hash_equals($deviceId,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
+        desktop_method('POST');$body=desktop_body();$reported=desktop_device($deviceId,$body);
         desktop_out(['ok'=>true,'intent'=>$terminalPayments->createIntent((int)($body['order_id']??0),(int)($body['terminal_config_id']??0),(int)($body['amount_cents']??0),(string)($body['payment_type']??''),(int)($body['installments']??1),$reported,(string)($body['idempotency_key']??''))],201);
     }
-    if($action==='terminal-intent-processing'){
-        desktop_method('POST');$body=desktop_body();$reported=(string)($body['device_id']??$deviceId);
-        if($deviceId!==''&&$reported!==''&&!hash_equals($deviceId,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
-        desktop_out(['ok'=>true,'intent'=>$terminalPayments->markProcessing((string)($body['intent_token']??''),$reported)]);
-    }
-    if($action==='terminal-intent-result'){
-        desktop_method('POST');$body=desktop_body();$reported=(string)($body['device_id']??$deviceId);
-        if($deviceId!==''&&$reported!==''&&!hash_equals($deviceId,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
-        desktop_out(['ok'=>true,'intent'=>$terminalPayments->recordLocalResult((string)($body['intent_token']??''),$reported,!empty($body['approved']),(string)($body['provider_transaction_id']??''),(string)($body['authorization_code']??''),is_array($body['raw_result']??null)?$body['raw_result']:[])]);
-    }
+    if($action==='terminal-intent-processing'){desktop_method('POST');$body=desktop_body();$reported=desktop_device($deviceId,$body);desktop_out(['ok'=>true,'intent'=>$terminalPayments->markProcessing((string)($body['intent_token']??''),$reported)]);}
+    if($action==='terminal-intent-result'){desktop_method('POST');$body=desktop_body();$reported=desktop_device($deviceId,$body);desktop_out(['ok'=>true,'intent'=>$terminalPayments->recordLocalResult((string)($body['intent_token']??''),$reported,!empty($body['approved']),(string)($body['provider_transaction_id']??''),(string)($body['authorization_code']??''),is_array($body['raw_result']??null)?$body['raw_result']:[])]);}
     if($action==='terminal-intent-status')desktop_out(['ok'=>true,'intent'=>$terminalPayments->status((string)($_GET['intent_token']??''))]);
 
-    if($action==='hardware-heartbeat'){
-        desktop_method('POST');$body=desktop_body();
-        $reported=(string)($body['device_id']??$deviceId);
-        if($deviceId!==''&&$reported!==''&&!hash_equals($deviceId,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
-        desktop_out(['ok'=>true,'binding'=>$hardware->heartbeat((int)($body['unit_id']??0),$reported,(string)($body['device_label']??''),is_array($body['hardware']??null)?$body['hardware']:[])]);
-    }
+    if($action==='hardware-heartbeat'){desktop_method('POST');$body=desktop_body();$reported=desktop_device($deviceId,$body);desktop_out(['ok'=>true,'binding'=>$hardware->heartbeat((int)($body['unit_id']??0),$reported,(string)($body['device_label']??''),is_array($body['hardware']??null)?$body['hardware']:[])]);}
     if($action==='hardware-list')desktop_out(['ok'=>true,'devices'=>$hardware->listBindings()]);
-    if($action==='hardware-revoke'){
-        desktop_method('POST');$body=desktop_body();$hardware->revokeBinding((int)($body['id']??0));desktop_out(['ok'=>true]);
-    }
+    if($action==='hardware-revoke'){desktop_method('POST');$body=desktop_body();$hardware->revokeBinding((int)($body['id']??0));desktop_out(['ok'=>true]);}
 
     desktop_out(['ok'=>false,'error'=>'Endpoint do Desktop não encontrado.'],404);
 }catch(RuntimeException $e){desktop_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))desktop_out(['ok'=>false,'error'=>$e->getMessage()],500);desktop_out(['ok'=>false,'error'=>'Erro interno.'],500);}
