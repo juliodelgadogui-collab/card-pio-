@@ -79,6 +79,16 @@ public sealed class ExpeditionOrder
     [JsonPropertyName("jobs_total")] public int JobsTotal { get; set; }
     [JsonPropertyName("jobs_ready")] public int JobsReady { get; set; }
     [JsonPropertyName("all_ready")] public bool AllReady { get; set; }
+    [JsonPropertyName("delivery_user_id")] public int? DeliveryUserId { get; set; }
+    [JsonPropertyName("delivery_name")] public string? DeliveryName { get; set; }
+    [JsonPropertyName("delivery_stage")] public string? DeliveryStage { get; set; }
+    [JsonPropertyName("delivery_picked_up")] public bool DeliveryPickedUp { get; set; }
+    [JsonPropertyName("delivery_route_started")] public bool DeliveryRouteStarted { get; set; }
+    [JsonPropertyName("delivery_arrived")] public bool DeliveryArrived { get; set; }
+    [JsonPropertyName("delivery_location_fresh")] public bool DeliveryLocationFresh { get; set; }
+    public string DeliveryDisplay => Channel == "delivery"
+        ? $"{(string.IsNullOrWhiteSpace(DeliveryStage) ? "Delivery" : DeliveryStage)}{(string.IsNullOrWhiteSpace(DeliveryName) ? "" : " • " + DeliveryName)}"
+        : "—";
 }
 
 public sealed class ProductionPrintClaimResponse
