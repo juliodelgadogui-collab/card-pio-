@@ -37,6 +37,7 @@ import br.com.eventmenu.go.data.DeliveryUser
 import br.com.eventmenu.go.data.OperatingUnit
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.UnassignedUnitDelivery
+import kotlinx.coroutines.delay
 
 @Composable
 fun DispatchScreen(
@@ -69,6 +70,13 @@ fun DispatchScreen(
 
     var assigning by remember { mutableStateOf<Order?>(null) }
     var routing by remember { mutableStateOf<UnassignedUnitDelivery?>(null) }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            if (orders.any { it.channel == "delivery" }) expeditionViewModel.refresh()
+            delay(10_000L)
+        }
+    }
 
     LaunchedEffect(orders.map { it.id to it.status }) {
         if (orders.any { it.channel == "delivery" }) expeditionViewModel.refresh()
