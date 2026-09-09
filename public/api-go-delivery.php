@@ -6,6 +6,7 @@ require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DeliveryProgressService;
+use EventMenu\Services\DeliveryTrackingService;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
@@ -20,7 +21,12 @@ try{
     $auth=new ApiAuthService();$token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')god_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);$auth->authenticate($token,$deviceId);
     $action=(string)($_GET['action']??'list');$service=new DeliveryProgressService();
     if($action==='list')god_out(['ok'=>true,'progress'=>$service->listMine()]);
+    if($action==='live-locations')god_out(['ok'=>true,'locations'=>(new DeliveryTrackingService())->activeForManager()]);
     god_post();$body=god_body();$orderId=(int)($body['order_id']??0);
+    if($action==='location'){
+        $location=(new DeliveryTrackingService())->update($orderId,(float)($body['latitude']??999),(float)($body['longitude']??999),isset($body['accuracy_m'])?(float)$body['accuracy_m']:null,isset($body['speed_mps'])?(float)$body['speed_mps']:null,isset($body['bearing_deg'])?(float)$body['bearing_deg']:null,isset($body['captured_at'])?(string)$body['captured_at']:null);
+        god_out(['ok'=>true,'location'=>$location]);
+    }
     if($action==='pickup')god_out(['ok'=>true,'progress'=>$service->pickup($orderId)]);
     if($action==='start-route')god_out(['ok'=>true,'progress'=>$service->startRoute($orderId)]);
     if($action==='arrive')god_out(['ok'=>true,'progress'=>$service->arrive($orderId)]);
