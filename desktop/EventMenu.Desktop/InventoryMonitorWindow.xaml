@@ -1,0 +1,47 @@
+<Window x:Class="EventMenu.Desktop.InventoryMonitorWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Estoque • EventMenu Desktop" Width="1080" Height="690" MinWidth="860" MinHeight="540"
+        WindowStartupLocation="CenterOwner">
+    <Grid Background="{StaticResource BackgroundBrush}" Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <DockPanel Margin="0,0,0,18">
+            <StackPanel DockPanel.Dock="Left">
+                <TextBlock Text="Estoque operacional" FontSize="28" FontWeight="SemiBold"/>
+                <TextBlock x:Name="UnitText" Text="Carregando unidade..." Foreground="{StaticResource MutedBrush}" Margin="0,5,0,0"/>
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <CheckBox x:Name="LowOnlyBox" Content="Somente baixo/zerado" VerticalAlignment="Center" Margin="0,0,14,0" Checked="LowOnlyBox_Changed" Unchecked="LowOnlyBox_Changed"/>
+                <Button Content="Atualizar" Click="RefreshButton_Click" Margin="0"/>
+            </StackPanel>
+        </DockPanel>
+        <UniformGrid Grid.Row="1" Columns="4" Margin="0,0,0,16">
+            <Border Background="White" CornerRadius="14" Padding="16" Margin="0,0,10,0"><StackPanel><TextBlock Text="Controlados" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="ControlledText" Text="0" FontSize="27" FontWeight="Bold" Margin="0,6,0,0"/></StackPanel></Border>
+            <Border Background="White" CornerRadius="14" Padding="16" Margin="0,0,10,0"><StackPanel><TextBlock Text="Baixo / zerado" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="LowText" Text="0" FontSize="27" FontWeight="Bold" Margin="0,6,0,0"/></StackPanel></Border>
+            <Border Background="White" CornerRadius="14" Padding="16" Margin="0,0,10,0"><StackPanel><TextBlock Text="Zerados" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="ZeroText" Text="0" FontSize="27" FontWeight="Bold" Margin="0,6,0,0"/></StackPanel></Border>
+            <Border Background="White" CornerRadius="14" Padding="16"><StackPanel><TextBlock Text="Reservado em pedidos" Foreground="{StaticResource MutedBrush}"/><TextBlock x:Name="ReservedText" Text="0" FontSize="27" FontWeight="Bold" Margin="0,6,0,0"/></StackPanel></Border>
+        </UniformGrid>
+        <Border Grid.Row="2" Background="White" CornerRadius="14" Padding="12">
+            <DataGrid x:Name="StockGrid" IsReadOnly="True" SelectionMode="Single">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Produto" Binding="{Binding Name}" Width="*"/>
+                    <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="125"/>
+                    <DataGridTextColumn Header="Disponível" Binding="{Binding AvailableDisplay}" Width="120"/>
+                    <DataGridTextColumn Header="Reservado" Binding="{Binding ReservedDisplay}" Width="120"/>
+                    <DataGridTextColumn Header="Físico" Binding="{Binding PhysicalDisplay}" Width="110"/>
+                    <DataGridTextColumn Header="Mínimo" Binding="{Binding MinimumDisplay}" Width="110"/>
+                    <DataGridTextColumn Header="Status" Binding="{Binding StatusLabel}" Width="95"/>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+        <DockPanel Grid.Row="3" Margin="0,12,0,0">
+            <TextBlock x:Name="StatusText" Text="Atualização automática a cada 30 segundos." Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center"/>
+            <Button DockPanel.Dock="Right" Content="Fechar" Style="{StaticResource SecondaryButton}" Click="CloseButton_Click" Margin="0"/>
+        </DockPanel>
+    </Grid>
+</Window>
