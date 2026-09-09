@@ -6,6 +6,7 @@ require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Core\Auth;
 use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\ExpeditionDeliveryService;
 use EventMenu\Services\ProductionDesktopService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -24,7 +25,7 @@ try{
     $action=(string)($_GET['action']??'board');$service=new ProductionDesktopService();
 
     if($action==='board'){prod_method('GET');prod_out(['ok'=>true,'board'=>$service->board()]);}
-    if($action==='expedition'){prod_method('GET');prod_out(['ok'=>true,'orders'=>$service->expedition()]);}
+    if($action==='expedition'){prod_method('GET');$orders=$service->expedition();prod_out(['ok'=>true,'orders'=>(new ExpeditionDeliveryService())->enrich($orders)]);}
     if($action==='job-status'){prod_method('POST');$body=prod_body();prod_out(['ok'=>true,'job'=>$service->changeJobStatus((int)($body['job_id']??0),(string)($body['status']??''),(string)($body['reason']??''))]);}
     if($action==='order-expedite'){prod_method('POST');$body=prod_body();$service->expediteOrder((int)($body['order_id']??0));prod_out(['ok'=>true]);}
     if($action==='print-claim'){prod_method('POST');$body=prod_body();$reported=prod_device($deviceId,$body);prod_out(['ok'=>true,'print'=>$service->claimPrint($reported)]);}
