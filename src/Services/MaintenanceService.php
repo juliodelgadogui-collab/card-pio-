@@ -44,7 +44,14 @@ final class MaintenanceService
             $stmt=$pdo->prepare('DELETE FROM delivery_live_locations WHERE order_id IN (SELECT id FROM orders WHERE status IN ("completed","cancelled"))');$stmt->execute();$result['finished_delivery_live_locations_removed']=$stmt->rowCount();
         }catch(\Throwable){$result['delivery_gps_cleanup']=false;}
 
+        // Confirmações são descobertas antes de executar a fila. Isso cobre pedidos
+        // originados no PDV, app e cardápio público com o mesmo comportamento.
+        try{$result['customer_confirmations']=(new CustomerCommunicationService())->queueRecentOrderConfirmations();}catch(\Throwable$e){$result['customer_confirmations']=['error'=>mb_substr($e->getMessage(),0,250)];}
+
         try{$jobs=new BackgroundJobService();$jobs->enqueue('backup.daily',[],null,'backup:'.gmdate('Y-m-d'),null,2);$result['jobs']=$jobs->runBatch(max(1,(int)env('QUEUE_BATCH_SIZE',40)),'cron');$result['job_cleanup']=$jobs->purge();}catch(\Throwable$e){$result['jobs']=['error'=>mb_substr($e->getMessage(),0,300)];}
+        try{
+            $before=gmdate('Y-m-d H:i:s',time()-90*86400);$stmt=$pdo->prepare('DELETE FROM customer_communications WHERE created_at<? AND status IN ("sent","skipped")');$stmt->execute([$before]);$result['old_customer_communications_removed']=$stmt->rowCount();
+        }catch(\Throwable){$result['old_customer_communications_removed']=0;}
         $runtime->set('cron.last_run',isset($result['jobs']['error'])?'warning':'ok','Manutenção executada.',['result'=>$result]);
         return$result;
     }

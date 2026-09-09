@@ -6,10 +6,12 @@ use EventMenu\Core\Auth;
 use EventMenu\Core\Security;
 use EventMenu\Core\TenantFeatures;
 use EventMenu\Services\MailSettingsService;
+use EventMenu\Services\WhatsAppSettingsService;
 
 Auth::requirePermission('settings.manage');
 $tenantId = em_require_tenant();
 $mail = (new MailSettingsService())->get($tenantId);
+$whatsapp = (new WhatsAppSettingsService())->get($tenantId);
 
 em_header('Configurações','settings');
 ?>
@@ -32,6 +34,9 @@ em_header('Configurações','settings');
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=email-settings')) ?>">
     <span class="eyebrow">E-MAIL</span><h3>Servidor SMTP</h3><p class="muted"><?= !empty($mail['enabled']) ? 'Envio de e-mail está configurado e ativo.' : 'Configure remetente, servidor, usuário, senha e teste de envio.' ?></p><span class="status-pill <?= !empty($mail['enabled']) ? 'active' : '' ?>"><?= !empty($mail['enabled']) ? 'Ativo' : 'Configurar' ?></span>
   </a>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=whatsapp-settings')) ?>">
+    <span class="eyebrow">WHATSAPP</span><h3>Mensagens automáticas</h3><p class="muted"><?= !empty($whatsapp['enabled']) ? 'Confirmação de pedido e rastreamento estão habilitados.' : 'Conecte a WhatsApp Cloud API para avisar clientes automaticamente.' ?></p><span class="status-pill <?= !empty($whatsapp['enabled']) ? 'active' : '' ?>"><?= !empty($whatsapp['enabled']) ? 'Ativo' : 'Configurar' ?></span>
+  </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=customers')) ?>">
     <span class="eyebrow">FIDELIDADE</span><h3>Clientes e pontos</h3><p class="muted">Programa de pontos, saldos, extrato e regras de resgate.</p><span class="button secondary compact">Abrir pontos</span>
   </a>
@@ -47,7 +52,7 @@ em_header('Configurações','settings');
 
 <section class="card">
   <div class="section-head"><div><span class="eyebrow">PRIMEIRO ACESSO</span><h2>Precisa configurar uma empresa nova?</h2></div></div>
-  <p class="muted">O checklist orienta a sequência recomendada: empresa, imagens, unidade, produtos, pagamentos, equipe e e-mail.</p>
+  <p class="muted">O checklist orienta a sequência recomendada: empresa, imagens, unidade, produtos, pagamentos, equipe, e-mail e WhatsApp.</p>
   <a class="button primary" href="<?= Security::e(app_url('?route=onboarding')) ?>">Abrir checklist</a>
 </section>
 <?php em_footer(); ?>

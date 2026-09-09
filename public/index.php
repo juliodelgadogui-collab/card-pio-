@@ -83,12 +83,12 @@ $routes=[
     'products'=>'products.php','categories'=>'categories.php','inventory'=>'inventory.php','purchases'=>'purchases.php','orders'=>'orders.php','receipt'=>'receipt.php','receipt-settings'=>'receipt-settings.php','restaurant'=>'restaurant.php',
     'customers'=>'customers.php','coupons'=>'coupons.php','events'=>'events.php','event-admin'=>'event-admin.php','tickets'=>'tickets.php','guests'=>'guests.php','promoters'=>'promoters.php',
     'payments'=>'payments.php','gateways'=>'gateways.php','users'=>'users.php','units'=>'units.php','reports'=>'reports.php','audit'=>'audit.php',
-    'settings'=>'settings-hub.php','settings-general'=>'settings.php','media-settings'=>'media-settings.php','email-settings'=>'email-settings.php','onboarding'=>'onboarding.php'
+    'settings'=>'settings-hub.php','settings-general'=>'settings.php','media-settings'=>'media-settings.php','email-settings'=>'email-settings.php','whatsapp-settings'=>'whatsapp-settings.php','onboarding'=>'onboarding.php'
 ];
 $file=$routes[$route]??null;
 if(!$file){http_response_code(404);em_header('Página não encontrada','');echo '<section class="card"><h2>404</h2><p>A página solicitada não existe.</p><a class="button primary" href="'.Security::e(app_url('')).'">Voltar</a></section>';em_footer();exit;}
 
-if(!in_array($route,['super','system-health','email-settings'],true)&&Auth::tenantId()&&!TenantFeatures::routeEnabled($route,Auth::tenantId())){
+if(!in_array($route,['super','system-health','email-settings','whatsapp-settings'],true)&&Auth::tenantId()&&!TenantFeatures::routeEnabled($route,Auth::tenantId())){
     http_response_code(403);em_header('Módulo não habilitado','');echo '<section class="card"><h2>Módulo fora do tipo de operação</h2><p>Esta empresa está configurada como <strong>'.Security::e(TenantFeatures::label(Auth::tenantId())).'</strong>.</p><a class="button primary" href="'.Security::e(app_url('')).'">Voltar</a></section>';em_footer();exit;
 }
 
