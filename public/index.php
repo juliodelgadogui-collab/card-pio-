@@ -80,7 +80,7 @@ if($route==='dashboard'&&Auth::tenantId()&&Auth::can('settings.manage')){
 $routes=[
     'super'=>'super.php','system-health'=>'system-health.php','dashboard'=>'dashboard.php','unit-context'=>'unit-context.php',
     'pos'=>'pos.php','pickup'=>'pickup.php','cash'=>'cash.php','kitchen'=>'kitchen.php','kds-stream'=>'kds-stream.php','production'=>'production.php','product-config'=>'product-config.php','delivery'=>'delivery.php',
-    'products'=>'products.php','inventory'=>'inventory.php','purchases'=>'purchases.php','orders'=>'orders.php','receipt'=>'receipt.php','receipt-settings'=>'receipt-settings.php','restaurant'=>'restaurant.php',
+    'products'=>'products.php','categories'=>'categories.php','inventory'=>'inventory.php','purchases'=>'purchases.php','orders'=>'orders.php','receipt'=>'receipt.php','receipt-settings'=>'receipt-settings.php','restaurant'=>'restaurant.php',
     'customers'=>'customers.php','coupons'=>'coupons.php','events'=>'events.php','event-admin'=>'event-admin.php','tickets'=>'tickets.php','guests'=>'guests.php','promoters'=>'promoters.php',
     'payments'=>'payments.php','gateways'=>'gateways.php','users'=>'users.php','units'=>'units.php','reports'=>'reports.php','audit'=>'audit.php',
     'settings'=>'settings-hub.php','settings-general'=>'settings.php','media-settings'=>'media-settings.php','email-settings'=>'email-settings.php','onboarding'=>'onboarding.php'
