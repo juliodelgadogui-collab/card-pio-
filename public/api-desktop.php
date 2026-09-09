@@ -22,6 +22,8 @@ if($_SERVER['REQUEST_METHOD']==='OPTIONS'){header('Allow: GET, POST, OPTIONS');h
 function desktop_out(array $data,int $status=200):never{http_response_code($status);echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
 function desktop_body():array{$raw=file_get_contents('php://input');if($raw===false||trim($raw)==='')return $_POST?:[];try{$data=json_decode($raw,true,512,JSON_THROW_ON_ERROR);return is_array($data)?$data:[];}catch(Throwable){desktop_out(['ok'=>false,'error'=>'JSON inválido.'],400);}}
 function desktop_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)desktop_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
+function desktop_fiscal_product_ready(array $product):bool{return !empty($product['ready'])&&(int)($product['fiscal_enabled']??0)===1;}
+function desktop_normalize_fiscal_products(array $products):array{foreach($products as &$product)$product['ready']=desktop_fiscal_product_ready($product);unset($product);return$products;}
 
 try{
     $auth=new ApiAuthService();
@@ -50,13 +52,16 @@ try{
         desktop_method('POST');desktop_out(['ok'=>true,'profile'=>$fiscal->saveProfile(desktop_body())]);
     }
     if($action==='fiscal-products'){
-        desktop_method('GET');desktop_out(['ok'=>true,'products'=>$fiscal->products()]);
+        desktop_method('GET');desktop_out(['ok'=>true,'products'=>desktop_normalize_fiscal_products($fiscal->products())]);
     }
     if($action==='fiscal-product-save'){
-        desktop_method('POST');desktop_out(['ok'=>true,'product'=>$fiscal->saveProductFiscal(desktop_body())]);
+        desktop_method('POST');$product=$fiscal->saveProductFiscal(desktop_body());$product['ready']=desktop_fiscal_product_ready($product);desktop_out(['ok'=>true,'product'=>$product]);
     }
     if($action==='fiscal-readiness'){
-        desktop_method('GET');desktop_out(['ok'=>true,'readiness'=>$fiscal->readiness((int)($_GET['unit_id']??0))]);
+        desktop_method('GET');$readiness=$fiscal->readiness((int)($_GET['unit_id']??0));$products=desktop_normalize_fiscal_products($fiscal->products());$missing=[];
+        foreach($products as $product)if((int)($product['active']??0)===1&&empty($product['ready']))$missing[]=['product_id'=>(int)$product['product_id'],'name'=>(string)$product['name']];
+        $readiness['products_missing']=$missing;$readiness['ready']=!empty($readiness['profile_ready'])&&!empty($readiness['certificate_ready'])&&$missing===[];
+        desktop_out(['ok'=>true,'readiness'=>$readiness]);
     }
     if($action==='certificate-save-a1'){
         desktop_method('POST');$body=desktop_body();
