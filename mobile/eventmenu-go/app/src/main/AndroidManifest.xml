@@ -21,7 +21,7 @@
         android:usesCleartextTraffic="false"
         android:icon="@drawable/ic_eventmenu_logo"
         android:roundIcon="@drawable/ic_eventmenu_logo"
-        android:label="EventMenu GO"
+        android:label="EventMenu GO GPS"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <meta-data
