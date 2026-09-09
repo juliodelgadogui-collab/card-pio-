@@ -117,6 +117,9 @@ public sealed class EventMenuApiClient : IDisposable
     public Task<PaymentStatusResponse> PaymentCashAsync(int orderId, int amountCents, string idempotencyKey, CancellationToken ct = default) =>
         PostAsync<PaymentStatusResponse>("api-go.php", "payment-cash", new { order_id = orderId, amount_cents = amountCents, idempotency_key = idempotencyKey }, ct);
 
+    public Task<PixCreateResponse> PixCreateAsync(int orderId, string taxId, int? amountCents = null, CancellationToken ct = default) =>
+        PostAsync<PixCreateResponse>("api-go.php", "pix-create", new { order_id = orderId, tax_id = taxId, amount_cents = amountCents }, ct);
+
     public async Task LogoutAsync(CancellationToken ct = default)
     {
         try
