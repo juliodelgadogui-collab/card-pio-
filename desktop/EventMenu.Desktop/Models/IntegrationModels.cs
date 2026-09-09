@@ -101,12 +101,19 @@ public sealed class PaymentTerminalConfig
     [JsonPropertyName("pinpad_identifier")] public string? PinpadIdentifier { get; set; }
     [JsonPropertyName("auto_capture")] public int AutoCapture { get; set; } = 1;
     [JsonPropertyName("runtime_config")] public Dictionary<string, object?> RuntimeConfig { get; set; } = new();
+    public string DisplayName => string.IsNullOrWhiteSpace(TerminalLabel) ? $"PINPad #{Id}" : TerminalLabel!;
 }
 
 public sealed class PaymentTerminalListResponse
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
     [JsonPropertyName("terminals")] public List<PaymentTerminalConfig> Terminals { get; set; } = new();
+}
+
+public sealed class PaymentTerminalResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("terminal")] public PaymentTerminalConfig? Terminal { get; set; }
 }
 
 public sealed class HardwareBindingResponse
