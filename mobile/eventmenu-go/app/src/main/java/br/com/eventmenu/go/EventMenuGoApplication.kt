@@ -21,6 +21,7 @@ class EventMenuGoApplication : Application() {
     lateinit var operatingUnitRepository:OperatingUnitRepository;private set
     lateinit var orderOperationsRepository:OrderOperationsRepository;private set
     lateinit var deliveryProgressRepository:DeliveryProgressRepository;private set
+    lateinit var expeditionStatusRepository:ExpeditionStatusRepository;private set
     lateinit var discountRepository:DiscountRepository;private set
     lateinit var cancellationRepository:CancellationRepository;private set
     lateinit var brandRepository:TenantBrandRepository;private set
@@ -47,6 +48,7 @@ class EventMenuGoApplication : Application() {
         operatingUnitRepository=OperatingUnitRepository(baseUrl,deviceId,store)
         orderOperationsRepository=OrderOperationsRepository(baseUrl,deviceId,store)
         deliveryProgressRepository=DeliveryProgressRepository(baseUrl,deviceId,store)
+        expeditionStatusRepository=ExpeditionStatusRepository(baseUrl,deviceId,store)
         discountRepository=DiscountRepository(baseUrl,deviceId,store)
         cancellationRepository=CancellationRepository(baseUrl,deviceId,store)
         brandRepository=TenantBrandRepository(this,baseUrl,deviceId,store)
