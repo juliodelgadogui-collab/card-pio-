@@ -15,10 +15,10 @@
             <Border Grid.Column="0" Background="#111827" Padding="64">
                 <StackPanel VerticalAlignment="Center" MaxWidth="560">
                     <TextBlock Text="EVENTMENU DESKTOP" Foreground="#C4B5FD" FontWeight="Bold" FontSize="15" />
-                    <TextBlock Text="Seu restaurante operando no computador, conectado ao mesmo servidor."
+                    <TextBlock Text="Sua operação mais simples, rápida e organizada."
                                Foreground="White" FontWeight="SemiBold" FontSize="36" TextWrapping="Wrap" Margin="0,18,0,18" />
                     <TextBlock Foreground="#CBD5E1" FontSize="17" TextWrapping="Wrap"
-                               Text="PDV, pedidos, mesas, comandas, caixa e impressão em uma interface própria para Windows." />
+                               Text="Vendas, pedidos, mesas, comandas, caixa e impressão em um só lugar." />
                 </StackPanel>
             </Border>
             <Grid Grid.Column="1" Margin="72">
@@ -26,12 +26,12 @@
                     <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.12" /></Border.Effect>
                     <StackPanel>
                         <TextBlock Text="Entrar" FontSize="30" FontWeight="SemiBold" />
-                        <TextBlock Text="Use o mesmo acesso da sua empresa no EventMenu." Foreground="#667085" Margin="0,8,0,28" TextWrapping="Wrap" />
+                        <TextBlock Text="Entre com seu e-mail e senha." Foreground="#667085" Margin="0,8,0,28" TextWrapping="Wrap" />
                         <TextBlock Text="E-mail" FontWeight="SemiBold" Margin="0,0,0,6" />
                         <TextBox x:Name="EmailBox" Height="42" Margin="0,0,0,18" />
                         <TextBlock Text="Senha" FontWeight="SemiBold" Margin="0,0,0,6" />
                         <PasswordBox x:Name="PasswordBox" Height="42" Margin="0,0,0,22" KeyDown="PasswordBox_KeyDown" />
-                        <Button x:Name="LoginButton" Content="Entrar no EventMenu" Height="44" Click="LoginButton_Click" />
+                        <Button x:Name="LoginButton" Content="Entrar" Height="44" Click="LoginButton_Click" />
                         <TextBlock x:Name="LoginStatus" Foreground="#B42318" Margin="0,10,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
@@ -102,7 +102,7 @@
                             <DockPanel Margin="0,0,0,22">
                                 <StackPanel DockPanel.Dock="Left">
                                     <TextBlock Text="Visão geral" FontSize="28" FontWeight="SemiBold" />
-                                    <TextBlock Text="Resumo da operação deste computador." Foreground="#667085" Margin="0,6,0,0" />
+                                    <TextBlock Text="Resumo da sua operação." Foreground="#667085" Margin="0,6,0,0" />
                                 </StackPanel>
                                 <Button Content="Atualizar agora" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshButton_Click" />
                             </DockPanel>
@@ -114,9 +114,9 @@
                             </UniformGrid>
                             <Border Background="White" CornerRadius="14" Padding="22">
                                 <StackPanel>
-                                    <TextBlock Text="Operação centralizada" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Text="Tudo em um só lugar" FontSize="18" FontWeight="SemiBold" />
                                     <TextBlock Margin="0,10,0,0" Foreground="#667085" TextWrapping="Wrap"
-                                               Text="Tudo que este computador faz é gravado no servidor EventMenu. Permissões, estoque, pagamentos e dados da empresa continuam sendo validados pelo backend." />
+                                               Text="Acompanhe pedidos, mesas, caixa, estoque e produção de forma simples durante o dia." />
                                 </StackPanel>
                             </Border>
                         </StackPanel>
@@ -125,7 +125,7 @@
                     <Grid x:Name="PosView" Visibility="Collapsed">
                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                         <DockPanel Margin="0,0,0,16">
-                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="PDV / Nova venda" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Monte o carrinho e envie o pedido para o servidor." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
+                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="PDV / Nova venda" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Monte o pedido e confirme a venda." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
                             <Button Content="Atualizar catálogo" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshProductsButton_Click" />
                         </DockPanel>
                         <Grid Grid.Row="1">
@@ -183,7 +183,7 @@
                     <Grid x:Name="OrdersView" Visibility="Collapsed">
                         <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                         <DockPanel Margin="0,0,0,18">
-                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="Pedidos" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Pedidos liberados para a função deste usuário." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
+                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="Pedidos" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Acompanhe os pedidos da operação." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
                             <Button Content="Atualizar pedidos" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshOrdersButton_Click" />
                         </DockPanel>
                         <Border Grid.Row="1" Background="White" CornerRadius="14" Padding="12">
