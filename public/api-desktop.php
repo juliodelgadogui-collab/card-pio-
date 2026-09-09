@@ -11,6 +11,7 @@ use EventMenu\Services\DesktopHardwareService;
 use EventMenu\Services\FiscalCertificateService;
 use EventMenu\Services\FiscalService;
 use EventMenu\Services\OperatingUnitService;
+use EventMenu\Services\TerminalPaymentService;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
@@ -29,7 +30,7 @@ try{
     if($token==='')desktop_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
     $user=$auth->authenticate($token,$deviceId);
     $action=(string)($_GET['action']??'context');
-    $fiscal=new FiscalService();$certificates=new FiscalCertificateService();$hardware=new DesktopHardwareService();
+    $fiscal=new FiscalService();$certificates=new FiscalCertificateService();$hardware=new DesktopHardwareService();$terminalPayments=new TerminalPaymentService();
 
     if($action==='context'){
         $effective=Auth::effectivePermissions();
@@ -68,6 +69,24 @@ try{
         desktop_method('POST');
         desktop_out(['ok'=>true,'terminal'=>$hardware->saveTerminal(desktop_body())]);
     }
+    if($action==='terminal-intent-create'){
+        desktop_method('POST');$body=desktop_body();
+        $reported=(string)($body['device_id']??$deviceId);
+        if($deviceId!==''&&$reported!==''&&!hash_equals($deviceId,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
+        desktop_out(['ok'=>true,'intent'=>$terminalPayments->createIntent((int)($body['order_id']??0),(int)($body['terminal_config_id']??0),(int)($body['amount_cents']??0),(string)($body['payment_type']??''),(int)($body['installments']??1),$reported,(string)($body['idempotency_key']??''))],201);
+    }
+    if($action==='terminal-intent-processing'){
+        desktop_method('POST');$body=desktop_body();$reported=(string)($body['device_id']??$deviceId);
+        if($deviceId!==''&&$reported!==''&&!hash_equals($deviceId,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
+        desktop_out(['ok'=>true,'intent'=>$terminalPayments->markProcessing((string)($body['intent_token']??''),$reported)]);
+    }
+    if($action==='terminal-intent-result'){
+        desktop_method('POST');$body=desktop_body();$reported=(string)($body['device_id']??$deviceId);
+        if($deviceId!==''&&$reported!==''&&!hash_equals($deviceId,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
+        desktop_out(['ok'=>true,'intent'=>$terminalPayments->recordLocalResult((string)($body['intent_token']??''),$reported,!empty($body['approved']),(string)($body['provider_transaction_id']??''),(string)($body['authorization_code']??''),is_array($body['raw_result']??null)?$body['raw_result']:[])]);
+    }
+    if($action==='terminal-intent-status')desktop_out(['ok'=>true,'intent'=>$terminalPayments->status((string)($_GET['intent_token']??''))]);
+
     if($action==='hardware-heartbeat'){
         desktop_method('POST');$body=desktop_body();
         $reported=(string)($body['device_id']??$deviceId);
