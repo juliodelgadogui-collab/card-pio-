@@ -61,11 +61,13 @@ final class DeliveryPublicTrackingService
                 'recorded_at'=>$row['recorded_at'],'received_at'=>$row['received_at'],
             ];
         }
+        $brand=(new TenantBrandService())->get((int)$row['tenant_id']);
+        if(empty($brand['apply_web']))$brand=(new TenantBrandService())->defaults();
         return [
             'order_id'=>(int)$row['order_id'],'status'=>$status,'tracking_active'=>$active,
             'picked_up_at'=>$row['picked_up_at'],'route_started_at'=>$row['route_started_at'],
             'arrived_at'=>$row['arrived_at'],'completed_at'=>$row['completed_at'],
-            'location'=>$location,'expires_at'=>$row['expires_at'],
+            'location'=>$location,'expires_at'=>$row['expires_at'],'brand'=>$brand,
         ];
     }
 
