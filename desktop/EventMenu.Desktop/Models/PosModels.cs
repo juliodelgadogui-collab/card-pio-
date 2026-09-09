@@ -38,6 +38,8 @@ public sealed class UnitsResponse
 public sealed class GoContextResponse
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("permissions")] public Dictionary<string, bool> Permissions { get; set; } = new();
+    [JsonPropertyName("permission_names")] public List<string> PermissionNames { get; set; } = new();
     [JsonPropertyName("modes")] public List<string> Modes { get; set; } = new();
     [JsonPropertyName("shift")] public Dictionary<string, JsonElement>? Shift { get; set; }
 }
