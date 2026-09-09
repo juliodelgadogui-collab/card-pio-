@@ -28,6 +28,8 @@ hardening_assert(!str_contains($update, "requirePermission('users.manage')"), 'u
 $install = hardening_file($root, 'public/install.php');
 hardening_assert(str_contains($install, 'strlen($password) < 10'), 'instalador precisa exigir senha mínima de 10 caracteres.');
 hardening_assert(str_contains($install, 'minlength="10"'), 'formulário do instalador precisa exigir 10 caracteres.');
+hardening_assert(str_contains($install, "HTTPS é obrigatório para instalar o EventMenu em produção."), 'instalador precisa bloquear domínio real em HTTP.');
+hardening_assert(str_contains($install, "['localhost','127.0.0.1','::1']"), 'instalador deve permitir HTTP somente em ambiente local.');
 
 $users = hardening_file($root, 'app/routes/users.php');
 hardening_assert(substr_count($users, 'strlen($password)<10') >= 2, 'criação/edição de usuários precisa exigir 10 caracteres.');
@@ -41,6 +43,7 @@ $bootstrap = hardening_file($root, 'app/bootstrap.php');
 hardening_assert(str_contains($bootstrap, 'Content-Security-Policy:'), 'CSP precisa estar habilitado.');
 hardening_assert(str_contains($bootstrap, "object-src 'none'"), 'CSP precisa bloquear object-src.');
 hardening_assert(str_contains($bootstrap, "base-uri 'self'"), 'CSP precisa limitar base-uri.');
+hardening_assert(str_contains($bootstrap, "frame-src 'self' https://maps.google.com https://www.google.com"), 'CSP precisa manter mapa público de eventos funcional.');
 hardening_assert(str_contains($bootstrap, "ini_set('session.use_strict_mode', '1')"), 'sessão precisa usar strict mode.');
 hardening_assert(str_contains($bootstrap, "ini_set('session.use_only_cookies', '1')"), 'sessão precisa usar apenas cookies.');
 
