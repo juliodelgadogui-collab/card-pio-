@@ -161,6 +161,8 @@ public sealed class FiscalDocument
     [JsonPropertyName("rejection_code")] public string? RejectionCode { get; set; }
     [JsonPropertyName("rejection_message")] public string? RejectionMessage { get; set; }
     [JsonPropertyName("snapshot_hash")] public string? SnapshotHash { get; set; }
+    [JsonPropertyName("transmission_attempts")] public int TransmissionAttempts { get; set; }
+    [JsonPropertyName("last_transmission_at")] public string? LastTransmissionAt { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
 }
 
