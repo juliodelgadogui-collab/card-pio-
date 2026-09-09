@@ -22,7 +22,7 @@ final class ExpeditionDeliveryService
 
         try{
             $placeholders=implode(',',array_fill(0,count($ids),'?'));
-            $sql='SELECT o.id,o.assigned_delivery_user_id,u.name delivery_name,dp.picked_up_at,dp.route_started_at,dp.arrived_at,dp.completed_at,ll.received_at location_received_at
+            $sql='SELECT o.id,o.assigned_delivery_user_id,u.name delivery_name,dp.picked_up_at,dp.route_started_at,dp.arrived_at,dp.completed_at,ll.updated_at location_received_at
                 FROM orders o
                 LEFT JOIN users u ON u.id=o.assigned_delivery_user_id AND u.tenant_id=o.tenant_id
                 LEFT JOIN delivery_progress dp ON dp.order_id=o.id AND dp.tenant_id=o.tenant_id
