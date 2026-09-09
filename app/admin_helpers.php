@@ -94,6 +94,7 @@ function em_nav(): array
         ['production', 'Produção / Estações', 'production.manage'],
         ['delivery', 'Entregas', 'orders.delivery'],
         ['products', 'Cardápio', 'catalog.manage'],
+        ['categories', 'Categorias', 'catalog.manage'],
         ['inventory', 'Estoque', 'inventory.manage'],
         ['purchases', 'Compras / Fornecedores', 'inventory.manage'],
         ['orders', 'Pedidos', 'orders.view'],
@@ -289,6 +290,7 @@ function em_footer(): void
     $sw = json_encode(app_url('sw.js?v=' . em_asset_version('sw.js')), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $receiptBase = json_encode(app_url('?route=receipt&id='), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     $receiptSettings = json_encode(app_url('?route=receipt-settings'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    $categoriesUrl = json_encode(app_url('?route=categories'), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     ?>
         <script>
         (() => {
@@ -332,6 +334,17 @@ function em_footer(): void
                     a.dataset.receiptSettings = '1';
                     a.href = <?= $receiptSettings ?>;
                     a.textContent = 'Impressão térmica';
+                    host.append(a);
+                }
+            }
+            if (route === 'products') {
+                const host = document.querySelector('.page-hero .hero-actions');
+                if (host && !host.querySelector('[data-categories-action]')) {
+                    const a = document.createElement('a');
+                    a.className = 'button secondary';
+                    a.dataset.categoriesAction = '1';
+                    a.href = <?= $categoriesUrl ?>;
+                    a.textContent = 'Categorias';
                     host.append(a);
                 }
             }
