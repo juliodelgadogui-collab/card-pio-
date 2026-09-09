@@ -35,29 +35,34 @@ public sealed class DesktopIntegrationApiClient : IDisposable
 
     public string DeviceId=>_deviceId;
 
-    public Task<DesktopIntegrationContext> ContextAsync(CancellationToken ct=default)=>GetAsync<DesktopIntegrationContext>("context",null,ct);
-    public Task<FiscalProfileResponse> FiscalProfileAsync(int unitId,CancellationToken ct=default)=>GetAsync<FiscalProfileResponse>("fiscal-profile",new(){["unit_id"]=unitId.ToString()},ct);
-    public Task<FiscalProfileResponse> SaveFiscalProfileAsync(object payload,CancellationToken ct=default)=>PostAsync<FiscalProfileResponse>("fiscal-profile-save",payload,ct);
-    public Task<FiscalCertificateResponse> SaveA1Async(int profileId,byte[] pfx,string password,string storageScope,CancellationToken ct=default)=>PostAsync<FiscalCertificateResponse>("certificate-save-a1",new{profile_id=profileId,pfx_base64=Convert.ToBase64String(pfx),password,storage_scope=storageScope},ct);
-    public Task<FiscalCertificateResponse> RegisterA3Async(int profileId,string subject,string serial,string thumbprint,string? validUntil,CancellationToken ct=default)=>PostAsync<FiscalCertificateResponse>("certificate-register-a3",new{profile_id=profileId,subject,serial_number=serial,thumbprint,valid_until=validUntil},ct);
-    public Task<FiscalDocumentResponse> QueueFiscalAsync(int orderId,string document,CancellationToken ct=default)=>PostAsync<FiscalDocumentResponse>("fiscal-queue",new{order_id=orderId,document},ct);
-    public Task<FiscalDocumentsResponse> FiscalDocumentsAsync(int limit=100,CancellationToken ct=default)=>GetAsync<FiscalDocumentsResponse>("fiscal-documents",new(){["limit"]=limit.ToString()},ct);
-    public Task<PaymentTerminalListResponse> TerminalListAsync(int unitId,CancellationToken ct=default)=>GetAsync<PaymentTerminalListResponse>("terminal-list",new(){["unit_id"]=unitId.ToString()},ct);
-    public Task<HardwareBindingResponse> HardwareHeartbeatAsync(int unitId,LocalHardwareProfileStore store,LocalHardwareProfile profile,CancellationToken ct=default)=>PostAsync<HardwareBindingResponse>("hardware-heartbeat",new{unit_id=unitId,device_id=_deviceId,device_label=$"EventMenu Desktop - {Environment.MachineName}",hardware=store.ToServerReport(profile)},ct);
-    public Task<TerminalIntentResponse> CreateTerminalIntentAsync(TerminalPaymentRequest request,int terminalConfigId,CancellationToken ct=default)=>PostAsync<TerminalIntentResponse>("terminal-intent-create",new{order_id=request.OrderId,terminal_config_id=terminalConfigId,amount_cents=request.AmountCents,payment_type=request.PaymentType,installments=request.Installments,device_id=_deviceId,idempotency_key=request.IdempotencyKey},ct);
-    public Task<TerminalIntentResponse> MarkTerminalProcessingAsync(string intentToken,CancellationToken ct=default)=>PostAsync<TerminalIntentResponse>("terminal-intent-processing",new{intent_token=intentToken,device_id=_deviceId},ct);
-    public Task<TerminalIntentResponse> RecordTerminalResultAsync(string intentToken,TerminalPaymentResult result,Dictionary<string,object?> raw,CancellationToken ct=default)=>PostAsync<TerminalIntentResponse>("terminal-intent-result",new{intent_token=intentToken,device_id=_deviceId,approved=result.Approved,provider_transaction_id=result.TransactionCode,authorization_code=result.AuthorizationCode,raw_result=raw},ct);
-    public Task<TerminalIntentResponse> TerminalIntentStatusAsync(string intentToken,CancellationToken ct=default)=>GetAsync<TerminalIntentResponse>("terminal-intent-status",new(){["intent_token"]=intentToken},ct);
+    public Task<DesktopIntegrationContext> ContextAsync(CancellationToken ct=default)=>GetAsync<DesktopIntegrationContext>("api-desktop.php","context",null,ct);
+    public Task<FiscalProfileResponse> FiscalProfileAsync(int unitId,CancellationToken ct=default)=>GetAsync<FiscalProfileResponse>("api-desktop.php","fiscal-profile",new(){["unit_id"]=unitId.ToString()},ct);
+    public Task<FiscalProfileResponse> SaveFiscalProfileAsync(object payload,CancellationToken ct=default)=>PostAsync<FiscalProfileResponse>("api-desktop.php","fiscal-profile-save",payload,ct);
+    public Task<FiscalCertificateResponse> SaveA1Async(int profileId,byte[] pfx,string password,string storageScope,CancellationToken ct=default)=>PostAsync<FiscalCertificateResponse>("api-desktop.php","certificate-save-a1",new{profile_id=profileId,pfx_base64=Convert.ToBase64String(pfx),password,storage_scope=storageScope},ct);
+    public Task<FiscalCertificateResponse> RegisterA3Async(int profileId,string subject,string serial,string thumbprint,string? validUntil,CancellationToken ct=default)=>PostAsync<FiscalCertificateResponse>("api-desktop.php","certificate-register-a3",new{profile_id=profileId,subject,serial_number=serial,thumbprint,valid_until=validUntil},ct);
+    public Task<FiscalDocumentResponse> QueueFiscalAsync(int orderId,string document,CancellationToken ct=default)=>PostAsync<FiscalDocumentResponse>("api-desktop.php","fiscal-queue",new{order_id=orderId,document},ct);
+    public Task<FiscalDocumentsResponse> FiscalDocumentsAsync(int limit=100,CancellationToken ct=default)=>GetAsync<FiscalDocumentsResponse>("api-desktop.php","fiscal-documents",new(){["limit"]=limit.ToString()},ct);
+    public Task<PaymentTerminalListResponse> TerminalListAsync(int unitId,CancellationToken ct=default)=>GetAsync<PaymentTerminalListResponse>("api-desktop.php","terminal-list",new(){["unit_id"]=unitId.ToString()},ct);
+    public Task<HardwareBindingResponse> HardwareHeartbeatAsync(int unitId,LocalHardwareProfileStore store,LocalHardwareProfile profile,CancellationToken ct=default)=>PostAsync<HardwareBindingResponse>("api-desktop.php","hardware-heartbeat",new{unit_id=unitId,device_id=_deviceId,device_label=$"EventMenu Desktop - {Environment.MachineName}",hardware=store.ToServerReport(profile)},ct);
+    public Task<TerminalIntentResponse> CreateTerminalIntentAsync(TerminalPaymentRequest request,int terminalConfigId,CancellationToken ct=default)=>PostAsync<TerminalIntentResponse>("api-desktop.php","terminal-intent-create",new{order_id=request.OrderId,terminal_config_id=terminalConfigId,amount_cents=request.AmountCents,payment_type=request.PaymentType,installments=request.Installments,device_id=_deviceId,idempotency_key=request.IdempotencyKey},ct);
+    public Task<TerminalIntentResponse> MarkTerminalProcessingAsync(string intentToken,CancellationToken ct=default)=>PostAsync<TerminalIntentResponse>("api-desktop.php","terminal-intent-processing",new{intent_token=intentToken,device_id=_deviceId},ct);
+    public Task<TerminalIntentResponse> RecordTerminalResultAsync(string intentToken,TerminalPaymentResult result,Dictionary<string,object?> raw,CancellationToken ct=default)=>PostAsync<TerminalIntentResponse>("api-desktop.php","terminal-intent-result",new{intent_token=intentToken,device_id=_deviceId,approved=result.Approved,provider_transaction_id=result.TransactionCode,authorization_code=result.AuthorizationCode,raw_result=raw},ct);
+    public Task<TerminalIntentResponse> TerminalIntentStatusAsync(string intentToken,CancellationToken ct=default)=>GetAsync<TerminalIntentResponse>("api-desktop.php","terminal-intent-status",new(){["intent_token"]=intentToken},ct);
 
-    private async Task<T> GetAsync<T>(string action,Dictionary<string,string>? query,CancellationToken ct)
+    public Task<HubPairingResponse> CreateHubPairingAsync(int unitId,CancellationToken ct=default)=>PostAsync<HubPairingResponse>("api-hub.php","pairing-create",new{unit_id=unitId,device_id=_deviceId},ct);
+    public Task<HubCommandsResponse> PollHubAsync(int limit=20,CancellationToken ct=default)=>GetAsync<HubCommandsResponse>("api-hub.php","desktop-poll",new(){["device_id"]=_deviceId,["limit"]=limit.ToString()},ct);
+    public Task<HubCommandResponse> ClaimHubCommandAsync(int id,CancellationToken ct=default)=>PostAsync<HubCommandResponse>("api-hub.php","desktop-claim",new{id,device_id=_deviceId},ct);
+    public Task<HubCommandResponse> CompleteHubCommandAsync(int id,bool success,object? result=null,string error="",CancellationToken ct=default)=>PostAsync<HubCommandResponse>("api-hub.php","desktop-complete",new{id,device_id=_deviceId,success,result=result??new{},error},ct);
+
+    private async Task<T> GetAsync<T>(string path,string action,Dictionary<string,string>? query,CancellationToken ct)
     {
-        var url=BuildUrl(action,query);
+        var url=BuildUrl(path,action,query);
         return await SendWithRefreshAsync<T>(HttpMethod.Get,url,null,ct);
     }
 
-    private async Task<T> PostAsync<T>(string action,object body,CancellationToken ct)
+    private async Task<T> PostAsync<T>(string path,string action,object body,CancellationToken ct)
     {
-        var url=BuildUrl(action,null);
+        var url=BuildUrl(path,action,null);
         return await SendWithRefreshAsync<T>(HttpMethod.Post,url,body,ct);
     }
 
@@ -104,9 +109,9 @@ public sealed class DesktopIntegrationApiClient : IDisposable
         }
     }
 
-    private static string BuildUrl(string action,Dictionary<string,string>? query)
+    private static string BuildUrl(string path,string action,Dictionary<string,string>? query)
     {
-        var sb=new StringBuilder("api-desktop.php?action=").Append(Uri.EscapeDataString(action));
+        var sb=new StringBuilder(path).Append("?action=").Append(Uri.EscapeDataString(action));
         if(query is not null)foreach(var pair in query)sb.Append('&').Append(Uri.EscapeDataString(pair.Key)).Append('=').Append(Uri.EscapeDataString(pair.Value));
         return sb.ToString();
     }
