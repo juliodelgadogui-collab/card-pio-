@@ -11,7 +11,7 @@ use RuntimeException;
 
 final class PaymentService
 {
-    private const PROVIDERS=['stripe','pagbank','mercadopago','manual'];
+    private const PROVIDERS=['stripe','pagbank','mercadopago','manual','tef'];
 
     public function create(int $orderId,string $provider,string $idempotencyKey,?int $amountCents=null):array
     {
@@ -28,7 +28,7 @@ final class PaymentService
             $paid=$this->paidAmount($pdo,$tenantId,$orderId);$remaining=max(0,(int)$order['total_cents']-$paid);
             if($remaining<=0||$order['payment_status']==='paid')throw new RuntimeException('Pedido já está integralmente pago.');
             $amount=$amountCents??$remaining;if($amount<=0||$amount>$remaining)throw new RuntimeException('Valor da parcela inválido. Saldo restante: R$ '.number_format($remaining/100,2,',','.').'.');
-            if($provider!=='manual'){$gw=$pdo->prepare('SELECT id FROM payment_gateways WHERE tenant_id=? AND provider=? AND active=1');$gw->execute([$tenantId,$provider]);if(!$gw->fetchColumn())throw new RuntimeException('Gateway não está ativo para esta empresa.');}
+            if(!in_array($provider,['manual','tef'],true)){$gw=$pdo->prepare('SELECT id FROM payment_gateways WHERE tenant_id=? AND provider=? AND active=1');$gw->execute([$tenantId,$provider]);if(!$gw->fetchColumn())throw new RuntimeException('Gateway não está ativo para esta empresa.');}
             $open=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE'));$open->execute([$tenantId,$orderId]);if($payment=$open->fetch())return $payment;
             $stmt=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")');$stmt->execute([$tenantId,$orderId,$provider,$idempotencyKey,$amount]);$id=(int)$pdo->lastInsertId();
             $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status<>"paid"')->execute([$orderId]);
@@ -57,7 +57,7 @@ final class PaymentService
             if(in_array($order['status'],['cancelled','completed'],true))throw new RuntimeException('Pedido cancelado ou finalizado não pode ser confirmado.');
             if(strtoupper((string)$verified['currency'])!=='BRL')throw new RuntimeException('Moeda divergente.');
 
-            if($provider!=='manual'){
+            if(!in_array($provider,['manual','tef'],true)){
                 $gw=$pdo->prepare(Database::portableSql($pdo,'SELECT account_reference FROM payment_gateways WHERE tenant_id=? AND provider=? AND active=1 FOR UPDATE'));$gw->execute([$tenantId,$provider]);$account=$gw->fetchColumn();
                 if($account===false)throw new RuntimeException('Gateway local não está ativo.');if((string)$account!==(string)$verified['account_reference'])throw new RuntimeException('Conta do recebedor divergente.');
             }
@@ -96,7 +96,7 @@ final class PaymentService
                 $notifications->publishToPermissionForTenant($tenantId,'refunds.manage',null,'payment.duplicate','Cobrança duplicada detectada','Uma segunda cobrança de '.$amount.' foi confirmada no pedido #'.$orderId.'. Revise o estorno da transação duplicada.','payment',(string)$payment['id'],'payment:'.$payment['id'].':duplicate','warning',gmdate('Y-m-d H:i:s',time()+604800));return;
             }
             if($payment['status']!=='paid')return;
-            $title=str_contains($source,'pix')?'PIX recebido':(str_contains($source,'nfc')||str_contains($source,'card')?'Cartão aprovado':'Pagamento confirmado');
+            $title=str_contains($source,'pix')?'PIX recebido':(str_contains($source,'nfc')||str_contains($source,'card')||str_contains($source,'tef')?'Cartão aprovado':'Pagamento confirmado');
             $notifications->publishToPermissionForTenant($tenantId,'payments.manage',null,'payment.received',$title,$amount.' confirmado no pedido #'.$orderId.'.','payment',(string)$payment['id'],'payment:'.$payment['id'].':received','success',gmdate('Y-m-d H:i:s',time()+172800));
         }catch(\Throwable){}
     }
