@@ -47,8 +47,16 @@ try{
         desktop_out(['ok'=>true,'profile'=>$profile?:null]);
     }
     if($action==='fiscal-profile-save'){
-        desktop_method('POST');
-        desktop_out(['ok'=>true,'profile'=>$fiscal->saveProfile(desktop_body())]);
+        desktop_method('POST');desktop_out(['ok'=>true,'profile'=>$fiscal->saveProfile(desktop_body())]);
+    }
+    if($action==='fiscal-products'){
+        desktop_method('GET');desktop_out(['ok'=>true,'products'=>$fiscal->products()]);
+    }
+    if($action==='fiscal-product-save'){
+        desktop_method('POST');desktop_out(['ok'=>true,'product'=>$fiscal->saveProductFiscal(desktop_body())]);
+    }
+    if($action==='fiscal-readiness'){
+        desktop_method('GET');desktop_out(['ok'=>true,'readiness'=>$fiscal->readiness((int)($_GET['unit_id']??0))]);
     }
     if($action==='certificate-save-a1'){
         desktop_method('POST');$body=desktop_body();
@@ -66,8 +74,7 @@ try{
 
     if($action==='terminal-list')desktop_out(['ok'=>true,'terminals'=>$hardware->terminalConfigs((int)($_GET['unit_id']??0))]);
     if($action==='terminal-save'){
-        desktop_method('POST');
-        desktop_out(['ok'=>true,'terminal'=>$hardware->saveTerminal(desktop_body())]);
+        desktop_method('POST');desktop_out(['ok'=>true,'terminal'=>$hardware->saveTerminal(desktop_body())]);
     }
     if($action==='terminal-intent-create'){
         desktop_method('POST');$body=desktop_body();
