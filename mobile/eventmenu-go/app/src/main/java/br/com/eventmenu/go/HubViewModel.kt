@@ -33,8 +33,11 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
     private val _state = MutableStateFlow(HubState())
     val state: StateFlow<HubState> = _state.asStateFlow()
 
-    fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(loading = true, error = null) }
+    fun refresh() = loadLinks(showLoading = true)
+    fun heartbeat() = loadLinks(showLoading = false)
+
+    private fun loadLinks(showLoading: Boolean) = viewModelScope.launch {
+        if (showLoading) _state.update { it.copy(loading = true, error = null) }
         runCatching { repository.links() }
             .onSuccess { links ->
                 val selected = _state.value.selectedLinkId?.takeIf { id -> links.any { it.id == id } }
@@ -42,7 +45,11 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
                     ?: links.firstOrNull()?.id
                 _state.update { it.copy(links = links, selectedLinkId = selected, loading = false) }
             }
-            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao carregar o Hub.") } }
+            .onFailure { e ->
+                if (showLoading) {
+                    _state.update { it.copy(loading = false, error = e.message ?: "Falha ao carregar o Hub.") }
+                }
+            }
     }
 
     fun select(linkId: Int) {
