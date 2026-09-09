@@ -27,14 +27,49 @@ public sealed class InventoryMonitorApiClient : IDisposable
         var baseUrl = (Environment.GetEnvironmentVariable("EVENTMENU_DESKTOP_API_BASE_URL") ?? "https://go.gestao2.store/1/").Trim();
         if (!baseUrl.EndsWith('/')) baseUrl += "/";
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
-            throw new InvalidOperationException("O endereço do servidor EventMenu precisa usar HTTPS.");
+            throw new InvalidOperationException("O endereço do sistema precisa usar uma conexão segura.");
         _http = new HttpClient { BaseAddress = uri, Timeout = TimeSpan.FromSeconds(20) };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         _http.DefaultRequestHeaders.Add("X-Device-Id", _deviceId);
     }
 
-    public Task<InventorySnapshotResponse> SnapshotAsync(bool lowOnly, CancellationToken ct = default) =>
-        SendWithRefreshAsync<InventorySnapshotResponse>(HttpMethod.Get, "api-go-inventory.php?action=snapshot&low_only=" + (lowOnly ? "1" : "0"), null, ct);
+    public async Task<InventorySnapshotResponse> SnapshotAsync(bool lowOnly, CancellationToken ct = default)
+    {
+        try
+        {
+            return await SendWithRefreshAsync<InventorySnapshotResponse>(HttpMethod.Get, "api-go-inventory.php?action=snapshot&low_only=" + (lowOnly ? "1" : "0"), null, ct);
+        }
+        catch (ApiClientException ex) when (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        {
+            var products = await SendWithRefreshAsync<ProductsResponse>(HttpMethod.Get, "api.php?action=products", null, ct);
+            var rows = products.Products.Where(x => x.TrackStock == 1).Select(x => new InventoryProductRow
+            {
+                Id = x.Id,
+                Name = x.Name,
+                Sku = x.Sku,
+                StockUnit = "un",
+                AvailableQty = x.StockQty ?? 0m,
+                ReservedQty = 0m,
+                PhysicalQty = x.StockQty ?? 0m,
+                MinStockQty = 0m,
+                StockStatus = (x.StockQty ?? 0m) <= 0m ? "zero" : "ok"
+            }).ToList();
+            if (lowOnly) rows = rows.Where(x => x.StockStatus == "zero").ToList();
+            return new InventorySnapshotResponse
+            {
+                Ok = true,
+                Unit = new InventoryUnit { Name = "Unidade atual" },
+                Products = rows,
+                Summary = new InventorySummary
+                {
+                    Controlled = rows.Count,
+                    Zero = rows.Count(x => x.StockStatus == "zero"),
+                    Low = rows.Count(x => x.StockStatus == "low"),
+                    ReservedQty = rows.Sum(x => x.ReservedQty)
+                }
+            };
+        }
+    }
 
     private async Task<T> SendWithRefreshAsync<T>(HttpMethod method, string url, object? body, CancellationToken ct)
     {
@@ -78,14 +113,14 @@ public sealed class InventoryMonitorApiClient : IDisposable
         if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
         HttpResponseMessage response;
         try { response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, ct); }
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested) { throw new ApiClientException("O servidor demorou para responder."); }
-        catch (HttpRequestException) { throw new ApiClientException("Sem conexão com o servidor."); }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested) { throw new ApiClientException("A atualização demorou demais. Tente novamente."); }
+        catch (HttpRequestException) { throw new ApiClientException("Sem conexão. Confira a internet e tente novamente."); }
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode) throw new ApiClientException(ReadError(text), response.StatusCode);
             var result = JsonSerializer.Deserialize<T>(text, JsonOptions);
-            return result ?? throw new ApiClientException("O servidor retornou dados incompletos.");
+            return result ?? throw new ApiClientException("Não foi possível carregar o estoque.");
         }
     }
 
