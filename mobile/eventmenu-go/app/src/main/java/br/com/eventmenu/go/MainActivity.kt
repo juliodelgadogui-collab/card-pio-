@@ -161,6 +161,9 @@ class MainActivity : FragmentActivity() {
         val entityType = target.entityType.lowercase()
         val approvalRequest = entityType in setOf("cancellation_request", "discount_request")
 
+        // Solicitações de aprovação precisam abrir a Gestão mesmo quando a notificação
+        // veio sem modo ou com um modo antigo. A API continua validando a permissão
+        // e o turno no servidor antes de aprovar qualquer ação.
         if (!approvalRequest && target.mode.isNotBlank() && target.mode != state.workShift?.mode) {
             vm.navigate(AppScreen.NOTIFICATIONS)
             return
@@ -168,19 +171,28 @@ class MainActivity : FragmentActivity() {
 
         val destination = when {
             entityType == "cancellation_request" -> AppScreen.MANAGER
+
             entityType == "discount_request" -> AppScreen.MANAGER
+
             notificationType == "order.new" && "orders_kitchen" in permissions && state.mode == AppMode.OPERATION -> AppScreen.KITCHEN
+
             notificationType == "order.ready" &&
                 ("orders_dispatch" in permissions || "delivery_assign" in permissions) &&
                 state.mode == AppMode.OPERATION -> AppScreen.DISPATCH
+
             state.mode == AppMode.DELIVERY && (target.mode == "delivery" || entityType == "order") -> AppScreen.DELIVERY
+
             entityType == "event" && state.mode == AppMode.EVENTS -> AppScreen.EVENTS
+
             entityType in setOf("table", "tab") && "tables" in permissions && state.mode == AppMode.OPERATION -> AppScreen.TABLES
+
             entityType == "payment" && "cash" in permissions -> AppScreen.CASH
+
             entityType == "order" && (
                 state.mode == AppMode.DELIVERY ||
                     permissions.any { it in setOf("orders_view", "orders_create", "orders_manage") }
                 ) -> AppScreen.ORDERS
+
             else -> AppScreen.NOTIFICATIONS
         }
 
