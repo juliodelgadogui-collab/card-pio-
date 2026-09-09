@@ -17,6 +17,7 @@ public partial class MainWindow
     private bool _hubBusy;
     private DateTimeOffset _lastHubHeartbeat=DateTimeOffset.MinValue;
     private Button? _productionNavButton;
+    private Button? _deliveryMonitorButton;
     private Button? _hubNavButton;
     private Button? _hardwareSettingsButton;
 
@@ -45,6 +46,15 @@ public partial class MainWindow
         };
         _productionNavButton.Click+=async(_,_)=>await OpenProductionAsync();
 
+        _deliveryMonitorButton=new Button
+        {
+            Content="Entregas ao vivo",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="Acompanhar GPS dos entregadores somente durante rotas ativas",
+            Visibility=(Can("delivery_assign")||Can("reports"))?Visibility.Visible:Visibility.Collapsed
+        };
+        _deliveryMonitorButton.Click+=async(_,_)=>await OpenDeliveryMonitorAsync();
+
         _hubNavButton=new Button
         {
             Content="Celular / Hub",
@@ -66,8 +76,9 @@ public partial class MainWindow
         var cashIndex=sidebar.Children.IndexOf(CashNavButton);
         var insert=Math.Max(0,cashIndex+1);
         sidebar.Children.Insert(insert,_productionNavButton);
-        sidebar.Children.Insert(insert+1,_hubNavButton);
-        sidebar.Children.Insert(insert+2,_hardwareSettingsButton);
+        sidebar.Children.Insert(insert+1,_deliveryMonitorButton);
+        sidebar.Children.Insert(insert+2,_hubNavButton);
+        sidebar.Children.Insert(insert+3,_hardwareSettingsButton);
     }
 
     private async void MainWindow_HubPreviewKeyDown(object sender,KeyEventArgs e)
@@ -93,6 +104,22 @@ public partial class MainWindow
             var window=new ProductionWindow(_hubIntegrationApi,Can("orders_dispatch"),Can("production_manage")){Owner=this};window.ShowDialog();
         }
         catch(Exception ex){MessageBox.Show(ex.Message,"Produção",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        await Task.CompletedTask;
+    }
+
+    private async Task OpenDeliveryMonitorAsync()
+    {
+        if(_store is null||ShellPanel.Visibility!=Visibility.Visible)return;
+        if(!Can("delivery_assign")&&!Can("reports"))return;
+        if(!HasShift||ShiftInt("unit_id")<1)
+        {
+            MessageBox.Show("Inicie um turno na unidade que deseja acompanhar.","Entregas ao vivo",MessageBoxButton.OK,MessageBoxImage.Information);return;
+        }
+        try
+        {
+            var window=new DeliveryMonitorWindow(_store){Owner=this};window.ShowDialog();
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"Entregas ao vivo",MessageBoxButton.OK,MessageBoxImage.Warning);}
         await Task.CompletedTask;
     }
 
@@ -164,7 +191,6 @@ public partial class MainWindow
             }
             if(ShiftIs("operation")&&(Can("production_print")||Can("orders_kitchen"))&&_productionPrintProcessor is not null)
             {
-                // Máximo de duas tarefas por ciclo para não bloquear a UI se uma unidade tiver grande fila.
                 for(var i=0;i<2;i++)if(!await _productionPrintProcessor.ProcessOneAsync())break;
             }
         }
