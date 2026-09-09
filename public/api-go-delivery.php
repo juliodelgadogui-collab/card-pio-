@@ -21,8 +21,16 @@ function god_post():void{if($_SERVER['REQUEST_METHOD']!=='POST')god_out(['ok'=>f
 
 try{
     $auth=new ApiAuthService();$token=ApiAuthService::bearerToken();$deviceId=ApiAuthService::deviceId();if($token==='')god_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);$auth->authenticate($token,$deviceId);
-    $action=(string)($_GET['action']??'list');$service=new DeliveryProgressService();$locations=new DeliveryLocationService();
-    if($action==='list')god_out(['ok'=>true,'progress'=>$service->listMine()]);
+    $action=(string)($_GET['action']??'list');$service=new DeliveryProgressService();$locations=new DeliveryLocationService();$publicTracking=new DeliveryPublicTrackingService();
+    if($action==='list'){
+        $progress=$service->listMine();
+        foreach($progress as &$row){
+            if(($row['order_status']??'')==='out_for_delivery'&&!empty($row['route_started_at'])&&empty($row['arrived_at'])&&empty($row['completed_at'])){
+                try{$tracking=$publicTracking->issue((int)$row['order_id']);$row['tracking_url']=$tracking['url'];$row['tracking_expires_at']=$tracking['expires_at'];}catch(RuntimeException){}
+            }
+        }unset($row);
+        god_out(['ok'=>true,'progress'=>$progress]);
+    }
     if($action==='manager-live')god_out(['ok'=>true,'locations'=>$locations->liveForManager()]);
 
     god_post();$body=god_body();
@@ -31,7 +39,7 @@ try{
     $orderId=(int)($body['order_id']??0);
     if($action==='pickup')god_out(['ok'=>true,'progress'=>$service->pickup($orderId)]);
     if($action==='start-route'){
-        $progress=$service->startRoute($orderId);$tracking=(new DeliveryPublicTrackingService())->issue($orderId);$progress['tracking_url']=$tracking['url'];$progress['tracking_expires_at']=$tracking['expires_at'];
+        $progress=$service->startRoute($orderId);$tracking=$publicTracking->issue($orderId);$progress['tracking_url']=$tracking['url'];$progress['tracking_expires_at']=$tracking['expires_at'];
         god_out(['ok'=>true,'progress'=>$progress]);
     }
     if($action==='arrive'){
