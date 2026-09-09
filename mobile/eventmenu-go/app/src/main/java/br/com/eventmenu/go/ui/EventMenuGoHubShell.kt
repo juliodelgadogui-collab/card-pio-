@@ -80,6 +80,10 @@ fun EventMenuGoHubShell(
         val permissions = state.session?.permissions.orEmpty()
         HubDialog(
             state = hubState,
+            canPrintOrder = permissions.any { it in setOf("orders_view", "orders_create", "orders_manage") },
+            canPrintReceipt = permissions.any { it in setOf("payments", "orders_view", "orders_manage") },
+            canShowCustomer = permissions.any { it in setOf("orders_view", "orders_create", "orders_manage") },
+            canSendAlert = permissions.any { it in setOf("orders_view", "orders_create", "orders_manage", "orders_kitchen", "orders_dispatch") },
             canTerminalRequest = "terminal_request" in permissions || "terminal_collect" in permissions,
             canOpenDrawer = "cash" in permissions,
             onDismiss = { showHub = false; hubViewModel.clearFeedback() },
