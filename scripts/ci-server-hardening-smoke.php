@@ -30,6 +30,12 @@ hardening_assert(str_contains($install, 'strlen($password) < 10'), 'instalador p
 hardening_assert(str_contains($install, 'minlength="10"'), 'formulário do instalador precisa exigir 10 caracteres.');
 hardening_assert(str_contains($install, "HTTPS é obrigatório para instalar o EventMenu em produção."), 'instalador precisa bloquear domínio real em HTTP.');
 hardening_assert(str_contains($install, "['localhost','127.0.0.1','::1']"), 'instalador deve permitir HTTP somente em ambiente local.');
+hardening_assert(str_contains($install, "value=\"sqlite\""), 'instalador precisa oferecer SQLite.');
+hardening_assert(str_contains($install, "value=\"mysql\""), 'instalador precisa oferecer MySQL/MariaDB.');
+hardening_assert(str_contains($install, "pdo_sqlite"), 'instalador precisa validar pdo_sqlite.');
+hardening_assert(str_contains($install, "pdo_mysql"), 'instalador precisa validar pdo_mysql.');
+hardening_assert(str_contains($install, 'eventmenu_install_probe_database'), 'instalador precisa testar a conexão antes de instalar.');
+hardening_assert(str_contains($install, "DB_CONNECTION' => \$driver"), 'instalador precisa persistir o banco escolhido no .env.');
 
 $users = hardening_file($root, 'app/routes/users.php');
 hardening_assert(substr_count($users, 'strlen($password)<10') >= 2, 'criação/edição de usuários precisa exigir 10 caracteres.');
