@@ -1,6 +1,6 @@
 using System.Net;
+using System.Net.Http;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using EventMenu.Desktop.Models;
@@ -53,7 +53,7 @@ public sealed class EventMenuApiClient : IDisposable
             device_label = $"EventMenu Desktop - {Environment.MachineName}"
         };
 
-        var response = await SendCoreAsync(HttpMethod.Post, "login", body, null, false, ct);
+        var response = await SendCoreAsync(HttpMethod.Post, "api.php", "login", null, body, null, ct);
         var login = Deserialize<LoginResponse>(response);
         if (string.IsNullOrWhiteSpace(login.Token) || string.IsNullOrWhiteSpace(login.RefreshToken))
             throw new ApiClientException("O servidor não retornou uma sessão válida.");
@@ -70,17 +70,47 @@ public sealed class EventMenuApiClient : IDisposable
         return login;
     }
 
-    public Task<MeResponse> MeAsync(CancellationToken ct = default) => GetAsync<MeResponse>("me", ct);
-    public Task<OrdersResponse> OrdersAsync(CancellationToken ct = default) => GetAsync<OrdersResponse>("orders", ct);
-    public Task<ProductsResponse> ProductsAsync(CancellationToken ct = default) => GetAsync<ProductsResponse>("products", ct);
-    public Task<CashResponse> CashCurrentAsync(CancellationToken ct = default) => GetAsync<CashResponse>("cash-current", ct);
+    public Task<MeResponse> MeAsync(CancellationToken ct = default) => GetAsync<MeResponse>("api.php", "me", null, ct);
+    public Task<OrdersResponse> OrdersAsync(CancellationToken ct = default) => GetAsync<OrdersResponse>("api.php", "orders", null, ct);
+    public Task<ProductsResponse> ProductsAsync(CancellationToken ct = default) => GetAsync<ProductsResponse>("api.php", "products", null, ct);
+    public Task<CashResponse> CashCurrentAsync(CancellationToken ct = default) => GetAsync<CashResponse>("api.php", "cash-current", null, ct);
+    public Task<CashSummaryResponse> CashSummaryAsync(CancellationToken ct = default) => GetAsync<CashSummaryResponse>("api.php", "cash-summary", null, ct);
+    public Task<OrderDetailsResponse> OrderDetailsAsync(int orderId, CancellationToken ct = default) =>
+        GetAsync<OrderDetailsResponse>("api.php", "order", new Dictionary<string, string> { ["id"] = orderId.ToString() }, ct);
+
+    public Task<OrderCreateResponse> CreateOrderAsync(OrderCreateRequest request, CancellationToken ct = default) =>
+        PostAsync<OrderCreateResponse>("api.php", "order-create", request, ct);
+
+    public Task<OrderCreateResponse> ChangeOrderStatusAsync(int orderId, string status, CancellationToken ct = default) =>
+        PostAsync<OrderCreateResponse>("api.php", "order-status", new { order_id = orderId, status }, ct);
+
+    public Task<CashMutationResponse> CashOpenAsync(int openingCashCents, string notes, CancellationToken ct = default) =>
+        PostAsync<CashMutationResponse>("api.php", "cash-open", new { opening_cash_cents = openingCashCents, notes }, ct);
+
+    public Task<CashMutationResponse> CashMovementAsync(string type, int amountCents, string notes, string direction = "in", CancellationToken ct = default) =>
+        PostAsync<CashMutationResponse>("api.php", "cash-movement", new { type, amount_cents = amountCents, notes, direction }, ct);
+
+    public Task<CashMutationResponse> CashCloseAsync(int countedCashCents, string notes, CancellationToken ct = default) =>
+        PostAsync<CashMutationResponse>("api.php", "cash-close", new { counted_cash_cents = countedCashCents, notes }, ct);
+
+    public Task<GoContextResponse> GoContextAsync(CancellationToken ct = default) => GetAsync<GoContextResponse>("api-go.php", "context", null, ct);
+    public Task<UnitsResponse> UnitsAsync(CancellationToken ct = default) => GetAsync<UnitsResponse>("api-go-units.php", "list", null, ct);
+    public Task<ShiftResponse> ShiftOpenAsync(string mode, int? unitId, CancellationToken ct = default) =>
+        PostAsync<ShiftResponse>("api-go-units.php", "shift-open", new { mode, unit_id = unitId }, ct);
+    public Task<ShiftResponse> ShiftCloseAsync(string notes = "", CancellationToken ct = default) =>
+        PostAsync<ShiftResponse>("api-go.php", "shift-close", new { notes }, ct);
+    public Task<TablesResponse> TablesAsync(CancellationToken ct = default) => GetAsync<TablesResponse>("api-go.php", "tables-list", null, ct);
+    public Task<TabResponse> TableOpenAsync(int tableId, string label = "", CancellationToken ct = default) =>
+        PostAsync<TabResponse>("api-go.php", "table-open", new { table_id = tableId, label }, ct);
+    public Task<TabResponse> TableCloseAsync(int tabId, CancellationToken ct = default) =>
+        PostAsync<TabResponse>("api-go.php", "table-close", new { tab_id = tabId }, ct);
 
     public async Task LogoutAsync(CancellationToken ct = default)
     {
         try
         {
             if (!string.IsNullOrWhiteSpace(_session?.Token))
-                await SendCoreAsync(HttpMethod.Post, "logout", new { }, _session.Token, false, ct);
+                await SendCoreAsync(HttpMethod.Post, "api.php", "logout", null, new { }, _session.Token, ct);
         }
         finally
         {
@@ -89,26 +119,38 @@ public sealed class EventMenuApiClient : IDisposable
         }
     }
 
-    private async Task<T> GetAsync<T>(string action, CancellationToken ct)
+    private async Task<T> GetAsync<T>(string path, string action, Dictionary<string, string>? query, CancellationToken ct)
     {
         EnsureSession();
-        var json = await SendWithRefreshAsync(HttpMethod.Get, action, null, ct);
+        var json = await SendWithRefreshAsync(HttpMethod.Get, path, action, query, null, ct);
         return Deserialize<T>(json);
     }
 
-    private async Task<string> SendWithRefreshAsync(HttpMethod method, string action, object? body, CancellationToken ct)
+    private async Task<T> PostAsync<T>(string path, string action, object body, CancellationToken ct)
+    {
+        EnsureSession();
+        var json = await SendWithRefreshAsync(HttpMethod.Post, path, action, null, body, ct);
+        return Deserialize<T>(json);
+    }
+
+    private async Task<string> SendWithRefreshAsync(HttpMethod method, string path, string action, Dictionary<string, string>? query, object? body, CancellationToken ct)
     {
         EnsureSession();
         try
         {
-            return await SendCoreAsync(method, action, body, _session!.Token, false, ct);
+            return await SendCoreAsync(method, path, action, query, body, _session!.Token, ct);
         }
-        catch (ApiClientException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.UnprocessableEntity)
+        catch (ApiClientException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.UnprocessableEntity && IsSessionError(ex.Message))
         {
             await RefreshAsync(ct);
-            return await SendCoreAsync(method, action, body, _session!.Token, false, ct);
+            return await SendCoreAsync(method, path, action, query, body, _session!.Token, ct);
         }
     }
+
+    private static bool IsSessionError(string message) =>
+        message.Contains("sessão", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+        message.Contains("bearer", StringComparison.OrdinalIgnoreCase);
 
     private async Task RefreshAsync(CancellationToken ct)
     {
@@ -125,12 +167,15 @@ public sealed class EventMenuApiClient : IDisposable
 
             var json = await SendCoreAsync(
                 HttpMethod.Post,
+                "api.php",
                 "refresh",
+                null,
                 new { refresh_token = _session!.RefreshToken, device_id = _deviceId },
                 null,
-                false,
                 ct);
             var refreshed = Deserialize<LoginResponse>(json);
+            if (string.IsNullOrWhiteSpace(refreshed.Token) || string.IsNullOrWhiteSpace(refreshed.RefreshToken))
+                throw new ApiClientException("Faça login novamente.", HttpStatusCode.Unauthorized);
             _session.Token = refreshed.Token;
             _session.RefreshToken = refreshed.RefreshToken;
             _session.ExpiresAt = refreshed.ExpiresAt;
@@ -152,13 +197,23 @@ public sealed class EventMenuApiClient : IDisposable
 
     private async Task<string> SendCoreAsync(
         HttpMethod method,
+        string path,
         string action,
+        Dictionary<string, string>? query,
         object? body,
         string? token,
-        bool _unused,
         CancellationToken ct)
     {
-        using var request = new HttpRequestMessage(method, $"api.php?action={Uri.EscapeDataString(action)}");
+        var url = new StringBuilder(path)
+            .Append("?action=")
+            .Append(Uri.EscapeDataString(action));
+        if (query is not null)
+        {
+            foreach (var pair in query)
+                url.Append('&').Append(Uri.EscapeDataString(pair.Key)).Append('=').Append(Uri.EscapeDataString(pair.Value));
+        }
+
+        using var request = new HttpRequestMessage(method, url.ToString());
         if (!string.IsNullOrWhiteSpace(token))
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         if (body is not null)
