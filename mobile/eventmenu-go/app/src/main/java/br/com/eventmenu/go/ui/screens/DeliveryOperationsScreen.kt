@@ -1,11 +1,14 @@
 package br.com.eventmenu.go.ui.screens
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -44,6 +47,7 @@ import br.com.eventmenu.go.OrderOperationsViewModel
 import br.com.eventmenu.go.data.DeliveryProgress
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.PixCharge
+import br.com.eventmenu.go.delivery.DeliveryLocationService
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
 import kotlinx.coroutines.delay
@@ -75,14 +79,41 @@ fun DeliveryOperationsScreen(
     var pixOrder by remember { mutableStateOf<Order?>(null) }
     var cashOrder by remember { mutableStateOf<Order?>(null) }
     var cancelOrder by remember { mutableStateOf<Order?>(null) }
+    var pendingRouteOrderId by remember { mutableStateOf<Int?>(null) }
+    var locationDenied by remember { mutableStateOf(false) }
     val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
+    val activeTrackingOrderId = deliveries.firstOrNull { order ->
+        order.status == "out_for_delivery" && progress[order.id]?.arrived != true
+    }?.id
+
+    val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        val orderId = pendingRouteOrderId
+        pendingRouteOrderId = null
+        val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true || result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        locationDenied = !granted
+        if (orderId != null) onStartRoute(orderId)
+    }
 
     LaunchedEffect(deliveries.map { it.id }) { onRefreshProgress() }
+    LaunchedEffect(activeTrackingOrderId) {
+        val orderId = activeTrackingOrderId
+        if (orderId != null && DeliveryLocationService.hasLocationPermission(context)) {
+            DeliveryLocationService.start(context, orderId)
+            locationDenied = false
+        } else if (orderId == null) {
+            DeliveryLocationService.stop(context)
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Minhas entregas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             Text("Acompanhe cada etapa até a entrega ao cliente.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (activeTrackingOrderId != null && DeliveryLocationService.hasLocationPermission(context)) {
+                Text("Localização ativa durante a rota do pedido #$activeTrackingOrderId.", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+            } else if (locationDenied) {
+                Text("Rota iniciada sem compartilhamento de localização. Você pode liberar o GPS nas permissões do aplicativo.", color = MaterialTheme.colorScheme.error)
+            }
         }
 
         items(deliveries, key = { it.id }) { order ->
@@ -126,7 +157,17 @@ fun DeliveryOperationsScreen(
                         Button(onClick = { onPickup(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Retirar pedido") }
                     }
                     if (order.status == "ready" && pickedUp) {
-                        Button(onClick = { onStartRoute(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Iniciar rota") }
+                        Button(
+                            onClick = {
+                                if (DeliveryLocationService.hasLocationPermission(context)) {
+                                    onStartRoute(order.id)
+                                } else {
+                                    pendingRouteOrderId = order.id
+                                    locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Iniciar rota") }
                     }
 
                     if (order.status == "out_for_delivery") {
@@ -138,7 +179,7 @@ fun DeliveryOperationsScreen(
                         }
 
                         if (!arrived) {
-                            Button(onClick = { onArrive(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Cheguei ao cliente") }
+                            Button(onClick = { DeliveryLocationService.stop(context); onArrive(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Cheguei ao cliente") }
                             Text("Depois de confirmar a chegada, você poderá receber o pagamento se necessário.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } else if (order.paymentStatus != "paid") {
                             Text("Como o cliente vai pagar?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -150,7 +191,7 @@ fun DeliveryOperationsScreen(
                                 OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("Enviar recibo") }
                                 OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("Imprimir") }
                             }
-                            Button(onClick = { onComplete(order.id) }, enabled = arrived, modifier = Modifier.fillMaxWidth()) { Text("Concluir entrega") }
+                            Button(onClick = { DeliveryLocationService.stop(context); onComplete(order.id) }, enabled = arrived, modifier = Modifier.fillMaxWidth()) { Text("Concluir entrega") }
                         }
                     }
                 }
