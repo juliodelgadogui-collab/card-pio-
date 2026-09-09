@@ -31,7 +31,7 @@ class DeliveryLocationBuffer(context: Context) {
                             speedMps = json.optNullableDouble("speed_mps"),
                             bearingDeg = json.optNullableDouble("bearing_deg"),
                             capturedAtMs = json.getLong("captured_at_ms"),
-                            batteryPct = if (json.has("battery_pct")) json.optInt("battery_pct") else null,
+                            batteryPct = if (json.has("battery_pct") && !json.isNull("battery_pct")) json.optInt("battery_pct") else null,
                             provider = json.optString("provider").takeIf { it.isNotBlank() },
                             isMock = json.optBoolean("is_mock", false),
                         )
@@ -42,11 +42,26 @@ class DeliveryLocationBuffer(context: Context) {
     }
 
     @Synchronized
+    fun dropFirst(count: Int) {
+        if (count <= 0) return
+        val current = all()
+        if (count >= current.size) {
+            clear()
+        } else {
+            save(current.drop(count))
+        }
+    }
+
+    @Synchronized
     fun clear() {
         prefs.edit().remove(KEY_POINTS).apply()
     }
 
     private fun save(points: List<DeliveryLocationSample>) {
+        if (points.isEmpty()) {
+            prefs.edit().remove(KEY_POINTS).apply()
+            return
+        }
         val array = JSONArray()
         points.forEach { sample ->
             val json = JSONObject()
