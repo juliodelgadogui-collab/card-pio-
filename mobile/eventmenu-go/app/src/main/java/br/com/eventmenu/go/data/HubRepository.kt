@@ -26,6 +26,14 @@ data class HubLink(
     val hardware: HubPeripheralStatus,
 )
 
+data class HubTerminal(
+    val id: Int,
+    val unitId: Int,
+    val provider: String,
+    val label: String,
+    val pinpad: String,
+)
+
 data class HubCommand(
     val id: Int,
     val commandType: String,
@@ -75,6 +83,25 @@ class HubRepository(
                             pinpad = hardware.optString("pinpad"),
                             printers = printers,
                         ),
+                    )
+                )
+            }
+        }
+    }
+
+    suspend fun terminals(unitId: Int): List<HubTerminal> {
+        val root = api.getHub("terminals", requireToken(), mapOf("unit_id" to unitId.toString()))
+        val array = root.optJSONArray("terminals") ?: return emptyList()
+        return buildList {
+            for (i in 0 until array.length()) {
+                val item = array.optJSONObject(i) ?: continue
+                add(
+                    HubTerminal(
+                        id = item.optInt("id"),
+                        unitId = item.optInt("unit_id"),
+                        provider = item.optString("provider"),
+                        label = item.optString("label", "PINPad"),
+                        pinpad = item.optString("pinpad_identifier"),
                     )
                 )
             }
