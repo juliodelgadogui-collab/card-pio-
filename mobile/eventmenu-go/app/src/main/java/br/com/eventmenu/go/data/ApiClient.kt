@@ -200,7 +200,7 @@ class ApiClient(
     private fun isCacheableRead(path: String, method: String, action: String, token: String?): Boolean {
         if (method != "GET" || token.isNullOrBlank()) return false
         if (path == "api-go-events.php" && action == "bar-order-resolve") return false
-        if (path == "api-hub.php" || path == "api-go-expedition.php") return false
+        if (path in setOf("api-hub.php", "api-go-expedition.php", "api-go-inventory.php")) return false
         return path in CACHEABLE_PATHS
     }
 
@@ -217,7 +217,6 @@ class ApiClient(
             "api-go-notifications.php",
             "api-go-events.php",
             "api-go-units.php",
-            "api-go-inventory.php",
         )
 
         fun configureSessionStore(store: SecureSessionStore) { sharedSessionStore = store }
