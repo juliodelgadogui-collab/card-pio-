@@ -16,6 +16,7 @@ data class DeliveryProgress(
     val routeStarted: Boolean get() = routeStartedAt.isNotBlank()
     val arrived: Boolean get() = arrivedAt.isNotBlank()
     val completed: Boolean get() = completedAt.isNotBlank() || orderStatus == "completed"
+    val trackingAllowed: Boolean get() = routeStarted && !arrived && !completed && orderStatus == "out_for_delivery"
 }
 
 class DeliveryProgressRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
@@ -35,6 +36,28 @@ class DeliveryProgressRepository(baseUrl: String, deviceId: String, private val 
     suspend fun complete(orderId: Int): DeliveryProgress {
         val root = api.postDelivery("complete", requireToken(), JSONObject().put("order_id", orderId))
         return parse(root.getJSONObject("progress"))
+    }
+
+    suspend fun sendLocation(
+        orderId: Int,
+        latitude: Double,
+        longitude: Double,
+        accuracyM: Double?,
+        speedMps: Double?,
+        headingDegrees: Double?,
+        provider: String,
+        recordedAt: String,
+    ) {
+        val body = JSONObject()
+            .put("order_id", orderId)
+            .put("latitude", latitude)
+            .put("longitude", longitude)
+            .put("provider", provider.take(30))
+            .put("recorded_at", recordedAt)
+        accuracyM?.let { body.put("accuracy_m", it) }
+        speedMps?.let { body.put("speed_mps", it) }
+        headingDegrees?.let { body.put("heading_degrees", it) }
+        api.postDelivery("location", requireToken(), body)
     }
 
     private suspend fun action(action: String, orderId: Int): DeliveryProgress {
