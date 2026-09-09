@@ -1,0 +1,58 @@
+name: EventMenu Desktop Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/eventmenu-desktop
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-windows.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore
+        run: dotnet restore desktop/EventMenu.Desktop/EventMenu.Desktop.csproj
+
+      - name: Build
+        run: dotnet build desktop/EventMenu.Desktop/EventMenu.Desktop.csproj -c Release --no-restore
+
+      - name: Publish Windows x64
+        run: >-
+          dotnet publish desktop/EventMenu.Desktop/EventMenu.Desktop.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          --no-restore
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:DebugType=None
+          -p:DebugSymbols=false
+          -o artifacts/EventMenu-Desktop-win-x64
+
+      - name: Upload Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Desktop-win-x64
+          path: artifacts/EventMenu-Desktop-win-x64/**
+          if-no-files-found: error
+          retention-days: 14
