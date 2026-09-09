@@ -1,0 +1,113 @@
+package br.com.eventmenu.go
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import br.com.eventmenu.go.data.HubCommand
+import br.com.eventmenu.go.data.HubLink
+import br.com.eventmenu.go.data.HubRepository
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+data class HubState(
+    val links: List<HubLink> = emptyList(),
+    val selectedLinkId: Int? = null,
+    val loading: Boolean = false,
+    val error: String? = null,
+    val message: String? = null,
+    val lastCommand: HubCommand? = null,
+    val pairingVersion: Int = 0,
+) {
+    val selected: HubLink? get() = links.firstOrNull { it.id == selectedLinkId } ?: links.firstOrNull()
+}
+
+class HubViewModel(private val repository: HubRepository) : ViewModel() {
+    private val _state = MutableStateFlow(HubState())
+    val state: StateFlow<HubState> = _state.asStateFlow()
+
+    fun refresh() = viewModelScope.launch {
+        _state.update { it.copy(loading = true, error = null) }
+        runCatching { repository.links() }
+            .onSuccess { links ->
+                val selected = _state.value.selectedLinkId?.takeIf { id -> links.any { it.id == id } }
+                    ?: links.firstOrNull { it.online }?.id
+                    ?: links.firstOrNull()?.id
+                _state.update { it.copy(links = links, selectedLinkId = selected, loading = false) }
+            }
+            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao carregar o Hub.") } }
+    }
+
+    fun select(linkId: Int) { _state.update { it.copy(selectedLinkId = linkId) } }
+
+    fun claimPairing(qr: String, label: String) = viewModelScope.launch {
+        _state.update { it.copy(loading = true, error = null, message = null) }
+        runCatching { repository.claimPairing(qr, label) }
+            .onSuccess { link ->
+                _state.update { it.copy(loading = false, selectedLinkId = link.id, pairingVersion = it.pairingVersion + 1, message = "Computador vinculado ao celular.") }
+                refresh()
+            }
+            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Não foi possível vincular o computador.") } }
+    }
+
+    fun printOrder(orderId: Int) = withSelected { repository.printOrder(it, orderId) }
+    fun printReceipt(orderId: Int) = withSelected { repository.printReceipt(it, orderId) }
+    fun openDrawer(reason: String) = withSelected { repository.openDrawer(it, reason) }
+    fun showCustomerDisplay(orderId: Int) = withSelected { repository.showCustomerDisplay(it, orderId) }
+    fun playAlert(message: String) = withSelected { repository.playAlert(it, message) }
+    fun chargeTef(orderId: Int, terminalConfigId: Int, amountCents: Int, paymentType: String, installments: Int) =
+        withSelected { repository.chargeTef(it, orderId, terminalConfigId, amountCents, paymentType, installments) }
+
+    fun revokeSelected() = viewModelScope.launch {
+        val link = _state.value.selected ?: return@launch
+        _state.update { it.copy(loading = true, error = null) }
+        runCatching { repository.revokeLink(link.id) }
+            .onSuccess {
+                _state.update { it.copy(loading = false, message = "Vínculo removido.", selectedLinkId = null) }
+                refresh()
+            }
+            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Não foi possível remover o vínculo.") } }
+    }
+
+    private fun withSelected(block: suspend (HubLink) -> HubCommand) = viewModelScope.launch {
+        val link = _state.value.selected
+        if (link == null) {
+            _state.update { it.copy(error = "Vincule este celular a um computador EventMenu.") }
+            return@launch
+        }
+        if (!link.online) {
+            _state.update { it.copy(error = "O computador EventMenu está offline.") }
+            return@launch
+        }
+        _state.update { it.copy(loading = true, error = null, message = null, lastCommand = null) }
+        runCatching { block(link) }
+            .onSuccess { command ->
+                _state.update { it.copy(loading = false, lastCommand = command, message = "Solicitação enviada ao ${link.desktopLabel}.") }
+                watchCommand(command.id)
+            }
+            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao enviar comando ao computador.") } }
+    }
+
+    private fun watchCommand(commandId: Int) = viewModelScope.launch {
+        repeat(20) {
+            delay(1_500)
+            val result = runCatching { repository.commandStatus(commandId) }.getOrNull() ?: return@launch
+            _state.update { it.copy(lastCommand = result) }
+            when (result.status) {
+                "completed" -> { _state.update { it.copy(message = "Comando concluído no computador.") }; return@launch }
+                "failed" -> { _state.update { it.copy(error = result.error.ifBlank { "O computador não conseguiu concluir a operação." }) }; return@launch }
+                "expired", "cancelled" -> { _state.update { it.copy(error = "A solicitação expirou ou foi cancelada.") }; return@launch }
+            }
+        }
+    }
+
+    fun clearFeedback() { _state.update { it.copy(error = null, message = null) } }
+
+    class Factory(private val repository: HubRepository) : ViewModelProvider.Factory {
+        @Suppress("UNCHECKED_CAST")
+        override fun <T : ViewModel> create(modelClass: Class<T>): T = HubViewModel(repository) as T
+    }
+}
