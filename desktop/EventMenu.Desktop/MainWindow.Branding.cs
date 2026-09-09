@@ -28,14 +28,13 @@ public partial class MainWindow
         var displayName = string.IsNullOrWhiteSpace(brand.DisplayName) ? _currentUser?.TenantName : brand.DisplayName.Trim();
         if (string.IsNullOrWhiteSpace(displayName)) displayName = "Minha empresa";
         TenantNameText.Text = displayName;
-        Title = $"{displayName} • EventMenu Desktop";
+        Title = $"{displayName} • EventMenu";
 
-        var background = ParseColor(brand.BackgroundColor, Color.FromRgb(244, 247, 251));
-        var primary = ParseColor(brand.PrimaryColor, Color.FromRgb(91, 52, 214));
-        ShellPanel.Background = new SolidColorBrush(background);
-
+        // A identidade da empresa não deve pintar toda a área operacional.
+        // Mantemos fundo e navegação neutros para preservar contraste e legibilidade.
+        ShellPanel.Background = new SolidColorBrush(Color.FromRgb(246, 247, 251));
         if (PosNavButton.Parent is StackPanel menu && menu.Parent is Border sidebar)
-            sidebar.Background = new SolidColorBrush(Darken(primary, .48));
+            sidebar.Background = new SolidColorBrush(Color.FromRgb(17, 24, 39));
 
         foreach (var text in Descendants<TextBlock>(ShellPanel))
         {
@@ -55,21 +54,5 @@ public partial class MainWindow
             if (child is T typed) yield return typed;
             foreach (var nested in Descendants<T>(child)) yield return nested;
         }
-    }
-
-    private static Color ParseColor(string value, Color fallback)
-    {
-        try
-        {
-            if (ColorConverter.ConvertFromString(value) is Color color) return color;
-        }
-        catch { }
-        return fallback;
-    }
-
-    private static Color Darken(Color color, double factor)
-    {
-        factor = Math.Clamp(factor, 0, 1);
-        return Color.FromRgb((byte)(color.R * factor), (byte)(color.G * factor), (byte)(color.B * factor));
     }
 }
