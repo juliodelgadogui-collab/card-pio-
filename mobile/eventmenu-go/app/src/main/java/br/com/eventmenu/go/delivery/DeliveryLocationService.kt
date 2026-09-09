@@ -25,7 +25,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import java.time.Instant
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 class DeliveryLocationService : Service(), LocationListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -72,8 +75,9 @@ class DeliveryLocationService : Service(), LocationListener {
         val now = System.currentTimeMillis()
         if (now - lastSentAt < 8_000L) return
         if (location.accuracy > 500f) return
+        // Não cancela uma requisição de rede já em andamento; simplesmente aguarda a próxima posição.
+        if (sendJob?.isActive == true) return
         lastSentAt = now
-        sendJob?.cancel()
         sendJob = scope.launch {
             runCatching {
                 val app = applicationContext as EventMenuGoApplication
@@ -85,11 +89,16 @@ class DeliveryLocationService : Service(), LocationListener {
                     speedMps = location.speed.takeIf { location.hasSpeed() }?.toDouble(),
                     headingDegrees = location.bearing.takeIf { location.hasBearing() }?.toDouble(),
                     provider = location.provider.orEmpty(),
-                    recordedAt = Instant.ofEpochMilli(location.time.coerceAtLeast(1L)).toString(),
+                    recordedAt = utcTimestamp(location.time.coerceAtLeast(1L)),
                 )
             }.onFailure { error ->
                 val message = error.message.orEmpty()
-                if (message.contains("rota", ignoreCase = true) || message.contains("turno", ignoreCase = true) || message.contains("atribuído", ignoreCase = true)) {
+                if (
+                    message.contains("rota", ignoreCase = true) ||
+                    message.contains("turno", ignoreCase = true) ||
+                    message.contains("atribuído", ignoreCase = true) ||
+                    message.contains("chegada", ignoreCase = true)
+                ) {
                     stopSelf()
                 }
             }
@@ -150,5 +159,10 @@ class DeliveryLocationService : Service(), LocationListener {
         fun hasLocationPermission(context: Context): Boolean =
             ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                 ActivityCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+        private fun utcTimestamp(epochMillis: Long): String =
+            SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+                timeZone = TimeZone.getTimeZone("UTC")
+            }.format(Date(epochMillis))
     }
 }
