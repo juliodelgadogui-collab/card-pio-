@@ -1,3 +1,5 @@
+using System.IO;
+
 namespace EventMenu.Desktop.Services;
 
 public static class DeviceIdentity
