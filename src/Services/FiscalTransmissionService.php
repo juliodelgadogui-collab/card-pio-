@@ -52,11 +52,17 @@ final class FiscalTransmissionService
             }
 
             $snapshot = $this->decryptSnapshot($document);
-            $pdo->prepare('UPDATE fiscal_documents SET status="processing",rejection_code=NULL,rejection_message=NULL,issued_at=COALESCE(issued_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
+            // cNF precisa ser estável entre tentativas. Ele é derivado do snapshot imutável,
+            // sem alterar o snapshot persistido nem depender de aleatoriedade do adaptador.
+            $snapshot['numeric_code'] = $this->numericCode((string)$document['snapshot_hash']);
+
+            $pdo->prepare('UPDATE fiscal_documents SET status="processing",transmission_attempts=transmission_attempts+1,transmission_started_at=CURRENT_TIMESTAMP,last_transmission_at=CURRENT_TIMESTAMP,rejection_code=NULL,rejection_message=NULL,issued_at=COALESCE(issued_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
                 ->execute([$documentId, $tenantId]);
             $document['status'] = 'processing';
             $document['rejection_code'] = null;
             $document['rejection_message'] = null;
+            $document['transmission_attempts'] = ((int)($document['transmission_attempts'] ?? 0)) + 1;
+            $document['numeric_code'] = $snapshot['numeric_code'];
             return ['document' => $this->publicDocument($document), 'snapshot' => $snapshot];
         });
     }
@@ -85,8 +91,9 @@ final class FiscalTransmissionService
         if ($xml === '' || strlen($xml) > 4 * 1024 * 1024) throw new RuntimeException('XML autorizado ausente ou inválido.');
         if (!$this->validXml($xml)) throw new RuntimeException('XML fiscal autorizado é inválido.');
         if (!str_contains($xml, $accessKey)) throw new RuntimeException('A chave de acesso não confere com o XML autorizado.');
+        $responseEncrypted = Crypto::encrypt($this->responseMetadata($result));
 
-        return Database::transaction(function (PDO $pdo) use ($tenantId, $documentId, $accessKey, $protocol, $xml): array {
+        return Database::transaction(function (PDO $pdo) use ($tenantId, $documentId, $accessKey, $protocol, $xml, $responseEncrypted): array {
             $q = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM fiscal_documents WHERE id=? AND tenant_id=? LIMIT 1 FOR UPDATE'));
             $q->execute([$documentId, $tenantId]);
             $document = $q->fetch();
@@ -99,8 +106,8 @@ final class FiscalTransmissionService
             if ($dupe->fetchColumn()) throw new RuntimeException('A chave de acesso já pertence a outro documento fiscal.');
 
             $encrypted = Crypto::encrypt($xml);
-            $pdo->prepare('UPDATE fiscal_documents SET status="authorized",access_key=?,protocol=?,xml_encrypted=?,rejection_code=NULL,rejection_message=NULL,authorized_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
-                ->execute([$accessKey, $protocol, $encrypted, $documentId, $tenantId]);
+            $pdo->prepare('UPDATE fiscal_documents SET status="authorized",access_key=?,protocol=?,xml_encrypted=?,response_encrypted=?,rejection_code=NULL,rejection_message=NULL,authorized_at=CURRENT_TIMESTAMP,last_transmission_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
+                ->execute([$accessKey, $protocol, $encrypted, $responseEncrypted, $documentId, $tenantId]);
             return $this->loadPublic($pdo, $tenantId, $documentId);
         });
     }
@@ -110,16 +117,17 @@ final class FiscalTransmissionService
         $code = mb_substr(trim((string)($result['rejection_code'] ?? '')), 0, 32);
         $message = mb_substr(trim((string)($result['rejection_message'] ?? '')), 0, 1000);
         if ($code === '' || $message === '') throw new RuntimeException('Rejeição da SEFAZ sem código ou motivo verificável.');
+        $responseEncrypted = Crypto::encrypt($this->responseMetadata($result));
 
-        return Database::transaction(function (PDO $pdo) use ($tenantId, $documentId, $code, $message): array {
+        return Database::transaction(function (PDO $pdo) use ($tenantId, $documentId, $code, $message, $responseEncrypted): array {
             $q = $pdo->prepare(Database::portableSql($pdo, 'SELECT status FROM fiscal_documents WHERE id=? AND tenant_id=? LIMIT 1 FOR UPDATE'));
             $q->execute([$documentId, $tenantId]);
             $status = $q->fetchColumn();
             if ($status === false) throw new RuntimeException('Documento fiscal não encontrado.');
             if ($status === 'authorized') throw new RuntimeException('Documento autorizado não pode ser convertido em rejeitado.');
             if ($status !== 'processing') throw new RuntimeException('Documento fiscal não está em processamento.');
-            $pdo->prepare('UPDATE fiscal_documents SET status="rejected",rejection_code=?,rejection_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
-                ->execute([$code, $message, $documentId, $tenantId]);
+            $pdo->prepare('UPDATE fiscal_documents SET status="rejected",rejection_code=?,rejection_message=?,response_encrypted=?,last_transmission_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
+                ->execute([$code, $message, $responseEncrypted, $documentId, $tenantId]);
             return $this->loadPublic($pdo, $tenantId, $documentId);
         });
     }
@@ -132,7 +140,7 @@ final class FiscalTransmissionService
             $status = $q->fetchColumn();
             if ($status === false) throw new RuntimeException('Documento fiscal não encontrado.');
             if ($status !== 'error') throw new RuntimeException('Somente erro técnico pode voltar para a fila automaticamente.');
-            $pdo->prepare('UPDATE fiscal_documents SET status="queued",rejection_code=NULL,rejection_message=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
+            $pdo->prepare('UPDATE fiscal_documents SET status="queued",transmission_started_at=NULL,rejection_code=NULL,rejection_message=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
                 ->execute([$documentId, $tenantId]);
             return $this->loadPublic($pdo, $tenantId, $documentId);
         });
@@ -143,7 +151,7 @@ final class FiscalTransmissionService
         $safe = mb_substr($this->friendlyError($message), 0, 1000);
         try {
             $pdo = Database::connection();
-            $pdo->prepare('UPDATE fiscal_documents SET status="error",rejection_code="TECHNICAL",rejection_message=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="processing"')
+            $pdo->prepare('UPDATE fiscal_documents SET status="error",rejection_code="TECHNICAL",rejection_message=?,last_transmission_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="processing"')
                 ->execute([$safe, $documentId, $tenantId]);
         } catch (Throwable) {
             // A falha original precisa continuar sendo a causa principal para o worker.
@@ -161,6 +169,27 @@ final class FiscalTransmissionService
             throw new RuntimeException('Integridade do snapshot fiscal não confere.');
         }
         return $snapshot;
+    }
+
+    private function numericCode(string $snapshotHash): string
+    {
+        if (!preg_match('/^[a-f0-9]{64}$/i', $snapshotHash)) throw new RuntimeException('Hash do snapshot fiscal inválido.');
+        $value = hexdec(substr($snapshotHash, 0, 7)) % 100000000;
+        return str_pad((string)$value, 8, '0', STR_PAD_LEFT);
+    }
+
+    private function responseMetadata(array $result): array
+    {
+        return [
+            'status' => mb_substr((string)($result['status'] ?? ''), 0, 30),
+            'verified' => !empty($result['verified']),
+            'access_key' => mb_substr((string)($result['access_key'] ?? ''), 0, 64),
+            'protocol' => mb_substr((string)($result['protocol'] ?? ''), 0, 120),
+            'rejection_code' => mb_substr((string)($result['rejection_code'] ?? ''), 0, 32),
+            'rejection_message' => mb_substr((string)($result['rejection_message'] ?? ''), 0, 1000),
+            'retryable' => !empty($result['retryable']),
+            'received_at' => gmdate('c'),
+        ];
     }
 
     private function validXml(string $xml): bool
@@ -186,7 +215,7 @@ final class FiscalTransmissionService
 
     private function publicDocument(array $row): array
     {
-        unset($row['xml_encrypted'], $row['cancellation_xml_encrypted'], $row['snapshot_encrypted']);
+        unset($row['xml_encrypted'], $row['cancellation_xml_encrypted'], $row['snapshot_encrypted'], $row['response_encrypted']);
         return $row;
     }
 
