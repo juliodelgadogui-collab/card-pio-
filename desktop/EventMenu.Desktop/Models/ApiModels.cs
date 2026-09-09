@@ -62,6 +62,8 @@ public sealed class Order
     [JsonPropertyName("customer_name")] public string? CustomerName { get; set; }
     [JsonPropertyName("customer_phone")] public string? CustomerPhone { get; set; }
     [JsonPropertyName("delivery_name")] public string? DeliveryName { get; set; }
+    [JsonPropertyName("assigned_delivery_user_id")] public int? AssignedDeliveryUserId { get; set; }
+    [JsonPropertyName("table_name")] public string? TableName { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     public string TotalDisplay => (TotalCents / 100m).ToString("C2", new System.Globalization.CultureInfo("pt-BR"));
     public string ChannelDisplay => Channel switch { "counter" => "Balcão", "pickup" => "Retirada", "delivery" => "Delivery", "table" => "Mesa", "event_bar" => "Evento / Bar", _ => Channel };
@@ -93,5 +95,5 @@ public sealed class CashResponse
 public sealed class ApiError
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
-    [JsonPropertyName("error")] public string Error { get; set; } = "Falha na comunicação com o servidor.";
+    [JsonPropertyName("error")] public string Error { get; set; } = "Não foi possível concluir a ação.";
 }
