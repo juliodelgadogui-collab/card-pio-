@@ -23,8 +23,23 @@ final class FiscalTransmitterFactory
         return $transmitter;
     }
 
+    public static function makeLifecycle(): FiscalLifecycleTransmitterInterface
+    {
+        $transmitter=self::make();
+        if(!$transmitter instanceof FiscalLifecycleTransmitterInterface){
+            throw new RuntimeException('O transmissor fiscal configurado ainda não suporta cancelamento, inutilização, consulta e contingência.');
+        }
+        return $transmitter;
+    }
+
     public static function isConfigured(): bool
     {
         return trim((string)env('FISCAL_TRANSMITTER_CLASS', '')) !== '';
+    }
+
+    public static function supportsLifecycle():bool
+    {
+        if(!self::isConfigured())return false;
+        try{return self::make() instanceof FiscalLifecycleTransmitterInterface;}catch(\Throwable){return false;}
     }
 }
