@@ -36,7 +36,7 @@ import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.navigation.AppDeepLinkTarget
 import br.com.eventmenu.go.navigation.AppDeepLinks
-import br.com.eventmenu.go.ui.EventMenuGoApp
+import br.com.eventmenu.go.ui.EventMenuGoHubShell
 import br.com.eventmenu.go.ui.theme.EventMenuTheme
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
@@ -96,7 +96,7 @@ class MainActivity : FragmentActivity() {
 
             EventMenuTheme(brand) {
                 Box(Modifier.fillMaxSize()) {
-                    EventMenuGoApp(
+                    EventMenuGoHubShell(
                         viewModel = vm,
                         onScan = { callback -> scanQr(callback) },
                         onBiometric = { authenticateBiometric(vm) },
