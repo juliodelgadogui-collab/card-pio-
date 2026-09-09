@@ -88,7 +88,26 @@ public partial class MainWindow
         }
 
         if (e.Key != Key.Enter) return;
-        if (ProductsGrid.SelectedItem is Product product && product.IsOutOfStock)
+
+        var search = ProductSearchBox.Text.Trim();
+        Product? product = null;
+        var exactSku = false;
+        if (search.Length > 0)
+        {
+            product = _products.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Sku) && x.Sku.Equals(search, StringComparison.OrdinalIgnoreCase));
+            exactSku = product is not null;
+        }
+        product ??= ProductsGrid.SelectedItem as Product;
+        product ??= ProductsGrid.Items.Cast<object>().OfType<Product>().FirstOrDefault();
+        if (product is null)
+        {
+            e.Handled = true;
+            return;
+        }
+
+        ProductsGrid.SelectedItem = product;
+        ProductsGrid.ScrollIntoView(product);
+        if (product.IsOutOfStock)
         {
             ShowOutOfStock(product);
             e.Handled = true;
@@ -96,6 +115,7 @@ public partial class MainWindow
         }
 
         AddSelectedProductToCart();
+        if (exactSku) ProductSearchBox.Clear();
         e.Handled = true;
     }
 
