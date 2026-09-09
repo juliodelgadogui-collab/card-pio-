@@ -17,9 +17,10 @@ public sealed class RawPrinterService
     {
         if(string.IsNullOrWhiteSpace(printerName))throw new InvalidOperationException("Impressora não configurada.");
         if(string.IsNullOrWhiteSpace(text))throw new InvalidOperationException("Não há conteúdo para imprimir.");
-        var encoding=Encoding.GetEncoding(850,EncoderFallback.ReplacementFallback,DecoderFallback.ReplacementFallback);
-        var payload=new List<byte>{0x1B,0x40}; // inicializa ESC/POS
-        payload.AddRange(encoding.GetBytes(text.Replace("\r\n","\n")));
+        // Latin-1 evita depender do provider de code pages do .NET. O perfil da impressora
+        // poderá escolher CP850/CP860 mais adiante, quando os modelos homologados forem definidos.
+        var payload=new List<byte>{0x1B,0x40};
+        payload.AddRange(Encoding.Latin1.GetBytes(text.Replace("\r\n","\n")));
         payload.AddRange(new byte[]{0x0A,0x0A,0x0A,0x1D,0x56,0x00});
         Write(printerName,payload.ToArray(),jobName);
     }
