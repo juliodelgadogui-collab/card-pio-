@@ -7,9 +7,9 @@ namespace EventMenu\Core;
 final class PermissionCatalog
 {
     private const ROLES = [
-        'admin'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect'],
-        'manager'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect'],
-        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','orders.fulfill','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','loyalty.redeem','tables.manage','events.bar','nfc.collect'],
+        'admin'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect','hardware.manage','terminal.collect','fiscal.manage','fiscal.issue'],
+        'manager'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect','terminal.collect','fiscal.issue'],
+        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','orders.fulfill','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','loyalty.redeem','tables.manage','events.bar','nfc.collect','terminal.collect','fiscal.issue'],
         'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','orders.fulfill','cancellations.request','events.bar','tickets.manage','guests.manage','customers.manage','loyalty.redeem','tables.manage','delivery.assign'],
         'waiter'=>['dashboard','orders.create','orders.view','orders.dispatch','cancellations.request','tables.manage'],
         'kitchen'=>['dashboard','orders.kitchen','production.print'],
@@ -59,6 +59,10 @@ final class PermissionCatalog
         'settings.manage'=>'Configurações da empresa',
         'nfc.manage'=>'Configurar dispositivos NFC',
         'nfc.collect'=>'Cobrar por NFC',
+        'hardware.manage'=>'Configurar hardware do Desktop',
+        'terminal.collect'=>'Cobrar via TEF / PINPad',
+        'fiscal.manage'=>'Configurar fiscal e certificado digital',
+        'fiscal.issue'=>'Emitir e consultar documentos fiscais',
         'events.promoter'=>'Área do promotor',
     ];
 
@@ -108,7 +112,7 @@ final class PermissionCatalog
         if(isset($set['orders.create'])||isset($set['orders.kitchen'])||isset($set['orders.dispatch'])||isset($set['orders.fulfill'])||isset($set['orders.fulfillment_correct'])||isset($set['production.manage'])||isset($set['production.print'])||isset($set['orders.reopen'])||isset($set['tables.manage'])||isset($set['cash.manage']))$modes[]='operation';
         if(isset($set['orders.delivery'])||isset($set['delivery.assign']))$modes[]='delivery';
         if(isset($set['tickets.manage'])||isset($set['guests.manage'])||isset($set['events.manage'])||isset($set['events.bar'])||isset($set['events.promoter']))$modes[]='events';
-        if(isset($set['payments.manage'])||isset($set['cash.manage'])||isset($set['nfc.collect']))$modes[]='pay';
+        if(isset($set['payments.manage'])||isset($set['cash.manage'])||isset($set['nfc.collect'])||isset($set['terminal.collect']))$modes[]='pay';
         return array_values(array_unique($modes));
     }
 
@@ -133,6 +137,10 @@ final class PermissionCatalog
             'loyalty_redeem'=>'loyalty.redeem',
             'loyalty_adjust'=>'loyalty.adjust',
             'nfc_collect'=>'nfc.collect',
+            'hardware_manage'=>'hardware.manage',
+            'terminal_collect'=>'terminal.collect',
+            'fiscal_manage'=>'fiscal.manage',
+            'fiscal_issue'=>'fiscal.issue',
             'tickets'=>'tickets.manage',
             'guests'=>'guests.manage',
             'tables'=>'tables.manage',
