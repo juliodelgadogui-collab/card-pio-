@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Threading;
 using EventMenu.Desktop.Models;
 using EventMenu.Desktop.Services;
@@ -15,6 +16,9 @@ public partial class ProductionWindow : Window
     private ProductionBoard _board=new();
     private List<ExpeditionOrder> _expedition=new();
     private bool _loading;
+    private ComboBox? _expeditionFilter;
+    private CheckBox? _expeditionReadyOnly;
+    private TextBlock? _expeditionCount;
 
     public ProductionWindow(DesktopIntegrationApiClient api,bool canDispatch,bool canManage)
     {
@@ -22,9 +26,34 @@ public partial class ProductionWindow : Window
         ExpediteItemButton.Visibility=_canDispatch?Visibility.Visible:Visibility.Collapsed;
         ExpediteOrderButton.Visibility=_canDispatch?Visibility.Visible:Visibility.Collapsed;
         PrintersTab.Visibility=_canManage?Visibility.Visible:Visibility.Collapsed;
+        EnsureExpeditionFilters();
+        ExpeditionGrid.LoadingRow+=ExpeditionGrid_LoadingRow;
         _timer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(5)};_timer.Tick+=async(_,_)=>await LoadAsync(false);
         Loaded+=async(_,_)=>{await LoadAsync(true);_timer.Start();};
-        Closed+=(_,_)=>_timer.Stop();
+        Closed+=(_,_)=>{_timer.Stop();ExpeditionGrid.LoadingRow-=ExpeditionGrid_LoadingRow;};
+    }
+
+    private void EnsureExpeditionFilters()
+    {
+        if(ExpediteOrderButton.Parent is not StackPanel actions)return;
+        _expeditionFilter=new ComboBox{Width=155,Height=34,Margin=new Thickness(12,0,8,0)};
+        _expeditionFilter.Items.Add(new ComboBoxItem{Content="Todos",Tag="all"});
+        _expeditionFilter.Items.Add(new ComboBoxItem{Content="Somente Delivery",Tag="delivery"});
+        _expeditionFilter.Items.Add(new ComboBoxItem{Content="Sem entregador",Tag="unassigned"});
+        _expeditionFilter.Items.Add(new ComboBoxItem{Content="Aguardando retirada",Tag="pickup"});
+        _expeditionFilter.Items.Add(new ComboBoxItem{Content="Em rota",Tag="route"});
+        _expeditionFilter.SelectedIndex=0;
+        _expeditionFilter.SelectionChanged+=(_,_)=>ApplyExpedition();
+
+        _expeditionReadyOnly=new CheckBox{Content="Só tudo pronto",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(0,0,12,0)};
+        _expeditionReadyOnly.Checked+=(_,_)=>ApplyExpedition();
+        _expeditionReadyOnly.Unchecked+=(_,_)=>ApplyExpedition();
+        _expeditionCount=new TextBlock{VerticalAlignment=VerticalAlignment.Center,Foreground=new SolidColorBrush(Color.FromRgb(102,112,133)),Margin=new Thickness(0,0,12,0)};
+
+        actions.Children.Insert(1,new TextBlock{Text="Exibir",VerticalAlignment=VerticalAlignment.Center,Margin=new Thickness(8,0,0,0),Foreground=new SolidColorBrush(Color.FromRgb(102,112,133))});
+        actions.Children.Insert(2,_expeditionFilter);
+        actions.Children.Insert(3,_expeditionReadyOnly);
+        actions.Children.Insert(4,_expeditionCount);
     }
 
     private async Task LoadAsync(bool showError)
@@ -33,9 +62,11 @@ public partial class ProductionWindow : Window
         try
         {
             var selectedStation=(StationsList.SelectedItem as ProductionStation)?.Id;
+            var selectedOrder=(ExpeditionGrid.SelectedItem as ExpeditionOrder)?.Id;
             var boardResponse=await _api.ProductionBoardAsync();_board=boardResponse.Board;
             var expeditionResponse=await _api.ExpeditionAsync();_expedition=expeditionResponse.Orders;
-            StationsList.ItemsSource=_board.Stations;PrinterStationCombo.ItemsSource=_board.Stations;ExpeditionGrid.ItemsSource=_expedition;
+            StationsList.ItemsSource=_board.Stations;PrinterStationCombo.ItemsSource=_board.Stations;
+            ApplyExpedition(selectedOrder);
             if(selectedStation.HasValue)StationsList.SelectedItem=_board.Stations.FirstOrDefault(x=>x.Id==selectedStation.Value);
             if(StationsList.SelectedItem is null&&_board.Stations.Count>0)StationsList.SelectedIndex=0;
             ApplyJobs();
@@ -58,6 +89,49 @@ public partial class ProductionWindow : Window
         var search=SearchBox.Text.Trim();if(search.Length>0)query=query.Where(x=>x.OrderId.ToString().Contains(search,StringComparison.OrdinalIgnoreCase)||x.Description.Contains(search,StringComparison.OrdinalIgnoreCase)||(x.TableName??"").Contains(search,StringComparison.OrdinalIgnoreCase)||(x.CustomerName??"").Contains(search,StringComparison.OrdinalIgnoreCase));
         JobsGrid.ItemsSource=query.OrderByDescending(x=>x.Delayed).ThenByDescending(x=>x.ElapsedMinutes).ThenBy(x=>x.Id).ToList();
         if(StationsList.SelectedItem is ProductionStation selected){StationTitle.Text=selected.Name;StationInfo.Text=$"SLA {selected.SlaMinutes} min • {selected.PrinterLabel}";}else{StationTitle.Text="Produção";StationInfo.Text="Selecione uma estação.";}
+    }
+
+    private void ApplyExpedition(int? preserveOrderId=null)
+    {
+        IEnumerable<ExpeditionOrder> query=_expedition;
+        var filter=(_expeditionFilter?.SelectedItem as ComboBoxItem)?.Tag?.ToString()??"all";
+        query=filter switch
+        {
+            "delivery"=>query.Where(x=>x.Channel.Equals("delivery",StringComparison.OrdinalIgnoreCase)),
+            "unassigned"=>query.Where(x=>x.Channel.Equals("delivery",StringComparison.OrdinalIgnoreCase)&&!x.DeliveryUserId.HasValue),
+            "pickup"=>query.Where(x=>x.Channel.Equals("delivery",StringComparison.OrdinalIgnoreCase)&&x.DeliveryUserId.HasValue&&!x.DeliveryPickedUp),
+            "route"=>query.Where(x=>x.Channel.Equals("delivery",StringComparison.OrdinalIgnoreCase)&&x.DeliveryRouteStarted&&!x.DeliveryArrived),
+            _=>query,
+        };
+        if(_expeditionReadyOnly?.IsChecked==true)query=query.Where(x=>x.AllReady);
+        var rows=query
+            .OrderByDescending(x=>x.Channel.Equals("delivery",StringComparison.OrdinalIgnoreCase)&&!x.DeliveryUserId.HasValue)
+            .ThenByDescending(x=>x.AllReady)
+            .ThenBy(x=>x.Id)
+            .ToList();
+        ExpeditionGrid.ItemsSource=rows;
+        _expeditionCount!.Text=$"{rows.Count}/{_expedition.Count}";
+        if(preserveOrderId.HasValue)ExpeditionGrid.SelectedItem=rows.FirstOrDefault(x=>x.Id==preserveOrderId.Value);
+    }
+
+    private void ExpeditionGrid_LoadingRow(object? sender,DataGridRowEventArgs e)
+    {
+        if(e.Row.Item is not ExpeditionOrder order)return;
+        if(order.Channel.Equals("delivery",StringComparison.OrdinalIgnoreCase)&&!order.DeliveryUserId.HasValue)
+        {
+            e.Row.Background=new SolidColorBrush(Color.FromRgb(254,243,242));
+            e.Row.ToolTip="Delivery pronto sem entregador definido.";
+        }
+        else if(order.AllReady)
+        {
+            e.Row.Background=new SolidColorBrush(Color.FromRgb(236,253,243));
+            e.Row.ToolTip="Todos os itens estão prontos para expedição.";
+        }
+        else
+        {
+            e.Row.ClearValue(Control.BackgroundProperty);
+            e.Row.ToolTip="Ainda existem itens em produção.";
+        }
     }
 
     private async Task ChangeSelectedAsync(string target)
