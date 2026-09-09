@@ -14,13 +14,16 @@ final class ProductionDesktopService
     public function board():array
     {
         $this->requireOperation();
+        if(!Auth::can('orders.kitchen')&&!Auth::can('orders.dispatch')&&!Auth::can('production.print')&&!Auth::can('production.manage'))throw new RuntimeException('Sem permissão para acompanhar a produção.');
         return(new ProductionService())->board();
     }
 
     public function expedition():array
     {
         $this->requireOperation();
-        if(!Auth::can('orders.dispatch')&&!Auth::can('orders.kitchen'))throw new RuntimeException('Sem permissão para acompanhar a expedição.');
+        // production.print/production.manage podem acompanhar a fila, mas a liberação
+        // continua protegida por orders.dispatch em markOrderExpedited().
+        if(!Auth::can('orders.dispatch')&&!Auth::can('orders.kitchen')&&!Auth::can('production.print')&&!Auth::can('production.manage'))throw new RuntimeException('Sem permissão para acompanhar a expedição.');
         return(new ProductionService())->expedition();
     }
 
