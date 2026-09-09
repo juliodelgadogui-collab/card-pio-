@@ -6,6 +6,7 @@ require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\HubService;
+use EventMenu\Services\HubTerminalCatalogService;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
@@ -25,6 +26,9 @@ try{
     if($action==='links'){
         hub_method('GET');$device=trim((string)($_GET['device_id']??$sessionDevice));if($sessionDevice!==''&&$device!==''&&!hash_equals($sessionDevice,$device))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');
         hub_out(['ok'=>true,'links'=>$hub->mobileLinks($device)]);
+    }
+    if($action==='terminals'){
+        hub_method('GET');hub_out(['ok'=>true,'terminals'=>(new HubTerminalCatalogService())->listForUnit((int)($_GET['unit_id']??0))]);
     }
     if($action==='pairing-create'){
         hub_method('POST');$body=hub_body();$device=hub_device($body,$sessionDevice);
