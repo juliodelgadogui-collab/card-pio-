@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS terminal_payment_intents (
   tenant_id INTEGER NOT NULL,
   unit_id INTEGER NOT NULL,
   order_id INTEGER NOT NULL,
+  payment_id INTEGER NULL,
   terminal_config_id INTEGER NOT NULL,
   device_hash TEXT NOT NULL,
   provider TEXT NOT NULL,
@@ -23,9 +24,11 @@ CREATE TABLE IF NOT EXISTS terminal_payment_intents (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE RESTRICT,
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+  FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE RESTRICT,
   FOREIGN KEY (terminal_config_id) REFERENCES payment_terminal_configs(id) ON DELETE RESTRICT,
   UNIQUE (intent_token),
-  UNIQUE (tenant_id, idempotency_key)
+  UNIQUE (tenant_id, idempotency_key),
+  UNIQUE (payment_id)
 );
 CREATE INDEX IF NOT EXISTS idx_terminal_intent_order ON terminal_payment_intents(tenant_id, order_id, status);
 CREATE INDEX IF NOT EXISTS idx_terminal_intent_expiry ON terminal_payment_intents(status, expires_at);
