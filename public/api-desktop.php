@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Core\Auth;
+use EventMenu\Core\Database;
 use EventMenu\Core\PermissionCatalog;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DesktopHardwareService;
@@ -25,6 +26,15 @@ function desktop_body():array{$raw=file_get_contents('php://input');if($raw===fa
 function desktop_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)desktop_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
 function desktop_fiscal_product_ready(array $product):bool{return !empty($product['ready'])&&(int)($product['fiscal_enabled']??0)===1;}
 function desktop_normalize_fiscal_products(array $products):array{foreach($products as &$product)$product['ready']=desktop_fiscal_product_ready($product);unset($product);return$products;}
+function desktop_fiscal_documents(FiscalService $fiscal,int $limit):array{
+    $documents=$fiscal->documents($limit);if(!$documents)return[];$tenantId=Auth::tenantId();if(!$tenantId)return$documents;
+    $ids=array_values(array_filter(array_map(static fn(array $row):int=>(int)($row['id']??0),$documents),static fn(int $id):bool=>$id>0));if(!$ids)return$documents;
+    $placeholders=implode(',',array_fill(0,count($ids),'?'));$args=array_merge([$tenantId],$ids);
+    $s=Database::connection()->prepare('SELECT id,transmission_attempts,transmission_started_at,last_transmission_at FROM fiscal_documents WHERE tenant_id=? AND id IN ('.$placeholders.')');$s->execute($args);$extra=[];
+    foreach($s->fetchAll() as $row)$extra[(int)$row['id']]=$row;
+    foreach($documents as &$document){$id=(int)($document['id']??0);$document['transmission_attempts']=(int)($extra[$id]['transmission_attempts']??0);$document['transmission_started_at']=$extra[$id]['transmission_started_at']??null;$document['last_transmission_at']=$extra[$id]['last_transmission_at']??null;}unset($document);
+    return$documents;
+}
 
 try{
     $auth=new ApiAuthService();
@@ -76,7 +86,7 @@ try{
         desktop_method('POST');$body=desktop_body();
         desktop_out(['ok'=>true,'document'=>$fiscal->queueForOrder((int)($body['order_id']??0),(string)($body['document']??''))],201);
     }
-    if($action==='fiscal-documents')desktop_out(['ok'=>true,'documents'=>$fiscal->documents((int)($_GET['limit']??100))]);
+    if($action==='fiscal-documents'){desktop_method('GET');desktop_out(['ok'=>true,'documents'=>desktop_fiscal_documents($fiscal,(int)($_GET['limit']??100))]);}
     if($action==='fiscal-retry'){
         desktop_method('POST');Auth::requirePermission('fiscal.issue');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');$body=desktop_body();
         desktop_out(['ok'=>true,'document'=>(new FiscalTransmissionService())->retryError($tenantId,(int)($body['document_id']??0))]);
