@@ -40,6 +40,9 @@ public sealed class Product
     [JsonPropertyName("stock_qty")] public decimal? StockQty { get; set; }
     [JsonPropertyName("track_stock")] public int TrackStock { get; set; }
     public string PriceDisplay => (PriceCents / 100m).ToString("C2", new System.Globalization.CultureInfo("pt-BR"));
+    public string StockDisplay => TrackStock == 1 ? (StockQty ?? 0m).ToString("0.###") : "—";
+    public string StockStatusLabel => TrackStock != 1 ? "Sem controle" : (StockQty ?? 0m) <= 0m ? "ZERADO" : "Disponível";
+    public bool IsOutOfStock => TrackStock == 1 && (StockQty ?? 0m) <= 0m;
 }
 
 public sealed class ProductsResponse
