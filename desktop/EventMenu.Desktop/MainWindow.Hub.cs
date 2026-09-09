@@ -17,6 +17,7 @@ public partial class MainWindow
     private bool _hubBusy;
     private DateTimeOffset _lastHubHeartbeat=DateTimeOffset.MinValue;
     private Button? _productionNavButton;
+    private Button? _inventoryNavButton;
     private Button? _deliveryMonitorButton;
     private Button? _hubNavButton;
     private Button? _hardwareSettingsButton;
@@ -27,6 +28,7 @@ public partial class MainWindow
         Loaded+=(_,_)=>EnsureHubControls();
         Closed+=(_,_)=>DisposeHubRuntime();
         PreviewKeyDown+=MainWindow_HubPreviewKeyDown;
+        ShellPanel.IsVisibleChanged+=ShellPanel_BrandVisibilityChanged;
         _hubTimer=new DispatcherTimer{Interval=TimeSpan.FromSeconds(3)};
         _hubTimer.Tick+=HubTimer_Tick;
         _hubTimer.Start();
@@ -45,6 +47,15 @@ public partial class MainWindow
             Visibility=(Can("orders_kitchen")||Can("orders_dispatch")||Can("production_print")||Can("production_manage"))?Visibility.Visible:Visibility.Collapsed
         };
         _productionNavButton.Click+=async(_,_)=>await OpenProductionAsync();
+
+        _inventoryNavButton=new Button
+        {
+            Content="Estoque",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="Saldo disponível, reservas e alertas de estoque baixo",
+            Visibility=Can("inventory")?Visibility.Visible:Visibility.Collapsed
+        };
+        _inventoryNavButton.Click+=async(_,_)=>await OpenInventoryMonitorAsync();
 
         _deliveryMonitorButton=new Button
         {
@@ -68,7 +79,7 @@ public partial class MainWindow
         {
             Content="Equipamentos e fiscal",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Configurar impressoras, PINPad, TEF e emissão fiscal",
+            ToolTip="Configurar equipamentos e emissão fiscal",
             Visibility=(Can("hardware_manage")||Can("fiscal_manage"))?Visibility.Visible:Visibility.Collapsed
         };
         _hardwareSettingsButton.Click+=async(_,_)=>await OpenHardwareSettingsAsync();
@@ -76,9 +87,10 @@ public partial class MainWindow
         var cashIndex=sidebar.Children.IndexOf(CashNavButton);
         var insert=Math.Max(0,cashIndex+1);
         sidebar.Children.Insert(insert,_productionNavButton);
-        sidebar.Children.Insert(insert+1,_deliveryMonitorButton);
-        sidebar.Children.Insert(insert+2,_hubNavButton);
-        sidebar.Children.Insert(insert+3,_hardwareSettingsButton);
+        sidebar.Children.Insert(insert+1,_inventoryNavButton);
+        sidebar.Children.Insert(insert+2,_deliveryMonitorButton);
+        sidebar.Children.Insert(insert+3,_hubNavButton);
+        sidebar.Children.Insert(insert+4,_hardwareSettingsButton);
     }
 
     private async void MainWindow_HubPreviewKeyDown(object sender,KeyEventArgs e)
@@ -104,6 +116,22 @@ public partial class MainWindow
             var window=new ProductionWindow(_hubIntegrationApi,Can("orders_dispatch"),Can("production_manage")){Owner=this};window.ShowDialog();
         }
         catch(Exception ex){MessageBox.Show(ex.Message,"Produção",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        await Task.CompletedTask;
+    }
+
+    private async Task OpenInventoryMonitorAsync()
+    {
+        if(_store is null||ShellPanel.Visibility!=Visibility.Visible||!Can("inventory"))return;
+        if(!HasShift||!ShiftIs("operation")||ShiftInt("unit_id")<1)
+        {
+            MessageBox.Show("Inicie um turno de Operação na unidade que deseja consultar.","Estoque",MessageBoxButton.OK,MessageBoxImage.Information);return;
+        }
+        try
+        {
+            using var inventoryApi=new InventoryMonitorApiClient(_store);
+            var window=new InventoryMonitorWindow(inventoryApi){Owner=this};window.ShowDialog();
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"Estoque",MessageBoxButton.OK,MessageBoxImage.Warning);}
         await Task.CompletedTask;
     }
 
@@ -235,6 +263,7 @@ public partial class MainWindow
     private void DisposeHubRuntime()
     {
         if(_hubTimer is not null){_hubTimer.Stop();_hubTimer.Tick-=HubTimer_Tick;_hubTimer=null;}
+        ShellPanel.IsVisibleChanged-=ShellPanel_BrandVisibilityChanged;
         _hubIntegrationApi?.Dispose();_hubIntegrationApi=null;_hubProcessor=null;_hubHardwareStore=null;_productionPrintProcessor=null;
         foreach(var disposable in _hubProviderDisposables)disposable.Dispose();
         _hubProviderDisposables.Clear();
