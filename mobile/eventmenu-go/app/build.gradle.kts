@@ -124,6 +124,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".gpspremium"
+            versionNameSuffix = "-gps-premium"
+        }
         release {
             isDebuggable = false
             isMinifyEnabled = true
