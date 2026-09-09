@@ -54,6 +54,28 @@ if (firebaseRequired && !firebaseEnabled) {
     )
 }
 
+// Assinatura fixa apenas para builds debug/teste distribuídos durante o desenvolvimento.
+// A chave Release de produção permanece totalmente separada e obrigatória via ambiente/secrets.
+val debugKeystorePath = envValue("EVENTMENU_DEBUG_KEYSTORE_PATH")
+val debugStorePassword = envValue("EVENTMENU_DEBUG_STORE_PASSWORD")
+val debugKeyAlias = envValue("EVENTMENU_DEBUG_KEY_ALIAS")
+val debugKeyPassword = envValue("EVENTMENU_DEBUG_KEY_PASSWORD")
+val debugSigning = linkedMapOf(
+    "EVENTMENU_DEBUG_KEYSTORE_PATH" to debugKeystorePath,
+    "EVENTMENU_DEBUG_STORE_PASSWORD" to debugStorePassword,
+    "EVENTMENU_DEBUG_KEY_ALIAS" to debugKeyAlias,
+    "EVENTMENU_DEBUG_KEY_PASSWORD" to debugKeyPassword,
+)
+val debugSigningCount = debugSigning.values.count { it.isNotBlank() }
+val debugSigningConfigured = debugSigningCount == debugSigning.size
+if (debugSigningCount in 1 until debugSigning.size) {
+    val missing = debugSigning.filterValues { it.isBlank() }.keys.joinToString(", ")
+    throw GradleException("Assinatura Debug incompleta. Faltando: $missing")
+}
+if (debugSigningConfigured && !file(debugKeystorePath).isFile) {
+    throw GradleException("Keystore Debug não encontrado no caminho informado.")
+}
+
 val releaseKeystorePath = envValue("EVENTMENU_RELEASE_KEYSTORE_PATH")
 val releaseStorePassword = envValue("EVENTMENU_RELEASE_STORE_PASSWORD")
 val releaseKeyAlias = envValue("EVENTMENU_RELEASE_KEY_ALIAS")
@@ -109,6 +131,18 @@ android {
     }
 
     signingConfigs {
+        if (debugSigningConfigured) {
+            getByName("debug") {
+                storeFile = file(debugKeystorePath)
+                storePassword = debugStorePassword
+                keyAlias = debugKeyAlias
+                keyPassword = debugKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
         if (releaseSigningConfigured) {
             create("release") {
                 storeFile = file(releaseKeystorePath)
@@ -124,6 +158,9 @@ android {
     }
 
     buildTypes {
+        debug {
+            if (debugSigningConfigured) signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isDebuggable = false
             isMinifyEnabled = true
