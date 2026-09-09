@@ -39,9 +39,15 @@ function eventmenu_install_build_env(string $appUrl): array
 {
     $appUrl = rtrim(trim($appUrl), '/');
     if (!filter_var($appUrl, FILTER_VALIDATE_URL) || !in_array(strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)), ['http', 'https'], true)) {
-        throw new RuntimeException('Informe uma URL válida do sistema, começando com http:// ou https://.');
+        throw new RuntimeException('Informe uma URL válida do sistema, começando com https://.');
     }
-    $secure = strtolower((string)parse_url($appUrl, PHP_URL_SCHEME)) === 'https' ? 'true' : 'false';
+    $scheme = strtolower((string)parse_url($appUrl, PHP_URL_SCHEME));
+    $host = strtolower(trim((string)parse_url($appUrl, PHP_URL_HOST)));
+    $localHosts = ['localhost','127.0.0.1','::1'];
+    if ($scheme !== 'https' && !in_array($host, $localHosts, true)) {
+        throw new RuntimeException('HTTPS é obrigatório para instalar o EventMenu em produção.');
+    }
+    $secure = $scheme === 'https' ? 'true' : 'false';
     return [
         'APP_NAME' => 'EventMenu Premium','APP_ENV' => 'production','APP_DEBUG' => 'false','APP_URL' => $appUrl,'APP_BASE_PATH' => app_base_path(),'APP_KEY' => Security::randomKey(32),'CRON_SECRET' => Security::randomKey(32),'DB_CONNECTION' => 'sqlite','DB_SQLITE_PATH' => 'storage/eventmenu.sqlite','DB_HOST' => '127.0.0.1','DB_PORT' => '3306','DB_DATABASE' => 'eventmenu','DB_USERNAME' => 'root','DB_PASSWORD' => '','SESSION_NAME' => 'eventmenu_session','SESSION_SECURE' => $secure,'PAYMENT_CURRENCY' => 'BRL','STRIPE_WEBHOOK_SECRET' => '','PAGBANK_WEBHOOK_SECRET' => '','MERCADOPAGO_WEBHOOK_SECRET' => '',
     ];
