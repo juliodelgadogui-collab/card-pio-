@@ -7,11 +7,11 @@ namespace EventMenu\Core;
 final class PermissionCatalog
 {
     private const ROLES = [
-        'admin'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect','hardware.manage','terminal.collect','fiscal.manage','fiscal.issue'],
-        'manager'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect','terminal.collect','fiscal.issue'],
-        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','orders.fulfill','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','loyalty.redeem','tables.manage','events.bar','nfc.collect','terminal.collect','fiscal.issue'],
-        'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','orders.fulfill','cancellations.request','events.bar','tickets.manage','guests.manage','customers.manage','loyalty.redeem','tables.manage','delivery.assign'],
-        'waiter'=>['dashboard','orders.create','orders.view','orders.dispatch','cancellations.request','tables.manage'],
+        'admin'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect','hardware.manage','terminal.request','terminal.collect','fiscal.manage','fiscal.issue'],
+        'manager'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect','terminal.request','terminal.collect','fiscal.issue'],
+        'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','orders.fulfill','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','loyalty.redeem','tables.manage','events.bar','nfc.collect','terminal.request','terminal.collect','fiscal.issue'],
+        'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','orders.fulfill','cancellations.request','events.bar','tickets.manage','guests.manage','customers.manage','loyalty.redeem','tables.manage','delivery.assign','terminal.request'],
+        'waiter'=>['dashboard','orders.create','orders.view','orders.dispatch','cancellations.request','tables.manage','terminal.request'],
         'kitchen'=>['dashboard','orders.kitchen','production.print'],
         'delivery'=>['dashboard','orders.delivery','cancellations.request','nfc.collect'],
         'promoter'=>['dashboard','events.promoter','reports.own','guests.manage'],
@@ -60,7 +60,8 @@ final class PermissionCatalog
         'nfc.manage'=>'Configurar dispositivos NFC',
         'nfc.collect'=>'Cobrar por NFC',
         'hardware.manage'=>'Configurar hardware do Desktop',
-        'terminal.collect'=>'Cobrar via TEF / PINPad',
+        'terminal.request'=>'Solicitar cobrança em PINPad vinculado',
+        'terminal.collect'=>'Operar cobranças TEF / PINPad',
         'fiscal.manage'=>'Configurar fiscal e certificado digital',
         'fiscal.issue'=>'Emitir e consultar documentos fiscais',
         'events.promoter'=>'Área do promotor',
@@ -98,8 +99,6 @@ final class PermissionCatalog
                 if((int)$row['allowed'])$effective[$permission]=true;else unset($effective[$permission]);
             }
         }catch(\Throwable $e){
-            // Segurança: se não for possível confirmar os overrides, nenhuma permissão é concedida.
-            // Isso evita restaurar silenciosamente permissões padrão removidas de um usuário.
             error_log('EventMenu permission lookup failed for tenant '.$tenantId.' user '.$userId.': '.get_class($e));
             return [];
         }
@@ -138,6 +137,7 @@ final class PermissionCatalog
             'loyalty_adjust'=>'loyalty.adjust',
             'nfc_collect'=>'nfc.collect',
             'hardware_manage'=>'hardware.manage',
+            'terminal_request'=>'terminal.request',
             'terminal_collect'=>'terminal.collect',
             'fiscal_manage'=>'fiscal.manage',
             'fiscal_issue'=>'fiscal.issue',
