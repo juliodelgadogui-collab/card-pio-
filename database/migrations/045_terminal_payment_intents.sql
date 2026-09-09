@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS terminal_payment_intents (
   tenant_id BIGINT UNSIGNED NOT NULL,
   unit_id BIGINT UNSIGNED NOT NULL,
   order_id BIGINT UNSIGNED NOT NULL,
+  payment_id BIGINT UNSIGNED NULL,
   terminal_config_id BIGINT UNSIGNED NOT NULL,
   device_hash CHAR(64) NOT NULL,
   provider VARCHAR(64) NOT NULL,
@@ -23,9 +24,11 @@ CREATE TABLE IF NOT EXISTS terminal_payment_intents (
   CONSTRAINT fk_terminal_intent_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   CONSTRAINT fk_terminal_intent_unit FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE RESTRICT,
   CONSTRAINT fk_terminal_intent_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_terminal_intent_payment FOREIGN KEY (payment_id) REFERENCES payments(id) ON DELETE RESTRICT,
   CONSTRAINT fk_terminal_intent_config FOREIGN KEY (terminal_config_id) REFERENCES payment_terminal_configs(id) ON DELETE RESTRICT,
   UNIQUE KEY uq_terminal_intent_token (intent_token),
   UNIQUE KEY uq_terminal_intent_idempotency (tenant_id, idempotency_key),
+  UNIQUE KEY uq_terminal_intent_payment (payment_id),
   INDEX idx_terminal_intent_order (tenant_id, order_id, status),
   INDEX idx_terminal_intent_expiry (status, expires_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
