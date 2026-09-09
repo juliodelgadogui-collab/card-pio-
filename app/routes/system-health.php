@@ -51,6 +51,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 
 $health=(new SystemHealthService())->snapshot();
 $readiness=(new ProductionReadinessService())->evaluate($health);
+$paymentReadiness=is_array($readiness['payments']??null)?$readiness['payments']:['ready'=>false,'blockers'=>[['message'=>'Prontidão de pagamentos indisponível.']],'warnings'=>[],'passed'=>[]];
 $labels=['database'=>'Banco de dados','cron'=>'Cron / manutenção','worker'=>'Worker da fila','queue'=>'Fila assíncrona','push'=>'Notificações push','backup'=>'Backup','gateways'=>'Gateways','webhooks'=>'Webhooks','storage'=>'Armazenamento'];
 $stateLabel=['ok'=>'OK','warning'=>'Atenção','error'=>'Erro','disabled'=>'Desativado'];
 $overall=$health['overall'];
@@ -70,7 +71,7 @@ em_header('Saúde do sistema','system-health');
         <div>
             <span class="eyebrow">PRONTIDÃO PARA PRODUÇÃO</span>
             <h2 style="margin-top:5px"><?= $readiness['ready']?'Pronto para produção':'Bloqueado para produção' ?></h2>
-            <p class="muted"><?= $readiness['ready']?'Os requisitos obrigatórios de infraestrutura e segurança estão atendidos. Revise os avisos antes de liberar pagamentos reais.':'Existem requisitos obrigatórios pendentes. Corrija os itens abaixo antes de liberar a operação real.' ?></p>
+            <p class="muted"><?= $readiness['ready']?'Os requisitos obrigatórios de infraestrutura e segurança estão atendidos.':'Existem requisitos obrigatórios pendentes. Corrija os itens abaixo antes de liberar a operação real.' ?></p>
         </div>
         <span class="status-pill <?= $readiness['ready']?'active':'cancelled' ?>"><?= $readiness['ready']?'PRONTO':'BLOQUEADO' ?></span>
     </div>
@@ -86,6 +87,25 @@ em_header('Saúde do sistema','system-health');
     <div style="margin-top:16px"><strong>Avisos de produção</strong><ul style="margin:8px 0 0 20px"><?php foreach($readiness['warnings']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></div>
     <?php endif;?>
     <details style="margin-top:16px"><summary>Ver verificações aprovadas</summary><ul style="margin:8px 0 0 20px"><?php foreach($readiness['passed']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></details>
+</section>
+
+<section class="card" style="margin-bottom:18px;border-width:2px">
+    <div class="section-head">
+        <div>
+            <span class="eyebrow">PAGAMENTOS REAIS</span>
+            <h2 style="margin-top:5px"><?= !empty($paymentReadiness['ready'])?'Prontos para liberar':'Ainda bloqueados' ?></h2>
+            <p class="muted"><?= !empty($paymentReadiness['ready'])?'Infraestrutura, gateway e recebimento de webhook já foram comprovados. Revise os avisos antes de aumentar o volume.':'Pix/cartão reais continuam bloqueados até a infraestrutura estar saudável, existir gateway ativo e ao menos um webhook válido ter chegado ao servidor.' ?></p>
+        </div>
+        <span class="status-pill <?= !empty($paymentReadiness['ready'])?'active':'cancelled' ?>"><?= !empty($paymentReadiness['ready'])?'PRONTO':'BLOQUEADO' ?></span>
+    </div>
+    <div class="metric-grid" style="margin-top:14px">
+        <div class="metric-card"><span>Bloqueadores</span><strong><?= count($paymentReadiness['blockers']??[]) ?></strong><small>impedem Pix/cartão real</small></div>
+        <div class="metric-card"><span>Avisos</span><strong><?= count($paymentReadiness['warnings']??[]) ?></strong><small>exigem acompanhamento</small></div>
+        <div class="metric-card"><span>Provas aprovadas</span><strong><?= count($paymentReadiness['passed']??[]) ?></strong><small>gateway, webhook e segurança</small></div>
+    </div>
+    <?php if(!empty($paymentReadiness['blockers'])):?><div style="margin-top:16px"><strong>Antes de liberar dinheiro real</strong><ul style="margin:8px 0 0 20px"><?php foreach($paymentReadiness['blockers']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></div><?php endif;?>
+    <?php if(!empty($paymentReadiness['warnings'])):?><div style="margin-top:16px"><strong>Avisos de pagamentos</strong><ul style="margin:8px 0 0 20px"><?php foreach($paymentReadiness['warnings']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></div><?php endif;?>
+    <?php if(!empty($paymentReadiness['passed'])):?><details style="margin-top:16px"><summary>Ver provas aprovadas</summary><ul style="margin:8px 0 0 20px"><?php foreach($paymentReadiness['passed']as$item):?><li style="margin:6px 0"><?= Security::e((string)$item['message']) ?></li><?php endforeach;?></ul></details><?php endif;?>
 </section>
 
 <section class="metric-grid" style="margin-bottom:18px"><div class="metric-card"><span>Estado geral</span><strong><?= Security::e($stateLabel[$overall]??$overall) ?></strong><small><?= Security::e(date('d/m/Y H:i:s')) ?></small></div><div class="metric-card"><span>Ambiente</span><strong><?= Security::e(strtoupper((string)$health['app']['environment'])) ?></strong><small><?= !empty($health['app']['debug'])?'debug ligado':'debug desligado' ?></small></div><div class="metric-card"><span>Versão mínima GO</span><strong><?= Security::e((string)$health['app']['min_app_version']) ?></strong><small>compatibilidade do aplicativo</small></div></section>

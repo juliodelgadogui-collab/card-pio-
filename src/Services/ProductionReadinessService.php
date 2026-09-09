@@ -6,7 +6,7 @@ namespace EventMenu\Services;
 
 final class ProductionReadinessService
 {
-    /** @return array{ready:bool,state:string,blockers:list<array{key:string,message:string}>,warnings:list<array{key:string,message:string}>,passed:list<array{key:string,message:string}>,security:array<string,mixed>} */
+    /** @return array{ready:bool,state:string,blockers:list<array{key:string,message:string}>,warnings:list<array{key:string,message:string}>,passed:list<array{key:string,message:string}>,security:array<string,mixed>,payments:array{ready:bool,state:string,blockers:list<array{key:string,message:string}>,warnings:list<array{key:string,message:string}>,passed:list<array{key:string,message:string}>}} */
     public function evaluate(array $health): array
     {
         $blockers = [];
@@ -96,6 +96,51 @@ final class ProductionReadinessService
             ];
         }
 
+        $paymentBlockers = [];
+        $paymentWarnings = [];
+        $paymentPassed = [];
+
+        // Pagamento real nunca pode ser considerado pronto se a própria instalação estiver bloqueada.
+        foreach ($blockers as $item) {
+            $paymentBlockers[] = [
+                'key' => 'system_' . (string)$item['key'],
+                'message' => 'Sistema: ' . (string)$item['message'],
+            ];
+        }
+
+        if (($gateway['state'] ?? 'warning') === 'ok') {
+            $paymentPassed[] = ['key' => 'gateway_live', 'message' => 'Existe gateway eletrônico ativo para receber pagamentos.'];
+        } else {
+            $paymentBlockers[] = ['key' => 'gateway_live', 'message' => 'Configure e ative pelo menos um gateway eletrônico antes de liberar Pix/cartão real.'];
+        }
+
+        // webhook_events só recebe registro depois da validação de autenticidade no GatewayService.
+        // Portanto qualquer evento registrado comprova que ao menos um webhook válido chegou ao servidor.
+        if (is_array($webhookLast) && $webhookLast !== []) {
+            $paymentPassed[] = ['key' => 'webhook_live', 'message' => 'O servidor já recebeu e validou webhook real de gateway.'];
+        } else {
+            $paymentBlockers[] = ['key' => 'webhook_live', 'message' => 'Ainda falta comprovar o recebimento de um webhook válido de pagamento.'];
+        }
+
+        $failedWebhooks = max(0, (int)($webhooks['details']['failed_last_24h'] ?? 0));
+        if ($failedWebhooks > 0) {
+            $paymentWarnings[] = [
+                'key' => 'webhook_failures',
+                'message' => $failedWebhooks . ' webhook(s) falharam nas últimas 24 horas. Revise antes de ampliar o volume.',
+            ];
+        } elseif (is_array($webhookLast) && $webhookLast !== []) {
+            $paymentPassed[] = ['key' => 'webhook_failures', 'message' => 'Nenhuma falha de webhook registrada nas últimas 24 horas.'];
+        }
+
+        if ($driver === 'sqlite') {
+            $paymentWarnings[] = [
+                'key' => 'payment_database_capacity',
+                'message' => 'Pagamentos podem operar em SQLite no início, mas MySQL/MariaDB é recomendado antes de alto volume simultâneo.',
+            ];
+        }
+
+        $paymentReady = $paymentBlockers === [];
+
         return [
             'ready' => $blockers === [],
             'state' => $blockers === [] ? 'ready' : 'blocked',
@@ -108,6 +153,13 @@ final class ProductionReadinessService
                 'https' => $https,
                 'session_secure' => $sessionSecure,
                 'app_key_strong' => $appKeyStrong,
+            ],
+            'payments' => [
+                'ready' => $paymentReady,
+                'state' => $paymentReady ? 'ready' : 'blocked',
+                'blockers' => $paymentBlockers,
+                'warnings' => $paymentWarnings,
+                'passed' => $paymentPassed,
             ],
         ];
     }

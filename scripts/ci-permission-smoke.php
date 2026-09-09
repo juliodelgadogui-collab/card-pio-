@@ -25,12 +25,23 @@ foreach(['cashier','attendant'] as $role){
 foreach(['waiter','delivery'] as $role){
     permission_assert(!in_array('loyalty.adjust',$roles[$role],true),$role.' não pode ajustar pontos.');
     permission_assert(!in_array('loyalty.redeem',$roles[$role],true),$role.' não pode resgatar pontos sem autorização de atendimento.');
+    permission_assert(!in_array('payments.manage',$roles[$role],true),$role.' não pode confirmar pagamentos.');
+    permission_assert(!in_array('gateways.manage',$roles[$role],true),$role.' não pode configurar gateways.');
 }
+permission_assert(!in_array('nfc.manage',$roles['delivery'],true),'Entregador não pode administrar dispositivos NFC.');
+
 $managerMap=PermissionCatalog::appPermissionMap($roles['manager']);
 $cashierMap=PermissionCatalog::appPermissionMap($roles['cashier']);
 permission_assert(($managerMap['loyalty_adjust']??false)===true,'Mapa Android do gerente perdeu loyalty_adjust.');
 permission_assert(($managerMap['loyalty_redeem']??false)===true,'Mapa Android do gerente perdeu loyalty_redeem.');
 permission_assert(($cashierMap['loyalty_adjust']??true)===false,'Mapa Android do caixa não pode ter loyalty_adjust.');
 permission_assert(($cashierMap['loyalty_redeem']??false)===true,'Mapa Android do caixa precisa de loyalty_redeem.');
+
+// Regressão de segurança: falha ao consultar overrides deve negar acesso, nunca restaurar permissões padrão.
+$permissionSource=file_get_contents(dirname(__DIR__).'/src/Core/PermissionCatalog.php');
+permission_assert(is_string($permissionSource)&&$permissionSource!=='','Não foi possível inspecionar PermissionCatalog.');
+permission_assert(!str_contains($permissionSource,'catch(\\Throwable){}'),'Consulta de overrides voltou a engolir erro silenciosamente (fail-open).');
+permission_assert(str_contains($permissionSource,"return [];\n        }"),'Falha de overrides precisa terminar sem permissões (fail-closed).');
+permission_assert(str_contains($permissionSource,'EventMenu permission lookup failed'),'Falha de consulta de permissões precisa deixar registro operacional seguro.');
 
 echo "CI permission smoke OK\n";

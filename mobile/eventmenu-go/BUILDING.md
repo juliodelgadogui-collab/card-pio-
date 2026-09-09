@@ -1,8 +1,20 @@
 # Compilar o EventMenu GO
 
-O projeto Android está em `mobile/eventmenu-go` e usa o servidor fixo:
+O projeto Android está em `mobile/eventmenu-go`.
+
+Por padrão, o app usa o servidor oficial:
 
 `https://go.gestao2.store/1/`
+
+O endereço pode ser alterado **somente no ambiente de compilação** com `EVENTMENU_API_BASE_URL`. A interface do funcionário não permite trocar de servidor. O build rejeita URLs sem HTTPS.
+
+Exemplo:
+
+```bash
+export EVENTMENU_API_BASE_URL="https://staging.exemplo.com/1/"
+```
+
+Essa configuração permite preparar staging, migração de domínio ou uma futura estratégia de failover sem manter uma URL rígida no código do aplicativo. Não implemente troca automática de servidor para operações de escrita sem banco compartilhado/idempotência ponta a ponta, pois uma repetição automática de POST após resposta perdida pode duplicar ações.
 
 ## Requisitos
 
@@ -116,7 +128,7 @@ Rotas inteligentes atuais:
 
 ## Observações
 
-- O domínio do servidor não é configurável pela interface do funcionário.
+- O domínio do servidor não é configurável pela interface do funcionário; somente pelo ambiente de build.
 - `local.properties`, pastas de build e arquivos do Android Studio ficam fora do Git.
 - O deep link apenas navega para uma área permitida; autorizações sensíveis continuam validadas pelo servidor.
 - Se um workflow do GitHub Actions falhar sem iniciar nenhuma etapa, isso não representa um erro de compilação do projeto. Use os scripts locais acima para separar falha de execução do Actions de falha real do Gradle/Kotlin.

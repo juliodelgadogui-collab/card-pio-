@@ -93,7 +93,12 @@ final class PermissionCatalog
                 if(!array_key_exists($permission,self::LABELS))continue;
                 if((int)$row['allowed'])$effective[$permission]=true;else unset($effective[$permission]);
             }
-        }catch(\Throwable){}
+        }catch(\Throwable $e){
+            // Segurança: se não for possível confirmar os overrides, nenhuma permissão é concedida.
+            // Isso evita restaurar silenciosamente permissões padrão removidas de um usuário.
+            error_log('EventMenu permission lookup failed for tenant '.$tenantId.' user '.$userId.': '.get_class($e));
+            return [];
+        }
         return array_keys($effective);
     }
 

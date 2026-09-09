@@ -3,16 +3,23 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Servidor oficial do EventMenu GO. Não existe configuração de servidor na interface do app.
-val apiBase = "https://go.gestao2.store/1/"
-val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
-val appVersionCode = ciBuildNumber ?: 3
-val appVersionName = if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
-
 fun envValue(primary: String, fallback: String? = null): String =
     System.getenv(primary)?.trim().orEmpty().ifBlank { fallback?.let { System.getenv(it)?.trim().orEmpty() }.orEmpty() }
 
 fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+// Servidor oficial por padrão, mas configurável no ambiente de compilação para migração/staging.
+// O endereço não é editável pela interface do funcionário.
+val apiBase = envValue("EVENTMENU_API_BASE_URL")
+    .ifBlank { "https://go.gestao2.store/1/" }
+    .trimEnd('/') + "/"
+if (!apiBase.startsWith("https://", ignoreCase = true)) {
+    throw GradleException("EVENTMENU_API_BASE_URL precisa usar HTTPS.")
+}
+
+val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val appVersionCode = ciBuildNumber ?: 3
+val appVersionName = if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
 
 val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
 val firebaseAppId = envValue("EVENTMENU_FIREBASE_APP_ID")
@@ -51,7 +58,7 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
-        buildConfigField("String", "API_BASE_URL", "\"$apiBase\"")
+        buildConfigField("String", "API_BASE_URL", buildConfigString(apiBase))
         buildConfigField("boolean", "FIREBASE_ENABLED", firebaseEnabled.toString())
         buildConfigField("String", "FIREBASE_PROJECT_ID", buildConfigString(firebaseProjectId))
         buildConfigField("String", "FIREBASE_APP_ID", buildConfigString(firebaseAppId))
