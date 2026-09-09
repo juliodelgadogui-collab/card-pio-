@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using EventMenu.Desktop.Models;
 
 namespace EventMenu.Desktop.Services;
@@ -17,7 +18,8 @@ public sealed class EventMenuApiClient : IDisposable
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        NumberHandling = JsonNumberHandling.AllowReadingFromString
     };
 
     public EventMenuApiClient(SecureSessionStore store)
@@ -97,7 +99,7 @@ public sealed class EventMenuApiClient : IDisposable
     public Task<CashMutationResponse> CashCloseAsync(int countedCashCents, string notes, CancellationToken ct = default) =>
         PostAsync<CashMutationResponse>("api.php", "cash-close", new { counted_cash_cents = countedCashCents, notes }, ct);
 
-    public Task<GoContextResponse> GoContextAsync(CancellationToken ct = default) => GetAsync<GoContextResponse>("api-go.php", "context", null, ct);
+    public Task<DesktopContextResponse> GoContextAsync(CancellationToken ct = default) => GetAsync<DesktopContextResponse>("api-go.php", "context", null, ct);
     public Task<UnitsResponse> UnitsAsync(CancellationToken ct = default) => GetAsync<UnitsResponse>("api-go-units.php", "list", null, ct);
     public Task<ShiftResponse> ShiftOpenAsync(string mode, int? unitId, CancellationToken ct = default) =>
         PostAsync<ShiftResponse>("api-go-units.php", "shift-open", new { mode, unit_id = unitId }, ct);
@@ -108,6 +110,12 @@ public sealed class EventMenuApiClient : IDisposable
         PostAsync<TabResponse>("api-go.php", "table-open", new { table_id = tableId, label }, ct);
     public Task<TabResponse> TableCloseAsync(int tabId, CancellationToken ct = default) =>
         PostAsync<TabResponse>("api-go.php", "table-close", new { tab_id = tabId }, ct);
+
+    public Task<PaymentStatusResponse> PaymentStatusAsync(int orderId, CancellationToken ct = default) =>
+        GetAsync<PaymentStatusResponse>("api-go.php", "payment-status", new Dictionary<string, string> { ["order_id"] = orderId.ToString() }, ct);
+
+    public Task<PaymentStatusResponse> PaymentCashAsync(int orderId, int amountCents, string idempotencyKey, CancellationToken ct = default) =>
+        PostAsync<PaymentStatusResponse>("api-go.php", "payment-cash", new { order_id = orderId, amount_cents = amountCents, idempotency_key = idempotencyKey }, ct);
 
     public async Task LogoutAsync(CancellationToken ct = default)
     {
