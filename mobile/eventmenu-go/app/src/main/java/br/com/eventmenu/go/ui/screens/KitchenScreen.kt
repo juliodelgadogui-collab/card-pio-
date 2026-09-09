@@ -19,10 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.data.KitchenTicket
+import br.com.eventmenu.go.util.ServerTime
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun KitchenScreen(tickets: List<KitchenTicket>, onRefresh: () -> Unit, onStatus: (Int,String) -> Unit) {
@@ -56,9 +54,5 @@ fun KitchenScreen(tickets: List<KitchenTicket>, onRefresh: () -> Unit, onStatus:
     }
 }
 
-private fun elapsed(value:String):String{
-    val created=runCatching{SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.US).parse(value)?.time}.getOrNull()?:return "—"
-    val seconds=((Date().time-created)/1000).coerceAtLeast(0);val min=seconds/60;val sec=seconds%60
-    return "%02d:%02d".format(min,sec)
-}
+private fun elapsed(value:String):String = ServerTime.elapsedClock(value)
 private fun formatQty(q:Double)=if(q%1.0==0.0)q.toInt().toString() else q.toString()
