@@ -89,8 +89,8 @@ if (PHP_SAPI !== 'cli' && !headers_sent()) {
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: camera=(self), microphone=(), geolocation=()');
     // Compatível com o painel atual, que ainda possui scripts/estilos inline.
-    // Mesmo assim bloqueia plugins, frames externos, base-uri maliciosa e carregamento de scripts de terceiros.
-    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests");
+    // O mapa público de eventos usa o embed oficial do Google Maps.
+    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; frame-src 'self' https://maps.google.com https://www.google.com; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests");
     $production = strtolower(trim((string)env('APP_ENV', 'production'))) === 'production';
     $httpsConfigured = strtolower((string)parse_url((string)env('APP_URL', ''), PHP_URL_SCHEME)) === 'https';
     if ($production && $httpsConfigured) {
