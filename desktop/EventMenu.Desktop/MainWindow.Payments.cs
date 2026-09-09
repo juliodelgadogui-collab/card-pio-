@@ -15,6 +15,7 @@ public partial class MainWindow
     private Button? _paymentCashButton;
     private Button? _paymentPixButton;
     private Button? _fiscalIssueButton;
+    private Button? _fiscalDocumentsButton;
     private bool _paymentControlsReady;
     private bool _canPayments;
 
@@ -84,6 +85,16 @@ public partial class MainWindow
         };
         _fiscalIssueButton.Click += async (_, _) => await PrepareSelectedFiscalAsync();
 
+        _fiscalDocumentsButton = new Button
+        {
+            Content = "Documentos fiscais",
+            Height = 36,
+            Padding = new Thickness(12, 5, 12, 5),
+            ToolTip = "Consultar fila, rejeições, erros e documentos realmente autorizados pela SEFAZ.",
+            Visibility = Visibility.Collapsed
+        };
+        _fiscalDocumentsButton.Click += async (_, _) => await OpenFiscalDocumentsAsync();
+
         _paymentPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
@@ -96,6 +107,7 @@ public partial class MainWindow
         _paymentPanel.Children.Add(_paymentCashButton);
         _paymentPanel.Children.Add(_paymentPixButton);
         _paymentPanel.Children.Add(_fiscalIssueButton);
+        _paymentPanel.Children.Add(_fiscalDocumentsButton);
         actions.Children.Insert(0, _paymentPanel);
 
         OrdersGrid.SelectionChanged += async (_, _) => await RefreshSelectedPaymentAsync(false);
@@ -128,6 +140,8 @@ public partial class MainWindow
                 _paymentPixButton.Visibility = _canPayments ? Visibility.Visible : Visibility.Collapsed;
             if (_fiscalIssueButton is not null)
                 _fiscalIssueButton.Visibility = canFiscalIssue ? Visibility.Visible : Visibility.Collapsed;
+            if (_fiscalDocumentsButton is not null)
+                _fiscalDocumentsButton.Visibility = canFiscalIssue ? Visibility.Visible : Visibility.Collapsed;
 
             await RefreshSelectedPaymentAsync(false);
         }
@@ -306,6 +320,23 @@ public partial class MainWindow
         finally
         {
             await RefreshSelectedPaymentAsync(false);
+        }
+    }
+
+    private async Task OpenFiscalDocumentsAsync()
+    {
+        if (!Can("fiscal_issue")) return;
+        try
+        {
+            EnsureHubRuntime();
+            if (_hubIntegrationApi is null) throw new InvalidOperationException("Módulo fiscal do Desktop indisponível.");
+            var window = new FiscalDocumentsWindow(_hubIntegrationApi) { Owner = this };
+            window.ShowDialog();
+            await RefreshSelectedPaymentAsync(false);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Fiscal", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
