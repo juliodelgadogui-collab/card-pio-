@@ -69,19 +69,20 @@
                     <Border Background="White" CornerRadius="12" Padding="10">
                         <DataGrid x:Name="ExpeditionGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single">
                             <DataGrid.Columns>
-                                <DataGridTextColumn Header="Pedido" Binding="{Binding Id}" Width="80"/>
-                                <DataGridTextColumn Header="Canal" Binding="{Binding Channel}" Width="110"/>
-                                <DataGridTextColumn Header="Mesa" Binding="{Binding TableName}" Width="120"/>
+                                <DataGridTextColumn Header="Pedido" Binding="{Binding Id}" Width="70"/>
+                                <DataGridTextColumn Header="Canal" Binding="{Binding Channel}" Width="95"/>
+                                <DataGridTextColumn Header="Mesa" Binding="{Binding TableName}" Width="95"/>
                                 <DataGridTextColumn Header="Cliente" Binding="{Binding CustomerName}" Width="*"/>
-                                <DataGridTextColumn Header="Prontos" Binding="{Binding JobsReady}" Width="90"/>
-                                <DataGridTextColumn Header="Total" Binding="{Binding JobsTotal}" Width="80"/>
-                                <DataGridCheckBoxColumn Header="Tudo pronto" Binding="{Binding AllReady}" Width="100"/>
+                                <DataGridTextColumn Header="Delivery" Binding="{Binding DeliveryDisplay}" Width="230"/>
+                                <DataGridTextColumn Header="Prontos" Binding="{Binding JobsReady}" Width="75"/>
+                                <DataGridTextColumn Header="Total" Binding="{Binding JobsTotal}" Width="65"/>
+                                <DataGridCheckBoxColumn Header="Tudo pronto" Binding="{Binding AllReady}" Width="90"/>
                             </DataGrid.Columns>
                         </DataGrid>
                     </Border>
                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
                         <Button x:Name="ExpediteOrderButton" Content="Liberar pedido" Width="130" Click="ExpediteOrderButton_Click"/>
-                        <TextBlock Text="A liberação só é permitida quando todos os itens ativos estiverem prontos." Foreground="#667085" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                        <TextBlock Text="Delivery mostra entregador e etapa da rota; a liberação continua bloqueada até todos os itens ficarem prontos." Foreground="#667085" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
                     </StackPanel>
                 </Grid>
             </TabItem>
