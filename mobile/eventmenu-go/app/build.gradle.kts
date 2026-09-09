@@ -8,8 +8,7 @@ fun envValue(primary: String, fallback: String? = null): String =
 
 fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-// Servidor oficial por padrão, mas configurável no ambiente de compilação para migração/staging.
-// O endereço não é editável pela interface do funcionário.
+// Servidor oficial por padrão, mas configurável somente no ambiente de compilação.
 val apiBase = envValue("EVENTMENU_API_BASE_URL")
     .ifBlank { "https://go.gestao2.store/1/" }
     .trimEnd('/') + "/"
@@ -17,9 +16,17 @@ if (!apiBase.startsWith("https://", ignoreCase = true)) {
     throw GradleException("EVENTMENU_API_BASE_URL precisa usar HTTPS.")
 }
 
+val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
 val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
-val appVersionCode = ciBuildNumber ?: 3
-val appVersionName = if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
+val explicitVersionCodeRaw = envValue("EVENTMENU_VERSION_CODE")
+val explicitVersionCode = explicitVersionCodeRaw.toIntOrNull()
+if (explicitVersionCodeRaw.isNotBlank() && explicitVersionCode == null) {
+    throw GradleException("EVENTMENU_VERSION_CODE precisa ser um número inteiro.")
+}
+val appVersionCode = explicitVersionCode ?: ciBuildNumber ?: 3
+val appVersionName = envValue("EVENTMENU_VERSION_NAME").ifBlank {
+    if (releaseRequested) "1.0.0" else if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
+}
 
 val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
 val firebaseAppId = envValue("EVENTMENU_FIREBASE_APP_ID")
@@ -34,7 +41,6 @@ val firebaseConfig = linkedMapOf(
 val firebaseConfiguredCount = firebaseConfig.values.count { it.isNotBlank() }
 val firebaseEnabled = firebaseConfiguredCount == firebaseConfig.size
 val firebasePartial = firebaseConfiguredCount in 1 until firebaseConfig.size
-val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
 val firebaseRequired = envValue("EVENTMENU_REQUIRE_FCM").equals("true", ignoreCase = true) || releaseRequested
 
 if (firebasePartial) {
@@ -46,6 +52,32 @@ if (firebaseRequired && !firebaseEnabled) {
         "Firebase Cloud Messaging é obrigatório neste build. Configure EVENTMENU_FIREBASE_PROJECT_ID, " +
             "EVENTMENU_FIREBASE_APP_ID, EVENTMENU_FIREBASE_API_KEY e EVENTMENU_FIREBASE_SENDER_ID."
     )
+}
+
+val releaseKeystorePath = envValue("EVENTMENU_RELEASE_KEYSTORE_PATH")
+val releaseStorePassword = envValue("EVENTMENU_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = envValue("EVENTMENU_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = envValue("EVENTMENU_RELEASE_KEY_PASSWORD")
+val releaseSigning = linkedMapOf(
+    "EVENTMENU_RELEASE_KEYSTORE_PATH" to releaseKeystorePath,
+    "EVENTMENU_RELEASE_STORE_PASSWORD" to releaseStorePassword,
+    "EVENTMENU_RELEASE_KEY_ALIAS" to releaseKeyAlias,
+    "EVENTMENU_RELEASE_KEY_PASSWORD" to releaseKeyPassword,
+)
+val releaseSigningCount = releaseSigning.values.count { it.isNotBlank() }
+val releaseSigningConfigured = releaseSigningCount == releaseSigning.size
+if (releaseSigningCount in 1 until releaseSigning.size) {
+    val missing = releaseSigning.filterValues { it.isBlank() }.keys.joinToString(", ")
+    throw GradleException("Assinatura Release incompleta. Faltando: $missing")
+}
+if (releaseRequested && !releaseSigningConfigured) {
+    throw GradleException(
+        "Build Release exige keystore permanente. Configure EVENTMENU_RELEASE_KEYSTORE_PATH, " +
+            "EVENTMENU_RELEASE_STORE_PASSWORD, EVENTMENU_RELEASE_KEY_ALIAS e EVENTMENU_RELEASE_KEY_PASSWORD."
+    )
+}
+if (releaseSigningConfigured && !file(releaseKeystorePath).isFile) {
+    throw GradleException("Keystore Release não encontrado no caminho informado.")
 }
 
 android {
@@ -76,11 +108,28 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
         }
     }
 }

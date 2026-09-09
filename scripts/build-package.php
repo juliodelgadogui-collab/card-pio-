@@ -90,16 +90,39 @@ Require all denied
 HTACCESS;
 write_file($destination . '/.htaccess', $rootHtaccess . "\n");
 
-$deployReadme = <<<'TXT'
-EVENTMENU PREMIUM — PRIMEIRA INSTALAÇÃO /1 — SQLITE
+$releaseVersion = trim((string)(getenv('EVENTMENU_RELEASE_VERSION') ?: 'production-candidate'));
+$buildCommit = trim((string)(getenv('EVENTMENU_BUILD_COMMIT') ?: getenv('GITHUB_SHA') ?: 'unknown'));
+$buildRun = trim((string)(getenv('GITHUB_RUN_ID') ?: 'local'));
+$manifest = [
+    'product' => 'EventMenu Premium',
+    'version' => $releaseVersion,
+    'commit' => $buildCommit,
+    'build_run' => $buildRun,
+    'generated_at_utc' => gmdate('c'),
+    'php_min' => '8.2',
+    'default_database' => 'sqlite',
+    'mysql_supported' => true,
+    'app_base_path' => '/1',
+    'package_profile' => 'production',
+];
+write_file($destination . '/BUILD-MANIFEST.json', json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n");
+write_file($destination . '/VERSION.txt', $releaseVersion . "\n" . $buildCommit . "\n");
 
-Este pacote foi gerado do HEAD atual do GitHub e foi preparado para um servidor totalmente vazio.
+if (is_file($destination . '/.env')) throw new RuntimeException('Pacote de produção não pode conter .env real.');
+if (!is_file($destination . '/vendor/autoload.php')) throw new RuntimeException('Pacote de produção sem vendor/autoload.php.');
+if (!is_file($destination . '/.env.example')) throw new RuntimeException('Pacote de produção sem .env.example.');
+
+$deployReadme = <<<'TXT'
+EVENTMENU PREMIUM — PACOTE DE PRODUÇÃO /1 — SQLITE
+
+Este pacote foi gerado pelo CI a partir de uma revisão validada do EventMenu.
 O Composer NÃO precisa estar instalado no servidor: a pasta vendor já acompanha o pacote.
+Consulte BUILD-MANIFEST.json e VERSION.txt para identificar exatamente a versão/commit instalado.
 
 REQUISITOS DO SERVIDOR
 - PHP 8.2 ou superior.
 - Extensões: PDO, pdo_sqlite, mbstring, curl e openssl.
-- HTTPS recomendado desde a primeira instalação.
+- HTTPS obrigatório para operação real.
 - Apache/LiteSpeed com .htaccess habilitado, ou regras equivalentes no Nginx.
 - Permissão de escrita para a pasta do sistema durante a instalação e para storage depois.
 
@@ -109,7 +132,7 @@ INSTALAÇÃO DO ZERO
 3. NÃO crie banco de dados manualmente.
 4. NÃO é obrigatório renomear .env.example: se .env não existir, o instalador cria automaticamente.
 5. Acesse https://SEU-DOMINIO/1/install.php.
-6. Confira se todos os requisitos aparecem com ✅.
+6. Confira se todos os requisitos aparecem como aprovados.
 7. Informe a URL, empresa inicial e os dados do Super ADM.
 8. Clique em "Instalar EventMenu com SQLite".
 9. O sistema criará automaticamente:
@@ -124,36 +147,36 @@ INSTALAÇÃO DO ZERO
 
    * * * * * php /CAMINHO/DO/SITE/1/cron.php >/dev/null 2>&1
 
-12. Entre como Super ADM, abra "Saúde do sistema" e confirme que Cron e Worker aparecem como OK.
+12. Entre como Super ADM, abra "Saúde do sistema" e confirme Cron, Worker, fila e backup.
+13. Antes de liberar Pix/cartão reais, confirme também a seção "Pagamentos reais" como PRONTO.
 
 CRON / MANUTENÇÃO AUTOMÁTICA
 - O cron é obrigatório em produção e deve executar a cada minuto.
-- Ele processa a fila assíncrona, notificações push, expirações, limpezas e o agendamento do backup automático.
-- Prefira a execução CLI acima: ela NÃO precisa expor o CRON_SECRET.
-- Se o seu provedor só aceitar chamada HTTP, o endpoint cron.php exige o cabeçalho X-Cron-Secret com o valor protegido do .env.
-- O painel Super ADM > Saúde do sistema mostra o caminho real do cron.php e informa se Cron/Worker estão atrasados.
+- Ele processa fila, notificações, expirações, limpezas e backup automático.
+- Prefira execução CLI: ela não precisa expor CRON_SECRET.
+- Se o provedor só aceitar HTTP, cron.php exige X-Cron-Secret.
 
 BANCO INICIAL
-- Banco: SQLite.
+- Banco inicial: SQLite.
 - Arquivo: storage/eventmenu.sqlite.
 - WAL e foreign keys são ativados automaticamente.
 - Nunca disponibilize storage publicamente.
-- Faça backup periódico do banco antes de atualizações importantes.
+- Para operação com alto volume/muitos operadores, planeje MySQL/MariaDB antes de escalar.
 
 ATUALIZAÇÕES
-- Envie os novos arquivos preservando .env e toda a pasta storage.
-- Entre como administrador autorizado e acesse /1/update.php para aplicar migrações.
-- NUNCA substitua storage/eventmenu.sqlite por um arquivo vazio durante atualização.
+- Preserve .env e toda a pasta storage.
+- Envie os novos arquivos e acesse /1/update.php com administrador autorizado.
+- Nunca substitua storage/eventmenu.sqlite por um arquivo vazio.
+- Confira VERSION.txt/BUILD-MANIFEST.json depois da atualização.
 
 SEGURANÇA
-- O .htaccess do pacote bloqueia .env, app, src, database, storage, vendor e public em Apache/LiteSpeed.
-- Em Nginx, replique esses bloqueios no virtual host.
-- SESSION_SECURE é ativado automaticamente quando a URL informada usa HTTPS.
-- Depois de instalado, install.php é bloqueado por installed.lock e pela existência do Super ADM.
-
-MIGRAÇÃO FUTURA PARA MYSQL/MARIADB
-O sistema mantém suporte a MySQL/MariaDB, mas a primeira instalação deste pacote usa SQLite conforme definido para a fase inicial do projeto.
+- O pacote não contém .env real, chave privada ou credenciais de gateway.
+- .htaccess bloqueia .env, app, src, database, storage, vendor e public em Apache/LiteSpeed.
+- Em Nginx, replique os mesmos bloqueios no virtual host.
+- SESSION_SECURE deve permanecer ativo em HTTPS.
+- install.php é bloqueado após instalação por installed.lock e pela existência do Super ADM.
+- SHA256SUMS.txt acompanha o artefato do CI para conferência de integridade.
 TXT;
 write_file($destination . '/LEIA-ME-INSTALACAO.txt', $deployReadme . "\n");
 
-echo "Pacote SQLite de primeira instalação criado em: {$destination}\n";
+echo "Pacote de produção SQLite criado em: {$destination}\n";
