@@ -19,6 +19,7 @@ public partial class MainWindow
             using var service = new TenantBrandDesktopService(_store);
             var brand = await service.LoadAsync();
             if (brand is not null && brand.ApplyWeb) ApplyTenantBrand(brand);
+            else ApplyProfessionalShell();
         }
         finally { _brandLoading = false; }
     }
@@ -29,12 +30,7 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(displayName)) displayName = "Minha empresa";
         TenantNameText.Text = displayName;
         Title = $"{displayName} • EventMenu";
-
-        // A identidade da empresa não deve pintar toda a área operacional.
-        // Mantemos fundo e navegação neutros para preservar contraste e legibilidade.
-        ShellPanel.Background = new SolidColorBrush(Color.FromRgb(246, 247, 251));
-        if (PosNavButton.Parent is StackPanel menu && menu.Parent is Border sidebar)
-            sidebar.Background = new SolidColorBrush(Color.FromRgb(17, 24, 39));
+        ApplyProfessionalShell();
 
         foreach (var text in Descendants<TextBlock>(ShellPanel))
         {
@@ -43,6 +39,23 @@ public partial class MainWindow
                 text.Text = displayName;
                 break;
             }
+        }
+    }
+
+    private void ApplyProfessionalShell()
+    {
+        ShellPanel.Background = new SolidColorBrush(Color.FromRgb(246, 247, 251));
+        if (PosNavButton.Parent is not StackPanel menu || menu.Parent is not Border sidebar) return;
+
+        sidebar.Background = new SolidColorBrush(Color.FromRgb(17, 24, 39));
+        foreach (var button in menu.Children.OfType<Button>())
+        {
+            button.Background = Brushes.Transparent;
+            button.Foreground = new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            button.HorizontalContentAlignment = HorizontalAlignment.Left;
+            button.FontWeight = FontWeights.SemiBold;
+            button.Padding = new Thickness(12, 10, 12, 10);
+            button.Margin = new Thickness(0, 0, 0, 4);
         }
     }
 
