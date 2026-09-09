@@ -11,6 +11,8 @@ data class DeliveryProgress(
     val routeStartedAt: String = "",
     val arrivedAt: String = "",
     val completedAt: String = "",
+    val trackingUrl: String = "",
+    val trackingExpiresAt: String = "",
 ) {
     val pickedUp: Boolean get() = pickedUpAt.isNotBlank()
     val routeStarted: Boolean get() = routeStartedAt.isNotBlank()
@@ -72,6 +74,8 @@ class DeliveryProgressRepository(baseUrl: String, deviceId: String, private val 
         routeStartedAt = json.optString("route_started_at"),
         arrivedAt = json.optString("arrived_at"),
         completedAt = json.optString("completed_at"),
+        trackingUrl = json.optString("tracking_url").takeUnless { it == "null" } ?: "",
+        trackingExpiresAt = json.optString("tracking_expires_at").takeUnless { it == "null" } ?: "",
     )
 
     private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)
