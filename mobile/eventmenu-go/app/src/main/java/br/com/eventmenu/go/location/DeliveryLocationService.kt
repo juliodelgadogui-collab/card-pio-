@@ -114,10 +114,12 @@ class DeliveryLocationService : Service() {
         if (pending.isEmpty()) return
         uploading = true
         scope.launch {
+            var uploaded = false
             try {
                 val app = application as EventMenuGoApplication
                 val result = app.deliveryProgressRepository.sendLocationBatch(pending)
                 buffer.dropFirst(pending.size)
+                uploaded = true
                 if (result.activeOrders <= 0) {
                     stopSelf()
                 } else {
@@ -127,10 +129,12 @@ class DeliveryLocationService : Service() {
                     )
                 }
             } catch (_: Throwable) {
-                updateNotification("Sem internet · guardando o trajeto para sincronizar")
+                updateNotification("Sem internet · trajeto protegido para sincronizar depois")
             } finally {
                 uploading = false
-                if (buffer.all().isNotEmpty()) flushBuffer()
+                // Só encadeia outro envio após sucesso. Sem internet, a próxima
+                // amostra de GPS dispara uma nova tentativa e evita loop agressivo.
+                if (uploaded && buffer.all().isNotEmpty()) flushBuffer()
             }
         }
     }
