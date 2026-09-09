@@ -57,6 +57,8 @@ class ApiClient(
     suspend fun postTabPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-tab-payments.php", "POST", action, token, emptyMap(), body)
     suspend fun getUnits(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-units.php", "GET", action, token, query, null)
     suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-units.php", "POST", action, token, emptyMap(), body)
+    suspend fun getHub(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-hub.php", "GET", action, token, query, null)
+    suspend fun postHub(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-hub.php", "POST", action, token, emptyMap(), body)
 
     private suspend fun request(
         path: String,
@@ -196,6 +198,8 @@ class ApiClient(
     private fun isCacheableRead(path: String, method: String, action: String, token: String?): Boolean {
         if (method != "GET" || token.isNullOrBlank()) return false
         if (path == "api-go-events.php" && action == "bar-order-resolve") return false
+        // O Hub representa estado de hardware e comandos em tempo quase real. Nunca servir de cache.
+        if (path == "api-hub.php") return false
         return path in CACHEABLE_PATHS
     }
 
