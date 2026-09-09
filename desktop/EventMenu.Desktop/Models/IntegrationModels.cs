@@ -30,6 +30,18 @@ public sealed class FiscalProfile
     [JsonPropertyName("state_code")] public string StateCode { get; set; } = "";
     [JsonPropertyName("city_code")] public string? CityCode { get; set; }
     [JsonPropertyName("tax_regime")] public string? TaxRegime { get; set; }
+    [JsonPropertyName("street")] public string? Street { get; set; }
+    [JsonPropertyName("address_number")] public string? AddressNumber { get; set; }
+    [JsonPropertyName("address_complement")] public string? AddressComplement { get; set; }
+    [JsonPropertyName("district")] public string? District { get; set; }
+    [JsonPropertyName("city_name")] public string? CityName { get; set; }
+    [JsonPropertyName("postal_code")] public string? PostalCode { get; set; }
+    [JsonPropertyName("phone")] public string? Phone { get; set; }
+    [JsonPropertyName("email")] public string? Email { get; set; }
+    [JsonPropertyName("municipal_registration")] public string? MunicipalRegistration { get; set; }
+    [JsonPropertyName("cnae")] public string? Cnae { get; set; }
+    [JsonPropertyName("country_code")] public string CountryCode { get; set; } = "1058";
+    [JsonPropertyName("country_name")] public string CountryName { get; set; } = "Brasil";
     [JsonPropertyName("nfce_series")] public int NfceSeries { get; set; } = 1;
     [JsonPropertyName("nfce_next_number")] public long NfceNextNumber { get; set; } = 1;
     [JsonPropertyName("nfe_series")] public int NfeSeries { get; set; } = 1;
@@ -53,6 +65,67 @@ public sealed class FiscalCertificateMetadata
     [JsonPropertyName("valid_from")] public string? ValidFrom { get; set; }
     [JsonPropertyName("valid_until")] public string? ValidUntil { get; set; }
     [JsonPropertyName("status")] public string Status { get; set; } = "";
+}
+
+public sealed class FiscalProduct
+{
+    [JsonPropertyName("product_id")] public int ProductId { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("sku")] public string? Sku { get; set; }
+    [JsonPropertyName("active")] public int Active { get; set; }
+    [JsonPropertyName("ncm")] public string? Ncm { get; set; }
+    [JsonPropertyName("cest")] public string? Cest { get; set; }
+    [JsonPropertyName("cfop")] public string? Cfop { get; set; }
+    [JsonPropertyName("commercial_unit")] public string? CommercialUnit { get; set; }
+    [JsonPropertyName("tributary_unit")] public string? TributaryUnit { get; set; }
+    [JsonPropertyName("origin")] public string? Origin { get; set; }
+    [JsonPropertyName("gtin")] public string? Gtin { get; set; }
+    [JsonPropertyName("gtin_tributary")] public string? GtinTributary { get; set; }
+    [JsonPropertyName("icms_cst")] public string? IcmsCst { get; set; }
+    [JsonPropertyName("icms_csosn")] public string? IcmsCsosn { get; set; }
+    [JsonPropertyName("icms_rate")] public decimal? IcmsRate { get; set; }
+    [JsonPropertyName("pis_cst")] public string? PisCst { get; set; }
+    [JsonPropertyName("pis_rate")] public decimal? PisRate { get; set; }
+    [JsonPropertyName("cofins_cst")] public string? CofinsCst { get; set; }
+    [JsonPropertyName("cofins_rate")] public decimal? CofinsRate { get; set; }
+    [JsonPropertyName("ipi_cst")] public string? IpiCst { get; set; }
+    [JsonPropertyName("ipi_rate")] public decimal? IpiRate { get; set; }
+    [JsonPropertyName("benefit_code")] public string? BenefitCode { get; set; }
+    [JsonPropertyName("fiscal_enabled")] public int? FiscalEnabled { get; set; }
+    [JsonPropertyName("ready")] public bool Ready { get; set; }
+    public string ReadinessLabel => Ready ? "Pronto" : "Incompleto";
+}
+
+public sealed class FiscalProductsResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("products")] public List<FiscalProduct> Products { get; set; } = new();
+}
+
+public sealed class FiscalProductResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("product")] public FiscalProduct? Product { get; set; }
+}
+
+public sealed class FiscalReadiness
+{
+    [JsonPropertyName("profile_ready")] public bool ProfileReady { get; set; }
+    [JsonPropertyName("certificate_ready")] public bool CertificateReady { get; set; }
+    [JsonPropertyName("products_missing")] public List<FiscalMissingProduct> ProductsMissing { get; set; } = new();
+    [JsonPropertyName("ready")] public bool Ready { get; set; }
+}
+
+public sealed class FiscalMissingProduct
+{
+    [JsonPropertyName("product_id")] public int ProductId { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+}
+
+public sealed class FiscalReadinessResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("readiness")] public FiscalReadiness? Readiness { get; set; }
 }
 
 public sealed class FiscalCertificateResponse
@@ -87,6 +160,7 @@ public sealed class FiscalDocument
     [JsonPropertyName("protocol")] public string? Protocol { get; set; }
     [JsonPropertyName("rejection_code")] public string? RejectionCode { get; set; }
     [JsonPropertyName("rejection_message")] public string? RejectionMessage { get; set; }
+    [JsonPropertyName("snapshot_hash")] public string? SnapshotHash { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
 }
 
