@@ -67,7 +67,11 @@ public partial class HardwareFiscalSettingsWindow : Window
         try
         {
             if(_canHardware)await LoadTerminalsAsync();
-            if(_canFiscal)await LoadFiscalAsync();
+            if(_canFiscal)
+            {
+                await LoadFiscalAsync();
+                await LoadReadinessAsync(false);
+            }
             StatusText.Text="Configurações carregadas.";
         }
         catch(Exception ex){SetError(ex.Message);}
@@ -100,22 +104,80 @@ public partial class HardwareFiscalSettingsWindow : Window
         _fiscalProfile=response.Profile;
         if(_fiscalProfile is null)
         {
-            NfceSeriesBox.Text="1";NfeSeriesBox.Text="1";
+            NfceSeriesBox.Text="1";NfeSeriesBox.Text="1";CountryCodeBox.Text="1058";CountryNameBox.Text="Brasil";
             CertificateStatusText.Text="Nenhum perfil fiscal salvo para esta unidade.";
+            FiscalReadinessText.Text="Salve o perfil fiscal para iniciar a validação.";
             return;
         }
+
         var p=_fiscalProfile;
         FiscalEnabledCheck.IsChecked=p.Enabled==1;
         ContingencyCheck.IsChecked=p.ContingencyEnabled==1;
         SelectChoice(FiscalEnvironmentCombo,p.Environment);
         SelectChoice(DefaultDocumentCombo,p.DefaultDocument);
         SelectChoice(CertificateModeCombo,p.CertificateMode);
-        LegalNameBox.Text=p.LegalName??"";TradeNameBox.Text=p.TradeName??"";CnpjBox.Text=p.Cnpj;IeBox.Text=p.StateRegistration;
-        UfBox.Text=p.StateCode;CityCodeBox.Text=p.CityCode??"";TaxRegimeBox.Text=p.TaxRegime??"";
-        NfceSeriesBox.Text=p.NfceSeries.ToString();NfeSeriesBox.Text=p.NfeSeries.ToString();CscIdBox.Text=p.CscId??"";
+        LegalNameBox.Text=p.LegalName??"";
+        TradeNameBox.Text=p.TradeName??"";
+        CnpjBox.Text=p.Cnpj;
+        IeBox.Text=p.StateRegistration;
+        MunicipalRegistrationBox.Text=p.MunicipalRegistration??"";
+        CnaeBox.Text=p.Cnae??"";
+        UfBox.Text=p.StateCode;
+        CityCodeBox.Text=p.CityCode??"";
+        TaxRegimeBox.Text=p.TaxRegime??"";
+        FiscalPhoneBox.Text=p.Phone??"";
+        FiscalEmailBox.Text=p.Email??"";
+        CountryCodeBox.Text=string.IsNullOrWhiteSpace(p.CountryCode)?"1058":p.CountryCode;
+        CountryNameBox.Text=string.IsNullOrWhiteSpace(p.CountryName)?"Brasil":p.CountryName;
+        StreetBox.Text=p.Street??"";
+        AddressNumberBox.Text=p.AddressNumber??"";
+        AddressComplementBox.Text=p.AddressComplement??"";
+        DistrictBox.Text=p.District??"";
+        CityNameBox.Text=p.CityName??"";
+        PostalCodeBox.Text=p.PostalCode??"";
+        NfceSeriesBox.Text=p.NfceSeries.ToString();
+        NfeSeriesBox.Text=p.NfeSeries.ToString();
+        CscIdBox.Text=p.CscId??"";
         CertificateStatusText.Text=p.Certificate is null
             ?"Nenhum certificado registrado."
             :$"{p.Certificate.CertificateType.ToUpperInvariant()} • {p.Certificate.Status} • válido até {FormatDate(p.Certificate.ValidUntil)} • {p.Certificate.StorageScope}";
+    }
+
+    private async Task LoadReadinessAsync(bool announce)
+    {
+        if(!_canFiscal)return;
+        try
+        {
+            var response=await _api.FiscalReadinessAsync(_unitId);
+            var r=response.Readiness;
+            if(r is null){FiscalReadinessText.Text="Não foi possível determinar a prontidão fiscal.";return;}
+            if(r.Ready)
+            {
+                FiscalReadinessText.Text="✓ Perfil, certificado e tributação dos produtos estão completos para preparar a emissão.";
+                FiscalReadinessText.Foreground=System.Windows.Media.Brushes.SeaGreen;
+                if(announce)SetSuccess("Configuração fiscal pronta para a etapa de transmissão/homologação.");
+                return;
+            }
+
+            var parts=new List<string>();
+            if(!r.ProfileReady)parts.Add("perfil do emitente incompleto");
+            if(!r.CertificateReady)parts.Add("certificado ausente/inválido");
+            if(r.ProductsMissing.Count>0)
+            {
+                var names=string.Join(", ",r.ProductsMissing.Take(4).Select(p=>p.Name));
+                var extra=r.ProductsMissing.Count>4?$" +{r.ProductsMissing.Count-4}":"";
+                parts.Add($"{r.ProductsMissing.Count} produto(s) sem tributação completa: {names}{extra}");
+            }
+            FiscalReadinessText.Text="Pendente: "+string.Join(" • ",parts);
+            FiscalReadinessText.Foreground=System.Windows.Media.Brushes.DarkOrange;
+            if(announce)SetError("A configuração fiscal ainda possui pendências. Veja o diagnóstico na aba Fiscal.");
+        }
+        catch(Exception ex)
+        {
+            FiscalReadinessText.Text=Friendly(ex.Message);
+            FiscalReadinessText.Foreground=System.Windows.Media.Brushes.Firebrick;
+            if(announce)SetError(ex.Message);
+        }
     }
 
     private async void SaveHardwareButton_Click(object sender,RoutedEventArgs e)
@@ -182,19 +244,50 @@ public partial class HardwareFiscalSettingsWindow : Window
                 enabled=FiscalEnabledCheck.IsChecked==true,
                 environment=ChoiceValue(FiscalEnvironmentCombo),
                 default_document=ChoiceValue(DefaultDocumentCombo),
-                legal_name=LegalNameBox.Text.Trim(),trade_name=TradeNameBox.Text.Trim(),cnpj=CnpjBox.Text.Trim(),
-                state_registration=IeBox.Text.Trim(),state_code=UfBox.Text.Trim().ToUpperInvariant(),city_code=CityCodeBox.Text.Trim(),tax_regime=TaxRegimeBox.Text.Trim(),
-                nfce_series=PositiveInt(NfceSeriesBox.Text,1),nfe_series=PositiveInt(NfeSeriesBox.Text,1),
-                csc_id=CscIdBox.Text.Trim(),csc_token=CscTokenBox.Password,
-                certificate_mode=ChoiceValue(CertificateModeCombo),contingency_enabled=ContingencyCheck.IsChecked==true
+                legal_name=LegalNameBox.Text.Trim(),
+                trade_name=TradeNameBox.Text.Trim(),
+                cnpj=CnpjBox.Text.Trim(),
+                state_registration=IeBox.Text.Trim(),
+                state_code=UfBox.Text.Trim().ToUpperInvariant(),
+                city_code=CityCodeBox.Text.Trim(),
+                tax_regime=TaxRegimeBox.Text.Trim(),
+                street=StreetBox.Text.Trim(),
+                address_number=AddressNumberBox.Text.Trim(),
+                address_complement=AddressComplementBox.Text.Trim(),
+                district=DistrictBox.Text.Trim(),
+                city_name=CityNameBox.Text.Trim(),
+                postal_code=PostalCodeBox.Text.Trim(),
+                phone=FiscalPhoneBox.Text.Trim(),
+                email=FiscalEmailBox.Text.Trim(),
+                municipal_registration=MunicipalRegistrationBox.Text.Trim(),
+                cnae=CnaeBox.Text.Trim(),
+                country_code=CountryCodeBox.Text.Trim(),
+                country_name=CountryNameBox.Text.Trim(),
+                nfce_series=PositiveInt(NfceSeriesBox.Text,1),
+                nfe_series=PositiveInt(NfeSeriesBox.Text,1),
+                csc_id=CscIdBox.Text.Trim(),
+                csc_token=CscTokenBox.Password,
+                certificate_mode=ChoiceValue(CertificateModeCombo),
+                contingency_enabled=ContingencyCheck.IsChecked==true
             });
             _fiscalProfile=response.Profile;
             CscTokenBox.Clear();
             await LoadFiscalAsync();
-            SetSuccess("Configuração fiscal salva. Use homologação antes de produção.");
+            await LoadReadinessAsync(false);
+            SetSuccess("Configuração fiscal salva. Mantenha em homologação até concluir a validação real.");
         }
         catch(Exception ex){SetError(ex.Message);}
     }
+
+    private async void ProductTaxButton_Click(object sender,RoutedEventArgs e)
+    {
+        if(!_canFiscal)return;
+        var window=new FiscalProductsWindow(_api){Owner=this};
+        window.ShowDialog();
+        await LoadReadinessAsync(false);
+    }
+
+    private async void CheckFiscalButton_Click(object sender,RoutedEventArgs e)=>await LoadReadinessAsync(true);
 
     private void SelectCertificateButton_Click(object sender,RoutedEventArgs e)
     {
@@ -221,6 +314,7 @@ public partial class HardwareFiscalSettingsWindow : Window
             finally{Array.Clear(pfx,0,pfx.Length);CertificatePasswordBox.Clear();}
             _certificateFile=null;CertificateFileText.Text="";
             await LoadFiscalAsync();
+            await LoadReadinessAsync(false);
             SetSuccess("Certificado A1 importado com proteção do servidor/Windows conforme o modo escolhido.");
         }
         catch(Exception ex){CertificatePasswordBox.Clear();SetError(ex.Message);}
