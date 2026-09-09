@@ -36,6 +36,8 @@ public partial class MainWindow
 
     private void EnsureHubControls()
     {
+        EnsurePosStockUx();
+        _=RefreshOperationalPermissionsAsync(true);
         if(_hubNavButton is not null)return;
         if(PosNavButton.Parent is not StackPanel sidebar)return;
 
@@ -205,6 +207,7 @@ public partial class MainWindow
         _hubBusy=true;
         try
         {
+            await RefreshOperationalPermissionsAsync();
             EnsureHubRuntime();if(_hubIntegrationApi is null||_hubHardwareStore is null||_hubProcessor is null)return;
             if(DateTimeOffset.UtcNow-_lastHubHeartbeat>TimeSpan.FromSeconds(30))
             {
@@ -264,6 +267,7 @@ public partial class MainWindow
     {
         if(_hubTimer is not null){_hubTimer.Stop();_hubTimer.Tick-=HubTimer_Tick;_hubTimer=null;}
         ShellPanel.IsVisibleChanged-=ShellPanel_BrandVisibilityChanged;
+        DisposePosStockUx();
         _hubIntegrationApi?.Dispose();_hubIntegrationApi=null;_hubProcessor=null;_hubHardwareStore=null;_productionPrintProcessor=null;
         foreach(var disposable in _hubProviderDisposables)disposable.Dispose();
         _hubProviderDisposables.Clear();
