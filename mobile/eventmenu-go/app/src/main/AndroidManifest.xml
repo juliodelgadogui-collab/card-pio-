@@ -3,47 +3,21 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-
-    <queries>
-        <package android:name="br.com.uol.ps.tapon" />
-    </queries>
-
-    <application
-        android:name=".EventMenuGoApplication"
-        android:allowBackup="false"
-        android:usesCleartextTraffic="false"
-        android:icon="@drawable/ic_eventmenu_logo"
-        android:roundIcon="@drawable/ic_eventmenu_logo"
-        android:label="EventMenu GO"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <meta-data
-            android:name="com.google.mlkit.vision.DEPENDENCIES"
-            android:value="barcode_ui" />
-        <service
-            android:name=".notifications.EventMenuFirebaseMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
-        <activity
-            android:name=".MainActivity"
-            android:exported="true"
-            android:launchMode="singleTop"
-            android:screenOrientation="unspecified">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="eventmenugo" android:host="open" />
-            </intent-filter>
+    <queries><package android:name="br.com.uol.ps.tapon" /></queries>
+    <application android:name=".EventMenuGoApplication" android:allowBackup="false" android:usesCleartextTraffic="false" android:icon="@drawable/ic_eventmenu_logo" android:roundIcon="@drawable/ic_eventmenu_logo" android:label="EventMenu GO" android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <meta-data android:name="com.google.mlkit.vision.DEPENDENCIES" android:value="barcode_ui" />
+        <service android:name=".notifications.EventMenuFirebaseMessagingService" android:exported="false"><intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter></service>
+        <service android:name=".location.DeliveryLocationService" android:exported="false" android:foregroundServiceType="location" android:stopWithTask="false" />
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop" android:screenOrientation="unspecified">
+            <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
+            <intent-filter><action android:name="android.intent.action.VIEW" /><category android:name="android.intent.category.DEFAULT" /><category android:name="android.intent.category.BROWSABLE" /><data android:scheme="eventmenugo" android:host="open" /></intent-filter>
         </activity>
     </application>
 </manifest>
