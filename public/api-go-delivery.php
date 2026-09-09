@@ -8,6 +8,7 @@ use EventMenu\Core\Auth;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DeliveryLocationService;
 use EventMenu\Services\DeliveryProgressService;
+use EventMenu\Services\DeliveryPublicTrackingService;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
@@ -29,7 +30,10 @@ try{
 
     $orderId=(int)($body['order_id']??0);
     if($action==='pickup')god_out(['ok'=>true,'progress'=>$service->pickup($orderId)]);
-    if($action==='start-route')god_out(['ok'=>true,'progress'=>$service->startRoute($orderId)]);
+    if($action==='start-route'){
+        $progress=$service->startRoute($orderId);$tracking=(new DeliveryPublicTrackingService())->issue($orderId);$progress['tracking_url']=$tracking['url'];$progress['tracking_expires_at']=$tracking['expires_at'];
+        god_out(['ok'=>true,'progress'=>$progress]);
+    }
     if($action==='arrive'){
         $progress=$service->arrive($orderId);$tenantId=Auth::tenantId();$userId=Auth::id();if($tenantId&&$userId)$locations->stopForOrder($tenantId,$userId,$orderId);
         god_out(['ok'=>true,'progress'=>$progress,'tracking'=>false]);
