@@ -67,19 +67,21 @@ fun DispatchScreen(
     val deliveryInProgress = orders
         .filter { it.channel == "delivery" && it.status == "out_for_delivery" }
         .sortedBy { it.id }
+    val hasDeliveryOrders = orders.any { it.channel == "delivery" }
 
     var assigning by remember { mutableStateOf<Order?>(null) }
     var routing by remember { mutableStateOf<UnassignedUnitDelivery?>(null) }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(hasDeliveryOrders) {
+        if (!hasDeliveryOrders) return@LaunchedEffect
         while (true) {
-            if (orders.any { it.channel == "delivery" }) expeditionViewModel.refresh()
+            expeditionViewModel.refresh()
             delay(10_000L)
         }
     }
 
     LaunchedEffect(orders.map { it.id to it.status }) {
-        if (orders.any { it.channel == "delivery" }) expeditionViewModel.refresh()
+        if (hasDeliveryOrders) expeditionViewModel.refresh()
     }
 
     LaunchedEffect(orderState.changedVersion) {
