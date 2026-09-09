@@ -171,6 +171,12 @@ fun DeliveryOperationsScreen(
                     }
 
                     if (order.status == "out_for_delivery") {
+                        step?.trackingUrl?.takeIf { it.isNotBlank() }?.let { trackingUrl ->
+                            OutlinedButton(onClick = { shareTracking(context, trackingUrl, order.id) }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Compartilhar acompanhamento com cliente")
+                            }
+                        }
+
                         if (address != null) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(onClick = { openGoogleMaps(context, address) }, modifier = Modifier.weight(1f)) { Text("Google Maps") }
@@ -366,6 +372,15 @@ private fun deliveryFriendlyDateTime(value: String): String {
 private fun copy(context: Context, text: String) {
     (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
         .setPrimaryClip(ClipData.newPlainText("PIX pedido", text))
+}
+
+private fun shareTracking(context: Context, url: String, orderId: Int) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, "Acompanhe o pedido #$orderId")
+        putExtra(Intent.EXTRA_TEXT, "Acompanhe sua entrega em tempo real:\n$url")
+    }
+    context.startActivity(Intent.createChooser(intent, "Compartilhar acompanhamento"))
 }
 
 private fun openDialer(context: Context, phone: String) {
