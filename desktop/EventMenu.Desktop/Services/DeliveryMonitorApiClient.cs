@@ -27,14 +27,23 @@ public sealed class DeliveryMonitorApiClient : IDisposable
         var baseUrl = (Environment.GetEnvironmentVariable("EVENTMENU_DESKTOP_API_BASE_URL") ?? "https://go.gestao2.store/1/").Trim();
         if (!baseUrl.EndsWith('/')) baseUrl += "/";
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
-            throw new InvalidOperationException("O endereço do servidor EventMenu precisa usar HTTPS.");
+            throw new InvalidOperationException("O endereço do sistema precisa usar uma conexão segura.");
         _http = new HttpClient { BaseAddress = uri, Timeout = TimeSpan.FromSeconds(20) };
         _http.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         _http.DefaultRequestHeaders.Add("X-Device-Id", _deviceId);
     }
 
-    public Task<DeliveryLiveResponse> LiveAsync(CancellationToken ct = default) =>
-        SendWithRefreshAsync<DeliveryLiveResponse>(HttpMethod.Get, "api-go-delivery.php?action=manager-live", null, ct);
+    public async Task<DeliveryLiveResponse> LiveAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await SendWithRefreshAsync<DeliveryLiveResponse>(HttpMethod.Get, "api-go-delivery.php?action=live-locations", null, ct);
+        }
+        catch (ApiClientException ex) when (ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        {
+            return await SendWithRefreshAsync<DeliveryLiveResponse>(HttpMethod.Get, "api-go-delivery.php?action=manager-live", null, ct);
+        }
+    }
 
     private async Task<T> SendWithRefreshAsync<T>(HttpMethod method, string url, object? body, CancellationToken ct)
     {
@@ -78,14 +87,14 @@ public sealed class DeliveryMonitorApiClient : IDisposable
         if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
         HttpResponseMessage response;
         try { response = await _http.SendAsync(request, HttpCompletionOption.ResponseContentRead, ct); }
-        catch (TaskCanceledException) when (!ct.IsCancellationRequested) { throw new ApiClientException("O servidor demorou para responder."); }
-        catch (HttpRequestException) { throw new ApiClientException("Sem conexão com o servidor."); }
+        catch (TaskCanceledException) when (!ct.IsCancellationRequested) { throw new ApiClientException("A atualização demorou demais. Tente novamente."); }
+        catch (HttpRequestException) { throw new ApiClientException("Sem conexão. Confira a internet e tente novamente."); }
         using (response)
         {
             var text = await response.Content.ReadAsStringAsync(ct);
             if (!response.IsSuccessStatusCode) throw new ApiClientException(ReadError(text), response.StatusCode);
             var result = JsonSerializer.Deserialize<T>(text, JsonOptions);
-            return result ?? throw new ApiClientException("O servidor retornou dados incompletos.");
+            return result ?? throw new ApiClientException("Não foi possível carregar as entregas.");
         }
     }
 
