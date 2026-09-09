@@ -34,15 +34,15 @@ public partial class DeliveryMonitorWindow : Window
             DeliveriesGrid.ItemsSource = response.Locations;
             if (selectedId.HasValue) DeliveriesGrid.SelectedItem = response.Locations.FirstOrDefault(x => x.DeliveryUserId == selectedId.Value);
             if (DeliveriesGrid.SelectedItem is null && response.Locations.Count > 0) DeliveriesGrid.SelectedIndex = 0;
-            var fresh = response.Locations.Count(x => x.Fresh);
+            var fresh = response.Locations.Count(x => x.IsLive);
             SummaryText.Text = response.Locations.Count == 0
-                ? "Nenhuma rota com GPS ativo agora."
-                : $"{response.Locations.Count} rota(s) • {fresh} com sinal recente";
+                ? "Nenhuma entrega em rota agora."
+                : $"{response.Locations.Count} entrega(s) em rota • {fresh} ao vivo";
             UpdateSelected();
         }
         catch (Exception ex)
         {
-            SummaryText.Text = "Não foi possível atualizar o rastreamento.";
+            SummaryText.Text = "Não foi possível atualizar as entregas agora.";
             if (showError) MessageBox.Show(Friendly(ex.Message), "Entregas ao vivo", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally { _loading = false; }
@@ -56,25 +56,26 @@ public partial class DeliveryMonitorWindow : Window
         {
             MapButton.IsEnabled = false;
             CopyButton.IsEnabled = false;
-            DetailText.Text = "Selecione uma entrega para ver a posição.";
+            DetailText.Text = "Selecione uma entrega para acompanhar.";
             return;
         }
-        MapButton.IsEnabled = true;
-        CopyButton.IsEnabled = true;
-        DetailText.Text = $"{row.DeliveryName} • Pedido #{row.OrderId} • {row.Coordinates} • {row.OnlineLabel}";
+        MapButton.IsEnabled = row.HasPosition;
+        CopyButton.IsEnabled = row.HasPosition;
+        DetailText.Text = $"{row.DeliveryName} • Pedido #{row.OrderId} • {row.OnlineLabel}" + (row.HasPosition ? $" • {row.Coordinates}" : "");
     }
 
     private void MapButton_Click(object sender, RoutedEventArgs e)
     {
-        if (DeliveriesGrid.SelectedItem is not DeliveryLiveLocation row) return;
-        var url = $"https://www.google.com/maps/search/?api=1&query={Uri.EscapeDataString(row.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + row.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture))}";
+        if (DeliveriesGrid.SelectedItem is not DeliveryLiveLocation row || !row.HasPosition) return;
+        var coordinates = row.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "," + row.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var url = $"https://www.google.com/maps/search/?api=1&query={Uri.EscapeDataString(coordinates)}";
         try { Process.Start(new ProcessStartInfo(url) { UseShellExecute = true }); }
-        catch { MessageBox.Show("Não foi possível abrir o mapa padrão do Windows.", "Entregas ao vivo", MessageBoxButton.OK, MessageBoxImage.Information); }
+        catch { MessageBox.Show("Não foi possível abrir o mapa.", "Entregas ao vivo", MessageBoxButton.OK, MessageBoxImage.Information); }
     }
 
     private void CopyButton_Click(object sender, RoutedEventArgs e)
     {
-        if (DeliveriesGrid.SelectedItem is DeliveryLiveLocation row) Clipboard.SetText(row.Coordinates);
+        if (DeliveriesGrid.SelectedItem is DeliveryLiveLocation row && row.HasPosition) Clipboard.SetText(row.Coordinates);
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await LoadAsync(true);
@@ -83,8 +84,9 @@ public partial class DeliveryMonitorWindow : Window
     private static string Friendly(string message)
     {
         var lower = message.ToLowerInvariant();
+        if (lower.Contains("método não permitido") || lower.Contains("endpoint")) return "O acompanhamento ao vivo ainda não está disponível nesta instalação.";
         return lower.Contains("sqlstate") || lower.Contains("exception") || lower.Contains("stack trace")
-            ? "Não foi possível consultar o rastreamento das entregas."
+            ? "Não foi possível consultar as entregas agora."
             : message;
     }
 }
