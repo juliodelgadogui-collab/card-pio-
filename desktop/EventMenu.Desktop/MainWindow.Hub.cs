@@ -13,9 +13,11 @@ public partial class MainWindow
     private DesktopIntegrationApiClient? _hubIntegrationApi;
     private LocalHardwareProfileStore? _hubHardwareStore;
     private HubCommandProcessor? _hubProcessor;
+    private readonly List<IDisposable> _hubProviderDisposables=new();
     private bool _hubBusy;
     private DateTimeOffset _lastHubHeartbeat=DateTimeOffset.MinValue;
     private Button? _hubNavButton;
+    private Button? _hardwareSettingsButton;
 
     protected override void OnSourceInitialized(EventArgs e)
     {
@@ -32,20 +34,34 @@ public partial class MainWindow
     {
         if(_hubNavButton is not null)return;
         if(PosNavButton.Parent is not StackPanel sidebar)return;
+
         _hubNavButton=new Button
         {
             Content="Celular / Hub",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Vincular celulares e acompanhar equipamentos desta unidade"
+            ToolTip="Gerar um QR temporário para vincular celulares autorizados",
+            Visibility=Can("hardware_manage")?Visibility.Visible:Visibility.Collapsed
         };
         _hubNavButton.Click+=async(_,_)=>await OpenHubPairingAsync();
+
+        _hardwareSettingsButton=new Button
+        {
+            Content="Equipamentos e fiscal",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="Configurar impressoras, PINPad, TEF e emissão fiscal",
+            Visibility=(Can("hardware_manage")||Can("fiscal_manage"))?Visibility.Visible:Visibility.Collapsed
+        };
+        _hardwareSettingsButton.Click+=async(_,_)=>await OpenHardwareSettingsAsync();
+
         var cashIndex=sidebar.Children.IndexOf(CashNavButton);
-        sidebar.Children.Insert(Math.Max(0,cashIndex+1),_hubNavButton);
+        var insert=Math.Max(0,cashIndex+1);
+        sidebar.Children.Insert(insert,_hubNavButton);
+        sidebar.Children.Insert(insert+1,_hardwareSettingsButton);
     }
 
     private async void MainWindow_HubPreviewKeyDown(object sender,KeyEventArgs e)
     {
-        if(e.Key==Key.H&&Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        if(e.Key==Key.H&&Keyboard.Modifiers.HasFlag(ModifierKeys.Control)&&Can("hardware_manage"))
         {
             e.Handled=true;
             await OpenHubPairingAsync();
@@ -54,6 +70,7 @@ public partial class MainWindow
 
     private async Task OpenHubPairingAsync()
     {
+        if(!Can("hardware_manage"))return;
         if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null)return;
         if(!HasShift)
         {
@@ -73,6 +90,29 @@ public partial class MainWindow
             var window=new HubPairingWindow(value){Owner=this};window.ShowDialog();
         }
         catch(Exception ex){MessageBox.Show(ex.Message,"EventMenu Hub",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+
+    private async Task OpenHardwareSettingsAsync()
+    {
+        if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null||_currentUser is null)return;
+        if(!Can("hardware_manage")&&!Can("fiscal_manage"))return;
+        if(!HasShift)
+        {
+            MessageBox.Show("Inicie um turno para definir a unidade que será configurada.","EventMenu",MessageBoxButton.OK,MessageBoxImage.Information);
+            return;
+        }
+        var unitId=ShiftInt("unit_id");if(unitId<1)return;
+        try
+        {
+            EnsureHubRuntime();
+            if(_hubIntegrationApi is null||_hubHardwareStore is null)return;
+            var unitName=ShiftValue("unit_name");
+            var window=new HardwareFiscalSettingsWindow(_hubIntegrationApi,_hubHardwareStore,_currentUser.TenantId,unitId,unitName,Can("hardware_manage"),Can("fiscal_manage")){Owner=this};
+            window.ShowDialog();
+            await _hubIntegrationApi.HardwareHeartbeatAsync(unitId,_hubHardwareStore,_hubHardwareStore.Load());
+            _lastHubHeartbeat=DateTimeOffset.UtcNow;
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"EventMenu",MessageBoxButton.OK,MessageBoxImage.Warning);}
     }
 
     private async void HubTimer_Tick(object? sender,EventArgs e)
@@ -113,7 +153,16 @@ public partial class MainWindow
         if(_hubIntegrationApi is not null)return;
         _hubHardwareStore=new LocalHardwareProfileStore();
         _hubIntegrationApi=new DesktopIntegrationApiClient(_store);
-        var terminal=new PaymentTerminalCoordinator(_hubIntegrationApi,Array.Empty<IPaymentTerminalProvider>());
+
+        var providers=new IPaymentTerminalProvider[]
+        {
+            new LocalTefBridgeProvider("generic_tef"),
+            new LocalTefBridgeProvider("pagbank_tef"),
+            new LocalTefBridgeProvider("stone_tef"),
+            new LocalTefBridgeProvider("sitef")
+        };
+        _hubProviderDisposables.AddRange(providers.OfType<IDisposable>());
+        var terminal=new PaymentTerminalCoordinator(_hubIntegrationApi,providers);
         _hubProcessor=new HubCommandProcessor(
             _hubIntegrationApi,
             _api,
@@ -127,5 +176,7 @@ public partial class MainWindow
     {
         if(_hubTimer is not null){_hubTimer.Stop();_hubTimer.Tick-=HubTimer_Tick;_hubTimer=null;}
         _hubIntegrationApi?.Dispose();_hubIntegrationApi=null;_hubProcessor=null;_hubHardwareStore=null;
+        foreach(var disposable in _hubProviderDisposables)disposable.Dispose();
+        _hubProviderDisposables.Clear();
     }
 }
