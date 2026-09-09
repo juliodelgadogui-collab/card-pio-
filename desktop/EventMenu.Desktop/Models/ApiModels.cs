@@ -64,6 +64,18 @@ public sealed class Order
     [JsonPropertyName("delivery_name")] public string? DeliveryName { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     public string TotalDisplay => (TotalCents / 100m).ToString("C2", new System.Globalization.CultureInfo("pt-BR"));
+    public string ChannelDisplay => Channel switch { "counter" => "Balcão", "pickup" => "Retirada", "delivery" => "Delivery", "table" => "Mesa", "event_bar" => "Evento / Bar", _ => Channel };
+    public string StatusDisplay => Status switch { "pending" => "Pendente", "confirmed" => "Confirmado", "preparing" => "Em preparo", "ready" => "Pronto", "out_for_delivery" => "Em rota", "served" => "Servido", "completed" => "Concluído", "cancelled" => "Cancelado", _ => Status };
+    public string PaymentStatusDisplay => PaymentStatus switch { "unpaid" => "Não pago", "pending" => "Pendente", "paid" => "Pago", "partially_paid" => "Parcial", "refunded" => "Estornado", "cancelled" => "Cancelado", _ => PaymentStatus };
+    public string CreatedDisplay
+    {
+        get
+        {
+            if (DateTimeOffset.TryParse(CreatedAt, out var value)) return value.ToLocalTime().ToString("dd/MM HH:mm");
+            if (DateTime.TryParse(CreatedAt, out var local)) return local.ToString("dd/MM HH:mm");
+            return CreatedAt;
+        }
+    }
 }
 
 public sealed class OrdersResponse
