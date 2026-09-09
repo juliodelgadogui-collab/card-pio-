@@ -15,7 +15,7 @@ final class HubService
         'print_order' => ['orders.view','orders.create','orders.manage'],
         'print_receipt' => ['payments.manage','orders.view','orders.manage'],
         'open_drawer' => ['cash.manage'],
-        'tef_charge' => ['terminal.collect','payments.manage'],
+        'tef_charge' => ['terminal.request','terminal.collect'],
         'customer_display' => ['orders.view','orders.create','orders.manage'],
         'kitchen_alert' => ['orders.kitchen','orders.dispatch','orders.manage'],
         'play_alert' => ['orders.view','orders.create','orders.manage','orders.kitchen','orders.dispatch'],
@@ -44,11 +44,12 @@ final class HubService
         $mobileDeviceId=trim($mobileDeviceId);if(strlen($mobileDeviceId)<8)throw new RuntimeException('Celular não identificado.');
         $deviceHash=hash('sha256',$mobileDeviceId);$hash=hash('sha256',$token);$label=mb_substr(trim($label),0,190);
         return Database::transaction(function(PDO $tx)use($tenantId,$userId,$deviceHash,$hash,$label):array{
-            $q=$tx->prepare(Database::portableSql($tx,'SELECT hp.*,dhb.device_label,dhb.revoked_at FROM hub_pairing_codes hp JOIN desktop_hardware_bindings dhb ON dhb.id=hp.desktop_binding_id AND dhb.tenant_id=hp.tenant_id WHERE hp.tenant_id=? AND hp.code_hash=? LIMIT 1 FOR UPDATE'));
+            $q=$tx->prepare(Database::portableSql($tx,'SELECT hp.*,dhb.device_label,dhb.revoked_at,dhb.last_seen_at FROM hub_pairing_codes hp JOIN desktop_hardware_bindings dhb ON dhb.id=hp.desktop_binding_id AND dhb.tenant_id=hp.tenant_id WHERE hp.tenant_id=? AND hp.code_hash=? LIMIT 1 FOR UPDATE'));
             $q->execute([$tenantId,$hash]);$pair=$q->fetch();if(!$pair)throw new RuntimeException('Pareamento não encontrado.');
             if($pair['status']!=='pending')throw new RuntimeException('Este QR já foi utilizado ou revogado.');
             if(strtotime((string)$pair['expires_at'])<time()){$tx->prepare('UPDATE hub_pairing_codes SET status="expired" WHERE id=?')->execute([$pair['id']]);throw new RuntimeException('Este QR expirou. Gere outro no computador.');}
             if(!empty($pair['revoked_at']))throw new RuntimeException('O computador foi revogado.');
+            $lastSeen=$pair['last_seen_at']?strtotime((string)$pair['last_seen_at']):0;if($lastSeen<(time()-90))throw new RuntimeException('O computador não está online no Hub.');
             $this->assertUnitAccess((int)$pair['unit_id']);
             $existing=$tx->prepare('SELECT id FROM hub_device_links WHERE tenant_id=? AND desktop_binding_id=? AND mobile_device_hash=? LIMIT 1');$existing->execute([$tenantId,$pair['desktop_binding_id'],$deviceHash]);$linkId=(int)$existing->fetchColumn();
             if($linkId>0){$tx->prepare('UPDATE hub_device_links SET unit_id=?,mobile_user_id=?,label=?,status="active",revoked_at=NULL,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$pair['unit_id'],$userId,$label?:null,$linkId]);}
@@ -61,8 +62,9 @@ final class HubService
 
     public function mobileLinks(string $mobileDeviceId):array
     {
-        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)return[];$hash=hash('sha256',trim($mobileDeviceId));
-        $s=Database::connection()->prepare('SELECT hdl.id,hdl.unit_id,hdl.desktop_binding_id,hdl.label,hdl.status,hdl.last_seen_at,ou.name unit_name,dhb.device_label desktop_label,dhb.hardware_json,dhb.last_seen_at desktop_last_seen_at,dhb.revoked_at desktop_revoked_at FROM hub_device_links hdl JOIN desktop_hardware_bindings dhb ON dhb.id=hdl.desktop_binding_id AND dhb.tenant_id=hdl.tenant_id LEFT JOIN operating_units ou ON ou.id=hdl.unit_id AND ou.tenant_id=hdl.tenant_id WHERE hdl.tenant_id=? AND hdl.mobile_user_id=? AND hdl.mobile_device_hash=? AND hdl.status="active" ORDER BY ou.name,dhb.device_label');
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)return[];$hash=hash('sha256',trim($mobileDeviceId));$pdo=Database::connection();
+        $pdo->prepare('UPDATE hub_device_links SET last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND mobile_user_id=? AND mobile_device_hash=? AND status="active"')->execute([$tenantId,$userId,$hash]);
+        $s=$pdo->prepare('SELECT hdl.id,hdl.unit_id,hdl.desktop_binding_id,hdl.label,hdl.status,hdl.last_seen_at,ou.name unit_name,dhb.device_label desktop_label,dhb.hardware_json,dhb.last_seen_at desktop_last_seen_at,dhb.revoked_at desktop_revoked_at FROM hub_device_links hdl JOIN desktop_hardware_bindings dhb ON dhb.id=hdl.desktop_binding_id AND dhb.tenant_id=hdl.tenant_id LEFT JOIN operating_units ou ON ou.id=hdl.unit_id AND ou.tenant_id=hdl.tenant_id WHERE hdl.tenant_id=? AND hdl.mobile_user_id=? AND hdl.mobile_device_hash=? AND hdl.status="active" ORDER BY ou.name,dhb.device_label');
         $s->execute([$tenantId,$userId,$hash]);$rows=$s->fetchAll();foreach($rows as &$row){$hardware=json_decode((string)($row['hardware_json']??''),true);$row['hardware']=is_array($hardware)?$hardware:[];unset($row['hardware_json']);$last=$row['desktop_last_seen_at']?strtotime((string)$row['desktop_last_seen_at']):0;$row['desktop_online']=empty($row['desktop_revoked_at'])&&$last>=(time()-90);}unset($row);return$rows;
     }
 
@@ -73,8 +75,8 @@ final class HubService
         $this->requireAnyPermission(self::COMMAND_PERMISSIONS[$commandType]);
         $idempotencyKey=trim($idempotencyKey);if(strlen($idempotencyKey)<12)throw new RuntimeException('Chave de idempotência inválida.');
         $deviceHash=hash('sha256',trim($mobileDeviceId));$pdo=Database::connection();
-        $link=$pdo->prepare('SELECT hdl.*,dhb.revoked_at FROM hub_device_links hdl JOIN desktop_hardware_bindings dhb ON dhb.id=hdl.desktop_binding_id AND dhb.tenant_id=hdl.tenant_id WHERE hdl.tenant_id=? AND hdl.desktop_binding_id=? AND hdl.mobile_user_id=? AND hdl.mobile_device_hash=? AND hdl.status="active" LIMIT 1');
-        $link->execute([$tenantId,$targetBindingId,$userId,$deviceHash]);$bound=$link->fetch();if(!$bound)throw new RuntimeException('Este celular não está vinculado ao computador selecionado.');if(!empty($bound['revoked_at']))throw new RuntimeException('O computador foi revogado.');$this->assertUnitAccess((int)$bound['unit_id']);
+        $link=$pdo->prepare('SELECT hdl.*,dhb.revoked_at,dhb.last_seen_at desktop_last_seen_at FROM hub_device_links hdl JOIN desktop_hardware_bindings dhb ON dhb.id=hdl.desktop_binding_id AND dhb.tenant_id=hdl.tenant_id WHERE hdl.tenant_id=? AND hdl.desktop_binding_id=? AND hdl.mobile_user_id=? AND hdl.mobile_device_hash=? AND hdl.status="active" LIMIT 1');
+        $link->execute([$tenantId,$targetBindingId,$userId,$deviceHash]);$bound=$link->fetch();if(!$bound)throw new RuntimeException('Este celular não está vinculado ao computador selecionado.');if(!empty($bound['revoked_at']))throw new RuntimeException('O computador foi revogado.');$lastSeen=$bound['desktop_last_seen_at']?strtotime((string)$bound['desktop_last_seen_at']):0;if($lastSeen<(time()-90))throw new RuntimeException('O computador EventMenu está offline.');$this->assertUnitAccess((int)$bound['unit_id']);
         $this->validatePayload($commandType,$payload,(int)$bound['unit_id']);
         $json=json_encode($this->sanitizePayload($payload),JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);$expires=gmdate('Y-m-d H:i:s',time()+120);
         $existing=$pdo->prepare('SELECT * FROM hub_commands WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$existing->execute([$tenantId,$idempotencyKey]);if($row=$existing->fetch())return$this->publicCommand($row);
@@ -130,7 +132,10 @@ final class HubService
         if(in_array($type,['print_order','print_receipt','tef_charge','customer_display'],true)){
             $orderId=(int)($payload['order_id']??0);if($orderId<1)throw new RuntimeException('Informe o pedido.');$s=Database::connection()->prepare('SELECT id,unit_id,status,payment_status,total_cents FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$s->execute([$orderId,Auth::tenantId()]);$order=$s->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');if((int)($order['unit_id']??0)!==$unitId)throw new RuntimeException('Pedido e computador pertencem a unidades diferentes.');
             if($type==='tef_charge'){
-                if(in_array((string)$order['status'],['cancelled','completed'],true)||(string)$order['payment_status']==='paid')throw new RuntimeException('Este pedido não aceita nova cobrança.');$amount=(int)($payload['amount_cents']??0);if($amount<=0)throw new RuntimeException('Informe o valor da cobrança.');$remaining=(new PaymentService())->remaining($orderId,Auth::tenantId());if($amount>(int)$remaining['remaining_cents'])throw new RuntimeException('Valor maior que o saldo restante do pedido.');$paymentType=(string)($payload['payment_type']??'');if(!in_array($paymentType,['debit','credit','pix','voucher'],true))throw new RuntimeException('Tipo de pagamento inválido.');if((int)($payload['terminal_config_id']??0)<1)throw new RuntimeException('Escolha o PINPad/TEF.');
+                if(in_array((string)$order['status'],['cancelled','completed'],true)||(string)$order['payment_status']==='paid')throw new RuntimeException('Este pedido não aceita nova cobrança.');
+                $amount=(int)($payload['amount_cents']??0);if($amount<=0)throw new RuntimeException('Informe o valor da cobrança.');$remaining=(new PaymentService())->remaining($orderId,Auth::tenantId());if($amount>(int)$remaining['remaining_cents'])throw new RuntimeException('Valor maior que o saldo restante do pedido.');
+                $paymentType=(string)($payload['payment_type']??'');if(!in_array($paymentType,['debit','credit','pix','voucher'],true))throw new RuntimeException('Tipo de pagamento inválido.');
+                $terminalId=(int)($payload['terminal_config_id']??0);if($terminalId<1)throw new RuntimeException('Escolha o PINPad/TEF.');$t=Database::connection()->prepare('SELECT id FROM payment_terminal_configs WHERE id=? AND tenant_id=? AND unit_id=? AND enabled=1 LIMIT 1');$t->execute([$terminalId,Auth::tenantId(),$unitId]);if(!$t->fetchColumn())throw new RuntimeException('O PINPad/TEF não está ativo nesta unidade.');
             }
         }
     }
