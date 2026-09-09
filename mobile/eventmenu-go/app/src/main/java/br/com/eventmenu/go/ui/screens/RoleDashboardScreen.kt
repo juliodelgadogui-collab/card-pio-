@@ -38,6 +38,7 @@ import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.GoState
 import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.ui.theme.LocalTenantBrand
+import br.com.eventmenu.go.util.ServerTime
 
 private data class DashboardShortcutItem(val icon: ImageVector, val label: String, val screen: AppScreen)
 
@@ -194,5 +195,5 @@ private fun DashboardStatusCard(title: String, status: String, active: Boolean) 
 
 private fun dashboardUnitName(raw: String?): String { val clean = raw?.trim().orEmpty(); return if (clean.isBlank() || clean.equals("null", true)) "Unidade principal" else clean }
 private fun firstName(name: String): String = name.trim().substringBefore(' ').ifBlank { "equipe" }
-private fun dashboardTime(value: String): String = value.trim().replace('T', ' ').substringAfter(' ', value).take(5).ifBlank { value }
+private fun dashboardTime(value: String): String = ServerTime.localTime(value)
 private fun dashboardMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
