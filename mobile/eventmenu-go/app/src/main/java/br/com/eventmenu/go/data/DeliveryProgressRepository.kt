@@ -8,18 +8,104 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-data class DeliveryProgress(val orderId:Int,val orderStatus:String,val pickedUpAt:String="",val routeStartedAt:String="",val arrivedAt:String="",val completedAt:String=""){
- val pickedUp:Boolean get()=pickedUpAt.isNotBlank();val routeStarted:Boolean get()=routeStartedAt.isNotBlank();val arrived:Boolean get()=arrivedAt.isNotBlank();val completed:Boolean get()=completedAt.isNotBlank()||orderStatus=="completed"
+data class DeliveryProgress(
+    val orderId: Int,
+    val orderStatus: String,
+    val pickedUpAt: String = "",
+    val routeStartedAt: String = "",
+    val arrivedAt: String = "",
+    val completedAt: String = "",
+) {
+    val pickedUp: Boolean get() = pickedUpAt.isNotBlank()
+    val routeStarted: Boolean get() = routeStartedAt.isNotBlank()
+    val arrived: Boolean get() = arrivedAt.isNotBlank()
+    val completed: Boolean get() = completedAt.isNotBlank() || orderStatus == "completed"
 }
-class DeliveryProgressRepository(baseUrl:String,deviceId:String,private val sessionStore:SecureSessionStore){
- private val api=ApiClient(baseUrl,deviceId)
- suspend fun listMine():List<DeliveryProgress>{val array=api.getDelivery("list",requireToken()).optJSONArray("progress")?:JSONArray();return buildList{for(i in 0 until array.length())add(parse(array.getJSONObject(i)))}}
- suspend fun pickup(orderId:Int)=action("pickup",orderId);suspend fun startRoute(orderId:Int)=action("start-route",orderId);suspend fun arrive(orderId:Int)=action("arrive",orderId)
- suspend fun complete(orderId:Int):DeliveryProgress{val root=api.postDelivery("complete",requireToken(),JSONObject().put("order_id",orderId));return parse(root.getJSONObject("progress"))}
- suspend fun sendLocationForActiveRoutes(latitude:Double,longitude:Double,accuracy:Double?,speed:Double?,bearing:Double?,capturedAtMs:Long){val active=listMine().filter{it.routeStarted&&!it.completed&&it.orderStatus=="out_for_delivery"};if(active.isEmpty())return;active.forEach{p->val body=JSONObject().put("order_id",p.orderId).put("latitude",latitude).put("longitude",longitude).put("captured_at",utc(capturedAtMs));accuracy?.let{body.put("accuracy_m",it)};speed?.let{body.put("speed_mps",it)};bearing?.let{body.put("bearing_deg",it)};api.postDelivery("location",requireToken(),body)}}
- suspend fun trackingLink(orderId:Int):String=api.postDelivery("tracking-link",requireToken(),JSONObject().put("order_id",orderId)).optString("tracking_url")
- private suspend fun action(action:String,orderId:Int):DeliveryProgress{val root=api.postDelivery(action,requireToken(),JSONObject().put("order_id",orderId));return parse(root.getJSONObject("progress"))}
- private fun parse(j:JSONObject)=DeliveryProgress(j.optInt("order_id"),j.optString("order_status"),j.optString("picked_up_at"),j.optString("route_started_at"),j.optString("arrived_at"),j.optString("completed_at"))
- private fun utc(ms:Long)=SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'",Locale.US).apply{timeZone=TimeZone.getTimeZone("UTC")}.format(Date(ms))
- private fun requireToken():String=sessionStore.token()?:throw ApiException("Sessão não encontrada.",401)
+
+data class DeliveryLocationSample(
+    val latitude: Double,
+    val longitude: Double,
+    val accuracyM: Double? = null,
+    val speedMps: Double? = null,
+    val bearingDeg: Double? = null,
+    val capturedAtMs: Long,
+    val batteryPct: Int? = null,
+    val provider: String? = null,
+    val isMock: Boolean = false,
+)
+
+data class DeliveryLocationUploadResult(
+    val activeOrders: Int,
+    val stored: Int,
+)
+
+class DeliveryProgressRepository(
+    baseUrl: String,
+    deviceId: String,
+    private val sessionStore: SecureSessionStore,
+) {
+    private val api = ApiClient(baseUrl, deviceId)
+
+    suspend fun listMine(): List<DeliveryProgress> {
+        val array = api.getDelivery("list", requireToken()).optJSONArray("progress") ?: JSONArray()
+        return buildList {
+            for (i in 0 until array.length()) add(parse(array.getJSONObject(i)))
+        }
+    }
+
+    suspend fun pickup(orderId: Int): DeliveryProgress = action("pickup", orderId)
+    suspend fun startRoute(orderId: Int): DeliveryProgress = action("start-route", orderId)
+    suspend fun arrive(orderId: Int): DeliveryProgress = action("arrive", orderId)
+
+    suspend fun complete(orderId: Int): DeliveryProgress {
+        val root = api.postDelivery("complete", requireToken(), JSONObject().put("order_id", orderId))
+        return parse(root.getJSONObject("progress"))
+    }
+
+    suspend fun sendLocationBatch(samples: List<DeliveryLocationSample>): DeliveryLocationUploadResult {
+        if (samples.isEmpty()) return DeliveryLocationUploadResult(activeOrders = 0, stored = 0)
+        val points = JSONArray()
+        samples.takeLast(30).forEach { sample ->
+            val point = JSONObject()
+                .put("latitude", sample.latitude)
+                .put("longitude", sample.longitude)
+                .put("captured_at", utc(sample.capturedAtMs))
+                .put("is_mock", sample.isMock)
+            sample.accuracyM?.let { point.put("accuracy_m", it) }
+            sample.speedMps?.let { point.put("speed_mps", it) }
+            sample.bearingDeg?.let { point.put("bearing_deg", it) }
+            sample.batteryPct?.let { point.put("battery_pct", it) }
+            sample.provider?.takeIf { it.isNotBlank() }?.let { point.put("provider", it.take(32)) }
+            points.put(point)
+        }
+        val root = api.postDelivery("location-batch", requireToken(), JSONObject().put("points", points))
+        val tracking = root.optJSONObject("tracking") ?: JSONObject()
+        return DeliveryLocationUploadResult(
+            activeOrders = tracking.optInt("active_orders", 0),
+            stored = tracking.optInt("stored", 0),
+        )
+    }
+
+    suspend fun trackingLink(orderId: Int): String =
+        api.postDelivery("tracking-link", requireToken(), JSONObject().put("order_id", orderId)).optString("tracking_url")
+
+    private suspend fun action(action: String, orderId: Int): DeliveryProgress {
+        val root = api.postDelivery(action, requireToken(), JSONObject().put("order_id", orderId))
+        return parse(root.getJSONObject("progress"))
+    }
+
+    private fun parse(json: JSONObject) = DeliveryProgress(
+        orderId = json.optInt("order_id"),
+        orderStatus = json.optString("order_status"),
+        pickedUpAt = json.optString("picked_up_at"),
+        routeStartedAt = json.optString("route_started_at"),
+        arrivedAt = json.optString("arrived_at"),
+        completedAt = json.optString("completed_at"),
+    )
+
+    private fun utc(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
+        timeZone = TimeZone.getTimeZone("UTC")
+    }.format(Date(ms))
+
+    private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)
 }
