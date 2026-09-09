@@ -43,8 +43,8 @@ try{
     }
 
     if($action==='fiscal-profile'){
-        $unitId=(int)($_GET['unit_id']??0);
-        desktop_out(['ok'=>true,'profile'=>$fiscal->profileForUnit($unitId)]);
+        $unitId=(int)($_GET['unit_id']??0);$profile=$fiscal->profileForUnit($unitId);
+        desktop_out(['ok'=>true,'profile'=>$profile?:null]);
     }
     if($action==='fiscal-profile-save'){
         desktop_method('POST');
