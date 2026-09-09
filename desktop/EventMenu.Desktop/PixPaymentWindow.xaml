@@ -1,0 +1,59 @@
+<Window x:Class="EventMenu.Desktop.PixPaymentWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Cobrança PIX"
+        Width="560" Height="720"
+        MinWidth="500" MinHeight="620"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="CanResizeWithGrip">
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <TextBlock Text="Cobrança PIX" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock x:Name="OrderText" Foreground="#667085" Margin="0,6,0,0" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="White" CornerRadius="14" Padding="18" Margin="0,18,0,14">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="CPF/CNPJ do pagador" FontWeight="SemiBold" />
+                    <TextBox x:Name="TaxIdBox" Margin="0,6,0,0" Height="38" MaxLength="18" />
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Valor" FontWeight="SemiBold" />
+                    <TextBox x:Name="AmountBox" Margin="0,6,0,0" Height="38" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2" Background="White" CornerRadius="14" Padding="18">
+            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <Button x:Name="GenerateButton" Content="Gerar PIX" Height="42" Margin="0,0,0,14" Click="GenerateButton_Click" />
+                    <TextBlock x:Name="StatusText" Text="Informe CPF/CNPJ e valor para gerar a cobrança." Foreground="#667085" TextWrapping="Wrap" Margin="0,0,0,12" />
+
+                    <Border x:Name="QrBorder" Visibility="Collapsed" BorderBrush="#E4E7EC" BorderThickness="1" CornerRadius="12" Padding="12" HorizontalAlignment="Center" Margin="0,4,0,12">
+                        <Image x:Name="QrImage" Width="250" Height="250" Stretch="Uniform" />
+                    </Border>
+
+                    <TextBlock x:Name="CopyPasteLabel" Text="PIX copia e cola" FontWeight="SemiBold" Visibility="Collapsed" />
+                    <TextBox x:Name="CopyPasteBox" Visibility="Collapsed" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True" Height="100" Margin="0,6,0,8" VerticalScrollBarVisibility="Auto" />
+                    <Button x:Name="CopyButton" Content="Copiar código PIX" Style="{StaticResource SecondaryButton}" Visibility="Collapsed" HorizontalAlignment="Left" Click="CopyButton_Click" />
+                    <TextBlock x:Name="ExpiresText" Foreground="#667085" Margin="0,8,0,0" />
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+
+        <DockPanel Grid.Row="3" Margin="0,14,0,0">
+            <TextBlock x:Name="PollingText" DockPanel.Dock="Left" VerticalAlignment="Center" Foreground="#667085" />
+            <Button Content="Fechar" DockPanel.Dock="Right" HorizontalAlignment="Right" Style="{StaticResource SecondaryButton}" Margin="0" Click="CloseButton_Click" />
+        </DockPanel>
+    </Grid>
+</Window>
