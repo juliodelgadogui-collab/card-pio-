@@ -72,6 +72,7 @@ public sealed class EventMenuApiClient : IDisposable
 
     public Task<MeResponse> MeAsync(CancellationToken ct = default) => GetAsync<MeResponse>("api.php", "me", null, ct);
     public Task<OrdersResponse> OrdersAsync(CancellationToken ct = default) => GetAsync<OrdersResponse>("api.php", "orders", null, ct);
+    public Task<OrdersResponse> OperationalOrdersAsync(CancellationToken ct = default) => GetAsync<OrdersResponse>("api-go.php", "orders", null, ct);
     public Task<ProductsResponse> ProductsAsync(CancellationToken ct = default) => GetAsync<ProductsResponse>("api.php", "products", null, ct);
     public Task<CashResponse> CashCurrentAsync(CancellationToken ct = default) => GetAsync<CashResponse>("api.php", "cash-current", null, ct);
     public Task<CashSummaryResponse> CashSummaryAsync(CancellationToken ct = default) => GetAsync<CashSummaryResponse>("api.php", "cash-summary", null, ct);
@@ -83,6 +84,9 @@ public sealed class EventMenuApiClient : IDisposable
 
     public Task<OrderCreateResponse> ChangeOrderStatusAsync(int orderId, string status, CancellationToken ct = default) =>
         PostAsync<OrderCreateResponse>("api.php", "order-status", new { order_id = orderId, status }, ct);
+
+    public Task<OrderCreateResponse> ChangeOperationalOrderStatusAsync(int orderId, string status, CancellationToken ct = default) =>
+        PostAsync<OrderCreateResponse>("api-go.php", "order-status", new { order_id = orderId, status }, ct);
 
     public Task<CashMutationResponse> CashOpenAsync(int openingCashCents, string notes, CancellationToken ct = default) =>
         PostAsync<CashMutationResponse>("api.php", "cash-open", new { opening_cash_cents = openingCashCents, notes }, ct);
@@ -140,7 +144,9 @@ public sealed class EventMenuApiClient : IDisposable
         {
             return await SendCoreAsync(method, path, action, query, body, _session!.Token, ct);
         }
-        catch (ApiClientException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.UnprocessableEntity && IsSessionError(ex.Message))
+        catch (ApiClientException ex) when (
+            ex.StatusCode == HttpStatusCode.Unauthorized ||
+            (ex.StatusCode == HttpStatusCode.UnprocessableEntity && IsSessionError(ex.Message)))
         {
             await RefreshAsync(ct);
             return await SendCoreAsync(method, path, action, query, body, _session!.Token, ct);
