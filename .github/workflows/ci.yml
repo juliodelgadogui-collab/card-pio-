@@ -38,6 +38,8 @@ jobs:
         run: php scripts/ci-production-readiness-smoke.php
       - name: Permission rules
         run: php scripts/ci-permission-smoke.php
+      - name: Server hardening rules
+        run: php scripts/ci-server-hardening-smoke.php
       - name: Load test and HTTP security checks
         run: |
           php scripts/load-test.php --dry-run --url=http://127.0.0.1:8080/ --requests=10 --concurrency=2
@@ -55,6 +57,9 @@ jobs:
           grep -qi '^X-Frame-Options: SAMEORIGIN' /tmp/eventmenu-headers.txt
           grep -qi '^Referrer-Policy: strict-origin-when-cross-origin' /tmp/eventmenu-headers.txt
           grep -qi '^Permissions-Policy: camera=(self), microphone=(), geolocation=()' /tmp/eventmenu-headers.txt
+          grep -qi '^Content-Security-Policy: ' /tmp/eventmenu-headers.txt
+          grep -qi "object-src 'none'" /tmp/eventmenu-headers.txt
+          grep -qi "base-uri 'self'" /tmp/eventmenu-headers.txt
           grep -qi '^Strict-Transport-Security: max-age=31536000; includeSubDomains' /tmp/eventmenu-headers.txt
           php scripts/load-test.php --url=http://127.0.0.1:18080/manifest.webmanifest --requests=20 --concurrency=4 --warmup=1 --expected=200 --fail-p95-ms=5000
 
@@ -251,11 +256,15 @@ jobs:
           test -f "$PACKAGE/src/Services/PasswordResetService.php"
           test -f "$PACKAGE/src/Services/BrandingMediaService.php"
           test -f "$PACKAGE/src/Services/OnboardingService.php"
+          test -f "$PACKAGE/scripts/ci-server-hardening-smoke.php" || true
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
           grep -q '^DB_SQLITE_PATH=storage/eventmenu.sqlite$' "$PACKAGE/.env.example"
           grep -q '"package_profile": "production"' "$PACKAGE/BUILD-MANIFEST.json"
           grep -q '${{ github.sha }}' "$PACKAGE/BUILD-MANIFEST.json"
+          grep -q 'BUILD-MANIFEST\\.json' "$PACKAGE/.htaccess"
+          grep -q '\\.(?:sqlite3?' "$PACKAGE/.htaccess"
+          grep -q 'Header always set X-Content-Type-Options' "$PACKAGE/.htaccess"
       - name: Generate package checksums
         run: |
           cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-SQLite-1"
