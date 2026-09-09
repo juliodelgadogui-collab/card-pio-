@@ -1,7 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
-using System.Windows.Interop;
 using System.Windows.Threading;
 using EventMenu.Desktop.Services;
 
@@ -13,9 +12,11 @@ public partial class MainWindow
     private DesktopIntegrationApiClient? _hubIntegrationApi;
     private LocalHardwareProfileStore? _hubHardwareStore;
     private HubCommandProcessor? _hubProcessor;
+    private ProductionPrintProcessor? _productionPrintProcessor;
     private readonly List<IDisposable> _hubProviderDisposables=new();
     private bool _hubBusy;
     private DateTimeOffset _lastHubHeartbeat=DateTimeOffset.MinValue;
+    private Button? _productionNavButton;
     private Button? _hubNavButton;
     private Button? _hardwareSettingsButton;
 
@@ -34,6 +35,15 @@ public partial class MainWindow
     {
         if(_hubNavButton is not null)return;
         if(PosNavButton.Parent is not StackPanel sidebar)return;
+
+        _productionNavButton=new Button
+        {
+            Content="Cozinha / Produção",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="KDS, estações, expedição e impressão automática",
+            Visibility=(Can("orders_kitchen")||Can("orders_dispatch")||Can("production_print")||Can("production_manage"))?Visibility.Visible:Visibility.Collapsed
+        };
+        _productionNavButton.Click+=async(_,_)=>await OpenProductionAsync();
 
         _hubNavButton=new Button
         {
@@ -55,8 +65,9 @@ public partial class MainWindow
 
         var cashIndex=sidebar.Children.IndexOf(CashNavButton);
         var insert=Math.Max(0,cashIndex+1);
-        sidebar.Children.Insert(insert,_hubNavButton);
-        sidebar.Children.Insert(insert+1,_hardwareSettingsButton);
+        sidebar.Children.Insert(insert,_productionNavButton);
+        sidebar.Children.Insert(insert+1,_hubNavButton);
+        sidebar.Children.Insert(insert+2,_hardwareSettingsButton);
     }
 
     private async void MainWindow_HubPreviewKeyDown(object sender,KeyEventArgs e)
@@ -66,6 +77,23 @@ public partial class MainWindow
             e.Handled=true;
             await OpenHubPairingAsync();
         }
+    }
+
+    private async Task OpenProductionAsync()
+    {
+        if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null)return;
+        if(!Can("orders_kitchen")&&!Can("orders_dispatch")&&!Can("production_print")&&!Can("production_manage"))return;
+        if(!HasShift||!ShiftIs("operation"))
+        {
+            MessageBox.Show("Inicie um turno de Operação para abrir a produção.","Produção",MessageBoxButton.OK,MessageBoxImage.Information);return;
+        }
+        try
+        {
+            EnsureHubRuntime();if(_hubIntegrationApi is null)return;
+            var window=new ProductionWindow(_hubIntegrationApi,Can("orders_dispatch"),Can("production_manage")){Owner=this};window.ShowDialog();
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"Produção",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        await Task.CompletedTask;
     }
 
     private async Task OpenHubPairingAsync()
@@ -134,6 +162,11 @@ public partial class MainWindow
                 if(command.UnitId!=unitId)continue;
                 await _hubProcessor.ProcessAsync(command);
             }
+            if(ShiftIs("operation")&&(Can("production_print")||Can("orders_kitchen"))&&_productionPrintProcessor is not null)
+            {
+                // Máximo de duas tarefas por ciclo para não bloquear a UI se uma unidade tiver grande fila.
+                for(var i=0;i<2;i++)if(!await _productionPrintProcessor.ProcessOneAsync())break;
+            }
         }
         catch(ApiClientException)
         {
@@ -141,8 +174,7 @@ public partial class MainWindow
         }
         catch
         {
-            // Falhas transitórias de hardware/rede serão tentadas no próximo ciclo; comandos reclamados
-            // recebem falha pelo processor quando o erro ocorrer durante a execução.
+            // Falhas transitórias de hardware/rede são registradas nas filas correspondentes.
         }
         finally{_hubBusy=false;}
     }
@@ -163,19 +195,21 @@ public partial class MainWindow
         };
         _hubProviderDisposables.AddRange(providers.OfType<IDisposable>());
         var terminal=new PaymentTerminalCoordinator(_hubIntegrationApi,providers);
+        var rawPrinter=new RawPrinterService();
         _hubProcessor=new HubCommandProcessor(
             _hubIntegrationApi,
             _api,
             _hubHardwareStore,
-            new RawPrinterService(),
+            rawPrinter,
             new CustomerDisplayStateStore(),
             terminal);
+        _productionPrintProcessor=new ProductionPrintProcessor(_hubIntegrationApi,rawPrinter);
     }
 
     private void DisposeHubRuntime()
     {
         if(_hubTimer is not null){_hubTimer.Stop();_hubTimer.Tick-=HubTimer_Tick;_hubTimer=null;}
-        _hubIntegrationApi?.Dispose();_hubIntegrationApi=null;_hubProcessor=null;_hubHardwareStore=null;
+        _hubIntegrationApi?.Dispose();_hubIntegrationApi=null;_hubProcessor=null;_hubHardwareStore=null;_productionPrintProcessor=null;
         foreach(var disposable in _hubProviderDisposables)disposable.Dispose();
         _hubProviderDisposables.Clear();
     }
