@@ -30,6 +30,20 @@ final class MaintenanceService
         try{if(Database::isSqlite($pdo))$pdo->exec("DELETE FROM api_tokens WHERE revoked_at IS NOT NULL AND revoked_at < datetime('now','-90 days')");else$pdo->exec('DELETE FROM api_tokens WHERE revoked_at IS NOT NULL AND revoked_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)');$result['old_api_tokens_removed']=true;}catch(\Throwable){$result['old_api_tokens_removed']=false;}
         try{if(Database::isSqlite($pdo))$pdo->exec("DELETE FROM api_refresh_tokens WHERE revoked_at IS NOT NULL AND revoked_at < datetime('now','-90 days')");else$pdo->exec('DELETE FROM api_refresh_tokens WHERE revoked_at IS NOT NULL AND revoked_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL 90 DAY)');$result['old_api_refresh_tokens_removed']=true;}catch(\Throwable){$result['old_api_refresh_tokens_removed']=false;}
 
+        // GPS de entrega tem retenção curta por privacidade e para impedir crescimento
+        // contínuo do banco. O período pode ser reduzido/aumentado entre 1 e 30 dias.
+        try{
+            $gpsDays=max(1,min(30,(int)env('DELIVERY_GPS_HISTORY_DAYS',7)));
+            $stmt=$pdo->prepare('DELETE FROM delivery_tracking_tokens WHERE expires_at<=CURRENT_TIMESTAMP');$stmt->execute();$result['expired_delivery_tracking_tokens']=$stmt->rowCount();
+            if(Database::isSqlite($pdo)){
+                $stmt=$pdo->prepare("DELETE FROM delivery_location_history WHERE captured_at < datetime('now', ?)");$stmt->execute(['-'.$gpsDays.' days']);
+            }else{
+                $stmt=$pdo->prepare('DELETE FROM delivery_location_history WHERE captured_at < DATE_SUB(CURRENT_TIMESTAMP, INTERVAL '.$gpsDays.' DAY)');$stmt->execute();
+            }
+            $result['old_delivery_gps_points_removed']=$stmt->rowCount();
+            $stmt=$pdo->prepare('DELETE FROM delivery_live_locations WHERE order_id IN (SELECT id FROM orders WHERE status IN ("completed","cancelled"))');$stmt->execute();$result['finished_delivery_live_locations_removed']=$stmt->rowCount();
+        }catch(\Throwable){$result['delivery_gps_cleanup']=false;}
+
         try{$jobs=new BackgroundJobService();$jobs->enqueue('backup.daily',[],null,'backup:'.gmdate('Y-m-d'),null,2);$result['jobs']=$jobs->runBatch(max(1,(int)env('QUEUE_BATCH_SIZE',40)),'cron');$result['job_cleanup']=$jobs->purge();}catch(\Throwable$e){$result['jobs']=['error'=>mb_substr($e->getMessage(),0,300)];}
         $runtime->set('cron.last_run',isset($result['jobs']['error'])?'warning':'ok','Manutenção executada.',['result'=>$result]);
         return$result;
