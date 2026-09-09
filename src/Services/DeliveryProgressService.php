@@ -40,13 +40,27 @@ final class DeliveryProgressService
     public function startRoute(int $orderId):array
     {
         [$tenantId,$userId,$shift]=$this->deliveryContext();$pdo=Database::connection();
-        $s=$pdo->prepare('SELECT dp.picked_up_at,o.status FROM delivery_progress dp JOIN orders o ON o.id=dp.order_id AND o.tenant_id=dp.tenant_id WHERE dp.tenant_id=? AND dp.order_id=? AND dp.delivery_user_id=? LIMIT 1');$s->execute([$tenantId,$orderId,$userId]);$row=$s->fetch();if(!$row||!$row['picked_up_at'])throw new RuntimeException('Retire o pedido no balcão antes de iniciar a rota.');
+        $s=$pdo->prepare('SELECT dp.picked_up_at,dp.route_started_at,o.status FROM delivery_progress dp JOIN orders o ON o.id=dp.order_id AND o.tenant_id=dp.tenant_id WHERE dp.tenant_id=? AND dp.order_id=? AND dp.delivery_user_id=? LIMIT 1');$s->execute([$tenantId,$orderId,$userId]);$row=$s->fetch();if(!$row||!$row['picked_up_at'])throw new RuntimeException('Retire o pedido no balcão antes de iniciar a rota.');
+        $firstStart=empty($row['route_started_at']);
         if($row['status']==='ready')(new OrderService())->changeStatus($orderId,'out_for_delivery','delivery');elseif($row['status']!=='out_for_delivery')throw new RuntimeException('Pedido não está disponível para iniciar rota.');
         Database::transaction(function(PDO $tx)use($tenantId,$userId,$orderId):void{
             $p=$this->lockedProgress($tx,$tenantId,$orderId);if(!$p)throw new RuntimeException('Progresso da entrega não encontrado.');
             if(!$p['route_started_at'])$tx->prepare('UPDATE delivery_progress SET route_started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
         });
-        Auth::audit('delivery.route_started','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return $this->progressByOrder(Database::connection(),$tenantId,$orderId);
+        Auth::audit('delivery.route_started','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);
+        if($firstStart){
+            try{
+                $token=(new DeliveryTrackingService())->publicToken($tenantId,$orderId);
+                $base=rtrim((string)env('APP_URL',''),'/');
+                if(!str_starts_with(strtolower($base),'https://'))throw new RuntimeException('APP_URL HTTPS é necessário para enviar o rastreamento.');
+                $url=$base.'/rastreio.php?t='.$token;
+                $queued=(new CustomerCommunicationService())->queueDeliveryTracking($tenantId,$orderId,$url);
+                Auth::audit('delivery.tracking_queued','order',(string)$orderId,['channels_queued'=>$queued]);
+            }catch(\Throwable $e){
+                Auth::audit('delivery.tracking_queue_failed','order',(string)$orderId,['error'=>mb_substr($e->getMessage(),0,240)]);
+            }
+        }
+        return $this->progressByOrder(Database::connection(),$tenantId,$orderId);
     }
 
     public function arrive(int $orderId):array
