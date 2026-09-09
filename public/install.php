@@ -7,9 +7,6 @@ require __DIR__ . '/../app/bootstrap.php';
 use EventMenu\Core\Database;
 use EventMenu\Core\Migrator;
 use EventMenu\Core\Security;
-use PDO;
-use PDOException;
-use RuntimeException;
 
 $root = dirname(__DIR__);
 $envPath = $root . '/.env';
