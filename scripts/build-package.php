@@ -69,6 +69,7 @@ foreach (['manifest.webmanifest', 'sw.js'] as $file) {
 }
 
 $deny = <<<'HTACCESS'
+Options -Indexes
 Require all denied
 HTACCESS;
 foreach (['app', 'src', 'database', 'storage', 'vendor', 'public'] as $directory) {
@@ -82,11 +83,22 @@ DirectoryIndex index.php
 <IfModule mod_rewrite.c>
 RewriteEngine On
 RewriteRule ^(?:app|src|database|storage|vendor|public)(?:/|$) - [F,L,NC]
+RewriteRule (^|/)(?:\.git|\.github)(?:/|$) - [F,L,NC]
 </IfModule>
 
-<FilesMatch "^(?:\.env|composer\.(?:json|lock))$">
+<FilesMatch "^(?:\.env(?:\..*)?|composer\.(?:json|lock)|BUILD-MANIFEST\.json|VERSION\.txt|LEIA-ME-INSTALACAO\.txt|SHA256SUMS\.txt)$">
 Require all denied
 </FilesMatch>
+
+<FilesMatch "\.(?:sqlite3?|db|sql|log|bak|old|ini|pem|key|crt|p12|pfx)$">
+Require all denied
+</FilesMatch>
+
+<IfModule mod_headers.c>
+Header always set X-Content-Type-Options "nosniff"
+Header always set Referrer-Policy "strict-origin-when-cross-origin"
+Header always set X-Frame-Options "SAMEORIGIN"
+</IfModule>
 HTACCESS;
 write_file($destination . '/.htaccess', $rootHtaccess . "\n");
 
@@ -117,7 +129,7 @@ EVENTMENU PREMIUM — PACOTE DE PRODUÇÃO /1 — SQLITE
 
 Este pacote foi gerado pelo CI a partir de uma revisão validada do EventMenu.
 O Composer NÃO precisa estar instalado no servidor: a pasta vendor já acompanha o pacote.
-Consulte BUILD-MANIFEST.json e VERSION.txt para identificar exatamente a versão/commit instalado.
+Consulte BUILD-MANIFEST.json e VERSION.txt localmente para identificar exatamente a versão/commit instalado.
 
 REQUISITOS DO SERVIDOR
 - PHP 8.2 ou superior.
@@ -165,17 +177,18 @@ BANCO INICIAL
 
 ATUALIZAÇÕES
 - Preserve .env e toda a pasta storage.
-- Envie os novos arquivos e acesse /1/update.php com administrador autorizado.
+- Envie os novos arquivos e acesse /1/update.php usando o Super ADM da plataforma.
 - Nunca substitua storage/eventmenu.sqlite por um arquivo vazio.
-- Confira VERSION.txt/BUILD-MANIFEST.json depois da atualização.
+- Confira VERSION.txt/BUILD-MANIFEST.json localmente depois da atualização.
 
 SEGURANÇA
 - O pacote não contém .env real, chave privada ou credenciais de gateway.
-- .htaccess bloqueia .env, app, src, database, storage, vendor e public em Apache/LiteSpeed.
+- .htaccess bloqueia .env, metadados de build, app, src, database, storage, vendor e public em Apache/LiteSpeed.
+- Extensões sensíveis como .sqlite, .db, .sql, .log, .pem e .key também são negadas.
 - Em Nginx, replique os mesmos bloqueios no virtual host.
 - SESSION_SECURE deve permanecer ativo em HTTPS.
 - install.php é bloqueado após instalação por installed.lock e pela existência do Super ADM.
-- SHA256SUMS.txt acompanha o artefato do CI para conferência de integridade.
+- SHA256SUMS.txt acompanha o artefato do CI para conferência de integridade local.
 TXT;
 write_file($destination . '/LEIA-ME-INSTALACAO.txt', $deployReadme . "\n");
 
