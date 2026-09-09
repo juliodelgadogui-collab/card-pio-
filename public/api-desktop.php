@@ -10,6 +10,7 @@ use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DesktopHardwareService;
 use EventMenu\Services\FiscalCertificateService;
 use EventMenu\Services\FiscalService;
+use EventMenu\Services\FiscalTransmissionService;
 use EventMenu\Services\OperatingUnitService;
 use EventMenu\Services\TerminalPaymentService;
 
@@ -76,6 +77,10 @@ try{
         desktop_out(['ok'=>true,'document'=>$fiscal->queueForOrder((int)($body['order_id']??0),(string)($body['document']??''))],201);
     }
     if($action==='fiscal-documents')desktop_out(['ok'=>true,'documents'=>$fiscal->documents((int)($_GET['limit']??100))]);
+    if($action==='fiscal-retry'){
+        desktop_method('POST');Auth::requirePermission('fiscal.issue');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');$body=desktop_body();
+        desktop_out(['ok'=>true,'document'=>(new FiscalTransmissionService())->retryError($tenantId,(int)($body['document_id']??0))]);
+    }
 
     if($action==='terminal-list')desktop_out(['ok'=>true,'terminals'=>$hardware->terminalConfigs((int)($_GET['unit_id']??0))]);
     if($action==='terminal-save'){
