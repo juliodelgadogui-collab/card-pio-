@@ -9,6 +9,7 @@ import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,6 +26,7 @@ import br.com.eventmenu.go.HubViewModel
 import br.com.eventmenu.go.MainViewModel
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.HubDialog
+import kotlinx.coroutines.delay
 
 @Composable
 fun EventMenuGoHubShell(
@@ -52,6 +54,14 @@ fun EventMenuGoHubShell(
             "terminal_request",
             "terminal_collect",
         )
+    }
+
+    LaunchedEffect(showHub, canUseHub) {
+        if (!showHub || !canUseHub) return@LaunchedEffect
+        while (true) {
+            hubViewModel.heartbeat()
+            delay(15_000L)
+        }
     }
 
     val hubAwareScan: (((String) -> Unit) -> Unit) = { fallback ->
