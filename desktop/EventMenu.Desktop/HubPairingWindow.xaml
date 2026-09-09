@@ -1,0 +1,37 @@
+<Window x:Class="EventMenu.Desktop.HubPairingWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EventMenu Hub" Width="520" Height="430" WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize" Background="#F4F7FB">
+    <Grid Margin="28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <StackPanel>
+            <TextBlock Text="Vincular celular" FontSize="26" FontWeight="SemiBold" />
+            <TextBlock Text="Conecte um celular autorizado a este computador e aos equipamentos desta unidade."
+                       Foreground="#667085" TextWrapping="Wrap" Margin="0,7,0,0" />
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="White" CornerRadius="16" Padding="22" Margin="0,20,0,18">
+            <StackPanel VerticalAlignment="Center">
+                <TextBlock Text="Código temporário" HorizontalAlignment="Center" Foreground="#667085" />
+                <TextBlock x:Name="PairingCodeText" HorizontalAlignment="Center" TextAlignment="Center"
+                           FontFamily="Consolas" FontSize="17" FontWeight="SemiBold" TextWrapping="Wrap"
+                           Margin="12,12,12,8" />
+                <Button Content="Copiar código" Width="145" HorizontalAlignment="Center" Click="CopyButton_Click" />
+                <TextBlock x:Name="ExpiresText" HorizontalAlignment="Center" Foreground="#667085" Margin="0,12,0,0" />
+                <Border Height="1" Background="#EAECF0" Margin="0,18" />
+                <TextBlock Text="No EventMenu GO: Perfil → Hub da unidade → Vincular computador. Leia o QR quando disponível ou cole este código."
+                           Foreground="#475467" TextWrapping="Wrap" TextAlignment="Center" />
+            </StackPanel>
+        </Border>
+
+        <DockPanel Grid.Row="2">
+            <TextBlock Text="O código só funciona uma vez e expira automaticamente." Foreground="#667085" VerticalAlignment="Center" />
+            <Button Content="Fechar" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="CloseButton_Click" />
+        </DockPanel>
+    </Grid>
+</Window>
