@@ -1,0 +1,114 @@
+<Window x:Class="EventMenu.Desktop.ProductionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EventMenu • Produção" Width="1180" Height="760" MinWidth="980" MinHeight="620"
+        WindowStartupLocation="CenterOwner" Background="#F4F7FB">
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel Margin="0,0,0,16">
+            <StackPanel DockPanel.Dock="Left">
+                <TextBlock Text="Cozinha e Produção" FontSize="28" FontWeight="SemiBold"/>
+                <TextBlock x:Name="SubtitleText" Text="Pedidos por estação, tempo e prioridade." Foreground="#667085" Margin="0,4,0,0"/>
+            </StackPanel>
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <TextBlock x:Name="ConnectionText" Text="Conectando..." Foreground="#667085" VerticalAlignment="Center" Margin="0,0,14,0"/>
+                <Button Content="Atualizar" Width="100" Height="36" Click="RefreshButton_Click"/>
+            </StackPanel>
+        </DockPanel>
+
+        <TabControl Grid.Row="1" x:Name="ProductionTabs">
+            <TabItem Header="Produção">
+                <Grid Margin="16">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="230"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                    <Border Background="White" CornerRadius="12" Padding="12">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="Estações" FontSize="18" FontWeight="SemiBold" Margin="6,4,6,12"/>
+                            <ListBox x:Name="StationsList" DisplayMemberPath="Name" SelectionChanged="StationsList_SelectionChanged" BorderThickness="0"/>
+                        </DockPanel>
+                    </Border>
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,10">
+                            <StackPanel DockPanel.Dock="Left">
+                                <TextBlock x:Name="StationTitle" Text="Todos os pedidos" FontSize="20" FontWeight="SemiBold"/>
+                                <TextBlock x:Name="StationInfo" Foreground="#667085" Margin="0,3,0,0"/>
+                            </StackPanel>
+                            <TextBox x:Name="SearchBox" DockPanel.Dock="Right" Width="220" Height="34" VerticalContentAlignment="Center" ToolTip="Buscar pedido, item, mesa ou cliente" TextChanged="SearchBox_TextChanged"/>
+                        </DockPanel>
+                        <Border Grid.Row="1" Background="White" CornerRadius="12" Padding="10">
+                            <DataGrid x:Name="JobsGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Pedido" Binding="{Binding OrderId}" Width="75"/>
+                                    <DataGridTextColumn Header="Item" Binding="{Binding Description}" Width="*"/>
+                                    <DataGridTextColumn Header="Qtd." Binding="{Binding Quantity}" Width="70"/>
+                                    <DataGridTextColumn Header="Mesa" Binding="{Binding TableName}" Width="100"/>
+                                    <DataGridTextColumn Header="Cliente" Binding="{Binding CustomerName}" Width="150"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="105"/>
+                                    <DataGridTextColumn Header="Tempo" Binding="{Binding TimeLabel}" Width="135"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,12,0,0">
+                            <Button x:Name="StartButton" Content="Iniciar preparo" Width="130" Click="StartButton_Click"/>
+                            <Button x:Name="ReadyButton" Content="Marcar pronto" Width="120" Click="ReadyButton_Click"/>
+                            <Button x:Name="ExpediteItemButton" Content="Liberar item" Width="110" Click="ExpediteItemButton_Click"/>
+                            <TextBlock x:Name="JobStatusText" Foreground="#667085" VerticalAlignment="Center" Margin="12,0,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="Expedição">
+                <Grid Margin="16">
+                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <Border Background="White" CornerRadius="12" Padding="10">
+                        <DataGrid x:Name="ExpeditionGrid" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" SelectionMode="Single">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Pedido" Binding="{Binding Id}" Width="80"/>
+                                <DataGridTextColumn Header="Canal" Binding="{Binding Channel}" Width="110"/>
+                                <DataGridTextColumn Header="Mesa" Binding="{Binding TableName}" Width="120"/>
+                                <DataGridTextColumn Header="Cliente" Binding="{Binding CustomerName}" Width="*"/>
+                                <DataGridTextColumn Header="Prontos" Binding="{Binding JobsReady}" Width="90"/>
+                                <DataGridTextColumn Header="Total" Binding="{Binding JobsTotal}" Width="80"/>
+                                <DataGridCheckBoxColumn Header="Tudo pronto" Binding="{Binding AllReady}" Width="100"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </Border>
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,12,0,0">
+                        <Button x:Name="ExpediteOrderButton" Content="Liberar pedido" Width="130" Click="ExpediteOrderButton_Click"/>
+                        <TextBlock Text="A liberação só é permitida quando todos os itens ativos estiverem prontos." Foreground="#667085" VerticalAlignment="Center" Margin="12,0,0,0"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <TabItem x:Name="PrintersTab" Header="Impressoras">
+                <Grid Margin="20">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+                    <TextBlock Text="Impressora por estação" FontSize="20" FontWeight="SemiBold"/>
+                    <TextBlock Grid.Row="1" Text="Vincule cada estação à impressora instalada neste Windows. O claim por dispositivo evita impressão duplicada em dois caixas." Foreground="#667085" TextWrapping="Wrap" Margin="0,5,0,16"/>
+                    <Grid Grid.Row="2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="260"/><ColumnDefinition Width="16"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                        <StackPanel><TextBlock Text="Estação" FontWeight="SemiBold"/><ComboBox x:Name="PrinterStationCombo" DisplayMemberPath="Name" Margin="0,5,0,0" SelectionChanged="PrinterStationCombo_SelectionChanged"/></StackPanel>
+                        <StackPanel Grid.Column="2"><TextBlock Text="Nome da impressora no Windows" FontWeight="SemiBold"/><TextBox x:Name="StationPrinterBox" Margin="0,5,0,0" ToolTip="Use exatamente o nome da impressora instalada no Windows."/></StackPanel>
+                    </Grid>
+                    <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,16,0,0">
+                        <CheckBox x:Name="AutomaticPrintCheck" Content="Impressão automática" VerticalAlignment="Center" Margin="0,0,20,0"/>
+                        <CheckBox x:Name="BindThisPcCheck" Content="Somente neste computador" IsChecked="True" VerticalAlignment="Center" Margin="0,0,20,0"/>
+                        <Button x:Name="SavePrinterButton" Content="Salvar estação" Width="130" Click="SavePrinterButton_Click"/>
+                    </StackPanel>
+                    <TextBlock Grid.Row="4" x:Name="PrinterStatusText" Foreground="#667085" Margin="0,16,0,0" TextWrapping="Wrap"/>
+                </Grid>
+            </TabItem>
+        </TabControl>
+
+        <DockPanel Grid.Row="2" Margin="0,14,0,0">
+            <TextBlock x:Name="FooterText" Foreground="#667085" VerticalAlignment="Center"/>
+            <Button DockPanel.Dock="Right" Content="Fechar" Width="90" Click="CloseButton_Click"/>
+        </DockPanel>
+    </Grid>
+</Window>
