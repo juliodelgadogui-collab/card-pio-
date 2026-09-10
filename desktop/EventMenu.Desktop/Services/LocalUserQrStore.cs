@@ -20,7 +20,7 @@ public sealed class LocalUserQrStore
         _file = Path.Combine(directory, "my-qr.dat");
     }
 
-    public LocalUserQrState? Load(int userId)
+    public LocalUserQrState? Load(int tenantId, int userId, string expectedType)
     {
         if (!File.Exists(_file)) return null;
         try
@@ -28,7 +28,15 @@ public sealed class LocalUserQrStore
             var encrypted = File.ReadAllBytes(_file);
             var clear = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
             var state = JsonSerializer.Deserialize<LocalUserQrState>(Encoding.UTF8.GetString(clear));
-            if (state is null || state.EntityId != userId || string.IsNullOrWhiteSpace(state.Payload)) return null;
+            if (state is null ||
+                state.TenantId != tenantId ||
+                state.EntityId != userId ||
+                !string.Equals(state.Type, expectedType, StringComparison.OrdinalIgnoreCase) ||
+                string.IsNullOrWhiteSpace(state.Payload))
+            {
+                Clear();
+                return null;
+            }
             if (IsExpired(state.ExpiresAt))
             {
                 Clear();
@@ -81,13 +89,14 @@ public sealed class LocalUserQrStore
                 out var utc))
             return utc <= DateTime.UtcNow;
 
-        // Se a validade vier em formato desconhecido, o servidor continuará sendo a autoridade.
+        // Se a validade vier em formato desconhecido, a validação online continuará sendo a autoridade.
         return false;
     }
 }
 
 public sealed class LocalUserQrState
 {
+    public int TenantId { get; set; }
     public string Type { get; set; } = "employee";
     public int EntityId { get; set; }
     public string Label { get; set; } = "";
