@@ -15,6 +15,7 @@ public partial class MainWindow
     private ProductionPrintProcessor? _productionPrintProcessor;
     private readonly List<IDisposable> _hubProviderDisposables=new();
     private bool _hubBusy;
+    private bool _navigationUxReady;
     private DateTimeOffset _lastHubHeartbeat=DateTimeOffset.MinValue;
     private Button? _productionNavButton;
     private Button? _inventoryNavButton;
@@ -25,7 +26,11 @@ public partial class MainWindow
     protected override void OnSourceInitialized(EventArgs e)
     {
         base.OnSourceInitialized(e);
-        Loaded+=(_,_)=>EnsureHubControls();
+        Loaded+=(_,_)=>
+        {
+            EnsureHubControls();
+            EnsureNativeNavigation();
+        };
         Closed+=(_,_)=>DisposeHubRuntime();
         PreviewKeyDown+=MainWindow_HubPreviewKeyDown;
         ShellPanel.IsVisibleChanged+=ShellPanel_BrandVisibilityChanged;
@@ -93,6 +98,43 @@ public partial class MainWindow
         sidebar.Children.Insert(insert+2,_deliveryMonitorButton);
         sidebar.Children.Insert(insert+3,_hubNavButton);
         sidebar.Children.Insert(insert+4,_hardwareSettingsButton);
+        EnsureNativeNavigation();
+    }
+
+    private void EnsureNativeNavigation()
+    {
+        if(_navigationUxReady||PosNavButton.Parent is not StackPanel sidebar)return;
+        _navigationUxReady=true;
+        foreach(var button in sidebar.Children.OfType<Button>())
+        {
+            if(IsPrimaryNavigation(button.Content?.ToString()))
+                button.Click+=PrimaryNavigationButton_Click;
+        }
+        SetActiveNavigationByLabel("Visão geral");
+    }
+
+    private static bool IsPrimaryNavigation(string? label)=>label is "Visão geral" or "Nova venda" or "Pedidos" or "Mesas e comandas" or "Caixa";
+
+    private void PrimaryNavigationButton_Click(object sender,RoutedEventArgs e)
+    {
+        if(sender is Button button)SetActiveNavigation(button);
+    }
+
+    private void SetActiveNavigationByLabel(string label)
+    {
+        if(PosNavButton.Parent is not StackPanel sidebar)return;
+        var target=sidebar.Children.OfType<Button>().FirstOrDefault(x=>string.Equals(x.Content?.ToString(),label,StringComparison.Ordinal));
+        if(target is not null)SetActiveNavigation(target);
+    }
+
+    private void SetActiveNavigation(Button active)
+    {
+        if(PosNavButton.Parent is not StackPanel sidebar)return;
+        foreach(var button in sidebar.Children.OfType<Button>())
+        {
+            if(IsPrimaryNavigation(button.Content?.ToString()))button.Tag=null;
+        }
+        active.Tag="active";
     }
 
     private async void MainWindow_HubPreviewKeyDown(object sender,KeyEventArgs e)
