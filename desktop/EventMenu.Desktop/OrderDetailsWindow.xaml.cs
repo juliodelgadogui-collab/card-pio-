@@ -41,10 +41,16 @@ public partial class OrderDetailsWindow : Window
             if (_order.Channel == "delivery")
             {
                 DeliveryCard.Visibility = Visibility.Visible;
-                if (_canAssignDelivery && _order.Status is not ("completed" or "cancelled"))
+                if (_canAssignDelivery && _order.Status == "ready")
+                {
                     await LoadDeliveryUsersAsync(_order.AssignedDeliveryUserId);
+                }
                 else
+                {
                     DeliveryAssignmentPanel.Visibility = Visibility.Collapsed;
+                    if (_canAssignDelivery && _order.AssignedDeliveryUserId is null && _order.Status is not ("completed" or "cancelled" or "out_for_delivery"))
+                        CurrentDeliveryText.Text += " • A escolha do entregador será liberada quando o pedido estiver pronto.";
+                }
             }
             else
             {
@@ -78,7 +84,7 @@ public partial class OrderDetailsWindow : Window
         LocationText.Text = order.Channel switch
         {
             "delivery" => string.IsNullOrWhiteSpace(order.DeliveryAddress) ? "Endereço não informado" : order.DeliveryAddress,
-            "table" => order.TableId is > 0 ? $"Mesa #{order.TableId}" : "Mesa não identificada",
+            "table" => !string.IsNullOrWhiteSpace(order.TableName) ? order.TableName : order.TableId is > 0 ? $"Mesa #{order.TableId}" : "Mesa não identificada",
             _ => ""
         };
 
@@ -92,21 +98,38 @@ public partial class OrderDetailsWindow : Window
     private async Task LoadDeliveryUsersAsync(int? selectedId)
     {
         var response = await _api.DeliveryUsersAsync();
-        var options = new List<DeliveryUserOption>
-        {
-            new() { Id = 0, Name = "Sem entregador" }
-        };
-        options.AddRange(response.DeliveryUsers);
+        var options = response.DeliveryUsers
+            .Where(x => x.Id > 0)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToList();
+
         DeliverySelector.ItemsSource = options;
-        DeliverySelector.SelectedItem = options.FirstOrDefault(x => x.Id == (selectedId ?? 0)) ?? options[0];
+        DeliverySelector.SelectedItem = selectedId.HasValue
+            ? options.FirstOrDefault(x => x.Id == selectedId.Value)
+            : null;
         DeliveryAssignmentPanel.Visibility = Visibility.Visible;
-        AssignDeliveryButton.IsEnabled = true;
+
+        if (options.Count == 0)
+        {
+            CurrentDeliveryText.Text = "Nenhum entregador disponível nesta unidade. O entregador precisa iniciar o turno de Delivery.";
+            AssignDeliveryButton.IsEnabled = false;
+        }
+        else
+        {
+            AssignDeliveryButton.IsEnabled = DeliverySelector.SelectedItem is DeliveryUserOption;
+            DeliverySelector.SelectionChanged += (_, _) => AssignDeliveryButton.IsEnabled = DeliverySelector.SelectedItem is DeliveryUserOption;
+        }
     }
 
     private async void AssignDeliveryButton_Click(object sender, RoutedEventArgs e)
     {
         if (_loading || !_canAssignDelivery || _order is null || DeliverySelector.SelectedItem is not DeliveryUserOption selected) return;
-        if (_order.Status is "completed" or "cancelled") return;
+        if (_order.Status != "ready")
+        {
+            FooterStatusText.Text = "O pedido precisa estar pronto para escolher o entregador.";
+            return;
+        }
 
         AssignDeliveryButton.IsEnabled = false;
         FooterStatusText.Text = "Salvando entregador...";
@@ -114,13 +137,13 @@ public partial class OrderDetailsWindow : Window
         {
             await _api.AssignDeliveryAsync(_order.Id, selected.Id);
             OrderChanged = true;
-            FooterStatusText.Text = selected.Id == 0 ? "Entregador removido do pedido." : $"{selected.Name} atribuído ao pedido.";
+            FooterStatusText.Text = $"{selected.Name} atribuído ao pedido.";
             await LoadAsync();
         }
         catch (Exception ex)
         {
             FooterStatusText.Text = ex.Message;
-            AssignDeliveryButton.IsEnabled = true;
+            AssignDeliveryButton.IsEnabled = DeliverySelector.SelectedItem is DeliveryUserOption;
         }
     }
 
