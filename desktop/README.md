@@ -1,139 +1,146 @@
-# EventMenu Desktop 0.2.0
+# EventMenu Desktop 0.3.0
 
-Cliente nativo para Windows conectado ao mesmo servidor do EventMenu Web e do EventMenu GO.
+Programa **Windows nativo** do EventMenu para operação de restaurante, delivery e eventos.
 
-## Arquitetura
+Tecnologia: **.NET 8 + WPF/XAML**, sem WebView e sem navegador embutido.
 
-```text
-EventMenu GO (Android) ── HTTPS ──┐
-                                 │
-EventMenu Desktop ───── HTTPS ───┼── EventMenu Web / servidor ── banco central
-       │                         │
-       └── hardware local        │
-           impressora            │
-           gaveta                │
-           PINPad/TEF            │
-           tela do cliente       │
-                                 │
-Cardápio / operação Web ─────────┘
-```
+O Desktop usa os mesmos dados e regras centrais do EventMenu. O Windows cuida da experiência de operação e dos equipamentos locais; validações sensíveis continuam centralizadas no sistema.
 
-O Desktop **não substitui o servidor Web** e não cria um segundo banco principal. Permissões, estoque, pedidos, pagamentos e consistência continuam sendo validados pelo backend.
+## O que o Desktop cobre
 
-## Segurança e sessão
+### Operação do restaurante
 
-- WPF nativo em .NET 8, sem WebView;
-- login usando a API real do EventMenu;
-- `device_id` persistente por computador;
-- access token + refresh token e renovação automática;
-- tokens protegidos no Windows com DPAPI (`CurrentUser`);
-- URL do servidor obrigatoriamente HTTPS;
-- permissões efetivas do servidor controlam as funções disponíveis;
-- segredos de gateways, TEF, webhook e certificado não são exibidos na operação comum.
-
-## Operação / PDV
-
+- login com renovação de sessão;
 - seleção de unidade e turno;
-- modos Operação, Delivery, Eventos e Pay conforme permissão;
-- pesquisa de produtos e carrinho;
-- pedidos de balcão, retirada, delivery e mesa;
-- mesas/comandas;
-- atualização de pedidos e estoque pelo servidor;
-- fluxo de preparo, pronto e conclusão;
-- caixa com abertura, suprimento, sangria, ajuste e fechamento;
-- impressão pela infraestrutura do Windows.
+- visão geral operacional;
+- nova venda / PDV;
+- pedidos com busca, filtros, detalhes e histórico;
+- aceite e mudança de etapa conforme permissão;
+- desconto e cancelamento com solicitação/aprovação;
+- fidelidade / pontos;
+- mesas e comandas;
+- conta dividida por valor, percentual, pessoas ou produtos;
+- recebimento por Pix ou dinheiro;
+- caixa, suprimento, sangria e fechamento;
+- produção, cozinha e expedição;
+- estoque.
 
-## Pagamentos
+### Delivery
 
-- consulta do saldo restante do pedido;
-- recebimento total ou parcial em dinheiro;
-- PIX PagBank com confirmação consultada no servidor;
-- idempotência nas intenções de cobrança;
-- pedidos cancelados/finalizados não recebem nova cobrança;
-- aprovação informada por aplicativo, Desktop ou PINPad nunca liquida o pedido sozinha.
+- triagem por unidade;
+- atribuição e transferência de entregador;
+- retirada, início de rota, chegada e conclusão;
+- pagamento Pix na entrega após a etapa permitida;
+- recebimento em dinheiro e troco;
+- QR de repasse do dinheiro ao caixa;
+- acompanhamento das entregas em rota;
+- resumo do turno e comissão.
 
-## EventMenu Hub
+A posição GPS real é enviada pelo celular do entregador. O Windows acompanha essa posição; não cria localização artificial.
 
-O Hub conecta o EventMenu GO a um computador EventMenu Desktop da mesma empresa/unidade.
+### Eventos
 
-- pareamento por QR Code temporário e de uso único;
-- vínculo por dispositivo e usuário;
-- indicador de computador online/offline por heartbeat;
-- comandos com fila, expiração e idempotência;
-- impressão de pedido e recibo pelo celular;
-- abertura de gaveta conforme permissão;
-- aviso/alerta no computador;
-- tela do cliente;
-- solicitação de cobrança no PINPad;
-- revogação do vínculo sem precisar reinstalar o aplicativo.
+- eventos disponíveis para o turno;
+- ingressos e convidados;
+- check-in;
+- venda no bar;
+- retirada de pedido do bar por código;
+- acompanhamento operacional conforme permissão.
 
-O celular solicita a ação; o Desktop executa somente os comandos permitidos para aquele vínculo e o servidor registra o estado.
+### QR e identificação
 
-## TEF / PINPad
+O leitor `Ler QR / código` concentra os fluxos compatíveis do EventMenu, incluindo:
 
-O Desktop possui uma ponte para um **conector homologado executando no próprio Windows**. A URL aceita para o conector local é limitada a `localhost`, `127.0.0.1` ou `::1`.
+- pedido;
+- mesa;
+- comanda;
+- ingresso;
+- convidado;
+- funcionário;
+- entregador;
+- cliente;
+- evento;
+- dispositivo autorizado;
+- repasse de dinheiro do Delivery.
 
-Provedores previstos na configuração:
+A tela `Meu QR` permite ao funcionário/entregador gerar, exibir, copiar, substituir e revogar sua identificação. O payload local é protegido com DPAPI do Windows e separado por empresa/usuário.
 
-- PagBank / PlugPag ou TEF;
-- Stone TEF;
-- SiTef;
-- conector TEF genérico.
+Os QRs exibidos pelo Desktop são renderizados nativamente no WPF a partir da matriz do QRCoder.
 
-O fluxo financeiro usa uma intenção `tef` própria no servidor. Um resultado como `approved_local` significa apenas que o equipamento local reportou aprovação. A liquidação do pedido depende da etapa de verificação do provedor/servidor.
+### Comprovantes e impressão
 
-A integração física de cada adquirente depende do SDK/conector e da homologação fornecidos por ela. O EventMenu não simula essa aprovação.
+- impressão operacional do pedido;
+- comprovante não fiscal completo do pedido;
+- comprovante não fiscal de uma divisão da comanda;
+- impressão pelo sistema do Windows;
+- configuração de impressora/equipamentos locais.
 
-## NFC-e / NF-e
+Comprovante de venda **não é nota fiscal**. A emissão fiscal fica em módulo separado.
 
-A camada fiscal já prepara a operação antes da transmissão:
+### Nota fiscal
+
+A área `Nota fiscal` foi separada das configurações gerais e pode conter, conforme permissão:
 
 - perfil fiscal por unidade;
-- homologação/produção;
-- CNPJ, IE, regime tributário e endereço completo do emitente;
-- séries e numeração de NFC-e/NF-e;
-- CSC protegido;
-- certificado A1 no servidor, Windows ou modo híbrido;
-- referência para certificado A3 local;
-- certificado local A1 protegido por DPAPI;
-- NCM, CEST, CFOP, unidade, origem, GTIN, CST/CSOSN, PIS, COFINS, IPI e benefício fiscal por produto;
-- editor tributário de produtos no Desktop;
-- diagnóstico de prontidão de perfil, certificado e produtos;
-- NF-e exige destinatário fiscal completo;
-- documento só entra na fila depois do pedido estar pago e dos dados obrigatórios estarem completos;
-- snapshot fiscal criptografado e com hash antes da transmissão, preservando exatamente os dados usados naquela emissão.
+- ambiente de homologação/produção;
+- CNPJ, IE, regime tributário e endereço;
+- séries e numeração;
+- CSC;
+- certificado A1 e referência de certificado local;
+- tributação dos produtos (NCM, CEST, CFOP, CST/CSOSN, PIS, COFINS, IPI etc.);
+- diagnóstico de prontidão;
+- acompanhamento dos documentos fiscais.
 
-### Contrato do transmissor SEFAZ
+A interface estar disponível não significa que a emissão oficial já esteja homologada. Transmissão real depende de credenciamento, certificado e transmissor fiscal válido para o ambiente utilizado.
 
-`FiscalTransmitterInterface` define o ponto de integração com o transmissor homologado. A máquina de estados interna usa:
+## Segurança
 
-```text
-queued -> processing -> authorized
-                    -> rejected
-                    -> error
-```
+- tokens locais protegidos pelo Windows;
+- comunicação configurada somente em HTTPS;
+- permissões recebidas da conta controlam o que aparece e o que pode ser executado;
+- pagamentos não são confirmados apenas porque a interface informou sucesso;
+- Pix só é baixado após confirmação do fluxo financeiro;
+- desconto/cancelamento/fidelidade seguem regras da conta;
+- dados de outra empresa não devem ser reutilizados no cache local;
+- QR universal é validado online antes de liberar dados ou ações;
+- mensagens de SQL/stack trace não devem aparecer ao operador.
 
-Para aceitar `authorized`, o transmissor precisa retornar uma resposta previamente verificada contendo, no mínimo:
+## Diferenças intencionais para o Android
 
-- `verified=true`;
-- chave de acesso com 44 dígitos;
-- protocolo;
-- XML fiscal válido;
-- chave de acesso compatível com o XML.
+O objetivo é paridade **operacional**, não copiar recursos físicos do telefone.
 
-Sem um transmissor real configurado, `UnavailableFiscalTransmitter` falha de forma segura. O EventMenu **não cria protocolo, chave ou autorização fictícios**.
+Ficam no celular:
 
-Rejeições verificadas ficam como `rejected`. Falhas técnicas ficam como `error` e podem voltar à fila para nova tentativa sem alterar o snapshot fiscal. Uma rejeição fiscal não é transformada automaticamente em nova nota.
+- GPS contínuo;
+- câmera para escanear QR/código;
+- biometria Android;
+- push/permissões Android;
+- Tap On/NFC do telefone enquanto esse módulo estiver pausado.
+
+No Windows, códigos podem ser lidos por scanner USB/teclado, colados ou digitados.
+
+## Integrações locais
+
+O projeto possui infraestrutura para:
+
+- impressoras;
+- gaveta;
+- tela do cliente;
+- conexão com celular autorizado;
+- fila de impressão da produção;
+- conectores TEF/PINPad.
+
+A integração física de TEF/PINPad e fiscal depende de SDK, credenciais e homologação do fornecedor. O EventMenu não deve simular aprovação financeira ou fiscal.
 
 ## Servidor
 
-Por padrão:
+Base padrão atual do cliente:
 
 ```text
 https://go.gestao2.store/1/
 ```
 
-Para staging/migração:
+Para outro ambiente:
 
 ```powershell
 $env:EVENTMENU_DESKTOP_API_BASE_URL = "https://staging.exemplo.com/1/"
@@ -141,36 +148,42 @@ $env:EVENTMENU_DESKTOP_API_BASE_URL = "https://staging.exemplo.com/1/"
 
 A URL precisa usar HTTPS.
 
-## Banco de dados
+Alguns módulos novos dependem de endpoints mais recentes. Antes de publicar o Desktop em outro ambiente, conferir compatibilidade do servidor com QR universal, eventos, gerência, aprovações, notificações, fidelidade, conta dividida, comprovantes e fluxo financeiro do Delivery.
 
-As estruturas novas possuem migrações para MySQL e SQLite, incluindo:
+## Compilação local
 
-- hardware do Desktop;
-- intenções TEF;
-- EventMenu Hub;
-- provedor financeiro `tef`;
-- dados fiscais do emitente, destinatário e produtos;
-- snapshot fiscal criptografado.
+Pré-requisito: SDK .NET 8 em Windows.
 
-As migrações devem ser aplicadas pelo processo normal de instalação/atualização do EventMenu. Não devem ser executadas manualmente fora do controle de versão em produção.
+```powershell
+dotnet restore desktop/EventMenu.Desktop/EventMenu.Desktop.csproj
+dotnet build desktop/EventMenu.Desktop/EventMenu.Desktop.csproj -c Release
+dotnet publish desktop/EventMenu.Desktop/EventMenu.Desktop.csproj -c Release -r win-x64 --self-contained false
+```
 
-## Publicação Windows
+O instalador Windows é produzido pelo fluxo já existente no repositório.
 
-A estrutura de publicação existente prevê:
+**Regra atual deste desenvolvimento:** não executar build, publish, GitHub Actions ou gerar instalador sem autorização explícita antes da compilação.
 
-1. `EventMenu-Desktop-win-x64.zip` — versão portátil self-contained;
-2. `EventMenu-Desktop-Setup.exe` — instalador Windows x64.
+## Transferência para outra conta/equipe
 
-Nesta etapa de desenvolvimento de hardware/fiscal, os arquivos foram alterados em código sem executar compilação ou publicação.
+Consulte também `desktop/HANDOFF_DESKTOP.md`.
 
-## Pendências externas antes de produção fiscal/TEF
+Ao transferir o trabalho, informar:
 
-- instalar e homologar o SDK/conector da adquirente escolhida;
-- implementar o adaptador real que verifica a transação TEF no provedor quando exigido;
-- implementar/configurar o transmissor SEFAZ real para o estado/ambiente utilizado;
-- validar certificado, CSC e credenciamento do emitente em homologação;
-- validar NCM/CFOP/CST/CSOSN e demais regras com o responsável fiscal/contador;
-- testar impressora, gaveta, PINPad e certificados no hardware real;
-- somente depois liberar produção.
+- branch atual;
+- commit de referência;
+- ambiente do servidor usado;
+- recursos ainda dependentes de hardware/homologação;
+- que Android, Desktop e servidor possuem responsabilidades diferentes;
+- que o Desktop é WPF nativo e não WebView.
 
-Operações financeiras e fiscais sensíveis continuam sendo confirmadas pelo servidor EventMenu e pelos provedores oficiais correspondentes.
+Se o repositório for público, outra conta pode clonar/forkar e compilar. Secrets não acompanham fork. Em repositório privado, a nova conta precisa receber acesso ou uma cópia/transferência autorizada.
+
+## Antes de considerar uma versão pronta
+
+1. revisão estática de XAML, code-behind, contratos JSON, permissões e estados;
+2. autorização explícita para compilar;
+3. build/publish do Windows;
+4. teste real de instalação e atualização;
+5. teste de login/sessão, turnos, PDV, pedidos, caixa, mesas, divisão de conta, produção, estoque, Delivery, eventos, QR, impressão, notificações, aprovações e fiscal;
+6. somente depois classificar a versão como pronta para produção.
