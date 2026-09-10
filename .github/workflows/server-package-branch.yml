@@ -40,7 +40,10 @@ jobs:
         env:
           APP_ENV: testing
           APP_DEBUG: 'false'
+          APP_URL: https://example.test
+          APP_BASE_PATH: /1
           APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          EVENTMENU_NODE_ROLE: primary
           DB_CONNECTION: mysql
           DB_HOST: 127.0.0.1
           DB_PORT: '3306'
@@ -50,6 +53,7 @@ jobs:
           SESSION_NAME: eventmenu_go_support_mysql
         run: |
           php scripts/ci-db-smoke.php
+          php scripts/ci-platform-failover-smoke.php
           php scripts/ci-eventmenu-go-hub-smoke.php
           php scripts/ci-delivery-tracking-smoke.php
           php scripts/ci-customer-communication-smoke.php
@@ -72,13 +76,17 @@ jobs:
         env:
           APP_ENV: testing
           APP_DEBUG: 'false'
+          APP_URL: https://example.test
+          APP_BASE_PATH: /1
           APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          EVENTMENU_NODE_ROLE: primary
           DB_CONNECTION: sqlite
           DB_SQLITE_PATH: /tmp/eventmenu-package.sqlite
           SESSION_NAME: eventmenu_package_sqlite
         run: |
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
+          php scripts/ci-platform-failover-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
           php scripts/ci-delivery-tracking-smoke.php
@@ -100,11 +108,14 @@ jobs:
           test -f "$PACKAGE/public/api-go-delivery.php"
           test -f "$PACKAGE/public/api-go-expedition.php"
           test -f "$PACKAGE/public/api-go-inventory.php"
+          test -f "$PACKAGE/public/api-go-routing.php"
+          test -f "$PACKAGE/public/api-cluster.php"
           test -f "$PACKAGE/public/api-hub.php"
           test -f "$PACKAGE/public/api-delivery-manager-live.php"
           test -f "$PACKAGE/public/api-delivery-track.php"
           test -f "$PACKAGE/public/rastreio.php"
           test -f "$PACKAGE/app/routes/delivery.php"
+          test -f "$PACKAGE/app/routes/platform-failover.php"
           test -f "$PACKAGE/app/routes/whatsapp-settings.php"
           test -f "$PACKAGE/src/Services/DeliveryTrackingService.php"
           test -f "$PACKAGE/src/Services/DeliveryPublicTrackingService.php"
@@ -112,6 +123,7 @@ jobs:
           test -f "$PACKAGE/src/Services/ExpeditionDeliveryService.php"
           test -f "$PACKAGE/src/Services/InventorySnapshotService.php"
           test -f "$PACKAGE/src/Services/CustomerCommunicationService.php"
+          test -f "$PACKAGE/src/Services/PlatformFailoverService.php"
           test -f "$PACKAGE/src/Services/HubService.php"
           test -f "$PACKAGE/src/Services/HubDesktopPresenceService.php"
           test -f "$PACKAGE/src/Services/HubCommandIdempotencyGuardService.php"
@@ -121,17 +133,21 @@ jobs:
           test -f "$PACKAGE/database/migrations/101_delivery_tracking_telemetry.sql"
           test -f "$PACKAGE/database/migrations/102_customer_communications.sql"
           test -f "$PACKAGE/database/migrations/103_eventmenu_hub_shared.sql"
+          test -f "$PACKAGE/database/migrations/104_platform_failover.sql"
           test -f "$PACKAGE/database/sqlite/migrations/099_delivery_live_tracking.sql"
           test -f "$PACKAGE/database/sqlite/migrations/100_delivery_tracking_tokens.sql"
           test -f "$PACKAGE/database/sqlite/migrations/101_delivery_tracking_telemetry.sql"
           test -f "$PACKAGE/database/sqlite/migrations/102_customer_communications.sql"
           test -f "$PACKAGE/database/sqlite/migrations/103_eventmenu_hub_shared.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/104_platform_failover.sql"
           test -f "$PACKAGE/scripts/ci-eventmenu-go-hub-smoke.php"
+          test -f "$PACKAGE/scripts/ci-platform-failover-smoke.php"
           test -d "$PACKAGE/vendor"
           test -f "$PACKAGE/vendor/autoload.php"
           test -d "$PACKAGE/storage"
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
+          grep -q '^EVENTMENU_NODE_ROLE=primary$' "$PACKAGE/.env.example"
           grep -q '^DELIVERY_GPS_HISTORY_DAYS=7$' "$PACKAGE/.env.example"
       - name: Generate checksums
         run: |
