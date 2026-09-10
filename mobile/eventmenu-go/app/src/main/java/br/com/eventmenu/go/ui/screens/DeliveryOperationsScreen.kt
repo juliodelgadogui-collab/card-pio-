@@ -1,11 +1,13 @@
 package br.com.eventmenu.go.ui.screens
 
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -30,6 +32,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,10 +46,13 @@ import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.OrderOperationsViewModel
 import br.com.eventmenu.go.data.DeliveryProgress
 import br.com.eventmenu.go.data.Order
+import br.com.eventmenu.go.data.OrderDetailItem
 import br.com.eventmenu.go.data.PixCharge
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.MultiFormatWriter
+import java.util.Locale
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun DeliveryOperationsScreen(
@@ -68,6 +74,7 @@ fun DeliveryOperationsScreen(
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as EventMenuGoApplication
+    val scope = rememberCoroutineScope()
     val detailViewModel: OrderOperationsViewModel = viewModel(factory = OrderOperationsViewModel.Factory(app.orderOperationsRepository))
     val detailState by detailViewModel.state.collectAsState()
     val cancellationViewModel: CancellationViewModel = viewModel(factory = CancellationViewModel.Factory(app.cancellationRepository))
@@ -75,6 +82,7 @@ fun DeliveryOperationsScreen(
     var pixOrder by remember { mutableStateOf<Order?>(null) }
     var cashOrder by remember { mutableStateOf<Order?>(null) }
     var cancelOrder by remember { mutableStateOf<Order?>(null) }
+    var whatsAppLoadingOrderId by remember { mutableStateOf<Int?>(null) }
     val deliveries = orders.filter {
         it.channel == "delivery" &&
             it.status !in setOf("completed", "cancelled") &&
@@ -118,7 +126,35 @@ fun DeliveryOperationsScreen(
                         Text(phone, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { openDialer(context, phone) }, modifier = Modifier.weight(1f)) { Text("Ligar") }
-                            OutlinedButton(onClick = { openMessage(context, phone, order.id) }, modifier = Modifier.weight(1f)) { Text("Mensagem") }
+                            OutlinedButton(
+                                onClick = {
+                                    if (whatsAppLoadingOrderId != null) return@OutlinedButton
+                                    whatsAppLoadingOrderId = order.id
+                                    scope.launch {
+                                        val items = runCatching { app.orderOperationsRepository.detail(order.id).items }.getOrElse {
+                                            Toast.makeText(
+                                                context,
+                                                "Não foi possível carregar os itens. Abrindo o WhatsApp sem o resumo do pedido.",
+                                                Toast.LENGTH_SHORT,
+                                            ).show()
+                                            emptyList()
+                                        }
+                                        val message = deliveryArrivalMessage(customer, items)
+                                        if (!openWhatsApp(context, phone, message)) {
+                                            Toast.makeText(
+                                                context,
+                                                "Não foi possível abrir o WhatsApp neste aparelho.",
+                                                Toast.LENGTH_LONG,
+                                            ).show()
+                                        }
+                                        whatsAppLoadingOrderId = null
+                                    }
+                                },
+                                enabled = whatsAppLoadingOrderId == null,
+                                modifier = Modifier.weight(1f),
+                            ) {
+                                Text(if (whatsAppLoadingOrderId == order.id) "Abrindo…" else "WhatsApp")
+                            }
                         }
                     }
 
@@ -338,11 +374,58 @@ private fun openDialer(context: Context, phone: String) {
     context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(phone))))
 }
 
-private fun openMessage(context: Context, phone: String, orderId: Int) {
-    context.startActivity(
-        Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + Uri.encode(phone)))
-            .putExtra("sms_body", "Olá! Estou chegando com seu pedido #$orderId.")
-    )
+private fun deliveryArrivalMessage(customerName: String?, items: List<OrderDetailItem>): String {
+    val customer = deliveryUseful(customerName)?.takeIf { !it.equals("Consumidor", true) }
+    val greeting = customer?.let { "Olá, $it!" } ?: "Olá!"
+    val summary = items
+        .filter { it.quantity > 0.0 && deliveryUseful(it.name) != null }
+        .joinToString(", ") { item ->
+            "${deliveryItemQuantity(item.quantity)}x ${item.name.trim()}"
+        }
+    return if (summary.isNotBlank()) {
+        "$greeting Estou chegando com seu pedido: $summary."
+    } else {
+        "$greeting Estou chegando com seu pedido."
+    }
+}
+
+private fun deliveryItemQuantity(quantity: Double): String {
+    if (quantity % 1.0 == 0.0) return quantity.toInt().toString()
+    return String.format(Locale.US, "%.2f", quantity)
+        .trimEnd('0')
+        .trimEnd('.')
+        .replace('.', ',')
+}
+
+private fun normalizeWhatsAppPhone(phone: String): String? {
+    var digits = phone.filter(Char::isDigit)
+    if (digits.startsWith("00")) digits = digits.drop(2)
+    if (digits.length == 10 || digits.length == 11) digits = "55$digits"
+    return digits.takeIf { it.length in 10..15 }
+}
+
+private fun openWhatsApp(context: Context, phone: String, message: String): Boolean {
+    val digits = normalizeWhatsAppPhone(phone) ?: return false
+    val appUri = Uri.parse("whatsapp://send?phone=$digits&text=${Uri.encode(message)}")
+
+    for (packageName in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+        try {
+            context.startActivity(Intent(Intent.ACTION_VIEW, appUri).setPackage(packageName))
+            return true
+        } catch (_: ActivityNotFoundException) {
+            // Tenta a próxima edição do WhatsApp.
+        } catch (_: SecurityException) {
+            // Tenta a próxima edição do WhatsApp.
+        }
+    }
+
+    return try {
+        val webUri = Uri.parse("https://wa.me/$digits?text=${Uri.encode(message)}")
+        context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+        true
+    } catch (_: Exception) {
+        false
+    }
 }
 
 private fun openGoogleMaps(context: Context, address: String) {
