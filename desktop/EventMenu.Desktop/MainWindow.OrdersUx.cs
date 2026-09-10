@@ -15,6 +15,7 @@ public partial class MainWindow
     private ComboBox? _ordersStatusFilter;
     private ComboBox? _ordersPaymentFilter;
     private TextBlock? _ordersVisibleCount;
+    private Button? _orderDetailsButton;
     private DependencyPropertyDescriptor? _ordersItemsSourceDescriptor;
 
     private void EnsureOrdersUx()
@@ -32,24 +33,21 @@ public partial class MainWindow
 
         StackPanel? actionBar = OrdersView.Children.OfType<StackPanel>()
             .FirstOrDefault(x => Grid.GetRow(x) == 2);
+        var rowGrid = OrdersView.Children.OfType<Grid>().FirstOrDefault(x => Grid.GetRow(x) == 2);
 
-        if (actionBar is null)
+        if (actionBar is null && rowGrid is not null)
         {
-            var rowGrid = OrdersView.Children.OfType<Grid>().FirstOrDefault(x => Grid.GetRow(x) == 2);
-            if (rowGrid is not null)
-            {
-                foreach (var hint in rowGrid.Children.OfType<TextBlock>().ToList())
-                    hint.Visibility = Visibility.Collapsed;
+            foreach (var hint in rowGrid.Children.OfType<TextBlock>().ToList())
+                hint.Visibility = Visibility.Collapsed;
 
-                actionBar = new StackPanel
-                {
-                    Orientation = Orientation.Horizontal,
-                    HorizontalAlignment = HorizontalAlignment.Left,
-                    VerticalAlignment = VerticalAlignment.Center,
-                };
-                Grid.SetColumn(actionBar, 0);
-                rowGrid.Children.Add(actionBar);
-            }
+            actionBar = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            Grid.SetColumn(actionBar, 0);
+            rowGrid.Children.Add(actionBar);
         }
 
         if (actionBar is not null)
@@ -92,7 +90,29 @@ public partial class MainWindow
             actionBar.Children.Add(_ordersVisibleCount);
         }
 
+        if (rowGrid is not null)
+        {
+            var rightActions = rowGrid.Children.OfType<StackPanel>().FirstOrDefault(x => Grid.GetColumn(x) == 1);
+            if (rightActions is not null)
+            {
+                _orderDetailsButton = new Button
+                {
+                    Content = "Ver pedido",
+                    Height = 40,
+                    MinHeight = 40,
+                    Padding = new Thickness(14, 8, 14, 8),
+                    Style = TryFindResource("SecondaryButton") as Style,
+                    ToolTip = "Abrir itens, cliente, entrega e observações",
+                    IsEnabled = false
+                };
+                _orderDetailsButton.Click += async (_, _) => await OpenSelectedOrderDetailsAsync();
+                rightActions.Children.Insert(0, _orderDetailsButton);
+            }
+        }
+
         OrdersGrid.LoadingRow += OrdersGrid_OperationalLoadingRow;
+        OrdersGrid.SelectionChanged += OrdersGrid_DetailsSelectionChanged;
+        OrdersGrid.MouseDoubleClick += OrdersGrid_MouseDoubleClick;
         PreviewKeyDown += MainWindow_OrdersPreviewKeyDown;
         _ordersItemsSourceDescriptor = DependencyPropertyDescriptor.FromProperty(ItemsControl.ItemsSourceProperty, typeof(DataGrid));
         _ordersItemsSourceDescriptor?.AddValueChanged(OrdersGrid, OrdersGrid_ItemsSourceChanged);
@@ -161,6 +181,29 @@ public partial class MainWindow
         }
     }
 
+    private void OrdersGrid_DetailsSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_orderDetailsButton is not null) _orderDetailsButton.IsEnabled = OrdersGrid.SelectedItem is Order;
+    }
+
+    private async void OrdersGrid_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (OrdersGrid.SelectedItem is not Order) return;
+        await OpenSelectedOrderDetailsAsync();
+    }
+
+    private async Task OpenSelectedOrderDetailsAsync()
+    {
+        if (_store is null || OrdersGrid.SelectedItem is not Order order) return;
+        var window = new OrderDetailsWindow(_store, order.Id, Can("delivery_assign")) { Owner = this };
+        window.ShowDialog();
+        if (window.OrderChanged)
+        {
+            await TryLoadOrdersAsync(false);
+            if (Can("tables") && ShiftIs("operation")) await TryLoadTablesAsync(false);
+        }
+    }
+
     private async void MainWindow_OrdersPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (ShellPanel.Visibility != Visibility.Visible) return;
@@ -171,6 +214,12 @@ public partial class MainWindow
             _ordersSearchBox?.Focus();
             _ordersSearchBox?.SelectAll();
             e.Handled = true;
+            return;
+        }
+        if (e.Key == Key.Enter && OrdersView.Visibility == Visibility.Visible && OrdersGrid.IsKeyboardFocusWithin && OrdersGrid.SelectedItem is Order)
+        {
+            e.Handled = true;
+            await OpenSelectedOrderDetailsAsync();
             return;
         }
         if (e.Key == Key.F5 && OrdersView.Visibility == Visibility.Visible)
@@ -184,6 +233,8 @@ public partial class MainWindow
     {
         if (!_ordersUxReady) return;
         OrdersGrid.LoadingRow -= OrdersGrid_OperationalLoadingRow;
+        OrdersGrid.SelectionChanged -= OrdersGrid_DetailsSelectionChanged;
+        OrdersGrid.MouseDoubleClick -= OrdersGrid_MouseDoubleClick;
         PreviewKeyDown -= MainWindow_OrdersPreviewKeyDown;
         _ordersItemsSourceDescriptor?.RemoveValueChanged(OrdersGrid, OrdersGrid_ItemsSourceChanged);
         _ordersItemsSourceDescriptor = null;
