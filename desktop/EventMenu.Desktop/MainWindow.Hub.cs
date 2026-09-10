@@ -20,6 +20,7 @@ public partial class MainWindow
     private Button? _productionNavButton;
     private Button? _inventoryNavButton;
     private Button? _deliveryMonitorButton;
+    private Button? _qrNavButton;
     private Button? _fiscalNavButton;
     private Button? _hubNavButton;
     private Button? _hardwareSettingsButton;
@@ -71,6 +72,14 @@ public partial class MainWindow
         };
         _deliveryMonitorButton.Click+=async(_,_)=>await OpenDeliveryMonitorAsync();
 
+        _qrNavButton=new Button
+        {
+            Content="Ler QR / código",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="Ler mesa, ingresso, convidado ou outro código autorizado"
+        };
+        _qrNavButton.Click+=async(_,_)=>await OpenQrOperationsAsync();
+
         _fiscalNavButton=new Button
         {
             Content="Nota fiscal",
@@ -100,9 +109,10 @@ public partial class MainWindow
         sidebar.Children.Insert(insert,_productionNavButton);
         sidebar.Children.Insert(insert+1,_inventoryNavButton);
         sidebar.Children.Insert(insert+2,_deliveryMonitorButton);
-        sidebar.Children.Insert(insert+3,_fiscalNavButton);
-        sidebar.Children.Insert(insert+4,_hubNavButton);
-        sidebar.Children.Insert(insert+5,_hardwareSettingsButton);
+        sidebar.Children.Insert(insert+3,_qrNavButton);
+        sidebar.Children.Insert(insert+4,_fiscalNavButton);
+        sidebar.Children.Insert(insert+5,_hubNavButton);
+        sidebar.Children.Insert(insert+6,_hardwareSettingsButton);
 
         ApplySecondaryNavigationVisibility();
         EnsureNativeNavigation();
@@ -132,6 +142,8 @@ public partial class MainWindow
             _inventoryNavButton.Visibility=Can("inventory")?Visibility.Visible:Visibility.Collapsed;
         if(_deliveryMonitorButton is not null)
             _deliveryMonitorButton.Visibility=(Can("delivery_assign")||Can("reports"))?Visibility.Visible:Visibility.Collapsed;
+        if(_qrNavButton is not null)
+            _qrNavButton.Visibility=(Can("tables")||Can("tickets")||Can("guests")||Can("orders_create"))?Visibility.Visible:Visibility.Collapsed;
         if(_fiscalNavButton is not null)
             _fiscalNavButton.Visibility=(Can("fiscal_manage")||Can("fiscal_issue"))?Visibility.Visible:Visibility.Collapsed;
         if(_hubNavButton is not null)
@@ -182,6 +194,11 @@ public partial class MainWindow
         {
             e.Handled=true;
             await OpenHubPairingAsync();
+        }
+        else if(e.Key==Key.Q&&Keyboard.Modifiers.HasFlag(ModifierKeys.Control))
+        {
+            e.Handled=true;
+            await OpenQrOperationsAsync();
         }
     }
 
@@ -234,6 +251,28 @@ public partial class MainWindow
         await Task.CompletedTask;
     }
 
+    private async Task OpenQrOperationsAsync()
+    {
+        if(_store is null||ShellPanel.Visibility!=Visibility.Visible)return;
+        var canTables=Can("tables")||Can("orders_create");
+        var canTickets=Can("tickets");
+        var canGuests=Can("guests");
+        if(!canTables&&!canTickets&&!canGuests)return;
+        if(!HasShift)
+        {
+            MessageBox.Show("Inicie um turno antes de usar a leitura de códigos.","Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            var window=new QrOperationsWindow(_store,canTables,canTickets,canGuests){Owner=this};
+            window.ShowDialog();
+            if(window.OperationChanged&&canTables&&ShiftIs("operation"))await TryLoadTablesAsync(false);
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+
     private async Task OpenFiscalAreaAsync()
     {
         if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null||_currentUser is null)return;
@@ -248,21 +287,18 @@ public partial class MainWindow
         {
             EnsureHubRuntime();
             if(_hubIntegrationApi is null)return;
-
-            if(Can("fiscal_manage"))
-            {
-                var unitId=ShiftInt("unit_id");
-                var unitName=ShiftValue("unit_name");
-                var store=_hubHardwareStore??new LocalHardwareProfileStore();
-                var window=new HardwareFiscalSettingsWindow(_hubIntegrationApi,store,_currentUser.TenantId,unitId,unitName,false,true){Owner=this};
-                window.UseFiscalOnlyMode();
-                window.ShowDialog();
-            }
-            else
-            {
-                var window=new FiscalDocumentsWindow(_hubIntegrationApi){Owner=this};
-                window.ShowDialog();
-            }
+            var unitId=ShiftInt("unit_id");
+            var unitName=ShiftValue("unit_name");
+            var store=_hubHardwareStore??new LocalHardwareProfileStore();
+            var window=new FiscalCenterWindow(
+                _hubIntegrationApi,
+                store,
+                _currentUser.TenantId,
+                unitId,
+                unitName,
+                Can("fiscal_manage"),
+                Can("fiscal_issue")){Owner=this};
+            window.ShowDialog();
         }
         catch(Exception ex){MessageBox.Show(ex.Message,"Nota fiscal",MessageBoxButton.OK,MessageBoxImage.Warning);}
     }
