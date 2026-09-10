@@ -9,6 +9,7 @@ public partial class MainWindow
     private bool _dashboardUxReady;
     private DependencyPropertyDescriptor? _dashboardOrdersDescriptor;
     private DependencyPropertyDescriptor? _dashboardTablesDescriptor;
+    private DependencyPropertyDescriptor? _connectionTextDescriptor;
     private TextBlock? _dashboardAttentionTitle;
     private TextBlock? _dashboardAttentionDetail;
     private TextBlock? _dashboardAttentionIcon;
@@ -21,6 +22,13 @@ public partial class MainWindow
         RenameMetric(OrdersCountText, "Pedidos ativos", "em andamento agora");
         RenameMetric(ProductsCountText, "A receber", "pagamentos pendentes");
         RenameMetric(TablesCountText, "Prontos", "aguardando próxima etapa");
+
+        if (ConnectionText.Parent is StackPanel connectionPanel)
+        {
+            var labels = connectionPanel.Children.OfType<TextBlock>().ToList();
+            if (labels.Count > 0) labels[0].Text = "Conexão";
+            if (labels.Count > 2) labels[2].Text = "situação do sistema";
+        }
 
         var attentionCard = DashboardView.Children.OfType<Border>().FirstOrDefault(x => Grid.GetRow(x) == 3);
         if (attentionCard?.Child is Grid attentionGrid)
@@ -41,6 +49,9 @@ public partial class MainWindow
         _dashboardOrdersDescriptor?.AddValueChanged(OrdersGrid, DashboardSourceChanged);
         _dashboardTablesDescriptor = DependencyPropertyDescriptor.FromProperty(ItemsControl.ItemsSourceProperty, typeof(DataGrid));
         _dashboardTablesDescriptor?.AddValueChanged(TablesGrid, DashboardSourceChanged);
+        _connectionTextDescriptor = DependencyPropertyDescriptor.FromProperty(TextBlock.TextProperty, typeof(TextBlock));
+        _connectionTextDescriptor?.AddValueChanged(ConnectionText, ConnectionTextChanged);
+        NormalizeConnectionText();
         RefreshDashboardUx();
     }
 
@@ -54,13 +65,24 @@ public partial class MainWindow
 
     private void DashboardSourceChanged(object? sender, EventArgs e) => RefreshDashboardUx();
 
+    private void ConnectionTextChanged(object? sender, EventArgs e) => NormalizeConnectionText();
+
+    private void NormalizeConnectionText()
+    {
+        var text = ConnectionText.Text?.Trim() ?? "";
+        if (text.Equals("Servidor conectado", StringComparison.OrdinalIgnoreCase)) ConnectionText.Text = "Online";
+        else if (text.StartsWith("Servidor conectado parcialmente", StringComparison.OrdinalIgnoreCase)) ConnectionText.Text = "Conexão parcial";
+        else if (text.Equals("Atualizando...", StringComparison.OrdinalIgnoreCase)) ConnectionText.Text = "Atualizando";
+    }
+
     private void RefreshDashboardUx()
     {
         if (!_dashboardUxReady) return;
 
         var activeOrders = _orders.Count(x => x.Status is not ("completed" or "cancelled"));
         var readyOrders = _orders.Count(x => x.Status == "ready");
-        var pendingPayments = _orders.Count(x => x.PaymentStatus is "unpaid" or "pending" or "partially_paid" && x.Status != "cancelled");
+        var pendingPayments = _orders.Count(x =>
+            (x.PaymentStatus is "unpaid" or "pending" or "partially_paid") && x.Status != "cancelled");
         var deliveryWithoutDriver = _orders.Count(x => x.Channel == "delivery"
             && x.AssignedDeliveryUserId is null
             && x.Status is "confirmed" or "preparing" or "ready");
@@ -127,8 +149,10 @@ public partial class MainWindow
         if (!_dashboardUxReady) return;
         _dashboardOrdersDescriptor?.RemoveValueChanged(OrdersGrid, DashboardSourceChanged);
         _dashboardTablesDescriptor?.RemoveValueChanged(TablesGrid, DashboardSourceChanged);
+        _connectionTextDescriptor?.RemoveValueChanged(ConnectionText, ConnectionTextChanged);
         _dashboardOrdersDescriptor = null;
         _dashboardTablesDescriptor = null;
+        _connectionTextDescriptor = null;
         _dashboardUxReady = false;
     }
 }
