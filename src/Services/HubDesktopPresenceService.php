@@ -38,18 +38,21 @@ final class HubDesktopPresenceService
         $hardwareJson = json_encode($safeHardware, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
 
         return Database::transaction(function (PDO $pdo) use ($tenantId, $unitId, $deviceHash, $label, $hardwareJson, $safeHardware): array {
-            $q = $pdo->prepare(Database::portableSql($pdo, 'SELECT id,revoked_at FROM desktop_hardware_bindings WHERE tenant_id=? AND device_hash=? LIMIT 1 FOR UPDATE'));
+            $q = $pdo->prepare(Database::portableSql($pdo, 'SELECT id,unit_id,revoked_at FROM desktop_hardware_bindings WHERE tenant_id=? AND device_hash=? LIMIT 1 FOR UPDATE'));
             $q->execute([$tenantId, $deviceHash]);
             $existing = $q->fetch();
 
             if ($existing && !empty($existing['revoked_at'])) {
                 throw new RuntimeException('Este computador foi revogado. Libere o dispositivo antes de reconectar.');
             }
+            if ($existing && (int)$existing['unit_id'] !== $unitId) {
+                throw new RuntimeException('Este computador já está vinculado a outra unidade. Revogue o vínculo antes de alterar a unidade.');
+            }
 
             if ($existing) {
                 $bindingId = (int)$existing['id'];
-                $pdo->prepare('UPDATE desktop_hardware_bindings SET unit_id=?,device_label=?,hardware_json=?,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')
-                    ->execute([$unitId, $label ?: null, $hardwareJson, $bindingId, $tenantId]);
+                $pdo->prepare('UPDATE desktop_hardware_bindings SET device_label=?,hardware_json=?,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND unit_id=?')
+                    ->execute([$label ?: null, $hardwareJson, $bindingId, $tenantId, $unitId]);
             } else {
                 $pdo->prepare('INSERT INTO desktop_hardware_bindings (tenant_id,unit_id,device_hash,device_label,hardware_json,last_seen_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)')
                     ->execute([$tenantId, $unitId, $deviceHash, $label ?: null, $hardwareJson]);
