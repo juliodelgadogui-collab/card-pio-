@@ -26,21 +26,6 @@ concurrency:
 jobs:
   mysql-smoke:
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_DATABASE: eventmenu
-          MYSQL_USER: eventmenu
-          MYSQL_PASSWORD: eventmenu
-          MYSQL_ROOT_PASSWORD: root
-        ports:
-          - 3306:3306
-        options: >-
-          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=10
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
@@ -48,6 +33,20 @@ jobs:
           php-version: '8.2'
           extensions: curl, mbstring, openssl, pdo_mysql
           coverage: none
+      - name: Start local MySQL
+        run: |
+          sudo systemctl start mysql.service
+          for i in {1..30}; do
+            if mysqladmin ping -h 127.0.0.1 -uroot --silent; then break; fi
+            sleep 1
+          done
+          sudo mysql <<'SQL'
+          CREATE DATABASE IF NOT EXISTS eventmenu CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          CREATE USER IF NOT EXISTS 'eventmenu'@'%' IDENTIFIED BY 'eventmenu';
+          ALTER USER 'eventmenu'@'%' IDENTIFIED BY 'eventmenu';
+          GRANT ALL PRIVILEGES ON eventmenu.* TO 'eventmenu'@'%';
+          FLUSH PRIVILEGES;
+          SQL
       - name: Install dependencies
         run: composer install --no-interaction --no-progress --prefer-dist
       - name: MySQL EventMenu GO support smoke
