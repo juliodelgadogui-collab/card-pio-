@@ -51,9 +51,8 @@ final class DeliveryProgressService
         if($firstStart){
             try{
                 $token=(new DeliveryTrackingService())->publicToken($tenantId,$orderId);
-                $base=rtrim((string)env('APP_URL',''),'/');
-                if(!str_starts_with(strtolower($base),'https://'))throw new RuntimeException('APP_URL HTTPS é necessário para enviar o rastreamento.');
-                $url=$base.'/rastreio.php?t='.$token;
+                $url=app_absolute_url('rastreio.php?t='.rawurlencode($token));
+                if(!str_starts_with(strtolower($url),'https://'))throw new RuntimeException('APP_URL HTTPS é necessário para enviar o rastreamento.');
                 $queued=(new CustomerCommunicationService())->queueDeliveryTracking($tenantId,$orderId,$url);
                 Auth::audit('delivery.tracking_queued','order',(string)$orderId,['channels_queued'=>$queued]);
             }catch(\Throwable $e){
