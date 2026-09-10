@@ -50,8 +50,8 @@ public sealed class CancellationRequestItem
     [JsonPropertyName("payment_status")] public string PaymentStatus { get; set; } = "";
     [JsonPropertyName("total_cents")] public int TotalCents { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
-    public string TotalDisplay => Money(TotalCents);
-    public string CreatedDisplay => LocalTime(CreatedAt);
+    public string TotalDisplay => OperationalDisplay.Money(TotalCents);
+    public string CreatedDisplay => OperationalDisplay.LocalTime(CreatedAt);
 }
 
 public sealed class DiscountRequestsResponse
@@ -73,9 +73,9 @@ public sealed class DiscountRequestItem
     [JsonPropertyName("order_status")] public string OrderStatus { get; set; } = "";
     [JsonPropertyName("payment_status")] public string PaymentStatus { get; set; } = "";
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
-    public string RequestedDisplay => Money(RequestedCents);
-    public string TotalDisplay => Money(TotalCents);
-    public string CreatedDisplay => LocalTime(CreatedAt);
+    public string RequestedDisplay => OperationalDisplay.Money(RequestedCents);
+    public string TotalDisplay => OperationalDisplay.Money(TotalCents);
+    public string CreatedDisplay => OperationalDisplay.LocalTime(CreatedAt);
 }
 
 public sealed class QrResolveResponse
@@ -124,7 +124,7 @@ public sealed class OperationalOrderDetail
     [JsonPropertyName("notes")] public string? Notes { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
 
-    public string TotalDisplay => Money(TotalCents);
+    public string TotalDisplay => OperationalDisplay.Money(TotalCents);
     public string ChannelDisplay => Channel switch
     {
         "counter" => "Balcão",
@@ -156,13 +156,17 @@ public sealed class OperationalOrderDetail
         "cancelled" => "Cancelado",
         _ => PaymentStatus
     };
-    public string CreatedDisplay => LocalTime(CreatedAt);
+    public string CreatedDisplay => OperationalDisplay.LocalTime(CreatedAt);
 }
 
-internal static string Money(int cents) => (cents / 100m).ToString("C2", new CultureInfo("pt-BR"));
-internal static string LocalTime(string value)
+internal static class OperationalDisplay
 {
-    if (DateTimeOffset.TryParse(value, out var offset)) return offset.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
-    if (DateTime.TryParse(value, out var local)) return local.ToString("dd/MM/yyyy HH:mm");
-    return value;
+    public static string Money(int cents) => (cents / 100m).ToString("C2", new CultureInfo("pt-BR"));
+
+    public static string LocalTime(string value)
+    {
+        if (DateTimeOffset.TryParse(value, out var offset)) return offset.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+        if (DateTime.TryParse(value, out var local)) return local.ToString("dd/MM/yyyy HH:mm");
+        return value;
+    }
 }
