@@ -14,6 +14,8 @@ public partial class ManagerCenterWindow : Window
     private readonly bool _canReopen;
     private readonly bool _canDiscountRequest;
     private readonly bool _canCancellationRequest;
+    private readonly bool _canAccept;
+    private readonly bool _canLoyalty;
     private List<DeliveryUserOption> _deliveryUsers = new();
     private bool _loading;
 
@@ -24,7 +26,9 @@ public partial class ManagerCenterWindow : Window
         bool canAssignDelivery,
         bool canReopen,
         bool canDiscountRequest,
-        bool canCancellationRequest)
+        bool canCancellationRequest,
+        bool canAccept,
+        bool canLoyalty)
     {
         _store = store;
         _api = new OperationalActionsApiClient(store);
@@ -32,6 +36,8 @@ public partial class ManagerCenterWindow : Window
         _canReopen = canReopen;
         _canDiscountRequest = canDiscountRequest;
         _canCancellationRequest = canCancellationRequest;
+        _canAccept = canAccept;
+        _canLoyalty = canLoyalty;
         InitializeComponent();
         ReopenTab.Visibility = canReopen ? Visibility.Visible : Visibility.Collapsed;
         Loaded += async (_, _) => await LoadAsync();
@@ -195,7 +201,14 @@ public partial class ManagerCenterWindow : Window
     private void OpenSelectedProblemOrder()
     {
         if (ProblemOrdersGrid.SelectedItem is not ManagerProblemOrder order) return;
-        var window = new OrderDetailsWindow(_store, order.Id, _canAssignDelivery, _canDiscountRequest, _canCancellationRequest) { Owner = this };
+        var window = new OrderDetailsWindow(
+            _store,
+            order.Id,
+            _canAssignDelivery,
+            _canDiscountRequest,
+            _canCancellationRequest,
+            _canAccept,
+            _canLoyalty) { Owner = this };
         window.ShowDialog();
         if (window.OrderChanged)
         {
