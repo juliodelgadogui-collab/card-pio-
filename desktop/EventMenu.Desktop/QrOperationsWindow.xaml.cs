@@ -170,13 +170,13 @@ public partial class QrOperationsWindow : Window
                 }
                 case "ticket":
                     if (!_canTickets) return;
-                    await _api.TicketCheckInAsync(_rawValue);
+                    await _api.TicketCheckInAsync(NormalizeScannedToken(_rawValue));
                     OperationChanged = true;
                     OperationStatusText.Text = "Entrada confirmada.";
                     break;
                 case "guest":
                     if (!_canGuests) return;
-                    await _api.GuestCheckInAsync(_rawValue);
+                    await _api.GuestCheckInAsync(NormalizeScannedToken(_rawValue));
                     OperationChanged = true;
                     OperationStatusText.Text = "Entrada do convidado confirmada.";
                     break;
@@ -213,6 +213,23 @@ public partial class QrOperationsWindow : Window
     private void UpdateActionAvailability()
     {
         ActionButton.IsEnabled = !_busy && ActionButton.Visibility == Visibility.Visible;
+    }
+
+    private static string NormalizeScannedToken(string raw)
+    {
+        var value = raw.Trim();
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return value;
+        var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in query)
+        {
+            var pieces = part.Split('=', 2);
+            if (pieces.Length != 2) continue;
+            var key = Uri.UnescapeDataString(pieces[0]);
+            if (key is not ("t" or "token" or "code")) continue;
+            var token = Uri.UnescapeDataString(pieces[1].Replace('+', ' ')).Trim();
+            if (token.Length > 0) return token;
+        }
+        return value;
     }
 
     private static string Text(Dictionary<string, JsonElement> data, string key, string fallback)
