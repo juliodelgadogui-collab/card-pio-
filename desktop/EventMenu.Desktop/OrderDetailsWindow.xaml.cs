@@ -6,19 +6,30 @@ namespace EventMenu.Desktop;
 
 public partial class OrderDetailsWindow : Window
 {
+    private readonly SecureSessionStore _store;
     private readonly OperationalActionsApiClient _api;
     private readonly int _orderId;
     private readonly bool _canAssignDelivery;
+    private readonly bool _canDiscountRequest;
+    private readonly bool _canCancellationRequest;
     private OperationalOrderDetail? _order;
     private bool _loading;
 
     public bool OrderChanged { get; private set; }
 
-    public OrderDetailsWindow(SecureSessionStore store, int orderId, bool canAssignDelivery)
+    public OrderDetailsWindow(
+        SecureSessionStore store,
+        int orderId,
+        bool canAssignDelivery,
+        bool canDiscountRequest,
+        bool canCancellationRequest)
     {
+        _store = store;
         _api = new OperationalActionsApiClient(store);
         _orderId = orderId;
         _canAssignDelivery = canAssignDelivery;
+        _canDiscountRequest = canDiscountRequest;
+        _canCancellationRequest = canCancellationRequest;
         InitializeComponent();
         TitleText.Text = $"Pedido #{orderId}";
         Loaded += async (_, _) => await LoadAsync();
@@ -37,6 +48,7 @@ public partial class OrderDetailsWindow : Window
             _order = response.Order ?? throw new InvalidOperationException("Pedido não encontrado.");
             ItemsGrid.ItemsSource = response.Items;
             RenderOrder(_order);
+            RefreshSensitiveActions(_order);
 
             if (_order.Channel == "delivery")
             {
@@ -95,6 +107,15 @@ public partial class OrderDetailsWindow : Window
         NotesText.Text = string.IsNullOrWhiteSpace(order.Notes) ? "Nenhuma observação." : order.Notes;
     }
 
+    private void RefreshSensitiveActions(OperationalOrderDetail order)
+    {
+        var open = order.Status is not ("completed" or "cancelled");
+        DiscountRequestButton.Visibility = _canDiscountRequest && open ? Visibility.Visible : Visibility.Collapsed;
+        CancellationRequestButton.Visibility = _canCancellationRequest && open ? Visibility.Visible : Visibility.Collapsed;
+        DiscountRequestButton.IsEnabled = open && order.PaymentStatus is not ("paid" or "refunded");
+        CancellationRequestButton.IsEnabled = open && order.PaymentStatus is not "paid";
+    }
+
     private async Task LoadDeliveryUsersAsync(int? selectedId)
     {
         var response = await _api.DeliveryUsersAsync();
@@ -144,6 +165,30 @@ public partial class OrderDetailsWindow : Window
         {
             FooterStatusText.Text = ex.Message;
             AssignDeliveryButton.IsEnabled = DeliverySelector.SelectedItem is DeliveryUserOption;
+        }
+    }
+
+    private async void DiscountRequestButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_canDiscountRequest || _order is null || _order.Status is "completed" or "cancelled") return;
+        var window = new OrderRequestWindow(_store, _order.Id, _order.TotalCents, true) { Owner = this };
+        if (window.ShowDialog() == true && window.Submitted)
+        {
+            FooterStatusText.Text = "Desconto enviado para autorização.";
+            OrderChanged = true;
+            await LoadAsync();
+        }
+    }
+
+    private async void CancellationRequestButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_canCancellationRequest || _order is null || _order.Status is "completed" or "cancelled") return;
+        var window = new OrderRequestWindow(_store, _order.Id, _order.TotalCents, false) { Owner = this };
+        if (window.ShowDialog() == true && window.Submitted)
+        {
+            FooterStatusText.Text = "Cancelamento enviado para autorização.";
+            OrderChanged = true;
+            await LoadAsync();
         }
     }
 
