@@ -1,7 +1,7 @@
 using System.Globalization;
 using System.Windows;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using EventMenu.Desktop.Models;
 using EventMenu.Desktop.Services;
 
 namespace EventMenu.Desktop;
@@ -33,61 +33,50 @@ public partial class PixPaymentWindow : Window
         var taxId = new string(TaxIdBox.Text.Where(char.IsDigit).ToArray());
         if (taxId.Length is not (11 or 14))
         {
-            MessageBox.Show("Informe um CPF ou CNPJ válido.", "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Informe um CPF ou CNPJ válido.", "Pix", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (!TryMoney(AmountBox.Text, out var amountCents) || amountCents <= 0)
         {
-            MessageBox.Show("Informe um valor maior que zero.", "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Informe um valor maior que zero.", "Pix", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
         GenerateButton.IsEnabled = false;
-        StatusText.Text = "Gerando cobrança PIX no servidor...";
+        StatusText.Text = "Preparando Pix...";
         try
         {
             var response = await _api.PixCreateAsync(_orderId, taxId, amountCents);
-            var pix = response.Pix ?? throw new ApiClientException("O servidor não retornou a cobrança PIX.");
-            if (string.IsNullOrWhiteSpace(pix.CopyPaste)) throw new ApiClientException("O código PIX não foi retornado pelo provedor.");
+            var pix = response.Pix ?? throw new ApiClientException("Não foi possível gerar o Pix.");
+            if (string.IsNullOrWhiteSpace(pix.CopyPaste)) throw new ApiClientException("O código Pix não foi recebido.");
 
             CopyPasteBox.Text = pix.CopyPaste;
             CopyPasteBox.Visibility = Visibility.Visible;
             CopyPasteLabel.Visibility = Visibility.Visible;
             CopyButton.Visibility = Visibility.Visible;
-            ExpiresText.Text = string.IsNullOrWhiteSpace(pix.ExpiresAt) ? "" : $"Validade informada pelo provedor: {pix.ExpiresAt}";
-            StatusText.Text = pix.Reused ? "Cobrança PIX já existente reutilizada. Aguardando pagamento..." : "PIX criado. Aguardando pagamento...";
+            ExpiresText.Text = string.IsNullOrWhiteSpace(pix.ExpiresAt) ? "" : $"Válido até {ServerTimeDisplay.Local(pix.ExpiresAt)}";
+            StatusText.Text = pix.Reused ? "Pix já existente. Aguardando pagamento..." : "Pix pronto. Aguardando pagamento...";
 
-            if (!string.IsNullOrWhiteSpace(pix.ImageUrl) && Uri.TryCreate(pix.ImageUrl, UriKind.Absolute, out var imageUri))
+            try
             {
-                try
-                {
-                    var bitmap = new BitmapImage();
-                    bitmap.BeginInit();
-                    bitmap.CacheOption = BitmapCacheOption.OnLoad;
-                    bitmap.UriSource = imageUri;
-                    bitmap.EndInit();
-                    bitmap.Freeze();
-                    QrImage.Source = bitmap;
-                    QrBorder.Visibility = Visibility.Visible;
-                }
-                catch
-                {
-                    QrBorder.Visibility = Visibility.Collapsed;
-                }
+                QrImage.Source = QrCodeRenderer.Create(pix.CopyPaste, 6);
+                QrBorder.Visibility = Visibility.Visible;
             }
-            else
+            catch
             {
+                QrImage.Source = null;
                 QrBorder.Visibility = Visibility.Collapsed;
+                StatusText.Text = "Pix pronto. Use o código Copia e Cola abaixo.";
             }
 
-            PollingText.Text = "Verificando confirmação automaticamente...";
+            PollingText.Text = "Verificando pagamento automaticamente...";
             _pollTimer.Start();
             await CheckPaymentAsync();
         }
         catch (Exception ex)
         {
-            StatusText.Text = "Não foi possível gerar o PIX.";
-            MessageBox.Show(ex.Message, "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
+            StatusText.Text = "Não foi possível gerar o Pix.";
+            MessageBox.Show(Friendly(ex.Message), "Pix", MessageBoxButton.OK, MessageBoxImage.Warning);
             GenerateButton.IsEnabled = true;
         }
     }
@@ -109,18 +98,18 @@ public partial class PixPaymentWindow : Window
                 PaymentConfirmed = true;
                 _pollTimer.Stop();
                 StatusText.Text = $"Pagamento confirmado: {Money(total)}.";
-                PollingText.Text = "PIX confirmado pelo servidor.";
+                PollingText.Text = "Pagamento recebido.";
                 GenerateButton.IsEnabled = false;
                 CopyButton.IsEnabled = false;
             }
             else
             {
-                PollingText.Text = $"Pago {Money(paid)} • aguardando {Money(remaining)}";
+                PollingText.Text = $"Pago {Money(paid)} • falta {Money(remaining)}";
             }
         }
         catch (Exception ex)
         {
-            PollingText.Text = $"Não foi possível consultar agora: {ex.Message}";
+            PollingText.Text = $"Não foi possível verificar agora: {Friendly(ex.Message)}";
         }
         finally
         {
@@ -134,11 +123,11 @@ public partial class PixPaymentWindow : Window
         try
         {
             Clipboard.SetText(CopyPasteBox.Text);
-            StatusText.Text = "Código PIX copiado.";
+            StatusText.Text = "Código Pix copiado.";
         }
         catch
         {
-            MessageBox.Show("Não foi possível copiar o código para a área de transferência.", "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Não foi possível copiar o código.", "Pix", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
@@ -169,4 +158,12 @@ public partial class PixPaymentWindow : Window
     }
 
     private static string Money(int cents) => (cents / 100m).ToString("C2", PtBr);
+
+    private static string Friendly(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("sqlstate") || lower.Contains("exception") || lower.Contains("stack trace")
+            ? "Não foi possível concluir o pagamento. Tente novamente."
+            : message;
+    }
 }
