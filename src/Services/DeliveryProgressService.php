@@ -109,6 +109,8 @@ final class DeliveryProgressService
 
     private function progressByOrder(PDO $pdo,int $tenantId,int $orderId):array
     {
-        $s=$pdo->prepare('SELECT * FROM delivery_progress WHERE tenant_id=? AND order_id=? LIMIT 1');$s->execute([$tenantId,$orderId]);return $s->fetch()?:throw new RuntimeException('Progresso da entrega não encontrado.');
+        $s=$pdo->prepare('SELECT dp.*,o.status AS order_status FROM delivery_progress dp JOIN orders o ON o.id=dp.order_id AND o.tenant_id=dp.tenant_id WHERE dp.tenant_id=? AND dp.order_id=? LIMIT 1');
+        $s->execute([$tenantId,$orderId]);
+        return $s->fetch()?:throw new RuntimeException('Progresso da entrega não encontrado.');
     }
 }
