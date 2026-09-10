@@ -8,6 +8,7 @@ public partial class ReceiptWindow : Window
 {
     private readonly OperationalActionsApiClient _api;
     private readonly int _orderId;
+    private OrderReceipt? _receipt;
     private bool _busy;
 
     public ReceiptWindow(SecureSessionStore store, int orderId)
@@ -23,17 +24,20 @@ public partial class ReceiptWindow : Window
     {
         if (_busy) return;
         _busy = true;
+        PrintButton.IsEnabled = false;
         StatusText.Text = "Carregando comprovante...";
         try
         {
             var response = await _api.OrderReceiptAsync(_orderId);
-            var receipt = response.Receipt ?? throw new InvalidOperationException("Comprovante não encontrado.");
-            Render(receipt);
-            StatusText.Text = $"{receipt.ReceiptNumber} • {receipt.CreatedDisplay}";
+            _receipt = response.Receipt ?? throw new InvalidOperationException("Comprovante não encontrado.");
+            Render(_receipt);
+            PrintButton.IsEnabled = true;
+            StatusText.Text = $"{_receipt.ReceiptNumber} • {_receipt.CreatedDisplay}";
         }
         catch (Exception ex)
         {
-            StatusText.Text = ex.Message;
+            _receipt = null;
+            StatusText.Text = Friendly(ex.Message);
         }
         finally
         {
@@ -44,7 +48,7 @@ public partial class ReceiptWindow : Window
     private void Render(OrderReceipt receipt)
     {
         TitleText.Text = $"Comprovante do pedido #{receipt.OrderId}";
-        SubtitleText.Text = receipt.CreatedDisplay;
+        SubtitleText.Text = $"{receipt.CreatedDisplay} • comprovante não fiscal";
 
         var tradeName = string.IsNullOrWhiteSpace(receipt.Identity.TradeName) ? receipt.TenantName : receipt.Identity.TradeName;
         BusinessNameText.Text = tradeName;
@@ -69,9 +73,32 @@ public partial class ReceiptWindow : Window
         FooterMessageText.Text = string.IsNullOrWhiteSpace(receipt.Identity.Footer) ? "Obrigado pela preferência!" : receipt.Identity.Footer;
     }
 
+    private void PrintButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || _receipt is null) return;
+        try
+        {
+            StatusText.Text = ReceiptPrinter.PrintReceipt(_receipt)
+                ? "Comprovante enviado para impressão."
+                : "Impressão cancelada.";
+        }
+        catch (Exception ex)
+        {
+            StatusText.Text = Friendly(ex.Message);
+        }
+    }
+
     private static string JoinNonEmpty(string separator, params string[] values) =>
         string.Join(separator, values.Where(x => !string.IsNullOrWhiteSpace(x)));
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await LoadAsync();
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+
+    private static string Friendly(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("sqlstate") || lower.Contains("exception") || lower.Contains("stack trace")
+            ? "Não foi possível carregar ou imprimir o comprovante."
+            : message;
+    }
 }
