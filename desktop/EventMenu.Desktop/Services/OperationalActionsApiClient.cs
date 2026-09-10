@@ -183,6 +183,22 @@ public sealed class OperationalActionsApiClient : IDisposable
     public Task<DeliveryMutationResponse> DeliveryCompleteAsync(int orderId, CancellationToken ct = default) =>
         PostAsync<DeliveryMutationResponse>("api-go-delivery.php", "complete", new { order_id = orderId }, ct);
 
+    // Dinheiro recebido no Delivery e repasse seguro ao caixa.
+    public Task<DeliveryCashReceiptResponse> DeliveryCashCollectAsync(int orderId, int receivedCents, CancellationToken ct = default) =>
+        PostAsync<DeliveryCashReceiptResponse>("api-go.php", "delivery-cash-collect", new { order_id = orderId, received_cents = receivedCents }, ct);
+
+    public Task<DeliveryCashOutstandingResponse> DeliveryCashOutstandingAsync(CancellationToken ct = default) =>
+        GetAsync<DeliveryCashOutstandingResponse>("api-go.php", "delivery-cash-outstanding", null, ct);
+
+    public Task<DeliveryCashHandoffResponse> CreateDeliveryHandoffAsync(CancellationToken ct = default) =>
+        PostAsync<DeliveryCashHandoffResponse>("api-go.php", "handoff-create", new { }, ct);
+
+    public Task<DeliveryCashHandoffResponse> ResolveDeliveryHandoffAsync(string token, CancellationToken ct = default) =>
+        GetAsync<DeliveryCashHandoffResponse>("api-go.php", "handoff-resolve", new() { ["token"] = token.Trim() }, ct);
+
+    public Task<DeliveryCashHandoffResponse> ConfirmDeliveryHandoffAsync(string token, CancellationToken ct = default) =>
+        PostAsync<DeliveryCashHandoffResponse>("api-go.php", "handoff-confirm", new { token = token.Trim() }, ct);
+
     private static bool IsEndpointUnavailable(ApiClientException ex) =>
         ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed;
 
