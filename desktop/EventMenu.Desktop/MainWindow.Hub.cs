@@ -20,6 +20,8 @@ public partial class MainWindow
     private Button? _productionNavButton;
     private Button? _inventoryNavButton;
     private Button? _deliveryMonitorButton;
+    private Button? _approvalsNavButton;
+    private Button? _notificationsNavButton;
     private Button? _qrNavButton;
     private Button? _fiscalNavButton;
     private Button? _hubNavButton;
@@ -72,6 +74,22 @@ public partial class MainWindow
         };
         _deliveryMonitorButton.Click+=async(_,_)=>await OpenDeliveryMonitorAsync();
 
+        _approvalsNavButton=new Button
+        {
+            Content="Aprovações",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="Decidir solicitações de desconto e cancelamento"
+        };
+        _approvalsNavButton.Click+=async(_,_)=>await OpenApprovalsAsync();
+
+        _notificationsNavButton=new Button
+        {
+            Content="Notificações",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="Avisos e pendências da operação"
+        };
+        _notificationsNavButton.Click+=async(_,_)=>await OpenNotificationsAsync();
+
         _qrNavButton=new Button
         {
             Content="Ler QR / código",
@@ -109,10 +127,12 @@ public partial class MainWindow
         sidebar.Children.Insert(insert,_productionNavButton);
         sidebar.Children.Insert(insert+1,_inventoryNavButton);
         sidebar.Children.Insert(insert+2,_deliveryMonitorButton);
-        sidebar.Children.Insert(insert+3,_qrNavButton);
-        sidebar.Children.Insert(insert+4,_fiscalNavButton);
-        sidebar.Children.Insert(insert+5,_hubNavButton);
-        sidebar.Children.Insert(insert+6,_hardwareSettingsButton);
+        sidebar.Children.Insert(insert+3,_approvalsNavButton);
+        sidebar.Children.Insert(insert+4,_notificationsNavButton);
+        sidebar.Children.Insert(insert+5,_qrNavButton);
+        sidebar.Children.Insert(insert+6,_fiscalNavButton);
+        sidebar.Children.Insert(insert+7,_hubNavButton);
+        sidebar.Children.Insert(insert+8,_hardwareSettingsButton);
 
         ApplySecondaryNavigationVisibility();
         EnsureNativeNavigation();
@@ -142,6 +162,10 @@ public partial class MainWindow
             _inventoryNavButton.Visibility=Can("inventory")?Visibility.Visible:Visibility.Collapsed;
         if(_deliveryMonitorButton is not null)
             _deliveryMonitorButton.Visibility=(Can("delivery_assign")||Can("reports"))?Visibility.Visible:Visibility.Collapsed;
+        if(_approvalsNavButton is not null)
+            _approvalsNavButton.Visibility=(Can("discount_approve")||Can("cancellation_approve"))?Visibility.Visible:Visibility.Collapsed;
+        if(_notificationsNavButton is not null)
+            _notificationsNavButton.Visibility=ShellPanel.Visibility==Visibility.Visible?Visibility.Visible:Visibility.Collapsed;
         if(_qrNavButton is not null)
             _qrNavButton.Visibility=(Can("tables")||Can("tickets")||Can("guests")||Can("orders_create")||Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign"))?Visibility.Visible:Visibility.Collapsed;
         if(_fiscalNavButton is not null)
@@ -251,6 +275,53 @@ public partial class MainWindow
         await Task.CompletedTask;
     }
 
+    private async Task OpenApprovalsAsync()
+    {
+        if(_store is null||ShellPanel.Visibility!=Visibility.Visible)return;
+        var canDiscount=Can("discount_approve");
+        var canCancellation=Can("cancellation_approve");
+        if(!canDiscount&&!canCancellation)return;
+        if(!HasShift||(!ShiftIs("operation")&&!ShiftIs("pay")))
+        {
+            MessageBox.Show("Use um turno de Operação ou Pay para decidir solicitações.","Aprovações",MessageBoxButton.OK,MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            var window=new ApprovalCenterWindow(_store,canDiscount,canCancellation){Owner=this};
+            window.ShowDialog();
+            if(window.ApprovalChanged)await RefreshAfterSensitiveOrderChangeAsync();
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"Aprovações",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+
+    private async Task OpenNotificationsAsync()
+    {
+        if(_store is null||ShellPanel.Visibility!=Visibility.Visible)return;
+        try
+        {
+            var window=new NotificationCenterWindow(
+                _store,
+                Can("delivery_assign"),
+                Can("discount_request"),
+                Can("cancellation_request"),
+                Can("discount_approve"),
+                Can("cancellation_approve")){Owner=this};
+            window.ShowDialog();
+            if(window.OperationChanged)await RefreshAfterSensitiveOrderChangeAsync();
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"Notificações",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+
+    private async Task RefreshAfterSensitiveOrderChangeAsync()
+    {
+        await TryLoadOrdersAsync(false);
+        if(Can("orders_create"))await TryLoadProductsAsync(false);
+        if(Can("tables")&&ShiftIs("operation"))await TryLoadTablesAsync(false);
+        RefreshDashboardUx();
+    }
+
     private async Task OpenQrOperationsAsync()
     {
         if(_store is null||ShellPanel.Visibility!=Visibility.Visible)return;
@@ -267,7 +338,15 @@ public partial class MainWindow
 
         try
         {
-            var window=new QrOperationsWindow(_store,canTables,canTickets,canGuests,canOrders,Can("delivery_assign")){Owner=this};
+            var window=new QrOperationsWindow(
+                _store,
+                canTables,
+                canTickets,
+                canGuests,
+                canOrders,
+                Can("delivery_assign"),
+                Can("discount_request"),
+                Can("cancellation_request")){Owner=this};
             window.ShowDialog();
             if(window.OperationChanged)
             {
