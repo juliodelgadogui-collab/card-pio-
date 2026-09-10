@@ -86,6 +86,7 @@ function em_nav(): array
     return [
         ['super', 'Plataforma', 'platform.manage'],
         ['system-health', 'Saúde do sistema', 'platform.manage'],
+        ['platform-failover', 'Contingência', 'platform.manage'],
         ['dashboard', 'Visão geral', 'dashboard'],
         ['pos', 'Caixa / PDV', 'orders.create'],
         ['pickup', 'Retirada / QR', 'orders.fulfill'],
@@ -229,7 +230,7 @@ function em_header(string $title, string $active): void
             <?php foreach (em_nav() as [$route, $label, $permission]): ?>
                 <?php
                 if (!em_can_nav($permission)) continue;
-                if ($currentTenantId && !in_array($route, ['super','system-health'], true) && !TenantFeatures::routeEnabled($route, $currentTenantId)) continue;
+                if ($currentTenantId && !in_array($route, ['super','system-health','platform-failover'], true) && !TenantFeatures::routeEnabled($route, $currentTenantId)) continue;
                 ?>
                 <a data-route="<?= Security::e($route) ?>" class="<?= $active === $route ? 'active' : '' ?>" href="<?= Security::e(app_url('?route=' . urlencode($route))) ?>"><?= Security::e($label) ?></a>
             <?php endforeach; ?>
