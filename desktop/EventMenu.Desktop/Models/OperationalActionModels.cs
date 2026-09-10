@@ -9,6 +9,7 @@ public sealed class DeliveryUserOption
     [JsonPropertyName("id")] public int Id { get; set; }
     [JsonPropertyName("name")] public string Name { get; set; } = "";
     [JsonPropertyName("phone")] public string? Phone { get; set; }
+    [JsonPropertyName("on_shift")] public int OnShift { get; set; }
     public string DisplayName => string.IsNullOrWhiteSpace(Phone) ? Name : $"{Name} • {Phone}";
     public override string ToString() => DisplayName;
 }
@@ -31,6 +32,12 @@ public sealed class QrResolveResponse
     [JsonPropertyName("data")] public Dictionary<string, JsonElement> Data { get; set; } = new();
 }
 
+public sealed class OrderQrResolveResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("order")] public OperationalOrderDetail? Order { get; set; }
+}
+
 public sealed class QrActionResponse
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
@@ -48,6 +55,7 @@ public sealed class OperationalOrderDetailsResponse
 public sealed class OperationalOrderDetail
 {
     [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("public_token")] public string PublicToken { get; set; } = "";
     [JsonPropertyName("channel")] public string Channel { get; set; } = "";
     [JsonPropertyName("status")] public string Status { get; set; } = "";
     [JsonPropertyName("payment_status")] public string PaymentStatus { get; set; } = "";
@@ -57,6 +65,7 @@ public sealed class OperationalOrderDetail
     [JsonPropertyName("delivery_address")] public string? DeliveryAddress { get; set; }
     [JsonPropertyName("delivery_name")] public string? DeliveryName { get; set; }
     [JsonPropertyName("assigned_delivery_user_id")] public int? AssignedDeliveryUserId { get; set; }
+    [JsonPropertyName("table_name")] public string? TableName { get; set; }
     [JsonPropertyName("table_id")] public int? TableId { get; set; }
     [JsonPropertyName("tab_id")] public int? TabId { get; set; }
     [JsonPropertyName("notes")] public string? Notes { get; set; }
