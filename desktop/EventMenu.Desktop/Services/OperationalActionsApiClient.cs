@@ -37,14 +37,35 @@ public sealed class OperationalActionsApiClient : IDisposable
     public Task<OperationalOrderDetailsResponse> OrderAsync(int orderId, CancellationToken ct = default) =>
         GetAsync<OperationalOrderDetailsResponse>("api.php", "order", new() { ["id"] = orderId.ToString() }, ct);
 
-    public Task<DeliveryUsersResponse> DeliveryUsersAsync(CancellationToken ct = default) =>
-        GetAsync<DeliveryUsersResponse>("api.php", "delivery-users", null, ct);
+    public async Task<DeliveryUsersResponse> DeliveryUsersAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            return await GetAsync<DeliveryUsersResponse>("api-go.php", "delivery-users", null, ct);
+        }
+        catch (ApiClientException ex) when (IsEndpointUnavailable(ex))
+        {
+            return await GetAsync<DeliveryUsersResponse>("api.php", "delivery-users", null, ct);
+        }
+    }
 
-    public Task<SimpleOperationResponse> AssignDeliveryAsync(int orderId, int deliveryUserId, CancellationToken ct = default) =>
-        PostAsync<SimpleOperationResponse>("api.php", "delivery-assign", new { order_id = orderId, delivery_user_id = deliveryUserId }, ct);
+    public async Task<SimpleOperationResponse> AssignDeliveryAsync(int orderId, int deliveryUserId, CancellationToken ct = default)
+    {
+        try
+        {
+            return await PostAsync<SimpleOperationResponse>("api-go.php", "delivery-assign", new { order_id = orderId, delivery_user_id = deliveryUserId }, ct);
+        }
+        catch (ApiClientException ex) when (IsEndpointUnavailable(ex))
+        {
+            return await PostAsync<SimpleOperationResponse>("api.php", "delivery-assign", new { order_id = orderId, delivery_user_id = deliveryUserId }, ct);
+        }
+    }
 
     public Task<QrResolveResponse> ResolveQrAsync(string value, CancellationToken ct = default) =>
         GetAsync<QrResolveResponse>("api.php", "qr-resolve", new() { ["value"] = value }, ct);
+
+    public Task<OrderQrResolveResponse> ResolveOrderQrAsync(string value, CancellationToken ct = default) =>
+        GetAsync<OrderQrResolveResponse>("api-go.php", "order-qr-resolve", new() { ["value"] = value }, ct);
 
     public Task<QrActionResponse> TicketCheckInAsync(string token, CancellationToken ct = default) =>
         PostAsync<QrActionResponse>("api.php", "ticket-checkin", new { token }, ct);
@@ -54,6 +75,9 @@ public sealed class OperationalActionsApiClient : IDisposable
 
     public Task<TabResponse> OpenTableAsync(int tableId, string label, CancellationToken ct = default) =>
         PostAsync<TabResponse>("api-go.php", "table-open", new { table_id = tableId, label }, ct);
+
+    private static bool IsEndpointUnavailable(ApiClientException ex) =>
+        ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed;
 
     private async Task<T> GetAsync<T>(string path, string action, Dictionary<string, string>? query, CancellationToken ct)
     {
