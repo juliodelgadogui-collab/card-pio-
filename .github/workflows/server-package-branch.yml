@@ -1,19 +1,6 @@
 name: EventMenu Server Package
 
 on:
-  push:
-    branches:
-      - feature/eventmenu-go-server-support
-    paths:
-      - '.github/workflows/server-package-branch.yml'
-      - 'app/**'
-      - 'public/**'
-      - 'src/**'
-      - 'database/**'
-      - 'scripts/**'
-      - 'composer.json'
-      - 'composer.lock'
-      - '.env.example'
   workflow_dispatch:
 
 permissions:
@@ -126,6 +113,8 @@ jobs:
           test -f "$PACKAGE/src/Services/InventorySnapshotService.php"
           test -f "$PACKAGE/src/Services/CustomerCommunicationService.php"
           test -f "$PACKAGE/src/Services/HubService.php"
+          test -f "$PACKAGE/src/Services/HubDesktopPresenceService.php"
+          test -f "$PACKAGE/src/Services/HubCommandIdempotencyGuardService.php"
           test -f "$PACKAGE/src/Services/HubTerminalCatalogService.php"
           test -f "$PACKAGE/database/migrations/099_delivery_live_tracking.sql"
           test -f "$PACKAGE/database/migrations/100_delivery_tracking_tokens.sql"
