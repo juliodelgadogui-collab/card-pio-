@@ -11,6 +11,7 @@ public partial class ProductSplitPixWindow : Window
     private readonly int _groupId;
     private readonly DispatcherTimer _timer;
     private bool _checking;
+    private bool _closed;
 
     public bool PaymentConfirmed { get; private set; }
 
@@ -27,6 +28,7 @@ public partial class ProductSplitPixWindow : Window
         _timer.Tick += Timer_Tick;
         Loaded += async (_, _) =>
         {
+            if (_closed) return;
             _timer.Start();
             await CheckAsync();
         };
@@ -34,11 +36,12 @@ public partial class ProductSplitPixWindow : Window
 
     private async Task CheckAsync()
     {
-        if (_checking || PaymentConfirmed) return;
+        if (_closed || _checking || PaymentConfirmed) return;
         _checking = true;
         try
         {
             var response = await _api.PixStatusAsync(_groupId);
+            if (_closed) return;
             if (response.Paid || response.Group?.Status == "paid")
             {
                 PaymentConfirmed = true;
@@ -54,7 +57,7 @@ public partial class ProductSplitPixWindow : Window
         }
         catch (Exception ex)
         {
-            StatusText.Text = Friendly(ex.Message);
+            if (!_closed) StatusText.Text = Friendly(ex.Message);
         }
         finally { _checking = false; }
     }
@@ -80,7 +83,9 @@ public partial class ProductSplitPixWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        _closed = true;
         _timer.Stop();
+        _timer.Tick -= Timer_Tick;
         base.OnClosed(e);
     }
 
