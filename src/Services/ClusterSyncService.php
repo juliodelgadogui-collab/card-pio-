@@ -11,6 +11,69 @@ use Throwable;
 
 final class ClusterSyncService
 {
+    /**
+     * Primeira ativação do servidor adicional. O operador configura no segundo
+     * servidor apenas EVENTMENU_NODE_ROLE=contingency e um token temporário.
+     * O principal envia a identidade/segredo do cluster por HTTPS e o adicional
+     * armazena o segredo cifrado com a APP_KEY local.
+     * @return array<string,mixed>
+     */
+    public function bootstrapSecondary(string $bootstrapToken): array
+    {
+        $failover = new PlatformFailoverService();
+        if (!$failover->isPrimaryNode()) throw new RuntimeException('Somente o servidor principal pode inicializar a contingência.');
+        $settings = $failover->get();
+        $urlBase = rtrim(trim((string)$settings['contingency_url']), '/');
+        if ($urlBase === '') throw new RuntimeException('Informe e salve a URL do servidor adicional primeiro.');
+        $bootstrapToken = trim($bootstrapToken);
+        if (strlen($bootstrapToken) < 24) throw new RuntimeException('Informe o código temporário configurado no servidor adicional.');
+
+        [$clusterId, $clusterSecret] = $this->credentials();
+        $nonce = bin2hex(random_bytes(16));
+        $payload = [
+            'schema' => 1,
+            'cluster_id' => $clusterId,
+            'cluster_secret' => $clusterSecret,
+            'primary_url' => (string)$settings['primary_url'],
+            'mode' => (string)$settings['mode'],
+            'timestamp' => time(),
+            'nonce' => $nonce,
+        ];
+        $raw = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+        $signature = hash_hmac('sha256', $raw, $bootstrapToken);
+        $response = $this->postJson($urlBase . '/api-cluster-bootstrap.php?action=configure', $raw, [
+            'Accept: application/json',
+            'Content-Type: application/json; charset=utf-8',
+            'X-EventMenu-Bootstrap-Signature: ' . $signature,
+        ]);
+        $json = json_decode($response['body'], true, 512, JSON_THROW_ON_ERROR);
+        if ($response['status'] < 200 || $response['status'] >= 300 || !is_array($json) || empty($json['ok'])) {
+            $message = is_array($json) ? trim((string)($json['error'] ?? '')) : '';
+            throw new RuntimeException($message !== '' ? $message : 'O servidor adicional recusou a inicialização.');
+        }
+        if (!hash_equals($clusterId, (string)($json['cluster_id'] ?? ''))) throw new RuntimeException('Inicialização respondida por outro cluster.');
+        if (!hash_equals($nonce, (string)($json['nonce'] ?? ''))) throw new RuntimeException('Resposta de inicialização não corresponde à solicitação atual.');
+        if ((string)($json['node_role'] ?? '') !== 'contingency') throw new RuntimeException('O servidor adicional não confirmou o papel de contingência.');
+        $expectedAck = hash_hmac('sha256', $clusterId . "\n" . $nonce . "\nconfigured", $clusterSecret);
+        if (!hash_equals($expectedAck, (string)($json['ack'] ?? ''))) throw new RuntimeException('Confirmação criptográfica da inicialização é inválida.');
+
+        $probe = $failover->probeSecondary();
+        if ((string)($probe['status'] ?? '') !== 'healthy') {
+            return [
+                'ok' => false,
+                'message' => 'Servidor inicializado, mas a verificação final ainda precisa de atenção: ' . (string)($probe['message'] ?? 'falha de verificação'),
+                'probe' => $probe,
+            ];
+        }
+        $sync = $this->pushControlPlane();
+        return [
+            'ok' => true,
+            'message' => 'Servidor adicional inicializado, verificado e sincronizado.',
+            'probe' => $probe,
+            'sync' => $sync,
+        ];
+    }
+
     /** @return array<string,mixed> */
     public function pushControlPlane(): array
     {
@@ -148,6 +211,14 @@ final class ClusterSyncService
                 if (!empty($row['cluster_secret_encrypted'])) $secret = Crypto::decrypt((string)$row['cluster_secret_encrypted']);
             }
         } catch (Throwable) {
+        }
+        if ($clusterId === '' || strlen($secret) < 32) {
+            try {
+                $node = new ClusterNodeConfigService();
+                if ($clusterId === '') $clusterId = $node->clusterId();
+                if (strlen($secret) < 32) $secret = $node->clusterSecret();
+            } catch (Throwable) {
+            }
         }
         if ($clusterId === '' || strlen($secret) < 32) throw new RuntimeException('Cluster/segredo de contingência ainda não configurados.');
         return [$clusterId, $secret];
