@@ -70,6 +70,7 @@ fun HubDialog(
     var alertText by remember { mutableStateOf("") }
     val hasOrderAction = canPrintOrder || canPrintReceipt || canShowCustomer || canTerminalRequest
     val hasHardwareAction = hasOrderAction || canOpenDrawer || canSendAlert
+    val commandEnabled = !state.loading && !state.commandBusy
 
     LaunchedEffect(Unit) { onRefresh() }
     LaunchedEffect(state.selectedLinkId, canTerminalRequest) {
@@ -115,6 +116,7 @@ fun HubDialog(
                         HubComputerCard(
                             link = link,
                             selected = state.selected?.id == link.id,
+                            enabled = !state.commandBusy,
                             onSelect = { onSelectLink(link.id) },
                         )
                     }
@@ -122,7 +124,7 @@ fun HubDialog(
                     item {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = onRefresh, enabled = !state.loading) { Text("Atualizar") }
-                            Button(onClick = onScanPairing, enabled = !state.loading) { Text("Ler QR do computador") }
+                            Button(onClick = onScanPairing, enabled = commandEnabled) { Text("Ler QR do computador") }
                         }
                     }
 
@@ -131,13 +133,14 @@ fun HubDialog(
                             value = pairingCode,
                             onValueChange = { pairingCode = it },
                             modifier = Modifier.fillMaxWidth(),
+                            enabled = commandEnabled,
                             label = { Text("Código de pareamento") },
                             supportingText = { Text("Use somente se não conseguir ler o QR exibido no computador.") },
                             singleLine = true,
                         )
                         Button(
                             onClick = { if (pairingCode.isNotBlank()) onPairCode(pairingCode, "Celular EventMenu GO") },
-                            enabled = pairingCode.isNotBlank() && !state.loading,
+                            enabled = pairingCode.isNotBlank() && commandEnabled,
                         ) { Text("Vincular") }
                     }
 
@@ -150,6 +153,7 @@ fun HubDialog(
                                     value = orderText,
                                     onValueChange = { orderText = it.filter(Char::isDigit) },
                                     modifier = Modifier.fillMaxWidth(),
+                                    enabled = !state.commandBusy,
                                     label = { Text("Número do pedido") },
                                     singleLine = true,
                                 )
@@ -165,13 +169,13 @@ fun HubDialog(
                                             if (canPrintOrder) {
                                                 OutlinedButton(
                                                     onClick = { onPrintOrder(orderId) },
-                                                    enabled = orderId > 0 && state.selected?.online == true,
+                                                    enabled = orderId > 0 && state.selected?.online == true && commandEnabled,
                                                 ) { Text("Imprimir pedido") }
                                             }
                                             if (canPrintReceipt) {
                                                 OutlinedButton(
                                                     onClick = { onPrintReceipt(orderId) },
-                                                    enabled = orderId > 0 && state.selected?.online == true,
+                                                    enabled = orderId > 0 && state.selected?.online == true && commandEnabled,
                                                 ) { Text("Imprimir recibo") }
                                             }
                                         }
@@ -179,7 +183,7 @@ fun HubDialog(
                                     if (canShowCustomer) {
                                         OutlinedButton(
                                             onClick = { onShowCustomer(orderId) },
-                                            enabled = orderId > 0 && state.selected?.online == true && state.selected?.hardware?.customerDisplay?.isNotBlank() == true,
+                                            enabled = orderId > 0 && state.selected?.online == true && state.selected?.hardware?.customerDisplay?.isNotBlank() == true && commandEnabled,
                                         ) { Text("Mostrar para o cliente") }
                                     }
                                 }
@@ -195,6 +199,7 @@ fun HubDialog(
                                     FilterChip(
                                         selected = state.selectedTerminal?.id == terminal.id,
                                         onClick = { onSelectTerminal(terminal.id) },
+                                        enabled = !state.commandBusy,
                                         label = { Text(if (terminal.pinpad.isBlank()) terminal.label else "${terminal.label} • ${terminal.pinpad}") },
                                     )
                                 }
@@ -204,19 +209,21 @@ fun HubDialog(
                                     value = amountText,
                                     onValueChange = { amountText = it.take(12) },
                                     modifier = Modifier.fillMaxWidth(),
+                                    enabled = !state.commandBusy,
                                     label = { Text("Valor") },
                                     prefix = { Text("R$ ") },
                                     singleLine = true,
                                 )
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    FilterChip(selected = paymentType == "debit", onClick = { paymentType = "debit" }, label = { Text("Débito") })
-                                    FilterChip(selected = paymentType == "credit", onClick = { paymentType = "credit" }, label = { Text("Crédito") })
-                                    FilterChip(selected = paymentType == "pix", onClick = { paymentType = "pix" }, label = { Text("Pix") })
+                                    FilterChip(selected = paymentType == "debit", onClick = { paymentType = "debit" }, enabled = !state.commandBusy, label = { Text("Débito") })
+                                    FilterChip(selected = paymentType == "credit", onClick = { paymentType = "credit" }, enabled = !state.commandBusy, label = { Text("Crédito") })
+                                    FilterChip(selected = paymentType == "pix", onClick = { paymentType = "pix" }, enabled = !state.commandBusy, label = { Text("Pix") })
                                 }
                                 if (paymentType == "credit") {
                                     OutlinedTextField(
                                         value = installmentsText,
                                         onValueChange = { installmentsText = it.filter(Char::isDigit).take(2) },
+                                        enabled = !state.commandBusy,
                                         label = { Text("Parcelas") },
                                         singleLine = true,
                                     )
@@ -225,7 +232,7 @@ fun HubDialog(
                                 val amount = parseMoneyCents(amountText)
                                 Button(
                                     onClick = { onChargeTef(orderId, amount, paymentType, installmentsText.toIntOrNull()?.coerceIn(1, 24) ?: 1) },
-                                    enabled = orderId > 0 && amount > 0 && state.selectedTerminal != null && state.selected?.online == true && !state.loading,
+                                    enabled = orderId > 0 && amount > 0 && state.selectedTerminal != null && state.selected?.online == true && commandEnabled,
                                 ) { Text("Enviar cobrança ao PINPad") }
                                 Text(
                                     "O celular apenas solicita a cobrança. A confirmação do pagamento continua sendo feita pelo servidor.",
@@ -239,7 +246,7 @@ fun HubDialog(
                             item {
                                 OutlinedButton(
                                     onClick = { onOpenDrawer("Abertura solicitada pelo celular") },
-                                    enabled = state.selected?.online == true && !state.loading,
+                                    enabled = state.selected?.online == true && commandEnabled,
                                 ) { Text("Abrir gaveta") }
                             }
                         }
@@ -251,11 +258,12 @@ fun HubDialog(
                                     value = alertText,
                                     onValueChange = { alertText = it.take(300) },
                                     modifier = Modifier.fillMaxWidth(),
+                                    enabled = !state.commandBusy,
                                     label = { Text("Mensagem") },
                                 )
                                 OutlinedButton(
                                     onClick = { onAlert(alertText) },
-                                    enabled = alertText.isNotBlank() && state.selected?.online == true,
+                                    enabled = alertText.isNotBlank() && state.selected?.online == true && commandEnabled,
                                 ) { Text("Enviar alerta") }
                             }
                         }
@@ -263,7 +271,7 @@ fun HubDialog(
 
                     if (state.selected != null) {
                         item {
-                            TextButton(onClick = onRevoke, enabled = !state.loading) {
+                            TextButton(onClick = onRevoke, enabled = commandEnabled) {
                                 Text("Desvincular este celular do computador")
                             }
                         }
@@ -272,6 +280,14 @@ fun HubDialog(
                     state.message?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium) } }
                     state.error?.let { error -> item { Text(error, color = MaterialTheme.colorScheme.error, fontWeight = FontWeight.Medium) } }
                     if (state.loading) item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) { CircularProgressIndicator() } }
+                    if (state.commandBusy) {
+                        item {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                                CircularProgressIndicator()
+                                Text("Aguardando resposta do computador…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             }
@@ -280,9 +296,10 @@ fun HubDialog(
 }
 
 @Composable
-private fun HubComputerCard(link: HubLink, selected: Boolean, onSelect: () -> Unit) {
+private fun HubComputerCard(link: HubLink, selected: Boolean, enabled: Boolean, onSelect: () -> Unit) {
     Card(
         onClick = onSelect,
+        enabled = enabled,
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceVariant,
