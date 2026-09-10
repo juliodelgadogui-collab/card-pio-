@@ -5,6 +5,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 
 use EventMenu\Core\Database;
+use EventMenu\Services\HubDesktopPresenceService;
 use EventMenu\Services\HubService;
 use EventMenu\Services\HubTerminalCatalogService;
 
@@ -34,17 +35,22 @@ $unitId = (int)$pdo->lastInsertId();
 
 $desktopDevice = 'desktop-ci-' . $suffix;
 $mobileDevice = 'mobile-ci-' . $suffix;
-$desktopHash = hash('sha256', $desktopDevice);
-$hardware = json_encode(['default_printer'=>'CI Printer','customer_display'=>'CI Display','pinpad'=>'CI PINPad'], JSON_UNESCAPED_SLASHES);
-$pdo->prepare('INSERT INTO desktop_hardware_bindings (tenant_id,unit_id,device_hash,device_label,hardware_json,last_seen_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)')
-    ->execute([$tenantId, $unitId, $desktopHash, 'Desktop CI', $hardware]);
-$desktopBindingId = (int)$pdo->lastInsertId();
 
 $_SESSION['user_id'] = $adminId;
 $_SESSION['tenant_id'] = $tenantId;
 $_SESSION['role'] = 'admin';
 $_SESSION['name'] = 'Hub CI Admin';
 unset($_SESSION['acting_tenant_id']);
+
+$presence = (new HubDesktopPresenceService())->heartbeat(
+    $unitId,
+    $desktopDevice,
+    'Desktop CI',
+    ['default_printer'=>'CI Printer','customer_display'=>'CI Display','pinpad'=>'CI PINPad','printers'=>['CI Printer']],
+);
+$desktopBindingId = (int)$presence['id'];
+hub_ci_assert($desktopBindingId > 0 && !empty($presence['online']), 'Heartbeat não registrou o computador como online.');
+hub_ci_assert(($presence['hardware']['default_printer'] ?? '') === 'CI Printer', 'Heartbeat perdeu o resumo de periféricos.');
 
 $hub = new HubService();
 $pairing = $hub->createPairingCode($unitId, $desktopDevice);
