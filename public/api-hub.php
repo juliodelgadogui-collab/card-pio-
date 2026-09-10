@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\HubCommandIdempotencyGuardService;
 use EventMenu\Services\HubDesktopPresenceService;
 use EventMenu\Services\HubService;
 use EventMenu\Services\HubTerminalCatalogService;
@@ -103,8 +104,12 @@ try {
         hub_method('POST');
         $body = hub_body();
         $device = hub_device($body, $sessionDevice);
+        $targetBindingId = (int)($body['target_binding_id'] ?? 0);
+        $commandType = (string)($body['command_type'] ?? '');
+        $idempotencyKey = (string)($body['idempotency_key'] ?? '');
         $payload = is_array($body['payload'] ?? null) ? $body['payload'] : [];
-        hub_out(['ok'=>true,'command'=>$hub->queueCommand((int)($body['target_binding_id'] ?? 0), (string)($body['command_type'] ?? ''), $payload, (string)($body['idempotency_key'] ?? ''), $device)], 201);
+        (new HubCommandIdempotencyGuardService())->assertReusable($idempotencyKey, $targetBindingId, $commandType, $device);
+        hub_out(['ok'=>true,'command'=>$hub->queueCommand($targetBindingId, $commandType, $payload, $idempotencyKey, $device)], 201);
     }
     if ($action === 'command-status') {
         hub_method('GET');
