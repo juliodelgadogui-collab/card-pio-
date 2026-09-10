@@ -100,6 +100,18 @@ public sealed class OperationalActionsApiClient : IDisposable
     public Task<OperationPayloadResponse> RejectDiscountAsync(int requestId, string reason, CancellationToken ct = default) =>
         PostAsync<OperationPayloadResponse>("api-go-discounts.php", "reject", new { request_id = requestId, reason }, ct);
 
+    public Task<NotificationListResponse> NotificationsAsync(int limit = 100, CancellationToken ct = default) =>
+        GetAsync<NotificationListResponse>("api-go-notifications.php", "list", new() { ["limit"] = Math.Clamp(limit, 1, 200).ToString() }, ct);
+
+    public Task<SimpleOperationResponse> MarkNotificationReadAsync(int notificationId, CancellationToken ct = default) =>
+        PostAsync<SimpleOperationResponse>("api-go-notifications.php", "read", new { notification_id = notificationId }, ct);
+
+    public Task<MarkAllNotificationsResponse> MarkAllNotificationsReadAsync(CancellationToken ct = default) =>
+        PostAsync<MarkAllNotificationsResponse>("api-go-notifications.php", "read-all", new { }, ct);
+
+    public Task<ReceiptResponse> OrderReceiptAsync(int orderId, CancellationToken ct = default) =>
+        GetAsync<ReceiptResponse>("api-go-receipts.php", "order", new() { ["order_id"] = orderId.ToString() }, ct);
+
     private static bool IsEndpointUnavailable(ApiClientException ex) =>
         ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed;
 
