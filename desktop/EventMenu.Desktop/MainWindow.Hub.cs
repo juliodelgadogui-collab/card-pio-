@@ -20,6 +20,7 @@ public partial class MainWindow
     private Button? _productionNavButton;
     private Button? _inventoryNavButton;
     private Button? _deliveryMonitorButton;
+    private Button? _fiscalNavButton;
     private Button? _hubNavButton;
     private Button? _hardwareSettingsButton;
 
@@ -50,8 +51,7 @@ public partial class MainWindow
         {
             Content="Produção",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Acompanhar preparo, expedição e impressão dos pedidos",
-            Visibility=(Can("orders_kitchen")||Can("orders_dispatch")||Can("production_print")||Can("production_manage"))?Visibility.Visible:Visibility.Collapsed
+            ToolTip="Acompanhar preparo, expedição e impressão dos pedidos"
         };
         _productionNavButton.Click+=async(_,_)=>await OpenProductionAsync();
 
@@ -59,8 +59,7 @@ public partial class MainWindow
         {
             Content="Estoque",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Acompanhar saldo e itens que precisam de reposição",
-            Visibility=Can("inventory")?Visibility.Visible:Visibility.Collapsed
+            ToolTip="Acompanhar saldo e itens que precisam de reposição"
         };
         _inventoryNavButton.Click+=async(_,_)=>await OpenInventoryMonitorAsync();
 
@@ -68,17 +67,23 @@ public partial class MainWindow
         {
             Content="Entregas",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Acompanhar entregas que estão em rota",
-            Visibility=(Can("delivery_assign")||Can("reports"))?Visibility.Visible:Visibility.Collapsed
+            ToolTip="Acompanhar entregas que estão em rota"
         };
         _deliveryMonitorButton.Click+=async(_,_)=>await OpenDeliveryMonitorAsync();
+
+        _fiscalNavButton=new Button
+        {
+            Content="Nota fiscal",
+            HorizontalContentAlignment=HorizontalAlignment.Left,
+            ToolTip="Configurar emissão e acompanhar documentos fiscais"
+        };
+        _fiscalNavButton.Click+=async(_,_)=>await OpenFiscalAreaAsync();
 
         _hubNavButton=new Button
         {
             Content="Conectar celular",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Vincular um celular autorizado a este computador",
-            Visibility=Can("hardware_manage")?Visibility.Visible:Visibility.Collapsed
+            ToolTip="Vincular um celular autorizado a este computador"
         };
         _hubNavButton.Click+=async(_,_)=>await OpenHubPairingAsync();
 
@@ -86,8 +91,7 @@ public partial class MainWindow
         {
             Content="Configurações",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Impressoras, equipamentos e configurações fiscais",
-            Visibility=(Can("hardware_manage")||Can("fiscal_manage"))?Visibility.Visible:Visibility.Collapsed
+            ToolTip="Impressoras, maquininha e equipamentos deste computador"
         };
         _hardwareSettingsButton.Click+=async(_,_)=>await OpenHardwareSettingsAsync();
 
@@ -96,9 +100,44 @@ public partial class MainWindow
         sidebar.Children.Insert(insert,_productionNavButton);
         sidebar.Children.Insert(insert+1,_inventoryNavButton);
         sidebar.Children.Insert(insert+2,_deliveryMonitorButton);
-        sidebar.Children.Insert(insert+3,_hubNavButton);
-        sidebar.Children.Insert(insert+4,_hardwareSettingsButton);
+        sidebar.Children.Insert(insert+3,_fiscalNavButton);
+        sidebar.Children.Insert(insert+4,_hubNavButton);
+        sidebar.Children.Insert(insert+5,_hardwareSettingsButton);
+
+        ApplySecondaryNavigationVisibility();
         EnsureNativeNavigation();
+        _=RefreshSecondaryNavigationPermissionsAsync();
+    }
+
+    private async Task RefreshSecondaryNavigationPermissionsAsync()
+    {
+        if(_api is null||ShellPanel.Visibility!=Visibility.Visible)return;
+        try
+        {
+            var context=await _api.GoContextAsync();
+            foreach(var permission in context.Permissions)_permissions[permission.Key]=permission.Value;
+            ApplySecondaryNavigationVisibility();
+        }
+        catch
+        {
+            ApplySecondaryNavigationVisibility();
+        }
+    }
+
+    private void ApplySecondaryNavigationVisibility()
+    {
+        if(_productionNavButton is not null)
+            _productionNavButton.Visibility=(Can("orders_kitchen")||Can("orders_dispatch")||Can("production_print")||Can("production_manage"))?Visibility.Visible:Visibility.Collapsed;
+        if(_inventoryNavButton is not null)
+            _inventoryNavButton.Visibility=Can("inventory")?Visibility.Visible:Visibility.Collapsed;
+        if(_deliveryMonitorButton is not null)
+            _deliveryMonitorButton.Visibility=(Can("delivery_assign")||Can("reports"))?Visibility.Visible:Visibility.Collapsed;
+        if(_fiscalNavButton is not null)
+            _fiscalNavButton.Visibility=(Can("fiscal_manage")||Can("fiscal_issue"))?Visibility.Visible:Visibility.Collapsed;
+        if(_hubNavButton is not null)
+            _hubNavButton.Visibility=Can("hardware_manage")?Visibility.Visible:Visibility.Collapsed;
+        if(_hardwareSettingsButton is not null)
+            _hardwareSettingsButton.Visibility=Can("hardware_manage")?Visibility.Visible:Visibility.Collapsed;
     }
 
     private void EnsureNativeNavigation()
@@ -195,6 +234,39 @@ public partial class MainWindow
         await Task.CompletedTask;
     }
 
+    private async Task OpenFiscalAreaAsync()
+    {
+        if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null||_currentUser is null)return;
+        if(!Can("fiscal_manage")&&!Can("fiscal_issue"))return;
+        if(!HasShift||ShiftInt("unit_id")<1)
+        {
+            MessageBox.Show("Inicie um turno na unidade que deseja usar.","Nota fiscal",MessageBoxButton.OK,MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            EnsureHubRuntime();
+            if(_hubIntegrationApi is null)return;
+
+            if(Can("fiscal_manage"))
+            {
+                var unitId=ShiftInt("unit_id");
+                var unitName=ShiftValue("unit_name");
+                var store=_hubHardwareStore??new LocalHardwareProfileStore();
+                var window=new HardwareFiscalSettingsWindow(_hubIntegrationApi,store,_currentUser.TenantId,unitId,unitName,false,true){Owner=this};
+                window.UseFiscalOnlyMode();
+                window.ShowDialog();
+            }
+            else
+            {
+                var window=new FiscalDocumentsWindow(_hubIntegrationApi){Owner=this};
+                window.ShowDialog();
+            }
+        }
+        catch(Exception ex){MessageBox.Show(ex.Message,"Nota fiscal",MessageBoxButton.OK,MessageBoxImage.Warning);}
+    }
+
     private async Task OpenHubPairingAsync()
     {
         if(!Can("hardware_manage"))return;
@@ -222,7 +294,7 @@ public partial class MainWindow
     private async Task OpenHardwareSettingsAsync()
     {
         if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null||_currentUser is null)return;
-        if(!Can("hardware_manage")&&!Can("fiscal_manage"))return;
+        if(!Can("hardware_manage"))return;
         if(!HasShift)
         {
             MessageBox.Show("Inicie um turno para escolher a unidade que será configurada.","Configurações",MessageBoxButton.OK,MessageBoxImage.Information);
@@ -234,7 +306,7 @@ public partial class MainWindow
             EnsureHubRuntime();
             if(_hubIntegrationApi is null||_hubHardwareStore is null)return;
             var unitName=ShiftValue("unit_name");
-            var window=new HardwareFiscalSettingsWindow(_hubIntegrationApi,_hubHardwareStore,_currentUser.TenantId,unitId,unitName,Can("hardware_manage"),Can("fiscal_manage")){Owner=this};
+            var window=new HardwareFiscalSettingsWindow(_hubIntegrationApi,_hubHardwareStore,_currentUser.TenantId,unitId,unitName,true,false){Owner=this};
             window.ShowDialog();
             await _hubIntegrationApi.HardwareHeartbeatAsync(unitId,_hubHardwareStore,_hubHardwareStore.Load());
             _lastHubHeartbeat=DateTimeOffset.UtcNow;
@@ -250,6 +322,7 @@ public partial class MainWindow
         try
         {
             await RefreshOperationalPermissionsAsync();
+            ApplySecondaryNavigationVisibility();
             EnsureHubRuntime();if(_hubIntegrationApi is null||_hubHardwareStore is null||_hubProcessor is null)return;
             if(DateTimeOffset.UtcNow-_lastHubHeartbeat>TimeSpan.FromSeconds(30))
             {
