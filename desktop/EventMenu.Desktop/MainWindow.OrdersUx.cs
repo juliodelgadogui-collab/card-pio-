@@ -196,7 +196,12 @@ public partial class MainWindow
     private async Task OpenSelectedOrderDetailsAsync()
     {
         if (_store is null || OrdersGrid.SelectedItem is not Order order) return;
-        var window = new OrderDetailsWindow(_store, order.Id, Can("delivery_assign")) { Owner = this };
+        var window = new OrderDetailsWindow(
+            _store,
+            order.Id,
+            Can("delivery_assign"),
+            Can("discount_request"),
+            Can("cancellation_request")) { Owner = this };
         window.ShowDialog();
         if (window.OrderChanged)
         {
