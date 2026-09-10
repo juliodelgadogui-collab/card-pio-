@@ -44,17 +44,18 @@ public partial class MainWindow
 
     private void ApplyProfessionalShell()
     {
-        ShellPanel.Background = new SolidColorBrush(Color.FromRgb(246, 247, 251));
-        if (PosNavButton.Parent is not StackPanel menu || menu.Parent is not Border sidebar) return;
+        ShellPanel.Background = new SolidColorBrush(Color.FromRgb(244, 246, 248));
+        if (PosNavButton.Parent is not StackPanel menu) return;
 
-        sidebar.Background = new SolidColorBrush(Color.FromRgb(17, 24, 39));
+        // O menu está dentro de um ScrollViewer. Não dependa do Border ser o pai direto:
+        // os botões mantêm o mesmo acabamento mesmo quando a árvore visual muda.
         foreach (var button in menu.Children.OfType<Button>())
         {
             button.Background = Brushes.Transparent;
-            button.Foreground = new SolidColorBrush(Color.FromRgb(226, 232, 240));
+            button.Foreground = new SolidColorBrush(Color.FromRgb(229, 231, 235));
             button.HorizontalContentAlignment = HorizontalAlignment.Left;
             button.FontWeight = FontWeights.SemiBold;
-            button.Padding = new Thickness(12, 10, 12, 10);
+            button.Padding = new Thickness(14, 11, 14, 11);
             button.Margin = new Thickness(0, 0, 0, 4);
         }
     }
