@@ -56,8 +56,20 @@ fun EventMenuGoHubShell(
         )
     }
 
-    LaunchedEffect(showHub, canUseHub) {
-        if (!showHub || !canUseHub) return@LaunchedEffect
+    // O ViewModel do Hub vive no escopo da Activity. Limpar explicitamente quando
+    // muda usuário, tenant, turno ou unidade impede que vínculos/comandos da sessão
+    // anterior apareçam por alguns instantes para o próximo operador.
+    val sessionUserId = state.session?.user?.id
+    val sessionTenantId = state.session?.user?.tenantId
+    val shiftId = state.workShift?.id
+    val unitId = state.workShift?.unitId
+    LaunchedEffect(sessionUserId, sessionTenantId, shiftId, unitId) {
+        showHub = false
+        hubViewModel.reset()
+    }
+
+    LaunchedEffect(showHub, canUseHub, sessionUserId, unitId) {
+        if (!showHub || !canUseHub || sessionUserId == null) return@LaunchedEffect
         while (true) {
             hubViewModel.heartbeat()
             delay(15_000L)
