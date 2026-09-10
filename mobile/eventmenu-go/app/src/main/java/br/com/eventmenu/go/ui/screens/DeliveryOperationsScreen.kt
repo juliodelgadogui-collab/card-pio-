@@ -132,19 +132,40 @@ fun DeliveryOperationsScreen(
                                     whatsAppLoadingOrderId = order.id
                                     scope.launch {
                                         try {
-                                            val items = runCatching { app.orderOperationsRepository.detail(order.id).items }.getOrElse {
+                                            val items = runCatching {
+                                                app.orderOperationsRepository.detail(order.id).items
+                                            }.getOrElse {
                                                 Toast.makeText(
                                                     context,
-                                                    "Não foi possível carregar os itens. O WhatsApp será aberto sem o resumo do pedido.",
-                                                    Toast.LENGTH_SHORT,
+                                                    "Não foi possível carregar a descrição do pedido. Atualize e tente novamente.",
+                                                    Toast.LENGTH_LONG,
                                                 ).show()
-                                                emptyList()
+                                                return@launch
+                                            }.filter { it.quantity > 0.0 && deliveryUseful(it.name) != null }
+
+                                            if (items.isEmpty()) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "O pedido está sem itens para montar a mensagem do WhatsApp.",
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
+                                                return@launch
                                             }
+
                                             val trackingUrl = runCatching {
                                                 app.deliveryProgressRepository.trackingLink(order.id)
                                             }.getOrNull()?.trim()?.takeIf {
-                                                it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true)
+                                                it.startsWith("https://", ignoreCase = true)
                                             }
+                                            if (trackingUrl == null) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "Não foi possível gerar o link de rastreamento. Atualize e tente novamente.",
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
+                                                return@launch
+                                            }
+
                                             val message = deliveryWhatsAppMessage(
                                                 customerName = customer,
                                                 items = items,
@@ -158,12 +179,6 @@ fun DeliveryOperationsScreen(
                                                     "Não foi possível abrir o WhatsApp neste aparelho.",
                                                     Toast.LENGTH_LONG,
                                                 ).show()
-                                            } else if (trackingUrl == null) {
-                                                Toast.makeText(
-                                                    context,
-                                                    "WhatsApp aberto. O link de rastreio não pôde ser carregado agora.",
-                                                    Toast.LENGTH_SHORT,
-                                                ).show()
                                             }
                                         } finally {
                                             whatsAppLoadingOrderId = null
@@ -173,7 +188,7 @@ fun DeliveryOperationsScreen(
                                 enabled = whatsAppLoadingOrderId == null,
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Text(if (whatsAppLoadingOrderId == order.id) "Abrindo…" else "WhatsApp")
+                                Text(if (whatsAppLoadingOrderId == order.id) "Preparando…" else "WhatsApp")
                             }
                         }
                     }
@@ -408,11 +423,13 @@ private fun deliveryWhatsAppMessage(
 ): String {
     val customer = deliveryUseful(customerName)?.takeIf { !it.equals("Consumidor", true) }
     val greeting = customer?.let { "Olá, $it!" } ?: "Olá!"
-    val summary = items
-        .filter { it.quantity > 0.0 && deliveryUseful(it.name) != null }
-        .joinToString(", ") { item ->
-            "${deliveryItemQuantity(item.quantity)}x ${item.name.trim()}"
-        }
+    val validItems = items.filter { it.quantity > 0.0 && deliveryUseful(it.name) != null }
+    val visibleItems = validItems.take(20)
+    val summary = visibleItems.joinToString(", ") { item ->
+        "${deliveryItemQuantity(item.quantity)}x ${item.name.trim()}"
+    }
+    val extra = validItems.size - visibleItems.size
+    val completeSummary = if (extra > 0) "$summary e mais $extra item(ns)" else summary
 
     val statusText = when {
         arrived -> "Cheguei com seu pedido"
@@ -420,7 +437,7 @@ private fun deliveryWhatsAppMessage(
         else -> "Estou saindo com seu pedido"
     }
 
-    val orderText = if (summary.isNotBlank()) "$statusText: $summary." else "$statusText."
+    val orderText = "$statusText: $completeSummary."
     val trackingText = trackingUrl?.let {
         "\n\n🛵 Acompanhe sua entrega em tempo real:\n$it"
     }.orEmpty()
