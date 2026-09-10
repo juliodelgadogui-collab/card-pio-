@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\HubDesktopPresenceService;
 use EventMenu\Services\HubService;
 use EventMenu\Services\HubTerminalCatalogService;
 
@@ -70,6 +71,21 @@ try {
     if ($action === 'terminals') {
         hub_method('GET');
         hub_out(['ok'=>true,'terminals'=>(new HubTerminalCatalogService())->listForUnit((int)($_GET['unit_id'] ?? 0))]);
+    }
+    if ($action === 'desktop-heartbeat') {
+        hub_method('POST');
+        $body = hub_body();
+        $device = hub_device($body, $sessionDevice);
+        $hardware = is_array($body['hardware'] ?? null) ? $body['hardware'] : [];
+        hub_out([
+            'ok'=>true,
+            'desktop'=>(new HubDesktopPresenceService())->heartbeat(
+                (int)($body['unit_id'] ?? 0),
+                $device,
+                (string)($body['label'] ?? 'EventMenu Desktop'),
+                $hardware,
+            ),
+        ]);
     }
     if ($action === 'pairing-create') {
         hub_method('POST');
