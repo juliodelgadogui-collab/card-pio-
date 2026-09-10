@@ -56,7 +56,7 @@ public partial class MyQrWindow : Window
             RevokeButton.Visibility = Visibility.Visible;
             GenerateButton.Content = "Gerar novo QR";
             ExpiryText.Text = string.IsNullOrWhiteSpace(_state.ExpiresAt)
-                ? "Sem prazo definido. Você pode revogar este QR a qualquer momento."
+                ? "Válido até ser substituído ou revogado."
                 : $"Válido até {ServerTimeDisplay.Local(_state.ExpiresAt!)}";
             StateTitleText.Text = "QR disponível";
             StateDetailText.Text = _state.Type == "delivery_user"
@@ -86,7 +86,7 @@ public partial class MyQrWindow : Window
         StatusText.Text = "Gerando seu QR...";
         try
         {
-            var response = await _api.IssueAsync(_qrType, _user.Id, _user.Name, 720);
+            var response = await _api.IssueAsync(_qrType, _user.Id, _user.Name);
             var qr = response.Qr ?? throw new InvalidOperationException("Não foi possível gerar o QR.");
             if (string.IsNullOrWhiteSpace(qr.Payload)) throw new InvalidOperationException("O QR foi criado sem conteúdo válido.");
 
