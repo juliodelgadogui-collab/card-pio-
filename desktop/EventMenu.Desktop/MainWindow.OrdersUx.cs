@@ -103,7 +103,7 @@ public partial class MainWindow
                     MinHeight = 40,
                     Padding = new Thickness(14, 8, 14, 8),
                     Style = TryFindResource("SecondaryButton") as Style,
-                    ToolTip = "Abrir itens, cliente, entrega e observações",
+                    ToolTip = "Abrir itens, cliente, entrega, histórico e observações",
                     IsEnabled = false
                 };
                 _orderDetailsButton.Click += async (_, _) => await OpenSelectedOrderDetailsAsync();
@@ -201,12 +201,16 @@ public partial class MainWindow
             order.Id,
             Can("delivery_assign"),
             Can("discount_request"),
-            Can("cancellation_request")) { Owner = this };
+            Can("cancellation_request"),
+            Can("orders_dispatch") || Can("orders_manage"),
+            Can("loyalty_redeem")) { Owner = this };
         window.ShowDialog();
         if (window.OrderChanged)
         {
             await TryLoadOrdersAsync(false);
+            if (Can("orders_create")) await TryLoadProductsAsync(false);
             if (Can("tables") && ShiftIs("operation")) await TryLoadTablesAsync(false);
+            RefreshDashboardUx();
         }
     }
 
