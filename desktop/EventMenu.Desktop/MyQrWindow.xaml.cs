@@ -65,7 +65,7 @@ public partial class MyQrWindow : Window
         }
         catch
         {
-            _localStore.Clear();
+            _localStore.Clear(_user.TenantId, _user.Id, _qrType);
             _state = null;
             RenderState();
             StatusText.Text = "O QR salvo estava inválido e foi descartado. Gere um novo código.";
@@ -129,7 +129,7 @@ public partial class MyQrWindow : Window
         try
         {
             await _api.RevokeAsync(_state.Type, _user.Id);
-            _localStore.Clear();
+            _localStore.Clear(_user.TenantId, _user.Id, _qrType);
             _state = null;
             RenderState();
             StatusText.Text = "QR revogado.";
