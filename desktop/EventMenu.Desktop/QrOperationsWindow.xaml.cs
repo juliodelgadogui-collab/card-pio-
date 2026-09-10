@@ -18,8 +18,11 @@ public partial class QrOperationsWindow : Window
     private readonly bool _canAssignDelivery;
     private readonly bool _canDiscountRequest;
     private readonly bool _canCancellationRequest;
+    private readonly bool _canCash;
     private QrResolveResponse? _current;
     private OperationalOrderDetail? _currentOrder;
+    private DeliveryCashHandoff? _currentHandoff;
+    private string _handoffToken = "";
     private string _rawValue = "";
     private bool _busy;
 
@@ -33,7 +36,8 @@ public partial class QrOperationsWindow : Window
         bool canOrders,
         bool canAssignDelivery,
         bool canDiscountRequest,
-        bool canCancellationRequest)
+        bool canCancellationRequest,
+        bool canCash = false)
     {
         _store = store;
         _api = new OperationalActionsApiClient(store);
@@ -44,6 +48,7 @@ public partial class QrOperationsWindow : Window
         _canAssignDelivery = canAssignDelivery;
         _canDiscountRequest = canDiscountRequest;
         _canCancellationRequest = canCancellationRequest;
+        _canCash = canCash;
         InitializeComponent();
         Loaded += (_, _) => CodeBox.Focus();
         Closed += (_, _) => _api.Dispose();
@@ -64,20 +69,36 @@ public partial class QrOperationsWindow : Window
         _rawValue = value;
         _current = null;
         _currentOrder = null;
+        _currentHandoff = null;
+        _handoffToken = "";
         ActionButton.IsEnabled = false;
         OperationStatusText.Text = "Consultando...";
         try
         {
-            try
+            var handoffToken = ExtractHandoffToken(value);
+            if (!string.IsNullOrWhiteSpace(handoffToken))
             {
-                _current = await _api.ResolveQrAsync(value);
-                RenderResult(_current);
+                if (!_canCash)
+                    throw new InvalidOperationException("Este QR é um repasse de dinheiro e precisa ser confirmado por um operador de caixa autorizado.");
+
+                _handoffToken = handoffToken;
+                _currentHandoff = (await _api.ResolveDeliveryHandoffAsync(handoffToken)).Handoff
+                    ?? throw new InvalidOperationException("Repasse não encontrado.");
+                RenderHandoffResult(_currentHandoff);
             }
-            catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound && _canOrders)
+            else
             {
-                var orderResponse = await _api.ResolveOrderQrAsync(NormalizeScannedToken(value));
-                _currentOrder = orderResponse.Order ?? throw new InvalidOperationException("Pedido não encontrado para este código.");
-                RenderOrderResult(_currentOrder);
+                try
+                {
+                    _current = await _api.ResolveQrAsync(value);
+                    RenderResult(_current);
+                }
+                catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound && _canOrders)
+                {
+                    var orderResponse = await _api.ResolveOrderQrAsync(NormalizeScannedToken(value));
+                    _currentOrder = orderResponse.Order ?? throw new InvalidOperationException("Pedido não encontrado para este código.");
+                    RenderOrderResult(_currentOrder);
+                }
             }
             OperationStatusText.Text = "Código reconhecido.";
         }
@@ -85,15 +106,17 @@ public partial class QrOperationsWindow : Window
         {
             _current = null;
             _currentOrder = null;
+            _currentHandoff = null;
+            _handoffToken = "";
             TypeText.Text = "CÓDIGO NÃO RECONHECIDO";
-            ResultTitleText.Text = "Não encontramos este código";
-            PrimaryInfoText.Text = "Confira a leitura e tente novamente.";
+            ResultTitleText.Text = "Não encontramos uma ação disponível";
+            PrimaryInfoText.Text = "Confira o código e a permissão do operador.";
             SecondaryInfoText.Text = "";
             TertiaryInfoText.Text = "";
             StateText.Text = "Atenção";
             TableLabelPanel.Visibility = Visibility.Collapsed;
             ActionButton.Visibility = Visibility.Collapsed;
-            OperationStatusText.Text = ex.Message;
+            OperationStatusText.Text = Friendly(ex.Message);
         }
         finally
         {
@@ -172,7 +195,7 @@ public partial class QrOperationsWindow : Window
             default:
                 TypeText.Text = "CÓDIGO";
                 ResultTitleText.Text = "Código reconhecido";
-                PrimaryInfoText.Text = "Este código foi reconhecido, mas não possui uma ação disponível nesta versão.";
+                PrimaryInfoText.Text = "Este código foi reconhecido, mas não possui uma ação disponível para este operador.";
                 SecondaryInfoText.Text = "";
                 TertiaryInfoText.Text = "";
                 StateText.Text = "Reconhecido";
@@ -195,9 +218,59 @@ public partial class QrOperationsWindow : Window
         ActionButton.Visibility = Visibility.Visible;
     }
 
+    private void RenderHandoffResult(DeliveryCashHandoff handoff)
+    {
+        TableLabelPanel.Visibility = Visibility.Collapsed;
+        TypeText.Text = "REPASSE DE ENTREGA";
+        ResultTitleText.Text = string.IsNullOrWhiteSpace(handoff.DeliveryName)
+            ? "Repasse do entregador"
+            : $"Repasse de {handoff.DeliveryName}";
+        PrimaryInfoText.Text = $"Valor a receber: {handoff.AmountDisplay}";
+        SecondaryInfoText.Text = string.IsNullOrWhiteSpace(handoff.UnitName)
+            ? "Confira o dinheiro antes de confirmar."
+            : $"Unidade: {handoff.UnitName}";
+        TertiaryInfoText.Text = "A confirmação registra a entrada no caixa e a baixa no turno do entregador.";
+        StateText.Text = handoff.StatusDisplay;
+        ActionButton.Content = "Confirmar recebimento";
+        ActionButton.Visibility = _canCash && handoff.Status == "pending" ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private async Task ExecuteActionAsync()
     {
         if (_busy) return;
+
+        if (_currentHandoff is not null)
+        {
+            if (!_canCash || string.IsNullOrWhiteSpace(_handoffToken) || _currentHandoff.Status != "pending") return;
+            if (MessageBox.Show(
+                    $"Você recebeu {_currentHandoff.AmountDisplay} em dinheiro de {(string.IsNullOrWhiteSpace(_currentHandoff.DeliveryName) ? "este entregador" : _currentHandoff.DeliveryName)}?",
+                    "Confirmar repasse",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+
+            _busy = true;
+            ActionButton.IsEnabled = false;
+            OperationStatusText.Text = "Confirmando recebimento...";
+            try
+            {
+                _currentHandoff = (await _api.ConfirmDeliveryHandoffAsync(_handoffToken)).Handoff
+                    ?? throw new InvalidOperationException("O servidor não retornou a confirmação do repasse.");
+                OperationChanged = true;
+                RenderHandoffResult(_currentHandoff);
+                OperationStatusText.Text = "Repasse confirmado e registrado no caixa.";
+            }
+            catch (Exception ex)
+            {
+                OperationStatusText.Text = Friendly(ex.Message);
+            }
+            finally
+            {
+                _busy = false;
+                UpdateActionAvailability();
+            }
+            return;
+        }
+
         if (_currentOrder is not null)
         {
             var window = new OrderDetailsWindow(
@@ -249,7 +322,7 @@ public partial class QrOperationsWindow : Window
         }
         catch (Exception ex)
         {
-            OperationStatusText.Text = ex.Message;
+            OperationStatusText.Text = Friendly(ex.Message);
         }
         finally
         {
@@ -274,6 +347,36 @@ public partial class QrOperationsWindow : Window
     private void UpdateActionAvailability()
     {
         ActionButton.IsEnabled = !_busy && ActionButton.Visibility == Visibility.Visible;
+    }
+
+    private static string? ExtractHandoffToken(string raw)
+    {
+        var value = raw.Trim();
+        const string prefix = "EVENTMENU:HANDOFF:";
+        if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var direct = value[prefix.Length..].Trim();
+            return direct.Length >= 32 ? direct : null;
+        }
+
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return null;
+        if (!uri.AbsolutePath.EndsWith("api-go.php", StringComparison.OrdinalIgnoreCase)) return null;
+
+        var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        string? action = null;
+        string? token = null;
+        foreach (var part in query)
+        {
+            var pieces = part.Split('=', 2);
+            if (pieces.Length != 2) continue;
+            var key = Uri.UnescapeDataString(pieces[0]);
+            var valuePart = Uri.UnescapeDataString(pieces[1].Replace('+', ' ')).Trim();
+            if (key.Equals("action", StringComparison.OrdinalIgnoreCase)) action = valuePart;
+            else if (key.Equals("t", StringComparison.OrdinalIgnoreCase)) token = valuePart;
+        }
+        return action?.Equals("handoff-view", StringComparison.OrdinalIgnoreCase) == true && token?.Length >= 32
+            ? token
+            : null;
     }
 
     private static string NormalizeScannedToken(string raw)
@@ -332,6 +435,14 @@ public partial class QrOperationsWindow : Window
         "inactive" => "Inativa",
         _ => status
     };
+
+    private static string Friendly(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("sqlstate") || lower.Contains("exception") || lower.Contains("stack trace")
+            ? "Não foi possível concluir esta operação. Tente novamente."
+            : message;
+    }
 
     private async void ResolveButton_Click(object sender, RoutedEventArgs e) => await ResolveAsync();
     private async void ActionButton_Click(object sender, RoutedEventArgs e) => await ExecuteActionAsync();
