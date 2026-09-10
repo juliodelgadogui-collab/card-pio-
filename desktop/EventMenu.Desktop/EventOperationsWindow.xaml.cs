@@ -13,11 +13,13 @@ public partial class EventOperationsWindow : Window
 {
     private readonly OperationalActionsApiClient _api;
     private readonly EventMenuApiClient _mainApi;
+    private readonly bool _canEvents;
     private readonly bool _canTickets;
     private readonly bool _canGuests;
     private readonly bool _canEventBar;
     private readonly bool _canPayments;
     private readonly bool _canCash;
+    private readonly bool _canViewRecent;
     private readonly ObservableCollection<CartLine> _barCart = new();
     private List<EventOverviewItem> _events = new();
     private List<Product> _catalog = new();
@@ -29,6 +31,7 @@ public partial class EventOperationsWindow : Window
 
     public EventOperationsWindow(
         SecureSessionStore store,
+        bool canEvents,
         bool canTickets,
         bool canGuests,
         bool canEventBar,
@@ -37,11 +40,13 @@ public partial class EventOperationsWindow : Window
     {
         _api = new OperationalActionsApiClient(store);
         _mainApi = new EventMenuApiClient(store);
+        _canEvents = canEvents;
         _canTickets = canTickets;
         _canGuests = canGuests;
         _canEventBar = canEventBar;
         _canPayments = canPayments;
         _canCash = canCash;
+        _canViewRecent = canEvents || canTickets || canGuests;
         InitializeComponent();
 
         TicketPanel.Visibility = canTickets ? Visibility.Visible : Visibility.Collapsed;
@@ -49,6 +54,7 @@ public partial class EventOperationsWindow : Window
         AccessTab.Visibility = canTickets || canGuests ? Visibility.Visible : Visibility.Collapsed;
         PickupTab.Visibility = canEventBar ? Visibility.Visible : Visibility.Collapsed;
         BarSaleTab.Visibility = canEventBar ? Visibility.Visible : Visibility.Collapsed;
+        RecentEntriesCard.Visibility = _canViewRecent ? Visibility.Visible : Visibility.Collapsed;
         BarCartGrid.ItemsSource = _barCart;
 
         Loaded += async (_, _) => await LoadAsync();
@@ -88,7 +94,8 @@ public partial class EventOperationsWindow : Window
             }
 
             RenderSelectedEvent();
-            if (SelectedEvent is not null) await LoadRecentAsync(SelectedEvent.Id);
+            if (_canViewRecent && SelectedEvent is not null) await LoadRecentAsync(SelectedEvent.Id);
+            else RecentEntriesGrid.ItemsSource = null;
             FooterStatusText.Text = _events.Count == 0 ? "Nenhum evento disponível neste turno." : $"{_events.Count} evento(s) carregado(s).";
         }
         catch (Exception ex)
@@ -117,7 +124,7 @@ public partial class EventOperationsWindow : Window
             return;
         }
 
-        EventSummaryText.Text = $"{selected.Venue}{(string.IsNullOrWhiteSpace(selected.StartsDisplay) ? "" : $" • {selected.StartsDisplay}")} • {selected.Status}";
+        EventSummaryText.Text = $"{selected.Venue}{(string.IsNullOrWhiteSpace(selected.StartsDisplay) ? "" : $" • {selected.StartsDisplay}")} • {FriendlyEventStatus(selected.Status)}";
         EventRevenueText.Text = selected.RevenueDisplay;
         TicketsPaidText.Text = selected.TicketsPaid.ToString();
         TicketsCheckinText.Text = $"{selected.TicketsCheckedIn} check-in(s) • {selected.TicketsReserved} reservado(s)";
@@ -129,6 +136,11 @@ public partial class EventOperationsWindow : Window
 
     private async Task LoadRecentAsync(int eventId)
     {
+        if (!_canViewRecent)
+        {
+            RecentEntriesGrid.ItemsSource = null;
+            return;
+        }
         try
         {
             RecentEntriesGrid.ItemsSource = (await _api.EventRecentAsync(eventId)).Entries;
@@ -142,7 +154,7 @@ public partial class EventOperationsWindow : Window
     private async void EventSelector_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         RenderSelectedEvent();
-        if (!_loading && SelectedEvent is { } selected) await LoadRecentAsync(selected.Id);
+        if (!_loading && _canViewRecent && SelectedEvent is { } selected) await LoadRecentAsync(selected.Id);
     }
 
     private async void TicketCheckinButton_Click(object sender, RoutedEventArgs e)
@@ -239,14 +251,14 @@ public partial class EventOperationsWindow : Window
             return;
         }
         PickupTitleText.Text = $"Pedido #{_pickupOrder.Id} • {_pickupOrder.TotalDisplay}";
-        PickupStateText.Text = $"{_pickupOrder.StatusDisplay} • pagamento {_pickupOrder.PaymentStatus}";
+        PickupStateText.Text = $"{_pickupOrder.StatusDisplay} • pagamento {PaymentLabel(_pickupOrder.PaymentStatus)}";
         PickupItemsGrid.ItemsSource = _pickupOrder.Items;
         DeliverPickupButton.IsEnabled = _pickupOrder.CanDeliver && !_pickupOrder.AlreadyDelivered;
         PickupHintText.Text = _pickupOrder.AlreadyDelivered
             ? "Este pedido já foi entregue anteriormente."
             : _pickupOrder.CanDeliver
                 ? "Confira os itens antes de confirmar a retirada."
-                : "O servidor ainda não liberou este pedido para retirada.";
+                : "O pedido ainda não está liberado para retirada.";
     }
 
     private async void DeliverPickupButton_Click(object sender, RoutedEventArgs e)
@@ -259,7 +271,7 @@ public partial class EventOperationsWindow : Window
             _pickupOrder = (await _api.DeliverEventBarOrderAsync(selected.Id, _pickupCode)).Order;
             OperationChanged = true;
             RenderPickup();
-            if (SelectedEvent is { } current) await LoadRecentAsync(current.Id);
+            if (_canViewRecent && SelectedEvent is { } current) await LoadRecentAsync(current.Id);
         }
         catch (Exception ex)
         {
@@ -393,6 +405,25 @@ public partial class EventOperationsWindow : Window
             CreateBarOrderButton.IsEnabled = true;
         }
     }
+
+    private static string FriendlyEventStatus(string status) => status switch
+    {
+        "published" => "Publicado",
+        "draft" => "Rascunho",
+        "closed" => "Encerrado",
+        _ => status
+    };
+
+    private static string PaymentLabel(string status) => status switch
+    {
+        "paid" => "pago",
+        "partially_paid" => "parcial",
+        "pending" => "pendente",
+        "unpaid" => "não pago",
+        "failed" => "falhou",
+        "refunded" => "estornado",
+        _ => status
+    };
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await LoadAsync();
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
