@@ -7,7 +7,7 @@ namespace EventMenu\Core;
 final class PermissionCatalog
 {
     private const ROLES = [
-        'admin'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect','terminal.request','terminal.collect'],
+        'admin'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','gateways.manage','events.manage','events.bar','tickets.manage','users.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','audit.view','settings.manage','nfc.manage','nfc.collect','hardware.manage','terminal.request','terminal.collect'],
         'manager'=>['dashboard','catalog.manage','inventory.manage','inventory.approve','production.manage','production.print','orders.manage','orders.view','orders.create','orders.kitchen','orders.delivery','orders.dispatch','orders.fulfill','orders.fulfillment_correct','orders.reopen','payments.manage','discounts.request','discounts.approve','cancellations.request','cancellations.approve','refunds.manage','cash.manage','events.manage','events.bar','tickets.manage','customers.manage','loyalty.redeem','loyalty.adjust','tables.manage','coupons.manage','guests.manage','promoters.manage','reports.view','delivery.assign','nfc.collect','terminal.request','terminal.collect'],
         'cashier'=>['dashboard','orders.manage','orders.view','orders.create','orders.dispatch','orders.fulfill','payments.manage','discounts.request','cancellations.request','cash.manage','customers.manage','loyalty.redeem','tables.manage','events.bar','nfc.collect','terminal.request','terminal.collect'],
         'attendant'=>['dashboard','orders.view','orders.create','orders.dispatch','orders.fulfill','cancellations.request','events.bar','tickets.manage','guests.manage','customers.manage','loyalty.redeem','tables.manage','delivery.assign','terminal.request'],
@@ -59,6 +59,7 @@ final class PermissionCatalog
         'settings.manage'=>'Configurações da empresa',
         'nfc.manage'=>'Configurar dispositivos NFC',
         'nfc.collect'=>'Cobrar por NFC',
+        'hardware.manage'=>'Configurar hardware do Desktop / Hub',
         'terminal.request'=>'Solicitar cobrança em PINPad vinculado',
         'terminal.collect'=>'Operar cobranças TEF / PINPad',
         'events.promoter'=>'Área do promotor',
@@ -96,8 +97,6 @@ final class PermissionCatalog
                 if((int)$row['allowed'])$effective[$permission]=true;else unset($effective[$permission]);
             }
         }catch(\Throwable $e){
-            // Segurança: se não for possível confirmar os overrides, nenhuma permissão é concedida.
-            // Isso evita restaurar silenciosamente permissões padrão removidas de um usuário.
             error_log('EventMenu permission lookup failed for tenant '.$tenantId.' user '.$userId.': '.get_class($e));
             return [];
         }
@@ -136,6 +135,7 @@ final class PermissionCatalog
             'loyalty_redeem'=>'loyalty.redeem',
             'loyalty_adjust'=>'loyalty.adjust',
             'nfc_collect'=>'nfc.collect',
+            'hardware_manage'=>'hardware.manage',
             'terminal_request'=>'terminal.request',
             'terminal_collect'=>'terminal.collect',
             'tickets'=>'tickets.manage',
