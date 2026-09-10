@@ -43,9 +43,9 @@ public partial class MainWindow
 
         _productionNavButton=new Button
         {
-            Content="Cozinha / Produção",
+            Content="Produção",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="KDS, estações, expedição e impressão automática",
+            ToolTip="Acompanhar preparo, expedição e impressão dos pedidos",
             Visibility=(Can("orders_kitchen")||Can("orders_dispatch")||Can("production_print")||Can("production_manage"))?Visibility.Visible:Visibility.Collapsed
         };
         _productionNavButton.Click+=async(_,_)=>await OpenProductionAsync();
@@ -54,34 +54,34 @@ public partial class MainWindow
         {
             Content="Estoque",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Saldo disponível, reservas e alertas de estoque baixo",
+            ToolTip="Acompanhar saldo e itens que precisam de reposição",
             Visibility=Can("inventory")?Visibility.Visible:Visibility.Collapsed
         };
         _inventoryNavButton.Click+=async(_,_)=>await OpenInventoryMonitorAsync();
 
         _deliveryMonitorButton=new Button
         {
-            Content="Entregas ao vivo",
+            Content="Entregas",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Acompanhar GPS dos entregadores somente durante rotas ativas",
+            ToolTip="Acompanhar entregas que estão em rota",
             Visibility=(Can("delivery_assign")||Can("reports"))?Visibility.Visible:Visibility.Collapsed
         };
         _deliveryMonitorButton.Click+=async(_,_)=>await OpenDeliveryMonitorAsync();
 
         _hubNavButton=new Button
         {
-            Content="Celular / Hub",
+            Content="Conectar celular",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Gerar um QR temporário para vincular celulares autorizados",
+            ToolTip="Vincular um celular autorizado a este computador",
             Visibility=Can("hardware_manage")?Visibility.Visible:Visibility.Collapsed
         };
         _hubNavButton.Click+=async(_,_)=>await OpenHubPairingAsync();
 
         _hardwareSettingsButton=new Button
         {
-            Content="Equipamentos e fiscal",
+            Content="Configurações",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Configurar equipamentos e emissão fiscal",
+            ToolTip="Impressoras, equipamentos e configurações fiscais",
             Visibility=(Can("hardware_manage")||Can("fiscal_manage"))?Visibility.Visible:Visibility.Collapsed
         };
         _hardwareSettingsButton.Click+=async(_,_)=>await OpenHardwareSettingsAsync();
@@ -143,13 +143,13 @@ public partial class MainWindow
         if(!Can("delivery_assign")&&!Can("reports"))return;
         if(!HasShift||ShiftInt("unit_id")<1)
         {
-            MessageBox.Show("Inicie um turno na unidade que deseja acompanhar.","Entregas ao vivo",MessageBoxButton.OK,MessageBoxImage.Information);return;
+            MessageBox.Show("Inicie um turno na unidade que deseja acompanhar.","Entregas",MessageBoxButton.OK,MessageBoxImage.Information);return;
         }
         try
         {
             var window=new DeliveryMonitorWindow(_store){Owner=this};window.ShowDialog();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Entregas ao vivo",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){MessageBox.Show(ex.Message,"Entregas",MessageBoxButton.OK,MessageBoxImage.Warning);}
         await Task.CompletedTask;
     }
 
@@ -159,10 +159,10 @@ public partial class MainWindow
         if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null)return;
         if(!HasShift)
         {
-            MessageBox.Show("Inicie um turno para vincular o celular à unidade deste computador.","EventMenu Hub",MessageBoxButton.OK,MessageBoxImage.Information);
+            MessageBox.Show("Inicie um turno para conectar o celular a esta unidade.","Conectar celular",MessageBoxButton.OK,MessageBoxImage.Information);
             return;
         }
-        var unitId=ShiftInt("unit_id");if(unitId<1){MessageBox.Show("O turno não possui uma unidade definida.","EventMenu Hub",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
+        var unitId=ShiftInt("unit_id");if(unitId<1){MessageBox.Show("Selecione uma unidade antes de conectar o celular.","Conectar celular",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
         try
         {
             EnsureHubRuntime();
@@ -171,10 +171,10 @@ public partial class MainWindow
             await _hubIntegrationApi.HardwareHeartbeatAsync(unitId,_hubHardwareStore,profile);
             _lastHubHeartbeat=DateTimeOffset.UtcNow;
             var pairing=await _hubIntegrationApi.CreateHubPairingAsync(unitId);
-            var value=pairing.Pairing??throw new InvalidOperationException("O servidor não gerou o pareamento.");
+            var value=pairing.Pairing??throw new InvalidOperationException("Não foi possível gerar o código de conexão.");
             var window=new HubPairingWindow(value){Owner=this};window.ShowDialog();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"EventMenu Hub",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){MessageBox.Show(ex.Message,"Conectar celular",MessageBoxButton.OK,MessageBoxImage.Warning);}
     }
 
     private async Task OpenHardwareSettingsAsync()
@@ -183,7 +183,7 @@ public partial class MainWindow
         if(!Can("hardware_manage")&&!Can("fiscal_manage"))return;
         if(!HasShift)
         {
-            MessageBox.Show("Inicie um turno para definir a unidade que será configurada.","EventMenu",MessageBoxButton.OK,MessageBoxImage.Information);
+            MessageBox.Show("Inicie um turno para escolher a unidade que será configurada.","Configurações",MessageBoxButton.OK,MessageBoxImage.Information);
             return;
         }
         var unitId=ShiftInt("unit_id");if(unitId<1)return;
@@ -197,7 +197,7 @@ public partial class MainWindow
             await _hubIntegrationApi.HardwareHeartbeatAsync(unitId,_hubHardwareStore,_hubHardwareStore.Load());
             _lastHubHeartbeat=DateTimeOffset.UtcNow;
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"EventMenu",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){MessageBox.Show(ex.Message,"Configurações",MessageBoxButton.OK,MessageBoxImage.Warning);}
     }
 
     private async void HubTimer_Tick(object? sender,EventArgs e)
@@ -227,11 +227,11 @@ public partial class MainWindow
         }
         catch(ApiClientException)
         {
-            // A sessão principal cuida da renovação/reauth. O Hub não deve interromper a operação do caixa.
+            // A operação principal continua mesmo se um recurso secundário ficar temporariamente indisponível.
         }
         catch
         {
-            // Falhas transitórias de hardware/rede são registradas nas filas correspondentes.
+            // Falhas transitórias não devem interromper o caixa.
         }
         finally{_hubBusy=false;}
     }
