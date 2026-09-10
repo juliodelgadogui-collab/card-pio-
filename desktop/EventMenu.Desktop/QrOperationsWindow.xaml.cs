@@ -16,6 +16,8 @@ public partial class QrOperationsWindow : Window
     private readonly bool _canGuests;
     private readonly bool _canOrders;
     private readonly bool _canAssignDelivery;
+    private readonly bool _canDiscountRequest;
+    private readonly bool _canCancellationRequest;
     private QrResolveResponse? _current;
     private OperationalOrderDetail? _currentOrder;
     private string _rawValue = "";
@@ -29,7 +31,9 @@ public partial class QrOperationsWindow : Window
         bool canTickets,
         bool canGuests,
         bool canOrders,
-        bool canAssignDelivery)
+        bool canAssignDelivery,
+        bool canDiscountRequest,
+        bool canCancellationRequest)
     {
         _store = store;
         _api = new OperationalActionsApiClient(store);
@@ -38,6 +42,8 @@ public partial class QrOperationsWindow : Window
         _canGuests = canGuests;
         _canOrders = canOrders;
         _canAssignDelivery = canAssignDelivery;
+        _canDiscountRequest = canDiscountRequest;
+        _canCancellationRequest = canCancellationRequest;
         InitializeComponent();
         Loaded += (_, _) => CodeBox.Focus();
         Closed += (_, _) => _api.Dispose();
@@ -194,7 +200,12 @@ public partial class QrOperationsWindow : Window
         if (_busy) return;
         if (_currentOrder is not null)
         {
-            var window = new OrderDetailsWindow(_store, _currentOrder.Id, _canAssignDelivery) { Owner = this };
+            var window = new OrderDetailsWindow(
+                _store,
+                _currentOrder.Id,
+                _canAssignDelivery,
+                _canDiscountRequest,
+                _canCancellationRequest) { Owner = this };
             window.ShowDialog();
             OperationChanged |= window.OrderChanged;
             return;
