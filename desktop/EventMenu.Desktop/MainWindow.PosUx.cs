@@ -9,8 +9,8 @@ namespace EventMenu.Desktop;
 
 public partial class MainWindow
 {
-    private static readonly Brush OutOfStockBackground = new SolidColorBrush(Color.FromRgb(254, 243, 242));
-    private static readonly Brush OutOfStockForeground = new SolidColorBrush(Color.FromRgb(180, 35, 24));
+    private static readonly Brush OutOfStockBackground = new SolidColorBrush(Color.FromRgb(254, 242, 242));
+    private static readonly Brush OutOfStockForeground = new SolidColorBrush(Color.FromRgb(185, 28, 28));
     private bool _posStockUxReady;
     private DateTimeOffset _lastOperationalPermissionRefresh = DateTimeOffset.MinValue;
 
@@ -32,13 +32,19 @@ public partial class MainWindow
             stockColumn.Header = "Estoque";
         }
 
-        if (!ProductsGrid.Columns.Any(c => string.Equals(c.Header?.ToString(), "Disponibilidade", StringComparison.OrdinalIgnoreCase)))
+        var hasAvailability = ProductsGrid.Columns.Any(c =>
+        {
+            var header = c.Header?.ToString() ?? "";
+            return header.Equals("Disponibilidade", StringComparison.OrdinalIgnoreCase)
+                   || header.Equals("Situação", StringComparison.OrdinalIgnoreCase);
+        });
+        if (!hasAvailability)
         {
             ProductsGrid.Columns.Add(new DataGridTextColumn
             {
-                Header = "Disponibilidade",
+                Header = "Situação",
                 Binding = new Binding(nameof(Product.StockStatusLabel)),
-                Width = new DataGridLength(110),
+                Width = new DataGridLength(105),
                 IsReadOnly = true,
             });
         }
@@ -51,8 +57,8 @@ public partial class MainWindow
         {
             e.Row.Background = OutOfStockBackground;
             e.Row.Foreground = OutOfStockForeground;
-            e.Row.Opacity = 0.72;
-            e.Row.ToolTip = "Produto zerado. O PDV não permite adicionar nova quantidade enquanto não houver saldo.";
+            e.Row.Opacity = 0.76;
+            e.Row.ToolTip = "Produto sem estoque disponível.";
         }
         else
         {
@@ -60,7 +66,7 @@ public partial class MainWindow
             e.Row.ClearValue(Control.ForegroundProperty);
             e.Row.Opacity = 1;
             e.Row.ToolTip = product.TrackStock == 1
-                ? $"Saldo informado pelo catálogo: {product.StockDisplay}. O servidor valida o estoque novamente ao criar o pedido."
+                ? $"Disponível: {product.StockDisplay}"
                 : "Produto sem controle de estoque.";
         }
     }
@@ -154,8 +160,8 @@ public partial class MainWindow
 
             MessageBox.Show(
                 product.StockQty.Value <= 0
-                    ? $"{product.Name} está zerado e precisa ser removido do pedido."
-                    : $"{product.Name}: o carrinho tem {line.Quantity:0.###}, mas o saldo informado é {product.StockQty.Value:0.###}.",
+                    ? $"{product.Name} está sem estoque e precisa ser removido do pedido."
+                    : $"{product.Name}: você colocou {line.Quantity:0.###}, mas há {product.StockQty.Value:0.###} disponível.",
                 "Conferir estoque",
                 MessageBoxButton.OK,
                 MessageBoxImage.Warning);
@@ -168,8 +174,8 @@ public partial class MainWindow
     private static void ShowOutOfStock(Product product)
     {
         MessageBox.Show(
-            $"{product.Name} está sem saldo disponível no catálogo. Atualize o estoque antes de vender uma nova unidade.",
-            "Produto zerado",
+            $"{product.Name} está sem estoque disponível.",
+            "Produto indisponível",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
     }
@@ -191,7 +197,7 @@ public partial class MainWindow
         }
         catch
         {
-            // A lista reduzida recebida no login continua sendo usada se o contexto operacional falhar.
+            // Mantém as permissões já carregadas se a atualização temporária não responder.
         }
     }
 
