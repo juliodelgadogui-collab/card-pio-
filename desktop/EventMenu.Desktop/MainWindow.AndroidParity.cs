@@ -227,7 +227,8 @@ public partial class MainWindow
 
         try
         {
-            var window = new MyQrWindow(_store, Can("orders_delivery")) { Owner = this };
+            var deliveryIdentity = ShiftIs("delivery") && Can("orders_delivery");
+            var window = new MyQrWindow(_store, deliveryIdentity) { Owner = this };
             window.ShowDialog();
         }
         catch (Exception ex)
