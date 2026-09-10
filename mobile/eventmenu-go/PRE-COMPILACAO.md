@@ -9,13 +9,15 @@ A próxima compilação deve ser **Debug Atualizável**, mantendo o package `br.
 - Usar Java 17, Android SDK 36, Build Tools 36.0.0 e Gradle 9.3.1.
 - Não exigir Firebase no build Debug. Firebase/Release continuam fora da homologação desta etapa.
 - Não alterar NFC/Tap On durante esta homologação.
-- Confirmar que o backend de teste contém `api-go-delivery.php`, `api-go-expedition.php`, `api-go-inventory.php` e `api-hub.php` da branch `feature/eventmenu-go-server-support`.
+- Confirmar que o backend de teste contém `api-go-delivery.php`, `api-go-expedition.php`, `api-go-inventory.php`, `api-go-routing.php`, `api-cluster.php` e `api-hub.php` da branch `feature/eventmenu-go-server-support`.
 - Confirmar `APP_URL` em HTTPS e `APP_BASE_PATH=/1` no servidor.
+- Se a contingência estiver habilitada, confirmar no Super ADM que o servidor adicional foi verificado pelo handshake do cluster.
+- Para contingência com escrita, os dois nós devem enxergar o mesmo MySQL/MariaDB (ou uma camada de banco com failover próprio) e usar a mesma `APP_KEY`. SQLite independente fica somente leitura.
 - Preservar os arquivos do GPS Premium: `DeliveryLocationService.kt`, `DeliveryLocationBuffer.kt`, `LocationPermissionActivity.kt` e o fluxo atualizado de `DeliveryProgressViewModel.kt`.
 
 ## Compilação
 
-Quando o GitHub Actions estiver disponível novamente, executar manualmente o workflow **EventMenu GO Atualizável** escolhendo a branch `feature/eventmenu-go-mobile-sync`. O workflow faz preflight dos módulos novos, restaura a assinatura de desenvolvimento, roda testes unitários, monta `assembleDebug`, valida package/certificado e publica o artefato `EventMenu-GO-ATUALIZAVEL`.
+Quando o GitHub Actions estiver disponível novamente, executar manualmente o workflow **EventMenu GO Atualizável** escolhendo a branch `feature/eventmenu-go-mobile-sync`. O workflow faz preflight dos módulos novos, incluindo failover, restaura a assinatura de desenvolvimento, roda testes unitários, monta `assembleDebug`, valida package/certificado e publica o artefato `EventMenu-GO-ATUALIZAVEL`.
 
 Para um build local de diagnóstico, a partir de `mobile/eventmenu-go`, usar `gradle :app:testDebugUnitTest --stacktrace --no-daemon` e depois `gradle :app:assembleDebug --stacktrace --no-daemon`. Um build local sem a assinatura fixa não deve ser distribuído como APK atualizável por cima do APK já instalado.
 
@@ -29,8 +31,12 @@ Para um build local de diagnóstico, a partir de `mobile/eventmenu-go`, usar `gr
 6. Hub: computador online/offline, QR temporário, vínculo por unidade, impressão, recibo, tela do cliente, alerta, gaveta conforme permissão e prevenção de comando duplicado.
 7. PINPad/TEF via Hub: o celular só solicita; aprovação local não pode marcar o pedido como pago. A confirmação continua dependendo do servidor/provedor.
 8. Trocar usuário/unidade/turno e confirmar que vínculos e comandos antigos não permanecem na tela.
-9. Testar perda e retorno da internet. Hub, expedição e estoque operacional não podem usar cache antigo como se fosse estado atual.
-10. Só depois da homologação fazer merge seletivo no `main` e iniciar a etapa Release/Firebase.
+9. Failover: com os dois servidores online, autenticar e deixar o APK baixar a configuração de roteamento. Em seguida indisponibilizar apenas o servidor principal e confirmar que uma consulta GET troca para o servidor de contingência.
+10. No modo `shared_db`, depois da troca, confirmar que a primeira gravação que detectou a queda não é repetida automaticamente; repetir manualmente a ação e confirmar que ela é executada uma única vez no servidor adicional.
+11. No modo `read_only`, confirmar que consultas continuam pelo adicional e que pedidos, pagamentos, estoque e outras gravações ficam bloqueados até o principal voltar.
+12. Reativar o servidor principal e confirmar que o APK volta automaticamente a ele após a sondagem de recuperação.
+13. Testar perda total da internet. Hub, expedição e estoque operacional não podem usar cache antigo como se fosse estado atual.
+14. Só depois da homologação fazer merge seletivo no `main` e iniciar a etapa Release/Firebase.
 
 ## Resultado esperado
 
