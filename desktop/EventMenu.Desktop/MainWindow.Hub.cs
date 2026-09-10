@@ -94,7 +94,7 @@ public partial class MainWindow
         {
             Content="Ler QR / código",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Ler pedido, mesa, ingresso, convidado ou repasse de entrega"
+            ToolTip="Ler pedidos, mesas, comandas, ingressos, convidados, funcionários, eventos e repasses"
         };
         _qrNavButton.Click+=async(_,_)=>await OpenQrOperationsAsync();
 
@@ -167,7 +167,7 @@ public partial class MainWindow
         if(_notificationsNavButton is not null)
             _notificationsNavButton.Visibility=ShellPanel.Visibility==Visibility.Visible?Visibility.Visible:Visibility.Collapsed;
         if(_qrNavButton is not null)
-            _qrNavButton.Visibility=(Can("tables")||Can("tickets")||Can("guests")||Can("orders_create")||Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign")||Can("cash"))?Visibility.Visible:Visibility.Collapsed;
+            _qrNavButton.Visibility=ShellPanel.Visibility==Visibility.Visible?Visibility.Visible:Visibility.Collapsed;
         if(_fiscalNavButton is not null)
             _fiscalNavButton.Visibility=(Can("fiscal_manage")||Can("fiscal_issue"))?Visibility.Visible:Visibility.Collapsed;
         if(_hubNavButton is not null)
@@ -325,18 +325,17 @@ public partial class MainWindow
     private async Task OpenQrOperationsAsync()
     {
         if(_store is null||ShellPanel.Visibility!=Visibility.Visible)return;
-        var canTables=Can("tables")||Can("orders_create");
-        var canTickets=Can("tickets");
-        var canGuests=Can("guests");
-        var canOrders=Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign");
-        var canCash=Can("cash");
-        if(!canTables&&!canTickets&&!canGuests&&!canOrders&&!canCash)return;
         if(!HasShift)
         {
             MessageBox.Show("Inicie um turno antes de usar a leitura de códigos.","Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Information);
             return;
         }
 
+        var canTables=Can("tables")||Can("orders_create");
+        var canTickets=Can("tickets");
+        var canGuests=Can("guests");
+        var canOrders=Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign")||Can("orders_delivery");
+        var canCash=Can("cash");
         try
         {
             var window=new QrOperationsWindow(
@@ -348,6 +347,8 @@ public partial class MainWindow
                 Can("delivery_assign"),
                 Can("discount_request"),
                 Can("cancellation_request"),
+                Can("orders_dispatch")||Can("orders_manage"),
+                Can("loyalty_redeem"),
                 canCash){Owner=this};
             window.ShowDialog();
             if(window.OperationChanged)
