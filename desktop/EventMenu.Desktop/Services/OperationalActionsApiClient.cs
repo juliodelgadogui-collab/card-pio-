@@ -76,6 +76,30 @@ public sealed class OperationalActionsApiClient : IDisposable
     public Task<TabResponse> OpenTableAsync(int tableId, string label, CancellationToken ct = default) =>
         PostAsync<TabResponse>("api-go.php", "table-open", new { table_id = tableId, label }, ct);
 
+    public Task<OperationPayloadResponse> RequestCancellationAsync(int orderId, string reason, CancellationToken ct = default) =>
+        PostAsync<OperationPayloadResponse>("api-go-cancellations.php", "request", new { order_id = orderId, reason }, ct);
+
+    public Task<CancellationRequestsResponse> PendingCancellationsAsync(CancellationToken ct = default) =>
+        GetAsync<CancellationRequestsResponse>("api-go-cancellations.php", "pending", null, ct);
+
+    public Task<OperationPayloadResponse> ApproveCancellationAsync(int requestId, CancellationToken ct = default) =>
+        PostAsync<OperationPayloadResponse>("api-go-cancellations.php", "approve", new { request_id = requestId }, ct);
+
+    public Task<OperationPayloadResponse> RejectCancellationAsync(int requestId, string reason, CancellationToken ct = default) =>
+        PostAsync<OperationPayloadResponse>("api-go-cancellations.php", "reject", new { request_id = requestId, reason }, ct);
+
+    public Task<OperationPayloadResponse> RequestDiscountAsync(int orderId, int amountCents, string reason, CancellationToken ct = default) =>
+        PostAsync<OperationPayloadResponse>("api-go-discounts.php", "request", new { order_id = orderId, amount_cents = amountCents, reason }, ct);
+
+    public Task<DiscountRequestsResponse> PendingDiscountsAsync(CancellationToken ct = default) =>
+        GetAsync<DiscountRequestsResponse>("api-go-discounts.php", "pending", null, ct);
+
+    public Task<OperationPayloadResponse> ApproveDiscountAsync(int requestId, CancellationToken ct = default) =>
+        PostAsync<OperationPayloadResponse>("api-go-discounts.php", "approve", new { request_id = requestId }, ct);
+
+    public Task<OperationPayloadResponse> RejectDiscountAsync(int requestId, string reason, CancellationToken ct = default) =>
+        PostAsync<OperationPayloadResponse>("api-go-discounts.php", "reject", new { request_id = requestId, reason }, ct);
+
     private static bool IsEndpointUnavailable(ApiClientException ex) =>
         ex.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed;
 
