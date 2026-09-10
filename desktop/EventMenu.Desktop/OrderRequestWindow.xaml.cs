@@ -29,7 +29,7 @@ public partial class OrderRequestWindow : Window
             TitleText.Text = "Solicitar desconto";
             SubtitleText.Text = $"Pedido #{orderId} • total {(orderTotalCents / 100m).ToString("C2", new CultureInfo("pt-BR"))}";
             AmountPanel.Visibility = Visibility.Visible;
-            InfoText.Text = "O desconto só será aplicado depois da autorização exigida pela empresa. Pedido já pago ou com cobrança em andamento não aceita alteração de valor.";
+            InfoText.Text = "O desconto só será aplicado depois da autorização. Pedido já pago ou com cobrança em andamento não aceita alteração de valor.";
             Loaded += (_, _) => AmountBox.Focus();
         }
         else
@@ -39,7 +39,7 @@ public partial class OrderRequestWindow : Window
             SubtitleText.Text = $"Pedido #{orderId}";
             AmountPanel.Visibility = Visibility.Collapsed;
             ReasonLabel.Text = "Motivo do cancelamento";
-            InfoText.Text = "O pedido não será cancelado imediatamente. A solicitação seguirá para autorização quando a função do usuário exigir aprovação.";
+            InfoText.Text = "O pedido não será cancelado imediatamente. A solicitação será enviada para autorização e o servidor verificará pagamento, cobrança em andamento e situação do pedido antes de concluir.";
             Loaded += (_, _) => ReasonBox.Focus();
         }
     }
