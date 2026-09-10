@@ -32,14 +32,18 @@ jobs:
           test -f app/src/main/java/br/com/eventmenu/go/data/HubRepository.kt
           test -f app/src/main/java/br/com/eventmenu/go/data/InventoryAlertRepository.kt
           test -f app/src/main/java/br/com/eventmenu/go/data/ExpeditionStatusRepository.kt
+          test -f app/src/main/java/br/com/eventmenu/go/data/FailoverEndpointRouter.kt
           test -f app/src/main/java/br/com/eventmenu/go/location/DeliveryLocationService.kt
           test -f app/src/main/java/br/com/eventmenu/go/location/DeliveryLocationBuffer.kt
           test -f app/src/main/java/br/com/eventmenu/go/location/LocationPermissionActivity.kt
           grep -q 'api-hub.php' app/src/main/java/br/com/eventmenu/go/data/ApiClient.kt
+          grep -q 'api-go-routing.php' app/src/main/java/br/com/eventmenu/go/data/ApiClient.kt
+          grep -q 'api-cluster.php' app/src/main/java/br/com/eventmenu/go/data/ApiClient.kt
+          grep -q 'FailoverEndpointRouter.initialize' app/src/main/java/br/com/eventmenu/go/EventMenuGoApplication.kt
           grep -q 'trackingLink(order.id)' app/src/main/java/br/com/eventmenu/go/ui/screens/DeliveryOperationsScreen.kt
           grep -q 'WhatsApp' app/src/main/java/br/com/eventmenu/go/ui/screens/DeliveryOperationsScreen.kt
           grep -q 'DeliveryLocationService' app/src/main/java/br/com/eventmenu/go/DeliveryProgressViewModel.kt
-          echo "EventMenu GO mobile-sync sources OK"
+          echo "EventMenu GO mobile-sync + failover sources OK"
 
       - uses: actions/setup-java@v4
         with:
