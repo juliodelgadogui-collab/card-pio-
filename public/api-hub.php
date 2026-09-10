@@ -108,8 +108,12 @@ try {
         $commandType = (string)($body['command_type'] ?? '');
         $idempotencyKey = (string)($body['idempotency_key'] ?? '');
         $payload = is_array($body['payload'] ?? null) ? $body['payload'] : [];
-        (new HubCommandIdempotencyGuardService())->assertReusable($idempotencyKey, $targetBindingId, $commandType, $device);
-        hub_out(['ok'=>true,'command'=>$hub->queueCommand($targetBindingId, $commandType, $payload, $idempotencyKey, $device)], 201);
+        $guard = new HubCommandIdempotencyGuardService();
+        $guard->assertReusable($idempotencyKey, $targetBindingId, $commandType, $device);
+        $command = $hub->queueCommand($targetBindingId, $commandType, $payload, $idempotencyKey, $device);
+        // Revalida depois da inserção para cobrir duas requisições simultâneas com a mesma chave.
+        $guard->assertReusable($idempotencyKey, $targetBindingId, $commandType, $device);
+        hub_out(['ok'=>true,'command'=>$command], 201);
     }
     if ($action === 'command-status') {
         hub_method('GET');
