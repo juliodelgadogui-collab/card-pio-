@@ -25,6 +25,59 @@ public sealed class SimpleOperationResponse
     [JsonPropertyName("ok")] public bool Ok { get; set; }
 }
 
+public sealed class OperationPayloadResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("request")] public Dictionary<string, JsonElement>? Request { get; set; }
+    [JsonPropertyName("result")] public Dictionary<string, JsonElement>? Result { get; set; }
+}
+
+public sealed class CancellationRequestsResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("requests")] public List<CancellationRequestItem> Requests { get; set; } = new();
+}
+
+public sealed class CancellationRequestItem
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("order_id")] public int OrderId { get; set; }
+    [JsonPropertyName("reason")] public string Reason { get; set; } = "";
+    [JsonPropertyName("requester_name")] public string RequesterName { get; set; } = "";
+    [JsonPropertyName("customer_name")] public string? CustomerName { get; set; }
+    [JsonPropertyName("channel")] public string Channel { get; set; } = "";
+    [JsonPropertyName("order_status")] public string OrderStatus { get; set; } = "";
+    [JsonPropertyName("payment_status")] public string PaymentStatus { get; set; } = "";
+    [JsonPropertyName("total_cents")] public int TotalCents { get; set; }
+    [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    public string TotalDisplay => Money(TotalCents);
+    public string CreatedDisplay => LocalTime(CreatedAt);
+}
+
+public sealed class DiscountRequestsResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("requests")] public List<DiscountRequestItem> Requests { get; set; } = new();
+}
+
+public sealed class DiscountRequestItem
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("order_id")] public int OrderId { get; set; }
+    [JsonPropertyName("requested_cents")] public int RequestedCents { get; set; }
+    [JsonPropertyName("reason")] public string Reason { get; set; } = "";
+    [JsonPropertyName("requester_name")] public string RequesterName { get; set; } = "";
+    [JsonPropertyName("subtotal_cents")] public int SubtotalCents { get; set; }
+    [JsonPropertyName("discount_cents")] public int DiscountCents { get; set; }
+    [JsonPropertyName("total_cents")] public int TotalCents { get; set; }
+    [JsonPropertyName("order_status")] public string OrderStatus { get; set; } = "";
+    [JsonPropertyName("payment_status")] public string PaymentStatus { get; set; } = "";
+    [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    public string RequestedDisplay => Money(RequestedCents);
+    public string TotalDisplay => Money(TotalCents);
+    public string CreatedDisplay => LocalTime(CreatedAt);
+}
+
 public sealed class QrResolveResponse
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
@@ -71,7 +124,7 @@ public sealed class OperationalOrderDetail
     [JsonPropertyName("notes")] public string? Notes { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
 
-    public string TotalDisplay => (TotalCents / 100m).ToString("C2", new CultureInfo("pt-BR"));
+    public string TotalDisplay => Money(TotalCents);
     public string ChannelDisplay => Channel switch
     {
         "counter" => "Balcão",
@@ -103,13 +156,13 @@ public sealed class OperationalOrderDetail
         "cancelled" => "Cancelado",
         _ => PaymentStatus
     };
-    public string CreatedDisplay
-    {
-        get
-        {
-            if (DateTimeOffset.TryParse(CreatedAt, out var offset)) return offset.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
-            if (DateTime.TryParse(CreatedAt, out var local)) return local.ToString("dd/MM/yyyy HH:mm");
-            return CreatedAt;
-        }
-    }
+    public string CreatedDisplay => LocalTime(CreatedAt);
+}
+
+internal static string Money(int cents) => (cents / 100m).ToString("C2", new CultureInfo("pt-BR"));
+internal static string LocalTime(string value)
+{
+    if (DateTimeOffset.TryParse(value, out var offset)) return offset.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+    if (DateTime.TryParse(value, out var local)) return local.ToString("dd/MM/yyyy HH:mm");
+    return value;
 }
