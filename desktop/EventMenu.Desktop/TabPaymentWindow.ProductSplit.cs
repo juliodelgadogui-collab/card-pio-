@@ -13,12 +13,11 @@ public partial class TabPaymentWindow
             return;
         }
 
-        var window = new ProductSplitPaymentWindow(_api, _tabId, _canCash) { Owner = this };
+        var window = new ProductSplitPaymentWindow(_store, _api, _tabId, _canCash) { Owner = this };
         window.ShowDialog();
-        if (window.PaymentChanged)
-        {
-            PaymentChanged = true;
-            await LoadAccountAsync();
-        }
+        if (window.PaymentChanged) PaymentChanged = true;
+
+        // Sempre relê a conta: um Pix pode ter sido criado e continuar pendente mesmo que a janela seja fechada.
+        await LoadAccountAsync();
     }
 }
