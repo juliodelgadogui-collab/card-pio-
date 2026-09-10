@@ -120,6 +120,8 @@ if (PHP_SAPI !== 'cli' && !in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET',
                 $action = (string)($_GET['action'] ?? '');
                 $allowed = in_array($script, ['install.php','update.php'], true)
                     || ($script === 'api-cluster.php' && $action === 'verify')
+                    || ($script === 'api-cluster-bootstrap.php' && $action === 'configure')
+                    || ($script === 'api-cluster-sync.php' && $action === 'push')
                     || ($script === 'api.php' && in_array($action, ['login','refresh','logout'], true));
                 if (!$allowed) {
                     http_response_code(503);
