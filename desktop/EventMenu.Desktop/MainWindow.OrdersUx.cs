@@ -30,15 +30,36 @@ public partial class MainWindow
             if (OrdersGrid.Columns[6] is DataGridTextColumn created) created.Binding = new Binding(nameof(Order.CreatedDisplay));
         }
 
-        var actionBar = OrdersView.Children.OfType<StackPanel>()
+        StackPanel? actionBar = OrdersView.Children.OfType<StackPanel>()
             .FirstOrDefault(x => Grid.GetRow(x) == 2);
+
+        // Layout novo: ações ficam em um Grid, com filtros à esquerda e botões à direita.
+        if (actionBar is null)
+        {
+            var rowGrid = OrdersView.Children.OfType<Grid>().FirstOrDefault(x => Grid.GetRow(x) == 2);
+            if (rowGrid is not null)
+            {
+                foreach (var hint in rowGrid.Children.OfType<TextBlock>().ToList())
+                    hint.Visibility = Visibility.Collapsed;
+
+                actionBar = new StackPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                Grid.SetColumn(actionBar, 0);
+                rowGrid.Children.Add(actionBar);
+            }
+        }
+
         if (actionBar is not null)
         {
             _ordersSearchBox = new TextBox
             {
-                Width = 190,
-                Height = 34,
-                Margin = new Thickness(0, 0, 8, 8),
+                Width = 205,
+                Height = 38,
+                Margin = new Thickness(0, 0, 8, 0),
                 VerticalContentAlignment = VerticalAlignment.Center,
                 ToolTip = "Buscar pedido, cliente ou entregador",
             };
@@ -48,27 +69,28 @@ public partial class MainWindow
             {
                 ("Todos os status", "all"), ("Pendentes", "pending"), ("Em preparo", "preparing"),
                 ("Prontos", "ready"), ("Em rota", "out_for_delivery"), ("Concluídos", "completed"), ("Cancelados", "cancelled")
-            }, 138);
+            }, 142);
             _ordersStatusFilter.SelectionChanged += (_, _) => ApplyOrdersFilter();
 
             _ordersPaymentFilter = CreateFilter(new[]
             {
                 ("Todos pagamentos", "all"), ("Não pagos", "unpaid"), ("Pendentes", "pending"),
                 ("Parciais", "partially_paid"), ("Pagos", "paid")
-            }, 145);
+            }, 150);
             _ordersPaymentFilter.SelectionChanged += (_, _) => ApplyOrdersFilter();
 
             _ordersVisibleCount = new TextBlock
             {
                 VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(2, 0, 12, 8),
-                Foreground = new SolidColorBrush(Color.FromRgb(102, 112, 133)),
+                Margin = new Thickness(4, 0, 12, 0),
+                Foreground = new SolidColorBrush(Color.FromRgb(100, 116, 139)),
+                FontSize = 11,
             };
 
-            actionBar.Children.Insert(0, _ordersSearchBox);
-            actionBar.Children.Insert(1, _ordersStatusFilter);
-            actionBar.Children.Insert(2, _ordersPaymentFilter);
-            actionBar.Children.Insert(3, _ordersVisibleCount);
+            actionBar.Children.Add(_ordersSearchBox);
+            actionBar.Children.Add(_ordersStatusFilter);
+            actionBar.Children.Add(_ordersPaymentFilter);
+            actionBar.Children.Add(_ordersVisibleCount);
         }
 
         OrdersGrid.LoadingRow += OrdersGrid_OperationalLoadingRow;
@@ -80,7 +102,7 @@ public partial class MainWindow
 
     private static ComboBox CreateFilter(IEnumerable<(string Label, string Value)> items, double width)
     {
-        var combo = new ComboBox { Width = width, Height = 34, Margin = new Thickness(0, 0, 8, 8) };
+        var combo = new ComboBox { Width = width, Height = 38, Margin = new Thickness(0, 0, 8, 0) };
         foreach (var item in items) combo.Items.Add(new ComboBoxItem { Content = item.Label, Tag = item.Value });
         combo.SelectedIndex = 0;
         return combo;
@@ -125,12 +147,12 @@ public partial class MainWindow
         e.Row.Opacity = 1;
         if (order.PaymentStatus is "unpaid" or "pending" && order.Status is not "completed")
         {
-            e.Row.Background = new SolidColorBrush(Color.FromRgb(255, 250, 235));
-            e.Row.ToolTip = "Pedido ainda possui pagamento pendente.";
+            e.Row.Background = new SolidColorBrush(Color.FromRgb(255, 251, 235));
+            e.Row.ToolTip = "Pagamento pendente.";
         }
         else if (order.Status.Equals("ready", StringComparison.OrdinalIgnoreCase))
         {
-            e.Row.Background = new SolidColorBrush(Color.FromRgb(236, 253, 243));
+            e.Row.Background = new SolidColorBrush(Color.FromRgb(236, 253, 245));
             e.Row.ToolTip = "Pedido pronto para a próxima etapa.";
         }
         else
