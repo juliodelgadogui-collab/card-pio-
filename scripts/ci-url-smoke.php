@@ -20,6 +20,8 @@ url_assert(app_url('') === '/1/', 'Raiz relativa incorreta.');
 url_assert(app_url('assets/app.css') === '/1/assets/app.css', 'Asset URL incorreta.');
 url_assert(app_url('?route=orders') === '/1/?route=orders', 'Rota do painel incorreta.');
 url_assert(app_absolute_url('webhook.php?provider=pagbank&tenant=ci') === 'https://example.test/1/webhook.php?provider=pagbank&tenant=ci', 'URL absoluta de webhook incorreta.');
+url_assert(app_absolute_url('pedido.php?t=pedido-ci') === 'https://example.test/1/pedido.php?t=pedido-ci', 'URL pública do pedido não respeita /1.');
+url_assert(app_absolute_url('rastreio.php?t=rastreio-ci') === 'https://example.test/1/rastreio.php?t=rastreio-ci', 'URL pública de rastreamento não respeita /1.');
 
 $html = '<a href="/pedido.php?t=abc">Pedido</a><img src="/assets/test.png"><form action="/checkout">';
 $rewritten = app_rewrite_root_urls($html);
