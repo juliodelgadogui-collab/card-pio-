@@ -1,5 +1,6 @@
 package br.com.eventmenu.go.data
 
+import br.com.eventmenu.go.BuildConfig
 import br.com.eventmenu.go.security.SecureSessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -71,7 +72,12 @@ class ApiClient(
 
     suspend fun refreshRouting(token: String) {
         val root = request("api-go-routing.php", "GET", "config", token, emptyMap(), null)
-        FailoverEndpointRouter.updateFromRouting(root)
+        acceptRoutingFromPrimary(root)
+    }
+
+    suspend fun refreshClientPolicy(): Boolean {
+        val root = request("api-client-policy.php", "GET", "manifest", null, mapOf("platform" to "android"), null)
+        return ClientPolicyManager.applyEnvelope(root)
     }
 
     private suspend fun request(
@@ -82,6 +88,10 @@ class ApiClient(
         query: Map<String, String>,
         body: JSONObject?,
     ): JSONObject = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        if (!policyExempt(path, action)) {
+            ClientPolicyManager.blockReason(BuildConfig.VERSION_NAME)?.let { throw ApiException(it, 403) }
+        }
+
         val store = sessionStore ?: sharedSessionStore
         val requestKey = cacheRequestKey(path, action, query)
         val cacheable = isCacheableRead(path, method, action, token)
@@ -102,7 +112,7 @@ class ApiClient(
             val routingToken = store?.token()?.takeIf { it.isNotBlank() }
                 ?: token?.takeIf { it.isNotBlank() }
                 ?: result.optString("token").takeIf { it.isNotBlank() }
-            if (path != "api-go-routing.php") maybeRefreshRouting(selectedBase, routingToken)
+            if (path !in CONTROL_PLANE_PATHS) maybeRefreshControlPlane(selectedBase, routingToken)
             if (cacheable) {
                 val scope = cacheScope(store, token)
                 if (scope.isNotBlank()) sharedOfflineCache?.save(scope, requestKey, result)
@@ -128,7 +138,7 @@ class ApiClient(
                         val routingToken = store?.token()?.takeIf { it.isNotBlank() }
                             ?: token?.takeIf { it.isNotBlank() }
                             ?: result.optString("token").takeIf { it.isNotBlank() }
-                        if (path != "api-go-routing.php") maybeRefreshRouting(selectedBase, routingToken)
+                        if (path !in CONTROL_PLANE_PATHS) maybeRefreshControlPlane(selectedBase, routingToken)
                         if (cacheable) {
                             val scope = cacheScope(store, token)
                             if (scope.isNotBlank()) sharedOfflineCache?.save(scope, requestKey, result)
@@ -200,6 +210,10 @@ class ApiClient(
             connection.readTimeout = 25_000
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("X-Device-Id", deviceId)
+            connection.setRequestProperty("X-EventMenu-Client", "android")
+            connection.setRequestProperty("X-EventMenu-Version", BuildConfig.VERSION_NAME)
+            val signingFingerprint = runCatching { ClientPolicyManager.signingFingerprint() }.getOrDefault("")
+            if (signingFingerprint.isNotBlank()) connection.setRequestProperty("X-EventMenu-Signing-Fingerprint", signingFingerprint)
             token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             if (body != null) {
                 connection.doOutput = true
@@ -224,17 +238,30 @@ class ApiClient(
         }
     }
 
-    private fun maybeRefreshRouting(serverBase: String, token: String?) {
-        if (token.isNullOrBlank()) return
+    private fun maybeRefreshControlPlane(serverBase: String, token: String?) {
         val now = System.currentTimeMillis()
         synchronized(routingSyncLock) {
             if (now - lastRoutingSyncAtMs < 300_000L) return
             lastRoutingSyncAtMs = now
         }
-        val root = runCatching {
-            execute(serverBase, "api-go-routing.php", "GET", "config", token, emptyMap(), null)
-        }.getOrNull() ?: return
+
+        if (!token.isNullOrBlank()) {
+            val routing = runCatching {
+                execute(serverBase, "api-go-routing.php", "GET", "config", token, emptyMap(), null)
+            }.getOrNull()
+            if (routing != null) acceptRoutingFromPrimary(routing)
+        }
+
+        val policy = runCatching {
+            execute(serverBase, "api-client-policy.php", "GET", "manifest", null, mapOf("platform" to "android"), null)
+        }.getOrNull()
+        if (policy != null) runCatching { ClientPolicyManager.applyEnvelope(policy) }
+    }
+
+    private fun acceptRoutingFromPrimary(root: JSONObject) {
+        if (!root.optString("served_by").equals("primary", ignoreCase = true)) return
         runCatching { FailoverEndpointRouter.updateFromRouting(root) }
+        runCatching { ClientPolicyManager.updateTrustFromRouting(root) }
     }
 
     private fun routedBase(forWrite: Boolean): String = runCatching {
@@ -291,6 +318,10 @@ class ApiClient(
 
     private fun isReplaySafePost(path: String, action: String): Boolean =
         path == "api.php" && action in setOf("login", "refresh")
+
+    private fun policyExempt(path: String, action: String): Boolean =
+        path == "api-client-policy.php" || path == "api-go-routing.php" ||
+            (path == "api.php" && action == "logout")
 
     private fun friendlyError(message: String, status: Int): String {
         val normalized = message.lowercase()
@@ -350,7 +381,7 @@ class ApiClient(
     private fun isCacheableRead(path: String, method: String, action: String, token: String?): Boolean {
         if (method != "GET" || token.isNullOrBlank()) return false
         if (path == "api-go-events.php" && action == "bar-order-resolve") return false
-        if (path in setOf("api-hub.php", "api-go-expedition.php", "api-go-inventory.php", "api-go-routing.php")) return false
+        if (path in setOf("api-hub.php", "api-go-expedition.php", "api-go-inventory.php", "api-go-routing.php", "api-client-policy.php")) return false
         return path in CACHEABLE_PATHS
     }
 
@@ -360,6 +391,8 @@ class ApiClient(
         @Volatile private var lastRoutingSyncAtMs: Long = 0L
         @Volatile private var sharedSessionStore: SecureSessionStore? = null
         @Volatile private var sharedOfflineCache: OfflineReadCache? = null
+
+        private val CONTROL_PLANE_PATHS = setOf("api-go-routing.php", "api-client-policy.php")
 
         private val CACHEABLE_PATHS = setOf(
             "api-go.php",
