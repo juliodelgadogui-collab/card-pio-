@@ -109,10 +109,12 @@ public partial class DeliveryWorkWindow : Window
         PickupButton.IsEnabled = active && string.IsNullOrWhiteSpace(item.PickedUpAt);
         StartRouteButton.IsEnabled = active && !string.IsNullOrWhiteSpace(item.PickedUpAt) && string.IsNullOrWhiteSpace(item.RouteStartedAt);
         ArriveButton.IsEnabled = active && !string.IsNullOrWhiteSpace(item.RouteStartedAt) && string.IsNullOrWhiteSpace(item.ArrivedAt);
-        ReceiveCashButton.IsEnabled = active
+        var canReceive = active
             && !string.IsNullOrWhiteSpace(item.ArrivedAt)
             && item.OrderStatus == "out_for_delivery"
             && item.PaymentStatus is "unpaid" or "failed";
+        ReceivePixButton.IsEnabled = canReceive;
+        ReceiveCashButton.IsEnabled = canReceive;
         CompleteButton.IsEnabled = active && !string.IsNullOrWhiteSpace(item.ArrivedAt) && string.IsNullOrWhiteSpace(item.CompletedAt);
         TrackingButton.IsEnabled = IsSafeTrackingUrl(item.TrackingUrl);
     }
@@ -122,6 +124,7 @@ public partial class DeliveryWorkWindow : Window
         PickupButton.IsEnabled = enabled;
         StartRouteButton.IsEnabled = enabled;
         ArriveButton.IsEnabled = enabled;
+        ReceivePixButton.IsEnabled = enabled;
         ReceiveCashButton.IsEnabled = enabled;
         CompleteButton.IsEnabled = enabled;
         TrackingButton.IsEnabled = enabled;
@@ -173,6 +176,32 @@ public partial class DeliveryWorkWindow : Window
     }
 
     private async void ArriveButton_Click(object sender, RoutedEventArgs e) => await MutateAsync("arrive");
+
+    private async void ReceivePixButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading || Selected is not { } item) return;
+        if (string.IsNullOrWhiteSpace(item.ArrivedAt))
+        {
+            FooterStatusText.Text = "Marque Cheguei antes de receber o pagamento.";
+            return;
+        }
+        if (item.PaymentStatus is not ("unpaid" or "failed"))
+        {
+            FooterStatusText.Text = item.PaymentStatus == "paid"
+                ? "Este pedido já está pago."
+                : "Já existe uma cobrança em andamento para este pedido.";
+            return;
+        }
+
+        var window = new PixPaymentWindow(_mainApi, item.OrderId, item.TotalCents) { Owner = this };
+        window.ShowDialog();
+        if (window.PaymentConfirmed)
+        {
+            OperationChanged = true;
+            FooterStatusText.Text = "Pagamento por Pix confirmado.";
+            await LoadAsync(item.OrderId);
+        }
+    }
 
     private async void ReceiveCashButton_Click(object sender, RoutedEventArgs e)
     {
