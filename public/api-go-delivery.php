@@ -87,14 +87,18 @@ try {
     if ($action === 'tracking-link') {
         $tenantId = Auth::tenantId();
         $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Sessão inválida.');
+        if (!$tenantId || !$userId || !Auth::can('orders.delivery')) throw new RuntimeException('Acesso negado ao rastreamento da entrega.');
         $q = Database::connection()->prepare('SELECT assigned_delivery_user_id,status FROM orders WHERE tenant_id=? AND id=? AND channel="delivery" LIMIT 1');
         $q->execute([$tenantId, $orderId]);
         $order = $q->fetch();
         if (!$order) throw new RuntimeException('Pedido não encontrado.');
-        if (Auth::role() === 'delivery' && (int)$order['assigned_delivery_user_id'] !== $userId) throw new RuntimeException('Pedido não atribuído a você.');
+        if ((int)$order['assigned_delivery_user_id'] !== $userId) throw new RuntimeException('Pedido não atribuído a você.');
+        if (in_array((string)$order['status'], ['cancelled'], true)) throw new RuntimeException('Pedido cancelado não possui rastreamento ativo.');
         $publicToken = $tracking->publicToken($tenantId, $orderId);
-        god_out(['ok' => true, 'tracking_url' => rtrim((string)env('APP_URL', ''), '/') . '/rastreio.php?t=' . $publicToken]);
+        god_out([
+            'ok' => true,
+            'tracking_url' => app_absolute_url('rastreio.php?t=' . rawurlencode($publicToken)),
+        ]);
     }
 
     if ($action === 'pickup') god_out(['ok' => true, 'progress' => $service->pickup($orderId)]);
