@@ -1,18 +1,16 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using EventMenu.Desktop.Models;
 using EventMenu.Desktop.Services;
-using QRCoder;
 
 namespace EventMenu.Desktop;
 
 public partial class TabPaymentWindow : Window
 {
     private static readonly CultureInfo PtBr = CultureInfo.GetCultureInfo("pt-BR");
+    private readonly SecureSessionStore _store;
     private readonly TabPaymentApiClient _api;
     private readonly int _tabId;
     private readonly bool _canCash;
@@ -26,6 +24,7 @@ public partial class TabPaymentWindow : Window
 
     public TabPaymentWindow(SecureSessionStore store, int tabId, bool canCash)
     {
+        _store = store;
         _api = new TabPaymentApiClient(store);
         _tabId = tabId;
         _canCash = canCash;
@@ -58,7 +57,7 @@ public partial class TabPaymentWindow : Window
         }
         catch (Exception ex)
         {
-            FooterStatusText.Text = ex.Message;
+            FooterStatusText.Text = Friendly(ex.Message);
         }
         finally
         {
@@ -109,7 +108,7 @@ public partial class TabPaymentWindow : Window
         {
             ChargeButton.IsEnabled = false;
             CancelGroupButton.Visibility = Visibility.Collapsed;
-            ServerStatusText.Text = "Existe uma cobrança iniciada por uma forma de pagamento não disponível para este usuário. Finalize-a no usuário autorizado.";
+            ServerStatusText.Text = "Existe uma cobrança iniciada por uma forma de pagamento não disponível para este usuário. Finalize-a com um usuário autorizado.";
             return;
         }
 
@@ -119,7 +118,7 @@ public partial class TabPaymentWindow : Window
             ChargeButton.Content = _currentGroup.Status == "pending" ? "Retomar Pix" : "Gerar Pix";
             ChargeButton.IsEnabled = true;
             CancelGroupButton.Visibility = _currentGroup.Status == "created" ? Visibility.Visible : Visibility.Collapsed;
-            ServerStatusText.Text = "Existe uma cobrança Pix em andamento. Informe o CPF/CNPJ do pagador para exibir ou reutilizar o código.";
+            ServerStatusText.Text = "Existe um Pix em andamento. Informe o CPF/CNPJ do pagador para exibir ou reutilizar o código.";
             return;
         }
 
@@ -170,30 +169,32 @@ public partial class TabPaymentWindow : Window
 
         _busy = true;
         SetEditingEnabled(false);
-        FooterStatusText.Text = method == "cash" ? "Registrando recebimento..." : "Preparando cobrança Pix...";
+        FooterStatusText.Text = method == "cash" ? "Registrando recebimento..." : "Preparando Pix...";
         try
         {
             var key = $"desktop-tab:{_tabId}:{Guid.NewGuid():N}";
             var response = await _api.CreateGroupAsync(_tabId, splitType, method, options, key);
-            _currentGroup = response.Group ?? throw new InvalidOperationException("O servidor não retornou a cobrança criada.");
+            _currentGroup = response.Group ?? throw new InvalidOperationException("Não foi possível iniciar a cobrança.");
             PaymentStateText.Text = $"{_currentGroup.MethodDisplay} • {_currentGroup.AmountDisplay} • {_currentGroup.StatusDisplay}";
 
             if (method == "cash")
             {
                 if (_currentGroup.Status != "paid")
-                    throw new InvalidOperationException("O recebimento em dinheiro não foi confirmado pelo servidor.");
+                    throw new InvalidOperationException("O recebimento em dinheiro ainda não foi confirmado.");
 
+                var paidGroupId = _currentGroup.Id;
                 PaymentChanged = true;
                 FooterStatusText.Text = $"Recebimento de {TabPaymentDisplay.Money(previewAmount)} confirmado.";
                 _currentGroup = null;
                 _busy = false;
                 await LoadAccountAsync();
+                OfferGroupReceipt(paidGroupId);
                 return;
             }
         }
         catch (Exception ex)
         {
-            FooterStatusText.Text = ex.Message;
+            FooterStatusText.Text = Friendly(ex.Message);
             _busy = false;
             SetEditingEnabled(_currentGroup is null);
             RenderOpenGroup();
@@ -222,26 +223,26 @@ public partial class TabPaymentWindow : Window
         try
         {
             var response = await _api.CreatePixAsync(groupId, taxId);
-            var pix = response.Pix ?? throw new InvalidOperationException("O servidor não retornou o Pix.");
+            var pix = response.Pix ?? throw new InvalidOperationException("Não foi possível gerar o Pix.");
             if (string.IsNullOrWhiteSpace(pix.CopyPaste))
-                throw new InvalidOperationException("O provedor não retornou o código Pix.");
+                throw new InvalidOperationException("O código Pix não foi recebido.");
 
             PixCodeBox.Text = pix.CopyPaste;
             PixCodeBox.Visibility = Visibility.Visible;
             PixCodeLabel.Visibility = Visibility.Visible;
             CopyPixButton.Visibility = Visibility.Visible;
-            QrImage.Source = CreateQrNative(pix.CopyPaste);
+            QrImage.Source = QrCodeRenderer.Create(pix.CopyPaste, 7);
             QrBorder.Visibility = Visibility.Visible;
             PixExpiryText.Text = string.IsNullOrWhiteSpace(pix.ExpiresAt) ? "" : $"Válido até {pix.ExpiresDisplay}";
             PaymentStateText.Text = $"Pix de {pix.AmountDisplay} • aguardando pagamento";
-            ServerStatusText.Text = "Verificando automaticamente. O pagamento só será concluído após confirmação do provedor pelo servidor.";
-            FooterStatusText.Text = pix.Reused ? "Cobrança Pix existente reutilizada." : "Pix gerado com sucesso.";
+            ServerStatusText.Text = "A confirmação é automática. A conta só será baixada depois da confirmação do pagamento.";
+            FooterStatusText.Text = pix.Reused ? "Pix existente reutilizado." : "Pix gerado com sucesso.";
             _pixTimer.Start();
             await CheckPixAsync();
         }
         catch (Exception ex)
         {
-            FooterStatusText.Text = ex.Message;
+            FooterStatusText.Text = Friendly(ex.Message);
         }
         finally
         {
@@ -265,12 +266,13 @@ public partial class TabPaymentWindow : Window
                 _pixTimer.Stop();
                 PaymentChanged = true;
                 PaymentStateText.Text = "Pix confirmado.";
-                ServerStatusText.Text = "Pagamento confirmado pelo servidor.";
+                ServerStatusText.Text = "Pagamento confirmado.";
                 FooterStatusText.Text = "Pagamento recebido com sucesso.";
                 ChargeButton.IsEnabled = false;
                 CancelGroupButton.Visibility = Visibility.Collapsed;
                 _currentGroup = null;
                 await LoadAccountAsync();
+                OfferGroupReceipt(groupId);
                 return;
             }
 
@@ -279,7 +281,7 @@ public partial class TabPaymentWindow : Window
                 _pixTimer.Stop();
                 PaymentStateText.Text = _currentGroup.StatusDisplay;
                 ServerStatusText.Text = _currentGroup.Status == "attention"
-                    ? "A cobrança precisa de conferência no servidor antes de qualquer nova tentativa."
+                    ? "Este pagamento precisa de conferência antes de uma nova tentativa."
                     : "Esta cobrança não está mais aguardando pagamento.";
                 ChargeButton.IsEnabled = false;
             }
@@ -290,7 +292,7 @@ public partial class TabPaymentWindow : Window
         }
         catch (Exception ex)
         {
-            ServerStatusText.Text = $"Não foi possível conferir agora: {ex.Message}";
+            ServerStatusText.Text = $"Não foi possível conferir agora: {Friendly(ex.Message)}";
         }
         finally
         {
@@ -301,7 +303,7 @@ public partial class TabPaymentWindow : Window
     private async Task CancelOpenGroupAsync()
     {
         if (_busy || _currentGroup is null || _currentGroup.Status != "created") return;
-        if (MessageBox.Show("Cancelar esta cobrança antes de enviá-la ao provedor?", "Conta da mesa", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        if (MessageBox.Show("Cancelar esta cobrança antes do pagamento?", "Conta da mesa", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
         _busy = true;
         CancelGroupButton.IsEnabled = false;
@@ -314,7 +316,7 @@ public partial class TabPaymentWindow : Window
         }
         catch (Exception ex)
         {
-            FooterStatusText.Text = ex.Message;
+            FooterStatusText.Text = Friendly(ex.Message);
         }
         finally
         {
@@ -389,11 +391,11 @@ public partial class TabPaymentWindow : Window
         if (TryBuildOptions(split, _account.RemainingCents, out _, out var amount, out _))
         {
             var method = SelectedTag(PaymentMethodCombo, "pix") == "cash" ? "dinheiro" : "Pix";
-            PreviewText.Text = $"Esta cobrança será de aproximadamente {TabPaymentDisplay.Money(amount)} em {method}. O valor final será validado pelo servidor.";
+            PreviewText.Text = $"Esta parte será de aproximadamente {TabPaymentDisplay.Money(amount)} em {method}.";
         }
         else
         {
-            PreviewText.Text = "Informe os dados da divisão para calcular esta cobrança.";
+            PreviewText.Text = "Informe os dados da divisão para calcular esta parte da conta.";
         }
     }
 
@@ -425,6 +427,24 @@ public partial class TabPaymentWindow : Window
         PixCustomerPanel.Visibility = method == "pix" ? Visibility.Visible : Visibility.Collapsed;
         ChargeButton.Content = method == "cash" ? "Receber em dinheiro" : "Gerar Pix";
         RefreshPreview();
+    }
+
+    private void OfferGroupReceipt(int groupId)
+    {
+        if (groupId < 1) return;
+        if (MessageBox.Show(
+                "Pagamento confirmado. Deseja abrir o comprovante desta parte da conta?",
+                "Comprovante",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes) return;
+        try
+        {
+            new GroupReceiptWindow(_store, groupId) { Owner = this }.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            FooterStatusText.Text = Friendly(ex.Message);
+        }
     }
 
     private void SplitValueBox_TextChanged(object sender, TextChangedEventArgs e) => RefreshPreview();
@@ -490,33 +510,12 @@ public partial class TabPaymentWindow : Window
         return digits.Length is 11 or 14;
     }
 
-    private static BitmapSource CreateQrNative(string value)
+    private static string Friendly(string message)
     {
-        using var generator = new QRCodeGenerator();
-        using var data = generator.CreateQrCode(value, QRCodeGenerator.ECCLevel.M, forceUtf8: true);
-        var matrix = data.ModuleMatrix;
-        if (matrix is null || matrix.Count == 0) throw new InvalidOperationException("QR inválido.");
-
-        const int quietZone = 4;
-        const int modulePixels = 7;
-        var modules = matrix.Count;
-        var size = (modules + quietZone * 2) * modulePixels;
-        var visual = new DrawingVisual();
-        using (var dc = visual.RenderOpen())
-        {
-            dc.DrawRectangle(Brushes.White, null, new Rect(0, 0, size, size));
-            for (var y = 0; y < modules; y++)
-            for (var x = 0; x < modules; x++)
-            {
-                if (!matrix[y][x]) continue;
-                dc.DrawRectangle(Brushes.Black, null, new Rect((x + quietZone) * modulePixels, (y + quietZone) * modulePixels, modulePixels, modulePixels));
-            }
-        }
-
-        var bitmap = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
-        bitmap.Render(visual);
-        bitmap.Freeze();
-        return bitmap;
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("sqlstate") || lower.Contains("exception") || lower.Contains("stack trace")
+            ? "Não foi possível concluir esta operação. Tente novamente."
+            : message;
     }
 
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
