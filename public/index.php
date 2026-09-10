@@ -78,7 +78,7 @@ if($route==='dashboard'&&Auth::tenantId()&&Auth::can('settings.manage')){
 }
 
 $routes=[
-    'super'=>'super.php','system-health'=>'system-health.php','dashboard'=>'dashboard.php','unit-context'=>'unit-context.php',
+    'super'=>'super.php','system-health'=>'system-health.php','platform-failover'=>'platform-failover.php','dashboard'=>'dashboard.php','unit-context'=>'unit-context.php',
     'pos'=>'pos.php','pickup'=>'pickup.php','cash'=>'cash.php','kitchen'=>'kitchen.php','kds-stream'=>'kds-stream.php','production'=>'production.php','product-config'=>'product-config.php','delivery'=>'delivery.php',
     'products'=>'products.php','categories'=>'categories.php','inventory'=>'inventory.php','purchases'=>'purchases.php','orders'=>'orders.php','receipt'=>'receipt.php','receipt-settings'=>'receipt-settings.php','restaurant'=>'restaurant.php',
     'customers'=>'customers.php','coupons'=>'coupons.php','events'=>'events.php','event-admin'=>'event-admin.php','tickets'=>'tickets.php','guests'=>'guests.php','promoters'=>'promoters.php',
@@ -88,7 +88,7 @@ $routes=[
 $file=$routes[$route]??null;
 if(!$file){http_response_code(404);em_header('Página não encontrada','');echo '<section class="card"><h2>404</h2><p>A página solicitada não existe.</p><a class="button primary" href="'.Security::e(app_url('')).'">Voltar</a></section>';em_footer();exit;}
 
-if(!in_array($route,['super','system-health','email-settings','whatsapp-settings'],true)&&Auth::tenantId()&&!TenantFeatures::routeEnabled($route,Auth::tenantId())){
+if(!in_array($route,['super','system-health','platform-failover','email-settings','whatsapp-settings'],true)&&Auth::tenantId()&&!TenantFeatures::routeEnabled($route,Auth::tenantId())){
     http_response_code(403);em_header('Módulo não habilitado','');echo '<section class="card"><h2>Módulo fora do tipo de operação</h2><p>Esta empresa está configurada como <strong>'.Security::e(TenantFeatures::label(Auth::tenantId())).'</strong>.</p><a class="button primary" href="'.Security::e(app_url('')).'">Voltar</a></section>';em_footer();exit;
 }
 
