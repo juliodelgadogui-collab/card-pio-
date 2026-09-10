@@ -33,7 +33,6 @@ public partial class MainWindow
         StackPanel? actionBar = OrdersView.Children.OfType<StackPanel>()
             .FirstOrDefault(x => Grid.GetRow(x) == 2);
 
-        // Layout novo: ações ficam em um Grid, com filtros à esquerda e botões à direita.
         if (actionBar is null)
         {
             var rowGrid = OrdersView.Children.OfType<Grid>().FirstOrDefault(x => Grid.GetRow(x) == 2);
@@ -168,6 +167,7 @@ public partial class MainWindow
         if (e.Key == Key.F3 && (Can("orders_view") || Can("orders_create") || Can("orders_manage") || Can("orders_kitchen") || Can("orders_delivery")))
         {
             ShowView(OrdersView);
+            SetActiveNavigationByLabel("Pedidos");
             _ordersSearchBox?.Focus();
             _ordersSearchBox?.SelectAll();
             e.Handled = true;
