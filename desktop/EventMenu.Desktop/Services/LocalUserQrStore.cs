@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -28,7 +29,7 @@ public sealed class LocalUserQrStore
             var clear = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
             var state = JsonSerializer.Deserialize<LocalUserQrState>(Encoding.UTF8.GetString(clear));
             if (state is null || state.EntityId != userId || string.IsNullOrWhiteSpace(state.Payload)) return null;
-            if (!string.IsNullOrWhiteSpace(state.ExpiresAt) && DateTimeOffset.TryParse(state.ExpiresAt, out var expires) && expires <= DateTimeOffset.UtcNow)
+            if (IsExpired(state.ExpiresAt))
             {
                 Clear();
                 return null;
@@ -58,8 +59,30 @@ public sealed class LocalUserQrStore
         }
         catch
         {
-            // Falha ao limpar o cache local não altera a revogação feita na conta.
+            // Falha ao limpar a cópia local não altera a revogação feita na conta.
         }
+    }
+
+    private static bool IsExpired(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return false;
+
+        if (DateTimeOffset.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var offset))
+            return offset <= DateTimeOffset.UtcNow;
+
+        if (DateTime.TryParse(
+                value,
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                out var utc))
+            return utc <= DateTime.UtcNow;
+
+        // Se a validade vier em formato desconhecido, o servidor continuará sendo a autoridade.
+        return false;
     }
 }
 
