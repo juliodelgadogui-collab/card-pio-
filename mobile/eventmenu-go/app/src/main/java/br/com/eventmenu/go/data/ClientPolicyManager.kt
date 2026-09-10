@@ -13,7 +13,6 @@ import java.security.MessageDigest
 import java.security.Signature
 import java.security.spec.X509EncodedKeySpec
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
@@ -121,8 +120,6 @@ object ClientPolicyManager {
     fun blockReason(currentVersion: String): String? {
         val policy = _state.value
         if (!policy.trusted) return null
-        // Manifesto expirado não substitui a autorização do backend. A próxima
-        // conexão tentará atualizar; o servidor continua aplicando a política.
         if (policy.expiresAtMs > 0 && System.currentTimeMillis() > policy.expiresAtMs) return null
         if (!policy.signingAllowed) return "A assinatura deste EventMenu GO não está autorizada."
         if (!policy.enabled) return "Este EventMenu GO foi desativado pelo administrador."
@@ -231,7 +228,9 @@ object ClientPolicyManager {
             context.packageManager.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES).signatures
         }
         val bytes = signatures?.firstOrNull()?.toByteArray() ?: return@runCatching ""
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(":") { "%02X".format(it) }
+        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString(":") { byte ->
+            "%02X".format(Locale.US, byte.toInt() and 0xFF)
+        }
     }.getOrDefault("")
 
     private fun parseIsoMillis(value: String): Long {
