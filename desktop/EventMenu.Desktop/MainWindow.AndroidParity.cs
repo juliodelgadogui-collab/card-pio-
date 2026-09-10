@@ -10,6 +10,7 @@ public partial class MainWindow
     private Button? _eventOperationsButton;
     private Button? _deliveryWorkButton;
     private Button? _deliveryTriageButton;
+    private Button? _myQrButton;
     private Button? _shiftSummaryButton;
 
     protected override void OnContentRendered(EventArgs e)
@@ -43,6 +44,11 @@ public partial class MainWindow
             "Check-in, convidados, bar, retirada e acompanhamento do evento",
             async () => await OpenEventOperationsAsync());
 
+        _myQrButton = CreateParityButton(
+            "Meu QR",
+            "Exibir seu código de identificação EventMenu",
+            async () => await OpenMyQrAsync());
+
         _shiftSummaryButton = CreateParityButton(
             "Meu turno",
             "Resumo dos pedidos, recebimentos, dinheiro de Delivery e comissão",
@@ -56,7 +62,8 @@ public partial class MainWindow
         sidebar.Children.Insert(anchor + 1, _deliveryWorkButton);
         sidebar.Children.Insert(anchor + 2, _managerCenterButton);
         sidebar.Children.Insert(anchor + 3, _eventOperationsButton);
-        sidebar.Children.Insert(anchor + 4, _shiftSummaryButton);
+        sidebar.Children.Insert(anchor + 4, _myQrButton);
+        sidebar.Children.Insert(anchor + 5, _shiftSummaryButton);
 
         ShellPanel.IsVisibleChanged += ShellPanel_AndroidParityVisibilityChanged;
         if (_hubTimer is not null) _hubTimer.Tick += AndroidParityVisibilityTick;
@@ -100,6 +107,9 @@ public partial class MainWindow
             _eventOperationsButton.Visibility = shellVisible &&
                 (Can("events") || Can("event_bar") || Can("tickets") || Can("guests") || Can("promoter"))
                 ? Visibility.Visible : Visibility.Collapsed;
+
+        if (_myQrButton is not null)
+            _myQrButton.Visibility = shellVisible ? Visibility.Visible : Visibility.Collapsed;
 
         if (_shiftSummaryButton is not null)
             _shiftSummaryButton.Visibility = shellVisible ? Visibility.Visible : Visibility.Collapsed;
@@ -206,6 +216,27 @@ public partial class MainWindow
         }
     }
 
+    private async Task OpenMyQrAsync()
+    {
+        if (_store is null || ShellPanel.Visibility != Visibility.Visible) return;
+        if (!HasShift)
+        {
+            MessageBox.Show("Inicie seu turno antes de gerar ou usar o Meu QR.", "Meu QR", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            var window = new MyQrWindow(_store, Can("orders_delivery")) { Owner = this };
+            window.ShowDialog();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(ex.Message, "Meu QR", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+        await Task.CompletedTask;
+    }
+
     private async Task OpenShiftSummaryAsync()
     {
         if (_store is null || ShellPanel.Visibility != Visibility.Visible) return;
@@ -239,6 +270,7 @@ public partial class MainWindow
         _eventOperationsButton = null;
         _deliveryWorkButton = null;
         _deliveryTriageButton = null;
+        _myQrButton = null;
         _shiftSummaryButton = null;
         _androidParityNavigationReady = false;
     }
