@@ -34,12 +34,14 @@ public partial class DeliveryWorkWindow : Window
         if (_loading) return;
         _loading = true;
         SetActions(false);
+        HandoffButton.IsEnabled = false;
         FooterStatusText.Text = "Atualizando entregas...";
         try
         {
             var progressTask = _api.DeliveryMineAsync();
             var ordersTask = _mainApi.OperationalOrdersAsync();
-            await Task.WhenAll(progressTask, ordersTask);
+            var cashTask = _api.DeliveryCashOutstandingAsync();
+            await Task.WhenAll(progressTask, ordersTask, cashTask);
 
             var progress = (await progressTask).Progress;
             var orders = (await ordersTask).Orders.ToDictionary(x => x.Id);
@@ -58,11 +60,21 @@ public partial class DeliveryWorkWindow : Window
             DeliveryGrid.SelectedItem = selectOrderId.HasValue
                 ? progress.FirstOrDefault(x => x.OrderId == selectOrderId.Value)
                 : progress.FirstOrDefault();
-            FooterStatusText.Text = progress.Count == 0 ? "Nenhuma entrega atribuída a este usuário." : $"{progress.Count} entrega(s) vinculada(s) ao seu turno.";
+
+            var balance = (await cashTask).Cash;
+            HandoffButton.IsEnabled = true;
+            FooterStatusText.Text = progress.Count == 0
+                ? balance is { OutstandingCents: > 0 }
+                    ? $"Nenhuma entrega ativa. Há {balance.OutstandingDisplay} para repassar ao caixa."
+                    : "Nenhuma entrega atribuída a este usuário."
+                : balance is { OutstandingCents: > 0 }
+                    ? $"{progress.Count} entrega(s) • {balance.OutstandingDisplay} aguardando repasse ao caixa."
+                    : $"{progress.Count} entrega(s) vinculada(s) ao seu turno.";
         }
         catch (Exception ex)
         {
             FooterStatusText.Text = Friendly(ex.Message);
+            HandoffButton.IsEnabled = true;
         }
         finally
         {
@@ -97,6 +109,10 @@ public partial class DeliveryWorkWindow : Window
         PickupButton.IsEnabled = active && string.IsNullOrWhiteSpace(item.PickedUpAt);
         StartRouteButton.IsEnabled = active && !string.IsNullOrWhiteSpace(item.PickedUpAt) && string.IsNullOrWhiteSpace(item.RouteStartedAt);
         ArriveButton.IsEnabled = active && !string.IsNullOrWhiteSpace(item.RouteStartedAt) && string.IsNullOrWhiteSpace(item.ArrivedAt);
+        ReceiveCashButton.IsEnabled = active
+            && !string.IsNullOrWhiteSpace(item.ArrivedAt)
+            && item.OrderStatus == "out_for_delivery"
+            && item.PaymentStatus is "unpaid" or "failed";
         CompleteButton.IsEnabled = active && !string.IsNullOrWhiteSpace(item.ArrivedAt) && string.IsNullOrWhiteSpace(item.CompletedAt);
         TrackingButton.IsEnabled = IsSafeTrackingUrl(item.TrackingUrl);
     }
@@ -106,6 +122,7 @@ public partial class DeliveryWorkWindow : Window
         PickupButton.IsEnabled = enabled;
         StartRouteButton.IsEnabled = enabled;
         ArriveButton.IsEnabled = enabled;
+        ReceiveCashButton.IsEnabled = enabled;
         CompleteButton.IsEnabled = enabled;
         TrackingButton.IsEnabled = enabled;
     }
@@ -148,12 +165,42 @@ public partial class DeliveryWorkWindow : Window
     }
 
     private async void PickupButton_Click(object sender, RoutedEventArgs e) => await MutateAsync("pickup");
+
     private async void StartRouteButton_Click(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show("Iniciar a rota deste pedido? O acompanhamento por GPS só terá posição em tempo real se o app do entregador estiver com localização ativa.", "Entrega", MessageBoxButton.YesNo, MessageBoxImage.Information) == MessageBoxResult.Yes)
             await MutateAsync("start");
     }
+
     private async void ArriveButton_Click(object sender, RoutedEventArgs e) => await MutateAsync("arrive");
+
+    private async void ReceiveCashButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading || Selected is not { } item) return;
+        if (string.IsNullOrWhiteSpace(item.ArrivedAt))
+        {
+            FooterStatusText.Text = "Marque Cheguei antes de receber dinheiro do cliente.";
+            return;
+        }
+        if (item.PaymentStatus is not ("unpaid" or "failed"))
+        {
+            FooterStatusText.Text = item.PaymentStatus == "paid"
+                ? "Este pedido já está pago."
+                : "Há uma cobrança eletrônica em andamento. Aguarde antes de receber em dinheiro.";
+            return;
+        }
+
+        var window = new DeliveryCashReceiveWindow(_api, item.OrderId, item.TotalCents) { Owner = this };
+        if (window.ShowDialog() == true && window.PaymentChanged)
+        {
+            OperationChanged = true;
+            FooterStatusText.Text = window.Receipt is { } receipt && receipt.ChangeCents > 0
+                ? $"Pagamento confirmado. Troco: {receipt.ChangeDisplay}."
+                : "Pagamento em dinheiro confirmado.";
+            await LoadAsync(item.OrderId);
+        }
+    }
+
     private async void CompleteButton_Click(object sender, RoutedEventArgs e)
     {
         if (MessageBox.Show("Confirmar que a entrega foi concluída?", "Entrega", MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes)
@@ -174,6 +221,15 @@ public partial class DeliveryWorkWindow : Window
         }
     }
 
+    private async void HandoffButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading) return;
+        var window = new DeliveryCashHandoffWindow(_api) { Owner = this };
+        window.ShowDialog();
+        if (window.HandoffChanged) OperationChanged = true;
+        await LoadAsync(Selected?.OrderId);
+    }
+
     private static bool IsSafeTrackingUrl(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 
@@ -183,6 +239,7 @@ public partial class DeliveryWorkWindow : Window
         "partially_paid" => "parcial",
         "pending" => "pendente",
         "unpaid" => "não pago",
+        "failed" => "falhou",
         "refunded" => "estornado",
         _ => status
     };
