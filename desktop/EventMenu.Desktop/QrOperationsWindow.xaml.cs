@@ -19,6 +19,8 @@ public partial class QrOperationsWindow : Window
     private readonly bool _canAssignDelivery;
     private readonly bool _canDiscountRequest;
     private readonly bool _canCancellationRequest;
+    private readonly bool _canAcceptOrders;
+    private readonly bool _canLoyalty;
     private readonly bool _canCash;
     private QrResolveResponse? _current;
     private UniversalQrResult? _currentUniversal;
@@ -39,6 +41,8 @@ public partial class QrOperationsWindow : Window
         bool canAssignDelivery,
         bool canDiscountRequest,
         bool canCancellationRequest,
+        bool canAcceptOrders,
+        bool canLoyalty,
         bool canCash = false)
     {
         _store = store;
@@ -51,6 +55,8 @@ public partial class QrOperationsWindow : Window
         _canAssignDelivery = canAssignDelivery;
         _canDiscountRequest = canDiscountRequest;
         _canCancellationRequest = canCancellationRequest;
+        _canAcceptOrders = canAcceptOrders;
+        _canLoyalty = canLoyalty;
         _canCash = canCash;
         InitializeComponent();
         Loaded += (_, _) => CodeBox.Focus();
@@ -138,7 +144,7 @@ public partial class QrOperationsWindow : Window
         }
         catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
         {
-            // Continua para os outros formatos de QR suportados pelo EventMenu.
+            // Continua para os outros formatos de código suportados.
         }
 
         if (_canOrders)
@@ -152,7 +158,7 @@ public partial class QrOperationsWindow : Window
             }
             catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
             {
-                // Pode ser um QR universal sem o prefixo EVENTMENU:QR:.
+                // Pode ser um QR universal sem o prefixo padrão.
             }
         }
 
@@ -319,13 +325,12 @@ public partial class QrOperationsWindow : Window
             case "device":
             {
                 var name = Text(data, "name", $"Dispositivo #{qr.EntityId}");
-                var provider = Text(data, "provider", "");
                 var status = Text(data, "status", "");
                 var userName = Text(data, "user_name", "");
                 TypeText.Text = "DISPOSITIVO";
                 ResultTitleText.Text = name;
                 PrimaryInfoText.Text = string.IsNullOrWhiteSpace(userName) ? "Dispositivo da operação" : $"Vinculado a {userName}";
-                SecondaryInfoText.Text = string.IsNullOrWhiteSpace(provider) ? "" : $"Integração: {provider}";
+                SecondaryInfoText.Text = "";
                 TertiaryInfoText.Text = "";
                 StateText.Text = string.IsNullOrWhiteSpace(status) ? "Reconhecido" : status;
                 break;
@@ -416,7 +421,9 @@ public partial class QrOperationsWindow : Window
                 _currentOrder.Id,
                 _canAssignDelivery,
                 _canDiscountRequest,
-                _canCancellationRequest) { Owner = this };
+                _canCancellationRequest,
+                _canAcceptOrders,
+                _canLoyalty) { Owner = this };
             window.ShowDialog();
             OperationChanged |= window.OrderChanged;
             return;
@@ -500,7 +507,7 @@ public partial class QrOperationsWindow : Window
             if (pieces.Length != 2) continue;
             var key = Uri.UnescapeDataString(pieces[0]);
             var token = Uri.UnescapeDataString(pieces[1].Replace('+', ' ')).Trim();
-            if (key is "qr" or "token" or "t" && token.Length == 64 && token.All(Uri.IsHexDigit)) return true;
+            if ((key is "qr" or "token" or "t") && token.Length == 64 && token.All(Uri.IsHexDigit)) return true;
         }
         return false;
     }
