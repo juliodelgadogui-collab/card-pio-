@@ -9,6 +9,7 @@ namespace EventMenu.Desktop;
 public partial class DeliveryWorkWindow : Window
 {
     private readonly OperationalActionsApiClient _api;
+    private readonly EventMenuApiClient _mainApi;
     private bool _loading;
 
     public bool OperationChanged { get; private set; }
@@ -16,9 +17,14 @@ public partial class DeliveryWorkWindow : Window
     public DeliveryWorkWindow(SecureSessionStore store)
     {
         _api = new OperationalActionsApiClient(store);
+        _mainApi = new EventMenuApiClient(store);
         InitializeComponent();
         Loaded += async (_, _) => await LoadAsync();
-        Closed += (_, _) => _api.Dispose();
+        Closed += (_, _) =>
+        {
+            _api.Dispose();
+            _mainApi.Dispose();
+        };
     }
 
     private DeliveryMineItem? Selected => DeliveryGrid.SelectedItem as DeliveryMineItem;
@@ -31,12 +37,28 @@ public partial class DeliveryWorkWindow : Window
         FooterStatusText.Text = "Atualizando entregas...";
         try
         {
-            var response = await _api.DeliveryMineAsync();
-            DeliveryGrid.ItemsSource = response.Progress;
+            var progressTask = _api.DeliveryMineAsync();
+            var ordersTask = _mainApi.OperationalOrdersAsync();
+            await Task.WhenAll(progressTask, ordersTask);
+
+            var progress = (await progressTask).Progress;
+            var orders = (await ordersTask).Orders.ToDictionary(x => x.Id);
+            foreach (var item in progress)
+            {
+                if (!orders.TryGetValue(item.OrderId, out var order)) continue;
+                item.OrderStatus = string.IsNullOrWhiteSpace(item.OrderStatus) ? order.Status : item.OrderStatus;
+                item.PaymentStatus = order.PaymentStatus;
+                item.CustomerName = order.CustomerName ?? "";
+                item.CustomerPhone = order.CustomerPhone ?? "";
+                item.DeliveryAddress = order.DeliveryAddress ?? "";
+                item.TotalCents = order.TotalCents;
+            }
+
+            DeliveryGrid.ItemsSource = progress;
             DeliveryGrid.SelectedItem = selectOrderId.HasValue
-                ? response.Progress.FirstOrDefault(x => x.OrderId == selectOrderId.Value)
-                : response.Progress.FirstOrDefault();
-            FooterStatusText.Text = response.Progress.Count == 0 ? "Nenhuma entrega atribuída a este usuário." : $"{response.Progress.Count} entrega(s) vinculada(s) ao seu turno.";
+                ? progress.FirstOrDefault(x => x.OrderId == selectOrderId.Value)
+                : progress.FirstOrDefault();
+            FooterStatusText.Text = progress.Count == 0 ? "Nenhuma entrega atribuída a este usuário." : $"{progress.Count} entrega(s) vinculada(s) ao seu turno.";
         }
         catch (Exception ex)
         {
@@ -69,7 +91,7 @@ public partial class DeliveryWorkWindow : Window
             ? "Cliente não informado"
             : string.IsNullOrWhiteSpace(item.CustomerPhone) ? item.CustomerName : $"{item.CustomerName} • {item.CustomerPhone}";
         AddressText.Text = string.IsNullOrWhiteSpace(item.DeliveryAddress) ? "Endereço não informado" : item.DeliveryAddress;
-        StageText.Text = item.StageDisplay;
+        StageText.Text = $"{item.StageDisplay} • pagamento {PaymentLabel(item.PaymentStatus)}";
 
         var active = !_loading && string.IsNullOrWhiteSpace(item.CompletedAt) && item.OrderStatus != "cancelled";
         PickupButton.IsEnabled = active && string.IsNullOrWhiteSpace(item.PickedUpAt);
@@ -154,6 +176,16 @@ public partial class DeliveryWorkWindow : Window
 
     private static bool IsSafeTrackingUrl(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+    private static string PaymentLabel(string status) => status switch
+    {
+        "paid" => "pago",
+        "partially_paid" => "parcial",
+        "pending" => "pendente",
+        "unpaid" => "não pago",
+        "refunded" => "estornado",
+        _ => status
+    };
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await LoadAsync(Selected?.OrderId);
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
