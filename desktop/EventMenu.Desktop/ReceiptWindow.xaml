@@ -83,11 +83,12 @@
         </Grid>
 
         <Grid Grid.Row="3" Margin="0,16,0,0">
-            <StackPanel>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel Margin="0,0,18,0">
                 <TextBlock x:Name="FooterMessageText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
-                <TextBlock x:Name="StatusText" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0" />
+                <TextBlock x:Name="StatusText" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap" />
             </StackPanel>
-            <Button Content="Fechar" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Click="CloseButton_Click" Margin="0" />
+            <Button Grid.Column="1" Content="Fechar" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Click="CloseButton_Click" Margin="0" />
         </Grid>
     </Grid>
 </Window>
