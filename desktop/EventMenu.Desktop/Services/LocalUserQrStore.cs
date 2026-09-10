@@ -8,24 +8,25 @@ namespace EventMenu.Desktop.Services;
 
 public sealed class LocalUserQrStore
 {
-    private readonly string _file;
+    private readonly string _directory;
 
     public LocalUserQrStore()
     {
-        var directory = Path.Combine(
+        _directory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "EventMenu",
-            "Desktop");
-        Directory.CreateDirectory(directory);
-        _file = Path.Combine(directory, "my-qr.dat");
+            "Desktop",
+            "Qr");
+        Directory.CreateDirectory(_directory);
     }
 
     public LocalUserQrState? Load(int tenantId, int userId, string expectedType)
     {
-        if (!File.Exists(_file)) return null;
+        var file = FileFor(tenantId, userId, expectedType);
+        if (!File.Exists(file)) return null;
         try
         {
-            var encrypted = File.ReadAllBytes(_file);
+            var encrypted = File.ReadAllBytes(file);
             var clear = ProtectedData.Unprotect(encrypted, null, DataProtectionScope.CurrentUser);
             var state = JsonSerializer.Deserialize<LocalUserQrState>(Encoding.UTF8.GetString(clear));
             if (state is null ||
@@ -34,41 +35,51 @@ public sealed class LocalUserQrStore
                 !string.Equals(state.Type, expectedType, StringComparison.OrdinalIgnoreCase) ||
                 string.IsNullOrWhiteSpace(state.Payload))
             {
-                Clear();
+                Clear(tenantId, userId, expectedType);
                 return null;
             }
             if (IsExpired(state.ExpiresAt))
             {
-                Clear();
+                Clear(tenantId, userId, expectedType);
                 return null;
             }
             return state;
         }
         catch
         {
-            Clear();
+            Clear(tenantId, userId, expectedType);
             return null;
         }
     }
 
     public void Save(LocalUserQrState state)
     {
+        var file = FileFor(state.TenantId, state.EntityId, state.Type);
         var json = JsonSerializer.Serialize(state);
         var clear = Encoding.UTF8.GetBytes(json);
         var encrypted = ProtectedData.Protect(clear, null, DataProtectionScope.CurrentUser);
-        File.WriteAllBytes(_file, encrypted);
+        File.WriteAllBytes(file, encrypted);
     }
 
-    public void Clear()
+    public void Clear(int tenantId, int userId, string type)
     {
         try
         {
-            if (File.Exists(_file)) File.Delete(_file);
+            var file = FileFor(tenantId, userId, type);
+            if (File.Exists(file)) File.Delete(file);
         }
         catch
         {
             // Falha ao limpar a cópia local não altera a revogação feita na conta.
         }
+    }
+
+    private string FileFor(int tenantId, int userId, string type)
+    {
+        var safeType = string.Equals(type, "delivery_user", StringComparison.OrdinalIgnoreCase)
+            ? "delivery"
+            : "employee";
+        return Path.Combine(_directory, $"my-qr-{Math.Max(0, tenantId)}-{Math.Max(0, userId)}-{safeType}.dat");
     }
 
     private static bool IsExpired(string? value)
