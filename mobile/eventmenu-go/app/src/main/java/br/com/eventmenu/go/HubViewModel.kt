@@ -7,6 +7,7 @@ import br.com.eventmenu.go.data.HubCommand
 import br.com.eventmenu.go.data.HubLink
 import br.com.eventmenu.go.data.HubRepository
 import br.com.eventmenu.go.data.HubTerminal
+import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -35,6 +36,16 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
 
     fun refresh() = loadLinks(showLoading = true)
     fun heartbeat() = loadLinks(showLoading = false)
+
+    /**
+     * Remove qualquer vínculo/comando da sessão anterior da memória da tela.
+     * Também cancela requests e watchers ainda em andamento para impedir que uma
+     * resposta antiga repovoe o Hub depois de logout, troca de usuário ou unidade.
+     */
+    fun reset() {
+        viewModelScope.coroutineContext.cancelChildren()
+        _state.value = HubState()
+    }
 
     private fun loadLinks(showLoading: Boolean) = viewModelScope.launch {
         if (showLoading) _state.update { it.copy(loading = true, error = null) }
