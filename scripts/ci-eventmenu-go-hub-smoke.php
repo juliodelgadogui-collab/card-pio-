@@ -5,6 +5,7 @@ declare(strict_types=1);
 require dirname(__DIR__) . '/app/bootstrap.php';
 
 use EventMenu\Core\Database;
+use EventMenu\Services\HubCommandIdempotencyGuardService;
 use EventMenu\Services\HubDesktopPresenceService;
 use EventMenu\Services\HubService;
 use EventMenu\Services\HubTerminalCatalogService;
@@ -32,6 +33,8 @@ $waiterId = (int)$pdo->lastInsertId();
 
 $pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,"Hub CI Unidade",1)')->execute([$tenantId, 'hub-' . $suffix]);
 $unitId = (int)$pdo->lastInsertId();
+$pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,"Hub CI Outra Unidade",1)')->execute([$tenantId, 'hub-other-' . $suffix]);
+$otherUnitId = (int)$pdo->lastInsertId();
 
 $desktopDevice = 'desktop-ci-' . $suffix;
 $mobileDevice = 'mobile-ci-' . $suffix;
@@ -42,7 +45,8 @@ $_SESSION['role'] = 'admin';
 $_SESSION['name'] = 'Hub CI Admin';
 unset($_SESSION['acting_tenant_id']);
 
-$presence = (new HubDesktopPresenceService())->heartbeat(
+$presenceService = new HubDesktopPresenceService();
+$presence = $presenceService->heartbeat(
     $unitId,
     $desktopDevice,
     'Desktop CI',
@@ -51,6 +55,11 @@ $presence = (new HubDesktopPresenceService())->heartbeat(
 $desktopBindingId = (int)$presence['id'];
 hub_ci_assert($desktopBindingId > 0 && !empty($presence['online']), 'Heartbeat não registrou o computador como online.');
 hub_ci_assert(($presence['hardware']['default_printer'] ?? '') === 'CI Printer', 'Heartbeat perdeu o resumo de periféricos.');
+
+$unitMoveBlocked = false;
+try { $presenceService->heartbeat($otherUnitId, $desktopDevice, 'Desktop CI', []); }
+catch (RuntimeException) { $unitMoveBlocked = true; }
+hub_ci_assert($unitMoveBlocked, 'Heartbeat moveu silenciosamente um computador para outra unidade.');
 
 $hub = new HubService();
 $pairing = $hub->createPairingCode($unitId, $desktopDevice);
@@ -76,6 +85,13 @@ $idempotency = 'hub-ci-print-' . $suffix;
 $print = $hub->queueCommand($desktopBindingId, 'print_order', ['order_id'=>$orderId], $idempotency, $mobileDevice);
 $printAgain = $hub->queueCommand($desktopBindingId, 'print_order', ['order_id'=>$orderId], $idempotency, $mobileDevice);
 hub_ci_assert((int)$print['id'] === (int)$printAgain['id'], 'Idempotência gerou comando duplicado.');
+
+$guard = new HubCommandIdempotencyGuardService();
+$guard->assertReusable($idempotency, $desktopBindingId, 'print_order', $mobileDevice);
+$idempotencyHijackBlocked = false;
+try { $guard->assertReusable($idempotency, $desktopBindingId, 'print_order', 'other-mobile-' . $suffix); }
+catch (RuntimeException) { $idempotencyHijackBlocked = true; }
+hub_ci_assert($idempotencyHijackBlocked, 'Outro celular conseguiu reutilizar a chave de idempotência do comando.');
 
 $drawerDenied = false;
 try { $hub->queueCommand($desktopBindingId, 'open_drawer', ['reason'=>'CI'], 'hub-ci-drawer-' . $suffix, $mobileDevice); }
