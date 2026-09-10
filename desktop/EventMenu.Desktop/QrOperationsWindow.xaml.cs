@@ -11,6 +11,7 @@ public partial class QrOperationsWindow : Window
 {
     private readonly SecureSessionStore _store;
     private readonly OperationalActionsApiClient _api;
+    private readonly UniversalQrApiClient _universalQrApi;
     private readonly bool _canTables;
     private readonly bool _canTickets;
     private readonly bool _canGuests;
@@ -20,6 +21,7 @@ public partial class QrOperationsWindow : Window
     private readonly bool _canCancellationRequest;
     private readonly bool _canCash;
     private QrResolveResponse? _current;
+    private UniversalQrResult? _currentUniversal;
     private OperationalOrderDetail? _currentOrder;
     private DeliveryCashHandoff? _currentHandoff;
     private string _handoffToken = "";
@@ -41,6 +43,7 @@ public partial class QrOperationsWindow : Window
     {
         _store = store;
         _api = new OperationalActionsApiClient(store);
+        _universalQrApi = new UniversalQrApiClient(store);
         _canTables = canTables;
         _canTickets = canTickets;
         _canGuests = canGuests;
@@ -51,7 +54,11 @@ public partial class QrOperationsWindow : Window
         _canCash = canCash;
         InitializeComponent();
         Loaded += (_, _) => CodeBox.Focus();
-        Closed += (_, _) => _api.Dispose();
+        Closed += (_, _) =>
+        {
+            _api.Dispose();
+            _universalQrApi.Dispose();
+        };
     }
 
     private async Task ResolveAsync()
@@ -68,6 +75,7 @@ public partial class QrOperationsWindow : Window
         _busy = true;
         _rawValue = value;
         _current = null;
+        _currentUniversal = null;
         _currentOrder = null;
         _currentHandoff = null;
         _handoffToken = "";
@@ -86,25 +94,20 @@ public partial class QrOperationsWindow : Window
                     ?? throw new InvalidOperationException("Repasse não encontrado.");
                 RenderHandoffResult(_currentHandoff);
             }
+            else if (LooksLikeUniversalQr(value))
+            {
+                await ResolveUniversalAsync(value);
+            }
             else
             {
-                try
-                {
-                    _current = await _api.ResolveQrAsync(value);
-                    RenderResult(_current);
-                }
-                catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound && _canOrders)
-                {
-                    var orderResponse = await _api.ResolveOrderQrAsync(NormalizeScannedToken(value));
-                    _currentOrder = orderResponse.Order ?? throw new InvalidOperationException("Pedido não encontrado para este código.");
-                    RenderOrderResult(_currentOrder);
-                }
+                await ResolveOperationalOrFallbackAsync(value);
             }
             OperationStatusText.Text = "Código reconhecido.";
         }
         catch (Exception ex)
         {
             _current = null;
+            _currentUniversal = null;
             _currentOrder = null;
             _currentHandoff = null;
             _handoffToken = "";
@@ -123,6 +126,44 @@ public partial class QrOperationsWindow : Window
             _busy = false;
             UpdateActionAvailability();
         }
+    }
+
+    private async Task ResolveOperationalOrFallbackAsync(string value)
+    {
+        try
+        {
+            _current = await _api.ResolveQrAsync(value);
+            RenderResult(_current);
+            return;
+        }
+        catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            // Continua para os outros formatos de QR suportados pelo EventMenu.
+        }
+
+        if (_canOrders)
+        {
+            try
+            {
+                var orderResponse = await _api.ResolveOrderQrAsync(NormalizeScannedToken(value));
+                _currentOrder = orderResponse.Order ?? throw new InvalidOperationException("Pedido não encontrado para este código.");
+                RenderOrderResult(_currentOrder);
+                return;
+            }
+            catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+            {
+                // Pode ser um QR universal sem o prefixo EVENTMENU:QR:.
+            }
+        }
+
+        await ResolveUniversalAsync(value);
+    }
+
+    private async Task ResolveUniversalAsync(string value)
+    {
+        var response = await _universalQrApi.ResolveAsync(value);
+        _currentUniversal = response.Qr ?? throw new InvalidOperationException("QR EventMenu não encontrado.");
+        RenderUniversalResult(_currentUniversal);
     }
 
     private void RenderResult(QrResolveResponse response)
@@ -203,6 +244,103 @@ public partial class QrOperationsWindow : Window
         }
     }
 
+    private void RenderUniversalResult(UniversalQrResult qr)
+    {
+        var data = qr.Data;
+        TableLabelPanel.Visibility = Visibility.Collapsed;
+        ActionButton.Visibility = Visibility.Collapsed;
+
+        switch (qr.Type)
+        {
+            case "employee":
+            case "delivery_user":
+            {
+                var name = Text(data, "name", qr.Type == "delivery_user" ? "Entregador" : "Funcionário");
+                var role = RoleLabel(Text(data, "role", ""));
+                var email = Text(data, "email", "");
+                var shift = Object(data, "shift");
+                var shiftMode = shift is null ? "" : Text(shift, "mode", "");
+                var started = shift is null ? "" : Text(shift, "started_at", "");
+
+                TypeText.Text = qr.Type == "delivery_user" ? "ENTREGADOR" : "FUNCIONÁRIO";
+                ResultTitleText.Text = name;
+                PrimaryInfoText.Text = string.IsNullOrWhiteSpace(role) ? "Funcionário EventMenu" : role;
+                SecondaryInfoText.Text = string.IsNullOrWhiteSpace(email) ? "" : email;
+                TertiaryInfoText.Text = shift is null
+                    ? "Sem turno aberto."
+                    : $"Turno {ModeLabel(shiftMode)}{(string.IsNullOrWhiteSpace(started) ? "" : $" • desde {ServerTimeDisplay.Local(started)}")}";
+                StateText.Text = shift is null ? "Sem turno" : "Em atividade";
+                break;
+            }
+            case "customer":
+            {
+                var name = Text(data, "name", "Cliente");
+                var phone = Text(data, "phone", "");
+                var email = Text(data, "email", "");
+                var points = Number(data, "points");
+                TypeText.Text = "CLIENTE";
+                ResultTitleText.Text = name;
+                PrimaryInfoText.Text = string.IsNullOrWhiteSpace(phone) ? "Cliente EventMenu" : phone;
+                SecondaryInfoText.Text = email;
+                TertiaryInfoText.Text = $"Pontos de fidelidade: {points}";
+                StateText.Text = "Identificado";
+                break;
+            }
+            case "event":
+            {
+                var name = Text(data, "name", "Evento");
+                var status = Text(data, "status", "");
+                var venue = Text(data, "venue", "");
+                var address = Text(data, "address", "");
+                var startsAt = Text(data, "starts_at", "");
+                TypeText.Text = "EVENTO";
+                ResultTitleText.Text = name;
+                PrimaryInfoText.Text = string.IsNullOrWhiteSpace(venue) ? "Evento EventMenu" : venue;
+                SecondaryInfoText.Text = address;
+                TertiaryInfoText.Text = string.IsNullOrWhiteSpace(startsAt) ? "" : $"Início: {ServerTimeDisplay.Local(startsAt)}";
+                StateText.Text = FriendlyEventStatus(status);
+                break;
+            }
+            case "tab":
+            {
+                var table = Text(data, "table_name", "Comanda");
+                var label = Text(data, "label", "");
+                var status = Text(data, "status", "");
+                var openedAt = Text(data, "opened_at", "");
+                var seats = Number(data, "seats");
+                TypeText.Text = "COMANDA";
+                ResultTitleText.Text = table;
+                PrimaryInfoText.Text = string.IsNullOrWhiteSpace(label) ? $"Comanda #{qr.EntityId}" : label;
+                SecondaryInfoText.Text = seats > 0 ? $"Lugares: {seats}" : "";
+                TertiaryInfoText.Text = string.IsNullOrWhiteSpace(openedAt) ? "" : $"Aberta em {ServerTimeDisplay.Local(openedAt)}";
+                StateText.Text = status.Equals("open", StringComparison.OrdinalIgnoreCase) ? "Aberta" : FriendlyTableStatus(status);
+                break;
+            }
+            case "device":
+            {
+                var name = Text(data, "name", $"Dispositivo #{qr.EntityId}");
+                var provider = Text(data, "provider", "");
+                var status = Text(data, "status", "");
+                var userName = Text(data, "user_name", "");
+                TypeText.Text = "DISPOSITIVO";
+                ResultTitleText.Text = name;
+                PrimaryInfoText.Text = string.IsNullOrWhiteSpace(userName) ? "Dispositivo da operação" : $"Vinculado a {userName}";
+                SecondaryInfoText.Text = string.IsNullOrWhiteSpace(provider) ? "" : $"Integração: {provider}";
+                TertiaryInfoText.Text = "";
+                StateText.Text = string.IsNullOrWhiteSpace(status) ? "Reconhecido" : status;
+                break;
+            }
+            default:
+                TypeText.Text = "QR EVENTMENU";
+                ResultTitleText.Text = string.IsNullOrWhiteSpace(qr.Label) ? "Código reconhecido" : qr.Label;
+                PrimaryInfoText.Text = $"Identificação #{qr.EntityId}";
+                SecondaryInfoText.Text = "";
+                TertiaryInfoText.Text = "";
+                StateText.Text = "Reconhecido";
+                break;
+        }
+    }
+
     private void RenderOrderResult(OperationalOrderDetail order)
     {
         TableLabelPanel.Visibility = Visibility.Collapsed;
@@ -254,7 +392,7 @@ public partial class QrOperationsWindow : Window
             try
             {
                 _currentHandoff = (await _api.ConfirmDeliveryHandoffAsync(_handoffToken)).Handoff
-                    ?? throw new InvalidOperationException("O servidor não retornou a confirmação do repasse.");
+                    ?? throw new InvalidOperationException("Não foi possível confirmar o repasse.");
                 OperationChanged = true;
                 RenderHandoffResult(_currentHandoff);
                 OperationStatusText.Text = "Repasse confirmado e registrado no caixa.";
@@ -283,7 +421,7 @@ public partial class QrOperationsWindow : Window
             OperationChanged |= window.OrderChanged;
             return;
         }
-        if (_current is null) return;
+        if (_current is null || _currentUniversal is not null) return;
 
         _busy = true;
         ActionButton.IsEnabled = false;
@@ -349,6 +487,24 @@ public partial class QrOperationsWindow : Window
         ActionButton.IsEnabled = !_busy && ActionButton.Visibility == Visibility.Visible;
     }
 
+    private static bool LooksLikeUniversalQr(string raw)
+    {
+        var value = raw.Trim();
+        if (value.StartsWith("EVENTMENU:QR:", StringComparison.OrdinalIgnoreCase)) return true;
+        if (value.Length == 64 && value.All(Uri.IsHexDigit)) return false;
+        if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)) return false;
+        var query = uri.Query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in query)
+        {
+            var pieces = part.Split('=', 2);
+            if (pieces.Length != 2) continue;
+            var key = Uri.UnescapeDataString(pieces[0]);
+            var token = Uri.UnescapeDataString(pieces[1].Replace('+', ' ')).Trim();
+            if (key is "qr" or "token" or "t" && token.Length == 64 && token.All(Uri.IsHexDigit)) return true;
+        }
+        return false;
+    }
+
     private static string? ExtractHandoffToken(string raw)
     {
         var value = raw.Trim();
@@ -403,6 +559,13 @@ public partial class QrOperationsWindow : Window
         return string.IsNullOrWhiteSpace(text) ? fallback : text!;
     }
 
+    private static Dictionary<string, JsonElement>? Object(Dictionary<string, JsonElement> data, string key)
+    {
+        if (!data.TryGetValue(key, out var value) || value.ValueKind != JsonValueKind.Object) return null;
+        try { return JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(value.GetRawText()); }
+        catch { return null; }
+    }
+
     private static int Number(Dictionary<string, JsonElement> data, string key)
     {
         if (!data.TryGetValue(key, out var value)) return 0;
@@ -432,8 +595,41 @@ public partial class QrOperationsWindow : Window
     {
         "available" => "Livre",
         "occupied" => "Ocupada",
+        "open" => "Aberta",
+        "closed" => "Fechada",
         "inactive" => "Inativa",
         _ => status
+    };
+
+    private static string FriendlyEventStatus(string status) => status.ToLowerInvariant() switch
+    {
+        "published" => "Publicado",
+        "draft" => "Rascunho",
+        "closed" => "Encerrado",
+        "cancelled" => "Cancelado",
+        _ when string.IsNullOrWhiteSpace(status) => "Reconhecido",
+        _ => status
+    };
+
+    private static string RoleLabel(string role) => role.ToLowerInvariant() switch
+    {
+        "delivery" => "Entregador",
+        "cashier" => "Caixa",
+        "attendant" => "Balconista",
+        "kitchen" => "Cozinha",
+        "waiter" => "Garçom",
+        "manager" => "Gerente",
+        "admin" => "Administrador",
+        _ => role
+    };
+
+    private static string ModeLabel(string mode) => mode.ToLowerInvariant() switch
+    {
+        "operation" => "Operação",
+        "delivery" => "Delivery",
+        "events" => "Eventos",
+        "pay" => "Pagamentos",
+        _ => mode
     };
 
     private static string Friendly(string message)
