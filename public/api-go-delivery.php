@@ -9,6 +9,7 @@ use EventMenu\Core\Database;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DeliveryProgressService;
 use EventMenu\Services\DeliveryTrackingService;
+use EventMenu\Services\WorkShiftService;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
@@ -88,12 +89,17 @@ try {
         $tenantId = Auth::tenantId();
         $userId = Auth::id();
         if (!$tenantId || !$userId || !Auth::can('orders.delivery')) throw new RuntimeException('Acesso negado ao rastreamento da entrega.');
-        $q = Database::connection()->prepare('SELECT assigned_delivery_user_id,status FROM orders WHERE tenant_id=? AND id=? AND channel="delivery" LIMIT 1');
+        $shift = (new WorkShiftService())->current();
+        if (!$shift || (string)$shift['mode'] !== 'delivery') throw new RuntimeException('Inicie um turno Delivery para compartilhar o rastreamento.');
+        $shiftUnitId = $shift['unit_id'] !== null ? (int)$shift['unit_id'] : null;
+        $q = Database::connection()->prepare('SELECT assigned_delivery_user_id,status,unit_id FROM orders WHERE tenant_id=? AND id=? AND channel="delivery" LIMIT 1');
         $q->execute([$tenantId, $orderId]);
         $order = $q->fetch();
         if (!$order) throw new RuntimeException('Pedido não encontrado.');
         if ((int)$order['assigned_delivery_user_id'] !== $userId) throw new RuntimeException('Pedido não atribuído a você.');
-        if (in_array((string)$order['status'], ['cancelled'], true)) throw new RuntimeException('Pedido cancelado não possui rastreamento ativo.');
+        $orderUnitId = $order['unit_id'] !== null ? (int)$order['unit_id'] : null;
+        if ($shiftUnitId !== $orderUnitId) throw new RuntimeException('Pedido pertence a outra unidade.');
+        if (in_array((string)$order['status'], ['cancelled','completed'], true)) throw new RuntimeException('Esta entrega não possui rastreamento ativo.');
         $publicToken = $tracking->publicToken($tenantId, $orderId);
         god_out([
             'ok' => true,
