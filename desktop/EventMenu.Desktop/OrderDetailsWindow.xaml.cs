@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using EventMenu.Desktop.Models;
 using EventMenu.Desktop.Services;
 
@@ -112,8 +113,11 @@ public partial class OrderDetailsWindow : Window
         var open = order.Status is not ("completed" or "cancelled");
         DiscountRequestButton.Visibility = _canDiscountRequest && open ? Visibility.Visible : Visibility.Collapsed;
         CancellationRequestButton.Visibility = _canCancellationRequest && open ? Visibility.Visible : Visibility.Collapsed;
-        DiscountRequestButton.IsEnabled = open && order.PaymentStatus is not ("paid" or "refunded");
-        CancellationRequestButton.IsEnabled = open && order.PaymentStatus is not "paid";
+
+        var noPaymentStarted = order.PaymentStatus == "unpaid";
+        DiscountRequestButton.IsEnabled = open && noPaymentStarted;
+        CancellationRequestButton.IsEnabled = open && noPaymentStarted;
+        ReceiptButton.IsEnabled = order.Id > 0;
     }
 
     private async Task LoadDeliveryUsersAsync(int? selectedId)
@@ -125,10 +129,12 @@ public partial class OrderDetailsWindow : Window
             .Select(x => x.First())
             .ToList();
 
+        DeliverySelector.SelectionChanged -= DeliverySelector_SelectionChanged;
         DeliverySelector.ItemsSource = options;
         DeliverySelector.SelectedItem = selectedId.HasValue
             ? options.FirstOrDefault(x => x.Id == selectedId.Value)
             : null;
+        DeliverySelector.SelectionChanged += DeliverySelector_SelectionChanged;
         DeliveryAssignmentPanel.Visibility = Visibility.Visible;
 
         if (options.Count == 0)
@@ -139,9 +145,11 @@ public partial class OrderDetailsWindow : Window
         else
         {
             AssignDeliveryButton.IsEnabled = DeliverySelector.SelectedItem is DeliveryUserOption;
-            DeliverySelector.SelectionChanged += (_, _) => AssignDeliveryButton.IsEnabled = DeliverySelector.SelectedItem is DeliveryUserOption;
         }
     }
+
+    private void DeliverySelector_SelectionChanged(object sender, SelectionChangedEventArgs e) =>
+        AssignDeliveryButton.IsEnabled = !_loading && DeliverySelector.SelectedItem is DeliveryUserOption;
 
     private async void AssignDeliveryButton_Click(object sender, RoutedEventArgs e)
     {
@@ -170,7 +178,7 @@ public partial class OrderDetailsWindow : Window
 
     private async void DiscountRequestButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_canDiscountRequest || _order is null || _order.Status is "completed" or "cancelled") return;
+        if (!_canDiscountRequest || _order is null || _order.Status is "completed" or "cancelled" || _order.PaymentStatus != "unpaid") return;
         var window = new OrderRequestWindow(_store, _order.Id, _order.TotalCents, true) { Owner = this };
         if (window.ShowDialog() == true && window.Submitted)
         {
@@ -182,7 +190,7 @@ public partial class OrderDetailsWindow : Window
 
     private async void CancellationRequestButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_canCancellationRequest || _order is null || _order.Status is "completed" or "cancelled") return;
+        if (!_canCancellationRequest || _order is null || _order.Status is "completed" or "cancelled" || _order.PaymentStatus != "unpaid") return;
         var window = new OrderRequestWindow(_store, _order.Id, _order.TotalCents, false) { Owner = this };
         if (window.ShowDialog() == true && window.Submitted)
         {
@@ -190,6 +198,13 @@ public partial class OrderDetailsWindow : Window
             OrderChanged = true;
             await LoadAsync();
         }
+    }
+
+    private void ReceiptButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_order is null) return;
+        var window = new ReceiptWindow(_store, _order.Id) { Owner = this };
+        window.ShowDialog();
     }
 
     private async void RefreshButton_Click(object sender, RoutedEventArgs e) => await LoadAsync();
