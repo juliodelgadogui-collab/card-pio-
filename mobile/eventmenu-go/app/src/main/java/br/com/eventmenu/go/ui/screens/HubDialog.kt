@@ -37,6 +37,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import br.com.eventmenu.go.HubState
 import br.com.eventmenu.go.data.HubLink
+import br.com.eventmenu.go.util.ServerTime
 
 @Composable
 fun HubDialog(
@@ -163,27 +164,32 @@ fun HubDialog(
                         if (canPrintOrder || canPrintReceipt || canShowCustomer) {
                             item {
                                 val orderId = orderText.toIntOrNull() ?: 0
+                                val selected = state.selected
+                                val hasPrinter = selected?.hardware?.defaultPrinter?.isNotBlank() == true || selected?.hardware?.printers?.isNotEmpty() == true
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     if (canPrintOrder || canPrintReceipt) {
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             if (canPrintOrder) {
                                                 OutlinedButton(
                                                     onClick = { onPrintOrder(orderId) },
-                                                    enabled = orderId > 0 && state.selected?.online == true && commandEnabled,
+                                                    enabled = orderId > 0 && selected?.online == true && hasPrinter && commandEnabled,
                                                 ) { Text("Imprimir pedido") }
                                             }
                                             if (canPrintReceipt) {
                                                 OutlinedButton(
                                                     onClick = { onPrintReceipt(orderId) },
-                                                    enabled = orderId > 0 && state.selected?.online == true && commandEnabled,
+                                                    enabled = orderId > 0 && selected?.online == true && hasPrinter && commandEnabled,
                                                 ) { Text("Imprimir recibo") }
                                             }
+                                        }
+                                        if (!hasPrinter) {
+                                            Text("Nenhuma impressora disponível neste computador.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
                                     }
                                     if (canShowCustomer) {
                                         OutlinedButton(
                                             onClick = { onShowCustomer(orderId) },
-                                            enabled = orderId > 0 && state.selected?.online == true && state.selected?.hardware?.customerDisplay?.isNotBlank() == true && commandEnabled,
+                                            enabled = orderId > 0 && selected?.online == true && selected?.hardware?.customerDisplay?.isNotBlank() == true && commandEnabled,
                                         ) { Text("Mostrar para o cliente") }
                                     }
                                 }
@@ -244,10 +250,14 @@ fun HubDialog(
 
                         if (canOpenDrawer) {
                             item {
+                                val drawerAvailable = state.selected?.hardware?.cashDrawer?.isNotBlank() == true
                                 OutlinedButton(
                                     onClick = { onOpenDrawer("Abertura solicitada pelo celular") },
-                                    enabled = state.selected?.online == true && commandEnabled,
+                                    enabled = state.selected?.online == true && drawerAvailable && commandEnabled,
                                 ) { Text("Abrir gaveta") }
+                                if (!drawerAvailable) {
+                                    Text("Gaveta não disponível neste computador.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
                             }
                         }
 
@@ -311,8 +321,11 @@ private fun HubComputerCard(link: HubLink, selected: Boolean, enabled: Boolean, 
                 Text(if (link.online) "● Online" else "○ Offline", color = if (link.online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (link.unitName.isNotBlank()) Text(link.unitName, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (link.lastSeenAt.isNotBlank()) {
+                Text("Última comunicação: ${ServerTime.localDateTime(link.lastSeenAt)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             val items = buildList {
-                if (link.hardware.defaultPrinter.isNotBlank()) add("Impressora")
+                if (link.hardware.defaultPrinter.isNotBlank() || link.hardware.printers.isNotEmpty()) add("Impressora")
                 if (link.hardware.cashDrawer.isNotBlank()) add("Gaveta")
                 if (link.hardware.pinpad.isNotBlank() || link.hardware.tefProvider.isNotBlank()) add("PINPad")
                 if (link.hardware.scale.isNotBlank()) add("Balança")
