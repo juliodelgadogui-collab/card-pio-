@@ -19,8 +19,57 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: eventmenu-go-server-support-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  mysql-smoke:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: eventmenu
+          MYSQL_USER: eventmenu
+          MYSQL_PASSWORD: eventmenu
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_mysql
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: MySQL EventMenu GO support smoke
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: eventmenu
+          DB_USERNAME: eventmenu
+          DB_PASSWORD: eventmenu
+          SESSION_NAME: eventmenu_go_support_mysql
+        run: |
+          php scripts/ci-db-smoke.php
+          php scripts/ci-eventmenu-go-hub-smoke.php
+          php scripts/ci-delivery-tracking-smoke.php
+          php scripts/ci-customer-communication-smoke.php
+
   server-package:
+    needs: [mysql-smoke]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -48,6 +97,7 @@ jobs:
           php scripts/ci-operations-smoke.php
           php scripts/ci-delivery-tracking-smoke.php
           php scripts/ci-customer-communication-smoke.php
+          php scripts/ci-eventmenu-go-hub-smoke.php
       - name: Build complete server package
         env:
           EVENTMENU_RELEASE_VERSION: server-support-2026-09-10
@@ -64,6 +114,7 @@ jobs:
           test -f "$PACKAGE/public/api-go-delivery.php"
           test -f "$PACKAGE/public/api-go-expedition.php"
           test -f "$PACKAGE/public/api-go-inventory.php"
+          test -f "$PACKAGE/public/api-hub.php"
           test -f "$PACKAGE/public/api-delivery-manager-live.php"
           test -f "$PACKAGE/public/api-delivery-track.php"
           test -f "$PACKAGE/public/rastreio.php"
@@ -75,14 +126,19 @@ jobs:
           test -f "$PACKAGE/src/Services/ExpeditionDeliveryService.php"
           test -f "$PACKAGE/src/Services/InventorySnapshotService.php"
           test -f "$PACKAGE/src/Services/CustomerCommunicationService.php"
+          test -f "$PACKAGE/src/Services/HubService.php"
+          test -f "$PACKAGE/src/Services/HubTerminalCatalogService.php"
           test -f "$PACKAGE/database/migrations/099_delivery_live_tracking.sql"
           test -f "$PACKAGE/database/migrations/100_delivery_tracking_tokens.sql"
           test -f "$PACKAGE/database/migrations/101_delivery_tracking_telemetry.sql"
           test -f "$PACKAGE/database/migrations/102_customer_communications.sql"
+          test -f "$PACKAGE/database/migrations/103_eventmenu_hub_shared.sql"
           test -f "$PACKAGE/database/sqlite/migrations/099_delivery_live_tracking.sql"
           test -f "$PACKAGE/database/sqlite/migrations/100_delivery_tracking_tokens.sql"
           test -f "$PACKAGE/database/sqlite/migrations/101_delivery_tracking_telemetry.sql"
           test -f "$PACKAGE/database/sqlite/migrations/102_customer_communications.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/103_eventmenu_hub_shared.sql"
+          test -f "$PACKAGE/scripts/ci-eventmenu-go-hub-smoke.php"
           test -d "$PACKAGE/vendor"
           test -f "$PACKAGE/vendor/autoload.php"
           test -d "$PACKAGE/storage"
