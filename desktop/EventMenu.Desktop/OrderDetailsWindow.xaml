@@ -86,8 +86,13 @@
         </Grid>
 
         <Grid Grid.Row="3" Margin="0,16,0,0">
-            <TextBlock x:Name="FooterStatusText" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" />
-            <Button Content="Fechar" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" Click="CloseButton_Click" Margin="0" />
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <TextBlock x:Name="FooterStatusText" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" TextWrapping="Wrap" />
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="12,0,12,0">
+                <Button x:Name="DiscountRequestButton" Content="Solicitar desconto" Style="{StaticResource SecondaryButton}" Click="DiscountRequestButton_Click" Visibility="Collapsed" />
+                <Button x:Name="CancellationRequestButton" Content="Solicitar cancelamento" Style="{StaticResource SecondaryButton}" Click="CancellationRequestButton_Click" Visibility="Collapsed" Margin="0" />
+            </StackPanel>
+            <Button Grid.Column="2" Content="Fechar" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" Click="CloseButton_Click" Margin="0" />
         </Grid>
     </Grid>
 </Window>
