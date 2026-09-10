@@ -155,17 +155,14 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
     }
 
     private fun watchCommand(commandId: Int) = viewModelScope.launch {
-        repeat(20) {
+        // O servidor mantém um comando do Hub válido por até 120 segundos.
+        // Acompanhamos a mesma janela para não liberar um segundo comando enquanto
+        // o primeiro ainda pode ser executado pelo computador.
+        repeat(80) {
             delay(1_500)
-            val result = runCatching { repository.commandStatus(commandId) }.getOrElse { e ->
-                _state.update {
-                    it.copy(
-                        commandBusy = false,
-                        error = e.message ?: "Não foi possível acompanhar a resposta do computador.",
-                    )
-                }
-                return@launch
-            }
+            val result = runCatching { repository.commandStatus(commandId) }.getOrNull()
+                ?: return@repeat
+
             _state.update { it.copy(lastCommand = result) }
             when (result.status) {
                 "completed" -> {
@@ -193,7 +190,7 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
         _state.update {
             it.copy(
                 commandBusy = false,
-                error = "O computador ainda não confirmou a operação. Evite repetir imediatamente; atualize o Hub e confira o equipamento.",
+                error = "A solicitação passou do tempo de resposta do Hub. Atualize a tela antes de tentar novamente.",
             )
         }
     }
