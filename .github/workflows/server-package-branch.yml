@@ -54,6 +54,7 @@ jobs:
         run: |
           php scripts/ci-db-smoke.php
           php scripts/ci-platform-failover-smoke.php
+          php scripts/ci-client-policy-smoke.php
           php scripts/ci-eventmenu-go-hub-smoke.php
           php scripts/ci-delivery-tracking-smoke.php
           php scripts/ci-customer-communication-smoke.php
@@ -87,6 +88,7 @@ jobs:
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-platform-failover-smoke.php
+          php scripts/ci-client-policy-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
           php scripts/ci-delivery-tracking-smoke.php
@@ -110,6 +112,9 @@ jobs:
           test -f "$PACKAGE/public/api-go-inventory.php"
           test -f "$PACKAGE/public/api-go-routing.php"
           test -f "$PACKAGE/public/api-cluster.php"
+          test -f "$PACKAGE/public/api-cluster-bootstrap.php"
+          test -f "$PACKAGE/public/api-cluster-sync.php"
+          test -f "$PACKAGE/public/api-client-policy.php"
           test -f "$PACKAGE/public/api-hub.php"
           test -f "$PACKAGE/public/api-delivery-manager-live.php"
           test -f "$PACKAGE/public/api-delivery-track.php"
@@ -124,6 +129,11 @@ jobs:
           test -f "$PACKAGE/src/Services/InventorySnapshotService.php"
           test -f "$PACKAGE/src/Services/CustomerCommunicationService.php"
           test -f "$PACKAGE/src/Services/PlatformFailoverService.php"
+          test -f "$PACKAGE/src/Services/ClusterNodeConfigService.php"
+          test -f "$PACKAGE/src/Services/ClusterSyncService.php"
+          test -f "$PACKAGE/src/Services/ClusterControlPlaneSchedulerService.php"
+          test -f "$PACKAGE/src/Services/ClientPolicyService.php"
+          test -f "$PACKAGE/src/Services/ClientPolicyGateService.php"
           test -f "$PACKAGE/src/Services/HubService.php"
           test -f "$PACKAGE/src/Services/HubDesktopPresenceService.php"
           test -f "$PACKAGE/src/Services/HubCommandIdempotencyGuardService.php"
@@ -134,20 +144,24 @@ jobs:
           test -f "$PACKAGE/database/migrations/102_customer_communications.sql"
           test -f "$PACKAGE/database/migrations/103_eventmenu_hub_shared.sql"
           test -f "$PACKAGE/database/migrations/104_platform_failover.sql"
+          test -f "$PACKAGE/database/migrations/105_client_policy_control_plane.sql"
           test -f "$PACKAGE/database/sqlite/migrations/099_delivery_live_tracking.sql"
           test -f "$PACKAGE/database/sqlite/migrations/100_delivery_tracking_tokens.sql"
           test -f "$PACKAGE/database/sqlite/migrations/101_delivery_tracking_telemetry.sql"
           test -f "$PACKAGE/database/sqlite/migrations/102_customer_communications.sql"
           test -f "$PACKAGE/database/sqlite/migrations/103_eventmenu_hub_shared.sql"
           test -f "$PACKAGE/database/sqlite/migrations/104_platform_failover.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/105_client_policy_control_plane.sql"
           test -f "$PACKAGE/scripts/ci-eventmenu-go-hub-smoke.php"
           test -f "$PACKAGE/scripts/ci-platform-failover-smoke.php"
+          test -f "$PACKAGE/scripts/ci-client-policy-smoke.php"
           test -d "$PACKAGE/vendor"
           test -f "$PACKAGE/vendor/autoload.php"
           test -d "$PACKAGE/storage"
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
           grep -q '^EVENTMENU_NODE_ROLE=primary$' "$PACKAGE/.env.example"
+          grep -q '^EVENTMENU_CLUSTER_BOOTSTRAP_TOKEN=$' "$PACKAGE/.env.example"
           grep -q '^DELIVERY_GPS_HISTORY_DAYS=7$' "$PACKAGE/.env.example"
       - name: Generate checksums
         run: |
