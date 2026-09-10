@@ -60,7 +60,7 @@ public partial class ShiftSummaryWindow : Window
             }
             else CommissionCard.Visibility = Visibility.Collapsed;
 
-            FooterStatusText.Text = "Resumo calculado pelo servidor com os movimentos registrados no turno.";
+            FooterStatusText.Text = "Resumo atualizado com os movimentos registrados neste turno.";
         }
         catch (Exception ex)
         {
