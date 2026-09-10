@@ -1,7 +1,5 @@
-using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Threading;
 using EventMenu.Desktop.Models;
 using EventMenu.Desktop.Services;
 
@@ -9,19 +7,18 @@ namespace EventMenu.Desktop;
 
 public partial class ProductSplitPaymentWindow : Window
 {
-    private static readonly CultureInfo PtBr = CultureInfo.GetCultureInfo("pt-BR");
+    private readonly SecureSessionStore _store;
     private readonly TabPaymentApiClient _api;
     private readonly int _tabId;
     private readonly bool _canCash;
-    private readonly DispatcherTimer _pixTimer;
     private TabPaymentGroup? _group;
     private bool _busy;
-    private bool _polling;
 
     public bool PaymentChanged { get; private set; }
 
-    public ProductSplitPaymentWindow(TabPaymentApiClient api, int tabId, bool canCash)
+    public ProductSplitPaymentWindow(SecureSessionStore store, TabPaymentApiClient api, int tabId, bool canCash)
     {
+        _store = store;
         _api = api;
         _tabId = tabId;
         _canCash = canCash;
@@ -29,8 +26,6 @@ public partial class ProductSplitPaymentWindow : Window
         PaymentMethodCombo.Items.Add(new ComboBoxItem { Content = "Pix", Tag = "pix" });
         if (canCash) PaymentMethodCombo.Items.Add(new ComboBoxItem { Content = "Dinheiro", Tag = "cash" });
         PaymentMethodCombo.SelectedIndex = 0;
-        _pixTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
-        _pixTimer.Tick += PixTimer_Tick;
         Loaded += async (_, _) => await LoadAsync();
     }
 
@@ -52,6 +47,7 @@ public partial class ProductSplitPaymentWindow : Window
                 return;
             }
 
+            _group = null;
             var available = account.Items.Where(x => x.SplitUsed != 1).ToList();
             ItemsGrid.ItemsSource = available;
             AvailableCountText.Text = $"{available.Count} disponível(is)";
@@ -84,7 +80,7 @@ public partial class ProductSplitPaymentWindow : Window
         ChargeButton.IsEnabled = !_busy && _group is null && selected.Count > 0;
         StatusText.Text = selected.Count == 0
             ? "Selecione os produtos que serão pagos juntos."
-            : $"Cobrança de {TabPaymentDisplay.Money(total)} por {selected.Count} item(ns).";
+            : $"Esta parte da conta será de {TabPaymentDisplay.Money(total)} por {selected.Count} item(ns).";
     }
 
     private async Task ChargeAsync()
@@ -114,14 +110,17 @@ public partial class ProductSplitPaymentWindow : Window
             var key = $"desktop-tab-product:{_tabId}:{Guid.NewGuid():N}";
             var response = await _api.CreateGroupAsync(_tabId, "product", method, new { item_ids = ids }, key);
             _group = response.Group ?? throw new InvalidOperationException("Não foi possível iniciar a cobrança.");
+            var groupId = _group.Id;
             if (method == "cash")
             {
                 if (_group.Status != "paid") throw new InvalidOperationException("O recebimento ainda não foi confirmado.");
                 PaymentChanged = true;
+                OfferGroupReceipt(groupId);
                 DialogResult = true;
                 return;
             }
-            await GeneratePixAsync(_group.Id, taxId);
+
+            await GeneratePixAsync(groupId, taxId);
         }
         catch (Exception ex)
         {
@@ -146,26 +145,31 @@ public partial class ProductSplitPaymentWindow : Window
         if (window.PaymentConfirmed)
         {
             PaymentChanged = true;
+            OfferGroupReceipt(groupId);
             DialogResult = true;
+        }
+        else
+        {
+            StatusText.Text = "Pix ainda aguardando pagamento. Ao fechar, a conta será atualizada antes de permitir outra cobrança.";
         }
     }
 
-    private async void PixTimer_Tick(object? sender, EventArgs e)
+    private void OfferGroupReceipt(int groupId)
     {
-        if (_polling || _group is null) return;
-        _polling = true;
+        if (groupId < 1) return;
+        if (MessageBox.Show(
+                "Pagamento confirmado. Deseja abrir o comprovante desta parte da conta?",
+                "Comprovante",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question) != MessageBoxResult.Yes) return;
         try
         {
-            var status = await _api.PixStatusAsync(_group.Id);
-            if (status.Paid || status.Group?.Status == "paid")
-            {
-                _pixTimer.Stop();
-                PaymentChanged = true;
-                DialogResult = true;
-            }
+            new GroupReceiptWindow(_store, groupId) { Owner = this }.ShowDialog();
         }
-        catch { }
-        finally { _polling = false; }
+        catch (Exception ex)
+        {
+            StatusText.Text = Friendly(ex.Message);
+        }
     }
 
     private string SelectedTag() => (PaymentMethodCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "pix";
@@ -175,12 +179,6 @@ public partial class ProductSplitPaymentWindow : Window
     private void PaymentMethodCombo_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshSelection();
     private async void ChargeButton_Click(object sender, RoutedEventArgs e) => await ChargeAsync();
     private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
-
-    protected override void OnClosed(EventArgs e)
-    {
-        _pixTimer.Stop();
-        base.OnClosed(e);
-    }
 
     private static string Friendly(string message)
     {
