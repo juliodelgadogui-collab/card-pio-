@@ -11,7 +11,10 @@
                 <TextBlock x:Name="TitleText" Text="Comprovante" Style="{StaticResource PageTitle}" />
                 <TextBlock x:Name="SubtitleText" Text="Carregando..." Style="{StaticResource PageSubtitle}" />
             </StackPanel>
-            <Button Content="Atualizar" Style="{StaticResource SecondaryButton}" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Click="RefreshButton_Click" Margin="0" />
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <Button x:Name="PrintButton" Content="Imprimir" IsEnabled="False" Click="PrintButton_Click" Margin="0" />
+                <Button Content="Atualizar" Style="{StaticResource SecondaryButton}" Click="RefreshButton_Click" Margin="8,0,0,0" />
+            </StackPanel>
         </DockPanel>
 
         <Border Grid.Row="1" Style="{StaticResource Card}" Padding="18" Margin="0,0,0,16">
@@ -20,6 +23,7 @@
                 <StackPanel>
                     <TextBlock x:Name="BusinessNameText" Text="—" FontSize="19" FontWeight="SemiBold" />
                     <TextBlock x:Name="BusinessDetailText" Text="" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,0" TextWrapping="Wrap" />
+                    <TextBlock Text="COMPROVANTE NÃO FISCAL" Foreground="{DynamicResource MutedBrush}" FontSize="10" FontWeight="SemiBold" Margin="0,6,0,0" />
                 </StackPanel>
                 <StackPanel Grid.Column="1">
                     <TextBlock Text="PEDIDO" Style="{StaticResource FieldLabel}" />
@@ -40,7 +44,7 @@
                 <Grid>
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                     <TextBlock Text="Itens" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
-                    <DataGrid Grid.Row="1" x:Name="ReceiptItemsGrid" IsReadOnly="True" SelectionMode="Single">
+                    <DataGrid Grid.Row="1" x:Name="ReceiptItemsGrid" IsReadOnly="True" AutoGenerateColumns="False" SelectionMode="Single">
                         <DataGrid.Columns>
                             <DataGridTextColumn Header="Item" Binding="{Binding Name}" Width="*" />
                             <DataGridTextColumn Header="Qtd." Binding="{Binding Quantity}" Width="65" />
@@ -69,7 +73,7 @@
                     <Border Style="{StaticResource Card}" Padding="18">
                         <StackPanel>
                             <TextBlock Text="Pagamentos" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10" />
-                            <DataGrid x:Name="PaymentsGrid" Height="180" IsReadOnly="True" HeadersVisibility="Column" SelectionMode="Single">
+                            <DataGrid x:Name="PaymentsGrid" Height="180" IsReadOnly="True" AutoGenerateColumns="False" HeadersVisibility="Column" SelectionMode="Single">
                                 <DataGrid.Columns>
                                     <DataGridTextColumn Header="Forma" Binding="{Binding MethodDisplay}" Width="*" />
                                     <DataGridTextColumn Header="Valor" Binding="{Binding AmountDisplay}" Width="95" />
@@ -86,6 +90,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <StackPanel Margin="0,0,18,0">
                 <TextBlock x:Name="FooterMessageText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                <TextBlock Text="Para emissão fiscal, use a área Nota fiscal." Foreground="{DynamicResource MutedBrush}" FontSize="10" Margin="0,3,0,0" />
                 <TextBlock x:Name="StatusText" Foreground="{DynamicResource MutedBrush}" FontSize="11" Margin="0,3,0,0" TextWrapping="Wrap" />
             </StackPanel>
             <Button Grid.Column="1" Content="Fechar" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" VerticalAlignment="Bottom" Click="CloseButton_Click" Margin="0" />
