@@ -100,6 +100,45 @@ public static class ReceiptPrinter
         return Print(document, $"EventMenu - Comprovante {receipt.OrderId}");
     }
 
+    public static bool PrintGroupReceipt(GroupReceipt receipt)
+    {
+        var document = NewDocument();
+        AddHeader(document,
+            string.IsNullOrWhiteSpace(receipt.TenantName) ? "EventMenu" : receipt.TenantName,
+            "COMPROVANTE DA DIVISÃO");
+        AddCenteredLine(document, "COMPROVANTE NÃO FISCAL", 9, FontWeights.SemiBold);
+        AddDivider(document);
+
+        AddLine(document, $"Número: {receipt.ReceiptNumber}");
+        AddLine(document, $"Data: {receipt.DateDisplay}");
+        var location = JoinNonEmpty(" • ", receipt.TableName, receipt.TabId.HasValue ? $"Comanda #{receipt.TabId.Value}" : "", receipt.TabLabel);
+        if (!string.IsNullOrWhiteSpace(location)) AddLine(document, location);
+        if (!string.IsNullOrWhiteSpace(receipt.OperatorName)) AddLine(document, $"Operador: {receipt.OperatorName}");
+        AddLine(document, $"Divisão: {receipt.SplitDisplay}");
+        AddLine(document, $"Forma: {receipt.MethodDisplay}");
+        AddDivider(document);
+
+        if (receipt.Items.Count > 0)
+        {
+            AddLine(document, "PRODUTOS DESTA PARTE", FontWeights.SemiBold);
+            foreach (var item in receipt.Items)
+                AddLine(document, $"{item.QuantityDisplay}x {item.Name} • Pedido #{item.OrderId} • {item.AmountDisplay}");
+            AddDivider(document);
+        }
+
+        AddLine(document, "DISTRIBUIÇÃO ENTRE PEDIDOS", FontWeights.SemiBold);
+        foreach (var allocation in receipt.Allocations)
+            AddLine(document, $"Pedido #{allocation.OrderId}: {allocation.AmountDisplay} • {allocation.StatusDisplay}");
+
+        AddDivider(document);
+        AddTotal(document, $"VALOR DESTA PARTE: {receipt.AmountDisplay}");
+        AddMoneyLine(document, "Confirmado", receipt.ConfirmedDisplay, FontWeights.SemiBold);
+        AddLine(document, $"Situação: {receipt.StatusDisplay}");
+        AddFooter(document, "Pagamento registrado na comanda pelo EventMenu.");
+        AddCenteredLine(document, "Este comprovante não substitui documento fiscal.", 8);
+        return Print(document, $"EventMenu - Divisão {receipt.GroupId}");
+    }
+
     private static FlowDocument NewDocument() => new()
     {
         PagePadding = new Thickness(18),
