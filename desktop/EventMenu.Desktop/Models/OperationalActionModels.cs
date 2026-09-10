@@ -277,7 +277,7 @@ public sealed class OperationalOrderDetail
         "pickup" => "Retirada",
         "delivery" => "Delivery",
         "table" => "Mesa",
-        "event_bar" => "Evento / Bar",
+        "bar" or "event_bar" => "Evento / Bar",
         _ => Channel
     };
     public string StatusDisplay => Status switch
