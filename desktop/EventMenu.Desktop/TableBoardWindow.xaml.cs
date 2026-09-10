@@ -8,14 +8,21 @@ namespace EventMenu.Desktop;
 public partial class TableBoardWindow : Window
 {
     private readonly EventMenuApiClient _api;
+    private readonly SecureSessionStore _store;
+    private readonly bool _canPayments;
+    private readonly bool _canCash;
     private bool _loading;
 
     public bool Changed { get; private set; }
 
-    public TableBoardWindow(EventMenuApiClient api)
+    public TableBoardWindow(EventMenuApiClient api, SecureSessionStore store, bool canPayments, bool canCash)
     {
         _api = api;
+        _store = store;
+        _canPayments = canPayments;
+        _canCash = canCash;
         InitializeComponent();
+        PaymentButton.Visibility = _canPayments ? Visibility.Visible : Visibility.Collapsed;
         Loaded += async (_, _) => await LoadAsync();
     }
 
@@ -25,6 +32,7 @@ public partial class TableBoardWindow : Window
         _loading = true;
         OpenButton.IsEnabled = false;
         CloseTabButton.IsEnabled = false;
+        PaymentButton.IsEnabled = false;
         try
         {
             var response = await _api.TablesAsync();
@@ -57,6 +65,7 @@ public partial class TableBoardWindow : Window
         {
             OpenButton.IsEnabled = false;
             CloseTabButton.IsEnabled = false;
+            PaymentButton.IsEnabled = false;
             return;
         }
 
@@ -67,6 +76,7 @@ public partial class TableBoardWindow : Window
         TabLabelBox.Text = table.TabLabel ?? "";
         TabLabelBox.IsEnabled = table.TabId is null;
         OpenButton.IsEnabled = !_loading && table.TabId is null && !table.Status.Equals("inactive", StringComparison.OrdinalIgnoreCase);
+        PaymentButton.IsEnabled = !_loading && _canPayments && table.TabId is > 0 && table.UnpaidCents > 0;
         CloseTabButton.IsEnabled = !_loading && table.TabId is > 0;
     }
 
@@ -92,9 +102,26 @@ public partial class TableBoardWindow : Window
         }
     }
 
+    private async void PaymentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_loading || !_canPayments || TablesList.SelectedItem is not TableInfo table || table.TabId is null) return;
+        var window = new TabPaymentWindow(_store, table.TabId.Value, _canCash) { Owner = this };
+        window.ShowDialog();
+        if (window.PaymentChanged)
+        {
+            Changed = true;
+            await LoadAsync(table.Id);
+        }
+    }
+
     private async void CloseTabButton_Click(object sender, RoutedEventArgs e)
     {
         if (_loading || TablesList.SelectedItem is not TableInfo table || table.TabId is null) return;
+        if (table.UnpaidCents > 0)
+        {
+            MessageBox.Show("A comanda ainda possui valor a receber. Quite a conta antes de fechar.", "Mesas e comandas", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
         if (MessageBox.Show($"Fechar a comanda da {table.Name}?", "Mesas e comandas", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
 
         _loading = true;
