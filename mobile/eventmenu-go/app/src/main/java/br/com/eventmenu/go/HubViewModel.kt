@@ -21,6 +21,7 @@ data class HubState(
     val terminals: List<HubTerminal> = emptyList(),
     val selectedTerminalId: Int? = null,
     val loading: Boolean = false,
+    val commandBusy: Boolean = false,
     val error: String? = null,
     val message: String? = null,
     val lastCommand: HubCommand? = null,
@@ -64,6 +65,7 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
     }
 
     fun select(linkId: Int) {
+        if (_state.value.commandBusy) return
         _state.update { it.copy(selectedLinkId = linkId, terminals = emptyList(), selectedTerminalId = null) }
     }
 
@@ -78,9 +80,16 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
             .onFailure { e -> _state.update { it.copy(error = e.message ?: "Não foi possível carregar os PINPads.") } }
     }
 
-    fun selectTerminal(id: Int) { _state.update { it.copy(selectedTerminalId = id) } }
+    fun selectTerminal(id: Int) {
+        if (_state.value.commandBusy) return
+        _state.update { it.copy(selectedTerminalId = id) }
+    }
 
     fun claimPairing(qr: String, label: String) = viewModelScope.launch {
+        if (_state.value.commandBusy) {
+            _state.update { it.copy(error = "Aguarde a operação atual terminar antes de parear outro computador.") }
+            return@launch
+        }
         _state.update { it.copy(loading = true, error = null, message = null) }
         runCatching { repository.claimPairing(qr, label) }
             .onSuccess { link ->
@@ -106,6 +115,10 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
     }
 
     fun revokeSelected() = viewModelScope.launch {
+        if (_state.value.commandBusy) {
+            _state.update { it.copy(error = "Aguarde a operação atual terminar antes de remover o vínculo.") }
+            return@launch
+        }
         val link = _state.value.selected ?: return@launch
         _state.update { it.copy(loading = true, error = null) }
         runCatching { repository.revokeLink(link.id) }
@@ -117,6 +130,10 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
     }
 
     private fun withSelected(block: suspend (HubLink) -> HubCommand) = viewModelScope.launch {
+        if (_state.value.commandBusy) {
+            _state.update { it.copy(error = "Aguarde a solicitação atual terminar antes de enviar outra.") }
+            return@launch
+        }
         val link = _state.value.selected
         if (link == null) {
             _state.update { it.copy(error = "Vincule este celular a um computador EventMenu.") }
@@ -126,36 +143,58 @@ class HubViewModel(private val repository: HubRepository) : ViewModel() {
             _state.update { it.copy(error = "O computador EventMenu está offline.") }
             return@launch
         }
-        _state.update { it.copy(loading = true, error = null, message = null, lastCommand = null) }
+        _state.update { it.copy(loading = true, commandBusy = true, error = null, message = null, lastCommand = null) }
         runCatching { block(link) }
             .onSuccess { command ->
                 _state.update { it.copy(loading = false, lastCommand = command, message = "Solicitação enviada ao ${link.desktopLabel}.") }
                 watchCommand(command.id)
             }
-            .onFailure { e -> _state.update { it.copy(loading = false, error = e.message ?: "Falha ao enviar comando ao computador.") } }
+            .onFailure { e ->
+                _state.update { it.copy(loading = false, commandBusy = false, error = e.message ?: "Falha ao enviar comando ao computador.") }
+            }
     }
 
     private fun watchCommand(commandId: Int) = viewModelScope.launch {
         repeat(20) {
             delay(1_500)
-            val result = runCatching { repository.commandStatus(commandId) }.getOrNull() ?: return@launch
+            val result = runCatching { repository.commandStatus(commandId) }.getOrElse { e ->
+                _state.update {
+                    it.copy(
+                        commandBusy = false,
+                        error = e.message ?: "Não foi possível acompanhar a resposta do computador.",
+                    )
+                }
+                return@launch
+            }
             _state.update { it.copy(lastCommand = result) }
             when (result.status) {
                 "completed" -> {
                     when {
                         result.commandType == "tef_charge" && result.approvedLocal == false ->
-                            _state.update { it.copy(error = result.resultMessage.ifBlank { "A cobrança não foi aprovada no PINPad." }) }
+                            _state.update { it.copy(commandBusy = false, error = result.resultMessage.ifBlank { "A cobrança não foi aprovada no PINPad." }) }
                         result.commandType == "tef_charge" && result.verified == true ->
-                            _state.update { it.copy(message = "Pagamento confirmado pelo servidor/provedor.") }
+                            _state.update { it.copy(commandBusy = false, message = "Pagamento confirmado pelo servidor/provedor.") }
                         result.commandType == "tef_charge" && result.approvedLocal == true ->
-                            _state.update { it.copy(message = "PINPad aprovou. Aguardando confirmação do provedor; o pedido ainda não foi marcado como pago.") }
-                        else -> _state.update { it.copy(message = "Comando concluído no computador.") }
+                            _state.update { it.copy(commandBusy = false, message = "PINPad aprovou. Aguardando confirmação do provedor; o pedido ainda não foi marcado como pago.") }
+                        else -> _state.update { it.copy(commandBusy = false, message = "Comando concluído no computador.") }
                     }
                     return@launch
                 }
-                "failed" -> { _state.update { it.copy(error = result.error.ifBlank { "O computador não conseguiu concluir a operação." }) }; return@launch }
-                "expired", "cancelled" -> { _state.update { it.copy(error = "A solicitação expirou ou foi cancelada.") }; return@launch }
+                "failed" -> {
+                    _state.update { it.copy(commandBusy = false, error = result.error.ifBlank { "O computador não conseguiu concluir a operação." }) }
+                    return@launch
+                }
+                "expired", "cancelled" -> {
+                    _state.update { it.copy(commandBusy = false, error = "A solicitação expirou ou foi cancelada.") }
+                    return@launch
+                }
             }
+        }
+        _state.update {
+            it.copy(
+                commandBusy = false,
+                error = "O computador ainda não confirmou a operação. Evite repetir imediatamente; atualize o Hub e confira o equipamento.",
+            )
         }
     }
 
