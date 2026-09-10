@@ -18,6 +18,7 @@ public partial class MainWindow
     {
         if (_dashboardUxReady) return;
         _dashboardUxReady = true;
+        EnsureTablesUx();
 
         RenameMetric(OrdersCountText, "Pedidos ativos", "em andamento agora");
         RenameMetric(ProductsCountText, "A receber", "pagamentos pendentes");
@@ -153,6 +154,7 @@ public partial class MainWindow
         _dashboardOrdersDescriptor = null;
         _dashboardTablesDescriptor = null;
         _connectionTextDescriptor = null;
+        DisposeTablesUx();
         _dashboardUxReady = false;
     }
 }
