@@ -75,9 +75,13 @@ fun DeliveryOperationsScreen(
     var pixOrder by remember { mutableStateOf<Order?>(null) }
     var cashOrder by remember { mutableStateOf<Order?>(null) }
     var cancelOrder by remember { mutableStateOf<Order?>(null) }
-    val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
+    val deliveries = orders.filter {
+        it.channel == "delivery" &&
+            it.status !in setOf("completed", "cancelled") &&
+            progress[it.id]?.completed != true
+    }
 
-    LaunchedEffect(deliveries.map { it.id }) { onRefreshProgress() }
+    LaunchedEffect(deliveries.map { it.id to it.status }) { onRefreshProgress() }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
@@ -87,9 +91,12 @@ fun DeliveryOperationsScreen(
 
         items(deliveries, key = { it.id }) { order ->
             val step = progress[order.id]
-            val pickedUp = step?.pickedUp == true
-            val routeStarted = step?.routeStarted == true || order.status == "out_for_delivery"
+            // O progresso da entrega é monotônico: chegada implica rota iniciada e
+            // rota iniciada implica retirada. Isso evita reexibir botões de etapas
+            // anteriores quando a lista de pedidos ainda não atualizou.
             val arrived = step?.arrived == true
+            val routeStarted = step?.routeStarted == true || arrived || order.status == "out_for_delivery"
+            val pickedUp = step?.pickedUp == true || routeStarted
             val customer = deliveryUseful(order.customerName)?.takeIf { !it.equals("Consumidor", true) }
             val address = deliveryUseful(order.deliveryAddress)
             val phone = deliveryUseful(order.customerPhone)
@@ -122,14 +129,14 @@ fun DeliveryOperationsScreen(
 
                     DeliveryStepIndicator(pickedUp, routeStarted, arrived)
 
-                    if (order.status == "ready" && !pickedUp) {
+                    if (order.status == "ready" && !pickedUp && !routeStarted && !arrived) {
                         Button(onClick = { onPickup(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Retirar pedido") }
                     }
-                    if (order.status == "ready" && pickedUp) {
+                    if (order.status == "ready" && pickedUp && !routeStarted && !arrived) {
                         Button(onClick = { onStartRoute(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Iniciar rota") }
                     }
 
-                    if (order.status == "out_for_delivery") {
+                    if (routeStarted) {
                         if (address != null) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(onClick = { openGoogleMaps(context, address) }, modifier = Modifier.weight(1f)) { Text("Google Maps") }
