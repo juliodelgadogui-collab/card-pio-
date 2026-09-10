@@ -22,21 +22,27 @@ final class PlatformFailoverService
         $row = $this->row();
         if ($row) return $this->normalizeRow($row);
 
+        $node = new ClusterNodeConfigService();
+        $nodeData = $node->get();
+        $bootstrapped = $node->isBootstrapped();
+        $role = $node->role();
+        $primaryFromNode = $node->primaryUrl();
+
         return [
             'id' => self::SETTINGS_ID,
-            'enabled' => false,
-            'primary_url' => $this->normalizeUrl(app_absolute_url(''), true),
-            'contingency_url' => '',
-            'mode' => 'read_only',
-            'cluster_id' => '',
+            'enabled' => $bootstrapped && $role === 'contingency',
+            'primary_url' => $primaryFromNode !== '' ? $primaryFromNode : $this->normalizeUrl(app_absolute_url(''), true),
+            'contingency_url' => $role === 'contingency' ? $this->normalizeUrl(app_absolute_url(''), true) : '',
+            'mode' => $node->mode(),
+            'cluster_id' => $node->clusterId(),
             'config_version' => 0,
-            'last_health_status' => 'unknown',
-            'last_health_message' => '',
-            'last_health_db_driver' => '',
-            'last_health_writable' => false,
+            'last_health_status' => $bootstrapped ? 'healthy' : 'unknown',
+            'last_health_message' => $bootstrapped ? 'Nó inicializado pelo servidor principal.' : '',
+            'last_health_db_driver' => strtolower(trim((string)env('DB_CONNECTION', ''))),
+            'last_health_writable' => $bootstrapped && $role === 'contingency' && $node->mode() === 'shared_db' && strtolower(trim((string)env('DB_CONNECTION', ''))) === 'mysql',
             'last_health_checked_at' => '',
-            'verified_at' => '',
-            'has_secret' => false,
+            'verified_at' => (string)($nodeData['configured_at'] ?? ''),
+            'has_secret' => strlen($node->clusterSecret()) >= 32,
         ];
     }
 
@@ -48,6 +54,7 @@ final class PlatformFailoverService
     public function save(array $input): array
     {
         if (!Auth::isSuperAdmin()) throw new RuntimeException('A configuração de contingência é restrita ao Super ADM.');
+        if (!$this->isPrimaryNode()) throw new RuntimeException('A configuração de contingência só pode ser alterada no servidor principal.');
 
         $existing = $this->row();
         $primary = $this->normalizeUrl((string)($input['primary_url'] ?? app_absolute_url('')), false);
@@ -110,9 +117,7 @@ final class PlatformFailoverService
             'secret_rotated' => $secretChanged,
         ]);
 
-        $saved = $this->get();
-        if ($secretChanged) $saved['_secret_once'] = $secretPlain;
-        return $saved;
+        return $this->get();
     }
 
     /** @return array<string,mixed> */
@@ -288,6 +293,12 @@ final class PlatformFailoverService
         if (in_array($explicit, ['primary', 'contingency'], true)) return $explicit;
 
         try {
+            $local = (new ClusterNodeConfigService())->role();
+            if (in_array($local, ['primary', 'contingency'], true)) return $local;
+        } catch (Throwable) {
+        }
+
+        try {
             $settings = $this->get();
             $current = $this->normalizeUrl(app_absolute_url(''), true);
             $secondary = trim((string)$settings['contingency_url']);
@@ -306,7 +317,9 @@ final class PlatformFailoverService
             if ($row && trim((string)$row['cluster_id']) !== '') return trim((string)$row['cluster_id']);
         } catch (Throwable) {
         }
-        return trim((string)env('EVENTMENU_CLUSTER_ID', ''));
+        $env = trim((string)env('EVENTMENU_CLUSTER_ID', ''));
+        if ($env !== '') return $env;
+        try { return (new ClusterNodeConfigService())->clusterId(); } catch (Throwable) { return ''; }
     }
 
     private function localClusterSecret(): string
@@ -316,7 +329,9 @@ final class PlatformFailoverService
             if ($row && !empty($row['cluster_secret_encrypted'])) return Crypto::decrypt((string)$row['cluster_secret_encrypted']);
         } catch (Throwable) {
         }
-        return trim((string)env('EVENTMENU_CLUSTER_SECRET', ''));
+        $env = trim((string)env('EVENTMENU_CLUSTER_SECRET', ''));
+        if ($env !== '') return $env;
+        try { return (new ClusterNodeConfigService())->clusterSecret(); } catch (Throwable) { return ''; }
     }
 
     /** @return array<string,mixed>|null */
