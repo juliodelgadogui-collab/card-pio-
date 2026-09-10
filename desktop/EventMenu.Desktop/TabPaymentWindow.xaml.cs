@@ -51,8 +51,8 @@ public partial class TabPaymentWindow : Window
         {
             var response = await _api.AccountAsync(_tabId);
             _account = response.Account ?? throw new InvalidOperationException("Comanda não encontrada.");
-            RenderAccount(_account);
             _currentGroup = _account.OpenGroup;
+            RenderAccount(_account);
             RenderOpenGroup();
             FooterStatusText.Text = "Conta atualizada.";
         }
@@ -86,6 +86,7 @@ public partial class TabPaymentWindow : Window
         else if (_currentGroup is null)
         {
             SplitValueBox.Text = (account.RemainingCents / 100m).ToString("N2", PtBr);
+            PaymentStateText.Text = "Pronta para receber.";
         }
     }
 
@@ -99,24 +100,31 @@ public partial class TabPaymentWindow : Window
         }
 
         PaymentStateText.Text = $"{_currentGroup.MethodDisplay} • {_currentGroup.AmountDisplay} • {_currentGroup.StatusDisplay}";
-        SetComboByTag(PaymentMethodCombo, _currentGroup.Method);
+        var methodAvailable = SetComboByTag(PaymentMethodCombo, _currentGroup.Method);
         PaymentMethodCombo.IsEnabled = false;
         SplitTypeCombo.IsEnabled = false;
         SplitValueBox.IsEnabled = false;
 
-        if (_currentGroup.Method == "pix" && _currentGroup.Status is "created" or "pending")
+        if (!methodAvailable)
+        {
+            ChargeButton.IsEnabled = false;
+            CancelGroupButton.Visibility = Visibility.Collapsed;
+            ServerStatusText.Text = "Existe uma cobrança iniciada por uma forma de pagamento não disponível para este usuário. Finalize-a no usuário autorizado.";
+            return;
+        }
+
+        if (IsAwaitingPix(_currentGroup))
         {
             PixCustomerPanel.Visibility = Visibility.Visible;
             ChargeButton.Content = _currentGroup.Status == "pending" ? "Retomar Pix" : "Gerar Pix";
             ChargeButton.IsEnabled = true;
             CancelGroupButton.Visibility = _currentGroup.Status == "created" ? Visibility.Visible : Visibility.Collapsed;
             ServerStatusText.Text = "Existe uma cobrança Pix em andamento. Informe o CPF/CNPJ do pagador para exibir ou reutilizar o código.";
+            return;
         }
-        else
-        {
-            ChargeButton.IsEnabled = false;
-            CancelGroupButton.Visibility = _currentGroup.Status == "created" ? Visibility.Visible : Visibility.Collapsed;
-        }
+
+        ChargeButton.IsEnabled = false;
+        CancelGroupButton.Visibility = _currentGroup.Status == "created" ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void SetEditingEnabled(bool enabled)
@@ -124,21 +132,21 @@ public partial class TabPaymentWindow : Window
         SplitTypeCombo.IsEnabled = enabled;
         SplitValueBox.IsEnabled = enabled;
         PaymentMethodCombo.IsEnabled = enabled;
-        ChargeButton.IsEnabled = enabled || (_currentGroup?.Method == "pix" && _currentGroup.Status is "created" or "pending");
+        ChargeButton.IsEnabled = enabled || IsAwaitingPix(_currentGroup);
     }
 
     private async Task StartPaymentAsync()
     {
         if (_busy || _account is null || _account.RemainingCents <= 0) return;
-        var method = SelectedTag(PaymentMethodCombo, "pix");
 
         if (_currentGroup is not null)
         {
-            if (_currentGroup.Method == "pix" && _currentGroup.Status is "created" or "pending")
-                await GeneratePixAsync(_currentGroup.Id);
+            if (IsAwaitingPix(_currentGroup)) await GeneratePixAsync(_currentGroup.Id);
+            else FooterStatusText.Text = "Já existe uma cobrança desta comanda em andamento.";
             return;
         }
 
+        var method = SelectedTag(PaymentMethodCombo, "pix");
         var splitType = SelectedTag(SplitTypeCombo, "value");
         if (!TryBuildOptions(splitType, _account.RemainingCents, out var options, out var previewAmount, out var error))
         {
@@ -174,6 +182,7 @@ public partial class TabPaymentWindow : Window
             {
                 if (_currentGroup.Status != "paid")
                     throw new InvalidOperationException("O recebimento em dinheiro não foi confirmado pelo servidor.");
+
                 PaymentChanged = true;
                 FooterStatusText.Text = $"Recebimento de {TabPaymentDisplay.Money(previewAmount)} confirmado.";
                 _currentGroup = null;
@@ -193,7 +202,7 @@ public partial class TabPaymentWindow : Window
 
         _busy = false;
         RenderOpenGroup();
-        if (_currentGroup?.Method == "pix") await GeneratePixAsync(_currentGroup.Id);
+        if (IsAwaitingPix(_currentGroup)) await GeneratePixAsync(_currentGroup!.Id);
     }
 
     private async Task GeneratePixAsync(int groupId)
@@ -214,7 +223,8 @@ public partial class TabPaymentWindow : Window
         {
             var response = await _api.CreatePixAsync(groupId, taxId);
             var pix = response.Pix ?? throw new InvalidOperationException("O servidor não retornou o Pix.");
-            if (string.IsNullOrWhiteSpace(pix.CopyPaste)) throw new InvalidOperationException("O provedor não retornou o código Pix.");
+            if (string.IsNullOrWhiteSpace(pix.CopyPaste))
+                throw new InvalidOperationException("O provedor não retornou o código Pix.");
 
             PixCodeBox.Text = pix.CopyPaste;
             PixCodeBox.Visibility = Visibility.Visible;
@@ -224,7 +234,7 @@ public partial class TabPaymentWindow : Window
             QrBorder.Visibility = Visibility.Visible;
             PixExpiryText.Text = string.IsNullOrWhiteSpace(pix.ExpiresAt) ? "" : $"Válido até {pix.ExpiresDisplay}";
             PaymentStateText.Text = $"Pix de {pix.AmountDisplay} • aguardando pagamento";
-            ServerStatusText.Text = "Verificando automaticamente. O pagamento só será concluído após confirmação do PagBank pelo servidor.";
+            ServerStatusText.Text = "Verificando automaticamente. O pagamento só será concluído após confirmação do provedor pelo servidor.";
             FooterStatusText.Text = pix.Reused ? "Cobrança Pix existente reutilizada." : "Pix gerado com sucesso.";
             _pixTimer.Start();
             await CheckPixAsync();
@@ -236,17 +246,18 @@ public partial class TabPaymentWindow : Window
         finally
         {
             _busy = false;
-            ChargeButton.IsEnabled = _currentGroup?.Method == "pix" && _currentGroup.Status is "created" or "pending";
+            ChargeButton.IsEnabled = IsAwaitingPix(_currentGroup);
         }
     }
 
     private async Task CheckPixAsync()
     {
-        if (_polling || _currentGroup is null || _currentGroup.Method != "pix") return;
+        if (_polling || !IsAwaitingPix(_currentGroup)) return;
+        var groupId = _currentGroup!.Id;
         _polling = true;
         try
         {
-            var response = await _api.PixStatusAsync(_currentGroup.Id);
+            var response = await _api.PixStatusAsync(groupId);
             if (response.Group is not null) _currentGroup = response.Group;
 
             if (response.Paid || _currentGroup?.Status == "paid")
@@ -272,9 +283,9 @@ public partial class TabPaymentWindow : Window
                     : "Esta cobrança não está mais aguardando pagamento.";
                 ChargeButton.IsEnabled = false;
             }
-            else
+            else if (_currentGroup is not null)
             {
-                PaymentStateText.Text = _currentGroup is null ? "Aguardando pagamento Pix." : $"Pix • {_currentGroup.AmountDisplay} • aguardando pagamento";
+                PaymentStateText.Text = $"Pix • {_currentGroup.AmountDisplay} • aguardando pagamento";
             }
         }
         catch (Exception ex)
@@ -339,7 +350,9 @@ public partial class TabPaymentWindow : Window
                 error = "Informe um percentual maior que 0 e no máximo 100.";
                 return false;
             }
-            estimatedAmountCents = percentage >= 100 ? remainingCents : Math.Max(1, (int)Math.Round(remainingCents * percentage / 100m, MidpointRounding.AwayFromZero));
+            estimatedAmountCents = percentage >= 100
+                ? remainingCents
+                : Math.Max(1, (int)Math.Round(remainingCents * percentage / 100m, MidpointRounding.AwayFromZero));
             options = new { percentage };
             return true;
         }
@@ -399,6 +412,7 @@ public partial class TabPaymentWindow : Window
             "person" => "Ex.: 4 para receber uma das quatro partes do saldo restante.",
             _ => "Você pode receber o saldo inteiro ou somente uma parte."
         };
+
         if (_account is not null && split == "value") SplitValueBox.Text = (_account.RemainingCents / 100m).ToString("N2", PtBr);
         else if (split == "percentage") SplitValueBox.Text = "100";
         else if (split == "person") SplitValueBox.Text = "1";
@@ -407,8 +421,9 @@ public partial class TabPaymentWindow : Window
 
     private void PaymentMethodCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        PixCustomerPanel.Visibility = SelectedTag(PaymentMethodCombo, "pix") == "pix" ? Visibility.Visible : Visibility.Collapsed;
-        ChargeButton.Content = SelectedTag(PaymentMethodCombo, "pix") == "cash" ? "Receber em dinheiro" : "Gerar Pix";
+        var method = SelectedTag(PaymentMethodCombo, "pix");
+        PixCustomerPanel.Visibility = method == "pix" ? Visibility.Visible : Visibility.Collapsed;
+        ChargeButton.Content = method == "cash" ? "Receber em dinheiro" : "Gerar Pix";
         RefreshPreview();
     }
 
@@ -444,13 +459,18 @@ public partial class TabPaymentWindow : Window
         _pixTimer.Stop();
     }
 
+    private static bool IsAwaitingPix(TabPaymentGroup? group) =>
+        group is not null && group.Method == "pix" && (group.Status == "created" || group.Status == "pending");
+
     private static string SelectedTag(ComboBox combo, string fallback) =>
         (combo.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? fallback;
 
-    private static void SetComboByTag(ComboBox combo, string value)
+    private static bool SetComboByTag(ComboBox combo, string value)
     {
-        combo.SelectedItem = combo.Items.Cast<object>().OfType<ComboBoxItem>()
+        var item = combo.Items.Cast<object>().OfType<ComboBoxItem>()
             .FirstOrDefault(x => string.Equals(x.Tag?.ToString(), value, StringComparison.OrdinalIgnoreCase));
+        combo.SelectedItem = item;
+        return item is not null;
     }
 
     private static bool TryMoney(string text, out int cents)
@@ -463,6 +483,7 @@ public partial class TabPaymentWindow : Window
     }
 
     private static string Digits(string value) => new(value.Where(char.IsDigit).ToArray());
+
     private static bool ValidTaxIdShape(string value)
     {
         var digits = Digits(value);
@@ -491,6 +512,7 @@ public partial class TabPaymentWindow : Window
                 dc.DrawRectangle(Brushes.Black, null, new Rect((x + quietZone) * modulePixels, (y + quietZone) * modulePixels, modulePixels, modulePixels));
             }
         }
+
         var bitmap = new RenderTargetBitmap(size, size, 96, 96, PixelFormats.Pbgra32);
         bitmap.Render(visual);
         bitmap.Freeze();
