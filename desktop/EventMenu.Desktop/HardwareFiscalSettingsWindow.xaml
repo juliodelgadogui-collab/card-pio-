@@ -1,8 +1,8 @@
 <Window x:Class="EventMenu.Desktop.HardwareFiscalSettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="EventMenu • Equipamentos e Fiscal" Width="980" Height="790"
-        MinWidth="860" MinHeight="700" WindowStartupLocation="CenterOwner" Background="#F4F7FB">
+        Title="EventMenu • Configurações" Width="980" Height="790"
+        MinWidth="860" MinHeight="700" WindowStartupLocation="CenterOwner" Background="{DynamicResource BackgroundBrush}">
     <Grid Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -12,89 +12,85 @@
 
         <DockPanel Margin="0,0,0,16">
             <StackPanel DockPanel.Dock="Left">
-                <TextBlock Text="Equipamentos e Fiscal" FontSize="27" FontWeight="SemiBold" />
-                <TextBlock x:Name="UnitText" Foreground="#667085" Margin="0,5,0,0" />
+                <TextBlock x:Name="SettingsHeadingText" Text="Configurações" Style="{StaticResource PageTitle}" />
+                <TextBlock x:Name="UnitText" Foreground="{DynamicResource MutedBrush}" Margin="0,5,0,0" />
             </StackPanel>
-            <TextBlock x:Name="StatusText" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="#667085" TextWrapping="Wrap" MaxWidth="390" />
+            <TextBlock x:Name="StatusText" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" MaxWidth="390" />
         </DockPanel>
 
         <TabControl Grid.Row="1" x:Name="SettingsTabs">
             <TabItem x:Name="HardwareTab" Header="Equipamentos">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="20">
-                        <TextBlock Text="Hardware deste computador" FontSize="20" FontWeight="SemiBold" />
-                        <TextBlock Text="Os nomes abaixo identificam os equipamentos que o EventMenu Hub pode usar neste Windows."
-                                   Foreground="#667085" TextWrapping="Wrap" Margin="0,6,0,18" />
+                        <TextBlock Text="Equipamentos deste computador" FontSize="20" FontWeight="SemiBold" />
+                        <TextBlock Text="Escolha os equipamentos usados no atendimento e na impressão."
+                                   Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,18" />
                         <TextBlock Text="Impressora padrão" FontWeight="SemiBold" />
-                        <TextBox x:Name="DefaultPrinterBox" Margin="0,5,0,12" ToolTip="Use exatamente o nome da impressora instalada no Windows." />
+                        <TextBox x:Name="DefaultPrinterBox" Margin="0,5,0,12" />
                         <TextBlock Text="Impressora ligada à gaveta" FontWeight="SemiBold" />
-                        <TextBox x:Name="CashDrawerBox" Margin="0,5,0,12" ToolTip="Em impressoras ESC/POS, o EventMenu envia o pulso de abertura da gaveta." />
+                        <TextBox x:Name="CashDrawerBox" Margin="0,5,0,12" />
                         <TextBlock Text="Balança" FontWeight="SemiBold" />
-                        <TextBox x:Name="ScaleBox" Margin="0,5,0,12" ToolTip="Nome/porta da balança. O driver específico poderá usar este identificador." />
+                        <TextBox x:Name="ScaleBox" Margin="0,5,0,12" />
                         <TextBlock Text="Leitor de código de barras" FontWeight="SemiBold" />
                         <TextBox x:Name="BarcodeBox" Margin="0,5,0,12" />
-                        <TextBlock Text="Segundo monitor / tela do cliente" FontWeight="SemiBold" />
+                        <TextBlock Text="Tela do cliente" FontWeight="SemiBold" />
                         <TextBox x:Name="CustomerDisplayBox" Margin="0,5,0,12" />
-                        <TextBlock Text="PINPad físico deste computador" FontWeight="SemiBold" />
+                        <TextBlock Text="Maquininha / PINPad" FontWeight="SemiBold" />
                         <TextBox x:Name="PinpadBox" Margin="0,5,0,18" />
                         <Button x:Name="SaveHardwareButton" Content="Salvar equipamentos" Width="180" HorizontalAlignment="Left" Click="SaveHardwareButton_Click" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem x:Name="TefTab" Header="TEF / PINPad">
+            <TabItem x:Name="TefTab" Header="Cartão">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="20">
-                        <TextBlock Text="Integração com maquininha / PINPad" FontSize="20" FontWeight="SemiBold" />
-                        <TextBlock Text="O EventMenu usa uma intenção segura no servidor e chama o conector homologado instalado neste computador. Aprovação local nunca confirma o pedido sozinha."
-                                   Foreground="#667085" TextWrapping="Wrap" Margin="0,6,0,16" />
-                        <TextBlock Text="Terminal existente" FontWeight="SemiBold" />
+                        <TextBlock Text="Pagamento com cartão" FontSize="20" FontWeight="SemiBold" />
+                        <TextBlock Text="Configure a maquininha disponível neste computador."
+                                   Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,16" />
+                        <TextBlock Text="Maquininha configurada" FontWeight="SemiBold" />
                         <ComboBox x:Name="TerminalSelector" Margin="0,5,0,14" DisplayMemberPath="DisplayName" SelectionChanged="TerminalSelector_SelectionChanged" />
-                        <Button Content="Novo terminal" Width="130" HorizontalAlignment="Left" Margin="0,0,0,16" Click="NewTerminalButton_Click" />
+                        <Button Content="Adicionar maquininha" Width="160" HorizontalAlignment="Left" Margin="0,0,0,16" Click="NewTerminalButton_Click" />
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="Provedor" FontWeight="SemiBold" /><ComboBox x:Name="ProviderCombo" Margin="0,5,0,12" />
                                 <TextBlock Text="Nome no caixa" FontWeight="SemiBold" /><TextBox x:Name="TerminalLabelBox" Margin="0,5,0,12" />
-                                <TextBlock Text="Identificação do PINPad" FontWeight="SemiBold" /><TextBox x:Name="TerminalPinpadBox" Margin="0,5,0,12" />
+                                <TextBlock Text="Identificação da maquininha" FontWeight="SemiBold" /><TextBox x:Name="TerminalPinpadBox" Margin="0,5,0,12" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Text="Modo" FontWeight="SemiBold" /><ComboBox x:Name="IntegrationModeCombo" Margin="0,5,0,12" />
-                                <TextBlock Text="Conector local" FontWeight="SemiBold" />
-                                <TextBox x:Name="BridgeUrlBox" Margin="0,5,0,12" ToolTip="Ex.: http://127.0.0.1:18765/. Somente localhost é aceito pelo Desktop." />
+                                <TextBlock Text="Tipo de integração" FontWeight="SemiBold" /><ComboBox x:Name="IntegrationModeCombo" Margin="0,5,0,12" />
+                                <TextBlock Text="Endereço do serviço local" FontWeight="SemiBold" />
+                                <TextBox x:Name="BridgeUrlBox" Margin="0,5,0,12" />
                                 <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                    <CheckBox x:Name="TerminalEnabledCheck" Content="Ativo" IsChecked="True" Margin="0,0,22,0" />
-                                    <CheckBox x:Name="AutoCaptureCheck" Content="Captura automática" IsChecked="True" />
+                                    <CheckBox x:Name="TerminalEnabledCheck" Content="Ativa" IsChecked="True" Margin="0,0,22,0" />
+                                    <CheckBox x:Name="AutoCaptureCheck" Content="Confirmar automaticamente" IsChecked="True" />
                                 </StackPanel>
                             </StackPanel>
                         </Grid>
-                        <Border Background="#F8FAFC" CornerRadius="10" Padding="12" Margin="0,14,0,14">
-                            <TextBlock Text="PagBank, Stone e SiTef usam esta interface somente quando o conector/SDK homologado correspondente estiver instalado. Segredos da adquirente não são mostrados aqui."
-                                       Foreground="#475467" TextWrapping="Wrap" />
-                        </Border>
-                        <Button x:Name="SaveTerminalButton" Content="Salvar terminal" Width="160" HorizontalAlignment="Left" Click="SaveTerminalButton_Click" />
+                        <Button x:Name="SaveTerminalButton" Content="Salvar maquininha" Width="160" HorizontalAlignment="Left" Margin="0,16,0,0" Click="SaveTerminalButton_Click" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
 
-            <TabItem x:Name="FiscalTab" Header="NFC-e / NF-e">
+            <TabItem x:Name="FiscalTab" Header="Nota fiscal">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="20">
-                        <TextBlock Text="Configuração fiscal da unidade" FontSize="20" FontWeight="SemiBold" />
-                        <TextBlock Text="Comece em homologação. O EventMenu só considera a nota autorizada depois de resposta válida da SEFAZ."
-                                   Foreground="#667085" TextWrapping="Wrap" Margin="0,6,0,16" />
+                        <TextBlock Text="Emissão de nota fiscal" FontSize="22" FontWeight="SemiBold" />
+                        <TextBlock Text="Preencha os dados da empresa, certificado e tributação dos produtos. Comece no ambiente de testes antes de usar em produção."
+                                   Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,18" />
 
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
-                            <CheckBox x:Name="FiscalEnabledCheck" Content="Fiscal ativo" Margin="0,0,22,0" />
-                            <CheckBox x:Name="ContingencyCheck" Content="Permitir contingência" />
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+                            <CheckBox x:Name="FiscalEnabledCheck" Content="Emitir nota fiscal nesta unidade" Margin="0,0,22,0" />
+                            <CheckBox x:Name="ContingencyCheck" Content="Permitir emissão em contingência" />
                         </StackPanel>
 
-                        <TextBlock Text="Identificação do emitente" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" />
+                        <TextBlock Text="Dados da empresa" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" />
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <StackPanel>
                                 <TextBlock Text="Ambiente" FontWeight="SemiBold" /><ComboBox x:Name="FiscalEnvironmentCombo" Margin="0,5,0,12" />
-                                <TextBlock Text="Documento padrão" FontWeight="SemiBold" /><ComboBox x:Name="DefaultDocumentCombo" Margin="0,5,0,12" />
+                                <TextBlock Text="Tipo de nota padrão" FontWeight="SemiBold" /><ComboBox x:Name="DefaultDocumentCombo" Margin="0,5,0,12" />
                                 <TextBlock Text="Razão social" FontWeight="SemiBold" /><TextBox x:Name="LegalNameBox" Margin="0,5,0,12" />
                                 <TextBlock Text="Nome fantasia" FontWeight="SemiBold" /><TextBox x:Name="TradeNameBox" Margin="0,5,0,12" />
                                 <TextBlock Text="CNPJ" FontWeight="SemiBold" /><TextBox x:Name="CnpjBox" Margin="0,5,0,12" />
@@ -105,7 +101,7 @@
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="UF" FontWeight="SemiBold" /><TextBox x:Name="UfBox" MaxLength="2" Margin="0,5,0,12" />
                                 <TextBlock Text="Código IBGE do município" FontWeight="SemiBold" /><TextBox x:Name="CityCodeBox" Margin="0,5,0,12" />
-                                <TextBlock Text="Regime tributário" FontWeight="SemiBold" /><TextBox x:Name="TaxRegimeBox" Margin="0,5,0,12" ToolTip="Informe o código utilizado na configuração fiscal da empresa." />
+                                <TextBlock Text="Regime tributário" FontWeight="SemiBold" /><TextBox x:Name="TaxRegimeBox" Margin="0,5,0,12" />
                                 <TextBlock Text="Telefone (opcional)" FontWeight="SemiBold" /><TextBox x:Name="FiscalPhoneBox" Margin="0,5,0,12" />
                                 <TextBlock Text="E-mail fiscal (opcional)" FontWeight="SemiBold" /><TextBox x:Name="FiscalEmailBox" Margin="0,5,0,12" />
                                 <TextBlock Text="País" FontWeight="SemiBold" /><TextBox x:Name="CountryNameBox" Margin="0,5,0,12" Text="Brasil" />
@@ -113,8 +109,8 @@
                             </StackPanel>
                         </Grid>
 
-                        <Border Height="1" Background="#EAECF0" Margin="0,10,0,16" />
-                        <TextBlock Text="Endereço fiscal do emitente" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" />
+                        <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,10,0,16" />
+                        <TextBlock Text="Endereço da empresa" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" />
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="2*"/><ColumnDefinition Width="12"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel>
@@ -129,8 +125,8 @@
                             </StackPanel>
                         </Grid>
 
-                        <Border Height="1" Background="#EAECF0" Margin="0,10,0,16" />
-                        <TextBlock Text="Numeração, CSC e certificado" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" />
+                        <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,10,0,16" />
+                        <TextBlock Text="Numeração e certificado" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" />
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
                             <StackPanel>
@@ -139,24 +135,24 @@
                                 <TextBlock Text="CSC ID" FontWeight="SemiBold" /><TextBox x:Name="CscIdBox" Margin="0,5,0,12" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Text="Novo CSC (opcional)" FontWeight="SemiBold" /><PasswordBox x:Name="CscTokenBox" Margin="0,5,0,12" ToolTip="Deixe vazio para manter o CSC já salvo." />
-                                <TextBlock Text="Onde usar o certificado" FontWeight="SemiBold" /><ComboBox x:Name="CertificateModeCombo" Margin="0,5,0,12" />
+                                <TextBlock Text="Novo CSC (opcional)" FontWeight="SemiBold" /><PasswordBox x:Name="CscTokenBox" Margin="0,5,0,12" />
+                                <TextBlock Text="Local do certificado" FontWeight="SemiBold" /><ComboBox x:Name="CertificateModeCombo" Margin="0,5,0,12" />
                             </StackPanel>
                         </Grid>
 
-                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                            <Button x:Name="SaveFiscalButton" Content="Salvar configuração fiscal" Width="205" Click="SaveFiscalButton_Click" />
-                            <Button x:Name="ProductTaxButton" Content="Tributação dos produtos" Width="190" Margin="10,0,0,0" Click="ProductTaxButton_Click" />
-                            <Button x:Name="CheckFiscalButton" Content="Verificar prontidão" Width="160" Margin="10,0,0,0" Click="CheckFiscalButton_Click" />
-                        </StackPanel>
-                        <TextBlock x:Name="FiscalReadinessText" Foreground="#667085" TextWrapping="Wrap" Margin="0,10,0,0" />
+                        <WrapPanel Margin="0,8,0,0">
+                            <Button x:Name="SaveFiscalButton" Content="Salvar configuração" Width="180" Click="SaveFiscalButton_Click" />
+                            <Button x:Name="ProductTaxButton" Content="Tributação dos produtos" Width="190" Click="ProductTaxButton_Click" />
+                            <Button x:Name="CheckFiscalButton" Content="Verificar configuração" Width="175" Click="CheckFiscalButton_Click" />
+                        </WrapPanel>
+                        <TextBlock x:Name="FiscalReadinessText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,10,0,0" />
 
-                        <Border Height="1" Background="#EAECF0" Margin="0,22" />
+                        <Border Height="1" Background="{DynamicResource BorderBrush}" Margin="0,22" />
                         <TextBlock Text="Certificado digital A1" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock x:Name="CertificateStatusText" Foreground="#667085" TextWrapping="Wrap" Margin="0,6,0,12" />
+                        <TextBlock x:Name="CertificateStatusText" Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,12" />
                         <DockPanel LastChildFill="True">
-                            <Button x:Name="SelectCertificateButton" Content="Escolher PFX/P12" Width="145" DockPanel.Dock="Left" Click="SelectCertificateButton_Click" />
-                            <TextBlock x:Name="CertificateFileText" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="#667085" TextTrimming="CharacterEllipsis" />
+                            <Button x:Name="SelectCertificateButton" Content="Escolher certificado" Width="155" DockPanel.Dock="Left" Click="SelectCertificateButton_Click" />
+                            <TextBlock x:Name="CertificateFileText" Margin="12,0,0,0" VerticalAlignment="Center" Foreground="{DynamicResource MutedBrush}" TextTrimming="CharacterEllipsis" />
                         </DockPanel>
                         <TextBlock Text="Senha do certificado" FontWeight="SemiBold" Margin="0,12,0,0" />
                         <PasswordBox x:Name="CertificatePasswordBox" Margin="0,5,0,12" />
@@ -167,8 +163,8 @@
         </TabControl>
 
         <DockPanel Grid.Row="2" Margin="0,16,0,0">
-            <TextBlock Text="Alterações são vinculadas à unidade e auditadas pelo servidor." Foreground="#667085" VerticalAlignment="Center" />
-            <Button Content="Fechar" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="CloseButton_Click" />
+            <TextBlock Text="As configurações ficam salvas para esta unidade." Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Center" />
+            <Button Content="Fechar" Style="{StaticResource SecondaryButton}" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="CloseButton_Click" Margin="0" />
         </DockPanel>
     </Grid>
 </Window>
