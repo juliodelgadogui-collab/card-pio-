@@ -61,6 +61,7 @@ public sealed class Order
     [JsonPropertyName("total_cents")] public int TotalCents { get; set; }
     [JsonPropertyName("customer_name")] public string? CustomerName { get; set; }
     [JsonPropertyName("customer_phone")] public string? CustomerPhone { get; set; }
+    [JsonPropertyName("delivery_address")] public string? DeliveryAddress { get; set; }
     [JsonPropertyName("delivery_name")] public string? DeliveryName { get; set; }
     [JsonPropertyName("assigned_delivery_user_id")] public int? AssignedDeliveryUserId { get; set; }
     [JsonPropertyName("table_name")] public string? TableName { get; set; }
