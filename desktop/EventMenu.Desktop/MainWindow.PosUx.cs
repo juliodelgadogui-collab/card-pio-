@@ -132,6 +132,7 @@ public partial class MainWindow
         if (e.Key == Key.F2 && Can("orders_create"))
         {
             ShowView(PosView);
+            SetActiveNavigationByLabel("Nova venda");
             ProductSearchBox.Focus();
             ProductSearchBox.SelectAll();
             e.Handled = true;
