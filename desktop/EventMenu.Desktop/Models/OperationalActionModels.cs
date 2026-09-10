@@ -308,12 +308,5 @@ public sealed class OperationalOrderDetail
 internal static class OperationalDisplay
 {
     public static string Money(int cents) => (cents / 100m).ToString("C2", new CultureInfo("pt-BR"));
-
-    public static string LocalTime(string value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return "";
-        if (DateTimeOffset.TryParse(value, out var offset)) return offset.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
-        if (DateTime.TryParse(value, out var local)) return local.ToString("dd/MM/yyyy HH:mm");
-        return value;
-    }
+    public static string LocalTime(string value) => ServerTimeDisplay.Local(value);
 }
