@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using System.Windows;
 using System.Windows.Input;
@@ -8,22 +9,35 @@ namespace EventMenu.Desktop;
 
 public partial class QrOperationsWindow : Window
 {
+    private readonly SecureSessionStore _store;
     private readonly OperationalActionsApiClient _api;
     private readonly bool _canTables;
     private readonly bool _canTickets;
     private readonly bool _canGuests;
+    private readonly bool _canOrders;
+    private readonly bool _canAssignDelivery;
     private QrResolveResponse? _current;
+    private OperationalOrderDetail? _currentOrder;
     private string _rawValue = "";
     private bool _busy;
 
     public bool OperationChanged { get; private set; }
 
-    public QrOperationsWindow(SecureSessionStore store, bool canTables, bool canTickets, bool canGuests)
+    public QrOperationsWindow(
+        SecureSessionStore store,
+        bool canTables,
+        bool canTickets,
+        bool canGuests,
+        bool canOrders,
+        bool canAssignDelivery)
     {
+        _store = store;
         _api = new OperationalActionsApiClient(store);
         _canTables = canTables;
         _canTickets = canTickets;
         _canGuests = canGuests;
+        _canOrders = canOrders;
+        _canAssignDelivery = canAssignDelivery;
         InitializeComponent();
         Loaded += (_, _) => CodeBox.Focus();
         Closed += (_, _) => _api.Dispose();
@@ -42,17 +56,29 @@ public partial class QrOperationsWindow : Window
 
         _busy = true;
         _rawValue = value;
+        _current = null;
+        _currentOrder = null;
         ActionButton.IsEnabled = false;
         OperationStatusText.Text = "Consultando...";
         try
         {
-            _current = await _api.ResolveQrAsync(value);
-            RenderResult(_current);
+            try
+            {
+                _current = await _api.ResolveQrAsync(value);
+                RenderResult(_current);
+            }
+            catch (ApiClientException ex) when (ex.StatusCode == HttpStatusCode.NotFound && _canOrders)
+            {
+                var orderResponse = await _api.ResolveOrderQrAsync(NormalizeScannedToken(value));
+                _currentOrder = orderResponse.Order ?? throw new InvalidOperationException("Pedido não encontrado para este código.");
+                RenderOrderResult(_currentOrder);
+            }
             OperationStatusText.Text = "Código reconhecido.";
         }
         catch (Exception ex)
         {
             _current = null;
+            _currentOrder = null;
             TypeText.Text = "CÓDIGO NÃO RECONHECIDO";
             ResultTitleText.Text = "Não encontramos este código";
             PrimaryInfoText.Text = "Confira a leitura e tente novamente.";
@@ -148,9 +174,33 @@ public partial class QrOperationsWindow : Window
         }
     }
 
+    private void RenderOrderResult(OperationalOrderDetail order)
+    {
+        TableLabelPanel.Visibility = Visibility.Collapsed;
+        TypeText.Text = "PEDIDO";
+        ResultTitleText.Text = $"Pedido #{order.Id}";
+        PrimaryInfoText.Text = string.IsNullOrWhiteSpace(order.CustomerName) ? order.ChannelDisplay : $"{order.CustomerName} • {order.ChannelDisplay}";
+        SecondaryInfoText.Text = $"{order.TotalDisplay} • {order.PaymentDisplay}";
+        TertiaryInfoText.Text = order.Channel == "delivery" && !string.IsNullOrWhiteSpace(order.DeliveryName)
+            ? $"{order.StatusDisplay} • Entregador: {order.DeliveryName}"
+            : order.StatusDisplay;
+        StateText.Text = order.StatusDisplay;
+        ActionButton.Content = "Abrir pedido";
+        ActionButton.Visibility = Visibility.Visible;
+    }
+
     private async Task ExecuteActionAsync()
     {
-        if (_busy || _current is null) return;
+        if (_busy) return;
+        if (_currentOrder is not null)
+        {
+            var window = new OrderDetailsWindow(_store, _currentOrder.Id, _canAssignDelivery) { Owner = this };
+            window.ShowDialog();
+            OperationChanged |= window.OrderChanged;
+            return;
+        }
+        if (_current is null) return;
+
         _busy = true;
         ActionButton.IsEnabled = false;
         OperationStatusText.Text = "Confirmando...";
