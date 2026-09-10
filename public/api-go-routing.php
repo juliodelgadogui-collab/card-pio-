@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\ClientPolicyService;
 use EventMenu\Services\PlatformFailoverService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -30,9 +31,13 @@ try {
     if ($action !== 'config') routing_out(['ok' => false, 'error' => 'Endpoint de roteamento não encontrado.'], 404);
 
     $service = new PlatformFailoverService();
+    $policySigning = null;
+    try { $policySigning = (new ClientPolicyService())->publicKeyBundle(); } catch (Throwable) {}
+
     routing_out([
         'ok' => true,
         'routing' => $service->routingConfig(),
+        'policy_signing' => $policySigning,
         'served_by' => $service->nodeRole(),
         'server_time' => gmdate('c'),
     ]);
