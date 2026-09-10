@@ -87,9 +87,6 @@ class ApiClient(
         val cacheable = isCacheableRead(path, method, action, token)
         val forWrite = method != "GET"
 
-        // Quando estamos na contingência, fazemos um teste leve do principal no
-        // máximo uma vez por minuto. Se ele voltou, o app retorna a ele antes de
-        // executar a próxima consulta.
         if (!forWrite && runCatching { FailoverEndpointRouter.shouldProbePrimary() }.getOrDefault(false)) {
             FailoverEndpointRouter.markPrimaryProbe()
             val primary = FailoverEndpointRouter.primaryBaseUrl()
@@ -102,6 +99,10 @@ class ApiClient(
         try {
             val result = executeWithRefresh(selectedBase, path, method, action, token, query, body, store)
             if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
+            val routingToken = store?.token()?.takeIf { it.isNotBlank() }
+                ?: token?.takeIf { it.isNotBlank() }
+                ?: result.optString("token").takeIf { it.isNotBlank() }
+            if (path != "api-go-routing.php") maybeRefreshRouting(selectedBase, routingToken)
             if (cacheable) {
                 val scope = cacheScope(store, token)
                 if (scope.isNotBlank()) sharedOfflineCache?.save(scope, requestKey, result)
@@ -120,14 +121,14 @@ class ApiClient(
                     FailoverEndpointRouter.activate(expectedRole)
                     ApiConnectionMonitor.online(expectedRole)
 
-                    // GET é seguro para repetir. Login/refresh também são
-                    // explicitamente tratadas como repetíveis. Demais POSTs não
-                    // são reenviados na mesma tentativa porque a resposta do
-                    // primeiro servidor pode ter se perdido depois da gravação.
                     if (!forWrite || isReplaySafePost(path, action)) {
                         selectedBase = candidate
                         val result = executeWithRefresh(selectedBase, path, method, action, token, query, body, store)
                         if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
+                        val routingToken = store?.token()?.takeIf { it.isNotBlank() }
+                            ?: token?.takeIf { it.isNotBlank() }
+                            ?: result.optString("token").takeIf { it.isNotBlank() }
+                        if (path != "api-go-routing.php") maybeRefreshRouting(selectedBase, routingToken)
                         if (cacheable) {
                             val scope = cacheScope(store, token)
                             if (scope.isNotBlank()) sharedOfflineCache?.save(scope, requestKey, result)
@@ -221,6 +222,19 @@ class ApiClient(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun maybeRefreshRouting(serverBase: String, token: String?) {
+        if (token.isNullOrBlank()) return
+        val now = System.currentTimeMillis()
+        synchronized(routingSyncLock) {
+            if (now - lastRoutingSyncAtMs < 300_000L) return
+            lastRoutingSyncAtMs = now
+        }
+        val root = runCatching {
+            execute(serverBase, "api-go-routing.php", "GET", "config", token, emptyMap(), null)
+        }.getOrNull() ?: return
+        runCatching { FailoverEndpointRouter.updateFromRouting(root) }
     }
 
     private fun routedBase(forWrite: Boolean): String = runCatching {
@@ -342,6 +356,8 @@ class ApiClient(
 
     companion object {
         private val refreshMutex = Mutex()
+        private val routingSyncLock = Any()
+        @Volatile private var lastRoutingSyncAtMs: Long = 0L
         @Volatile private var sharedSessionStore: SecureSessionStore? = null
         @Volatile private var sharedOfflineCache: OfflineReadCache? = null
 
