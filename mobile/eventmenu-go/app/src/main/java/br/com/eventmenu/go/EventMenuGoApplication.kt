@@ -35,6 +35,7 @@ class EventMenuGoApplication : Application() {
         val deviceId=DeviceIdentity.id(this)
         val baseUrl=BuildConfig.API_BASE_URL
         FailoverEndpointRouter.initialize(this,baseUrl)
+        ClientPolicyManager.initialize(this)
         ApiClient.configureSessionStore(store)
         ApiClient.configureOfflineCache(OfflineReadCache(this))
         repository=EventMenuRepository(baseUrl,deviceId,store)
