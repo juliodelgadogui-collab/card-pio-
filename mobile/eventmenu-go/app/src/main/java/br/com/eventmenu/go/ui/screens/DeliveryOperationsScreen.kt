@@ -131,23 +131,43 @@ fun DeliveryOperationsScreen(
                                     if (whatsAppLoadingOrderId != null) return@OutlinedButton
                                     whatsAppLoadingOrderId = order.id
                                     scope.launch {
-                                        val items = runCatching { app.orderOperationsRepository.detail(order.id).items }.getOrElse {
-                                            Toast.makeText(
-                                                context,
-                                                "Não foi possível carregar os itens. Abrindo o WhatsApp sem o resumo do pedido.",
-                                                Toast.LENGTH_SHORT,
-                                            ).show()
-                                            emptyList()
+                                        try {
+                                            val items = runCatching { app.orderOperationsRepository.detail(order.id).items }.getOrElse {
+                                                Toast.makeText(
+                                                    context,
+                                                    "Não foi possível carregar os itens. O WhatsApp será aberto sem o resumo do pedido.",
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                                emptyList()
+                                            }
+                                            val trackingUrl = runCatching {
+                                                app.deliveryProgressRepository.trackingLink(order.id)
+                                            }.getOrNull()?.trim()?.takeIf {
+                                                it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true)
+                                            }
+                                            val message = deliveryWhatsAppMessage(
+                                                customerName = customer,
+                                                items = items,
+                                                trackingUrl = trackingUrl,
+                                                routeStarted = routeStarted,
+                                                arrived = arrived,
+                                            )
+                                            if (!openWhatsApp(context, phone, message)) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "Não foi possível abrir o WhatsApp neste aparelho.",
+                                                    Toast.LENGTH_LONG,
+                                                ).show()
+                                            } else if (trackingUrl == null) {
+                                                Toast.makeText(
+                                                    context,
+                                                    "WhatsApp aberto. O link de rastreio não pôde ser carregado agora.",
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            }
+                                        } finally {
+                                            whatsAppLoadingOrderId = null
                                         }
-                                        val message = deliveryArrivalMessage(customer, items)
-                                        if (!openWhatsApp(context, phone, message)) {
-                                            Toast.makeText(
-                                                context,
-                                                "Não foi possível abrir o WhatsApp neste aparelho.",
-                                                Toast.LENGTH_LONG,
-                                            ).show()
-                                        }
-                                        whatsAppLoadingOrderId = null
                                     }
                                 },
                                 enabled = whatsAppLoadingOrderId == null,
@@ -174,10 +194,15 @@ fun DeliveryOperationsScreen(
 
                     if (routeStarted) {
                         if (address != null) {
+                            Text("Navegação", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(onClick = { openGoogleMaps(context, address) }, modifier = Modifier.weight(1f)) { Text("Google Maps") }
                                 OutlinedButton(onClick = { openWaze(context, address) }, modifier = Modifier.weight(1f)) { Text("Waze") }
                             }
+                            Text(
+                                "A navegação abre no mapa do aparelho para usar trânsito, voz e recálculo de rota.",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
 
                         if (!arrived) {
@@ -374,7 +399,13 @@ private fun openDialer(context: Context, phone: String) {
     context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + Uri.encode(phone))))
 }
 
-private fun deliveryArrivalMessage(customerName: String?, items: List<OrderDetailItem>): String {
+private fun deliveryWhatsAppMessage(
+    customerName: String?,
+    items: List<OrderDetailItem>,
+    trackingUrl: String?,
+    routeStarted: Boolean,
+    arrived: Boolean,
+): String {
     val customer = deliveryUseful(customerName)?.takeIf { !it.equals("Consumidor", true) }
     val greeting = customer?.let { "Olá, $it!" } ?: "Olá!"
     val summary = items
@@ -382,11 +413,19 @@ private fun deliveryArrivalMessage(customerName: String?, items: List<OrderDetai
         .joinToString(", ") { item ->
             "${deliveryItemQuantity(item.quantity)}x ${item.name.trim()}"
         }
-    return if (summary.isNotBlank()) {
-        "$greeting Estou chegando com seu pedido: $summary."
-    } else {
-        "$greeting Estou chegando com seu pedido."
+
+    val statusText = when {
+        arrived -> "Cheguei com seu pedido"
+        routeStarted -> "Estou a caminho com seu pedido"
+        else -> "Estou saindo com seu pedido"
     }
+
+    val orderText = if (summary.isNotBlank()) "$statusText: $summary." else "$statusText."
+    val trackingText = trackingUrl?.let {
+        "\n\n🛵 Acompanhe sua entrega em tempo real:\n$it"
+    }.orEmpty()
+
+    return "$greeting $orderText$trackingText"
 }
 
 private fun deliveryItemQuantity(quantity: Double): String {
