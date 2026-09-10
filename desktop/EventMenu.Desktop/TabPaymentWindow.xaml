@@ -33,9 +33,11 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel>
                         <TextBlock Text="Como deseja receber?" FontSize="19" FontWeight="SemiBold" />
-                        <TextBlock Text="O servidor calcula o valor final e impede duas cobranças ao mesmo tempo." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,18" />
+                        <TextBlock Text="Escolha como dividir a conta. O valor da cobrança é calculado automaticamente." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,5,0,18" />
 
-                        <TextBlock Text="Dividir por" Style="{StaticResource FieldLabel}" />
+                        <Button x:Name="ProductSplitButton" Content="Dividir por produtos" Style="{StaticResource SecondaryButton}" Click="ProductSplitButton_Click" Margin="0,0,0,16" ToolTip="Escolher produtos específicos desta comanda" />
+
+                        <TextBlock Text="Ou dividir por" Style="{StaticResource FieldLabel}" />
                         <ComboBox x:Name="SplitTypeCombo" Height="42" Margin="0,0,0,14" SelectionChanged="SplitTypeCombo_SelectionChanged">
                             <ComboBoxItem Content="Valor" Tag="value" />
                             <ComboBoxItem Content="Percentual" Tag="percentage" />
@@ -83,7 +85,7 @@
                     </ScrollViewer>
 
                     <Border Grid.Row="3" Background="#F8FAFC" CornerRadius="10" Padding="12" Margin="0,14,0,0">
-                        <TextBlock x:Name="ServerStatusText" Text="A confirmação final sempre vem do servidor." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ServerStatusText" Text="Aguardando pagamento." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
                     </Border>
                 </Grid>
             </Border>
