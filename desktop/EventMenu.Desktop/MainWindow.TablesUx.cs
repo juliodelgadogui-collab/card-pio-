@@ -26,7 +26,7 @@ public partial class MainWindow
                 Padding = new Thickness(14, 8, 14, 8),
                 Margin = new Thickness(0, 0, 8, 0),
                 Style = TryFindResource("SecondaryButton") as Style,
-                ToolTip = "Ver as mesas em cartões"
+                ToolTip = "Ver mesas, comandas e valores em aberto"
             };
             DockPanel.SetDock(_tableBoardButton, Dock.Right);
             _tableBoardButton.Click += TableBoardButton_Click;
@@ -47,16 +47,22 @@ public partial class MainWindow
 
     private async void TableBoardButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_api is null || !Can("tables")) return;
+        if (_api is null || _store is null || !Can("tables")) return;
         if (!ShiftIs("operation"))
         {
             MessageBox.Show("Inicie um turno de Operação para abrir a visão do salão.", "Mesas e comandas", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        var window = new TableBoardWindow(_api) { Owner = this };
+        var window = new TableBoardWindow(_api, _store, Can("payments"), Can("cash")) { Owner = this };
         window.ShowDialog();
-        if (window.Changed) await TryLoadTablesAsync(false);
+        if (window.Changed)
+        {
+            await TryLoadTablesAsync(false);
+            await TryLoadOrdersAsync(false);
+            if (Can("cash")) await TryLoadCashAsync(false);
+            RefreshDashboardUx();
+        }
     }
 
     private void DisposeTablesUx()
