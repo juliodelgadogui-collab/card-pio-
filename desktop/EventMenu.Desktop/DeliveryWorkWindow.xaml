@@ -8,7 +8,7 @@
         <DockPanel Margin="0,0,0,16">
             <StackPanel DockPanel.Dock="Left">
                 <TextBlock Text="Minhas entregas" Style="{StaticResource PageTitle}"/>
-                <TextBlock Text="Retire o pedido, inicie a rota, confirme a chegada e conclua a entrega. Recebimentos em dinheiro ficam registrados no turno." Style="{StaticResource PageSubtitle}" TextWrapping="Wrap"/>
+                <TextBlock Text="Retire o pedido, inicie a rota, confirme a chegada, receba o pagamento quando necessário e conclua a entrega." Style="{StaticResource PageSubtitle}" TextWrapping="Wrap"/>
             </StackPanel>
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                 <Button x:Name="HandoffButton" Content="Repassar dinheiro" Style="{StaticResource SecondaryButton}" Click="HandoffButton_Click"/>
@@ -41,11 +41,12 @@
                         <Button x:Name="PickupButton" Content="Retirar pedido" IsEnabled="False" Click="PickupButton_Click"/>
                         <Button x:Name="StartRouteButton" Content="Iniciar rota" IsEnabled="False" Click="StartRouteButton_Click"/>
                         <Button x:Name="ArriveButton" Content="Cheguei" IsEnabled="False" Click="ArriveButton_Click"/>
+                        <Button x:Name="ReceivePixButton" Content="Receber por Pix" IsEnabled="False" Click="ReceivePixButton_Click"/>
                         <Button x:Name="ReceiveCashButton" Content="Receber em dinheiro" IsEnabled="False" Click="ReceiveCashButton_Click"/>
                         <Button x:Name="CompleteButton" Content="Concluir entrega" IsEnabled="False" Click="CompleteButton_Click"/>
                         <Button x:Name="TrackingButton" Content="Acompanhamento do cliente" Style="{StaticResource SecondaryButton}" IsEnabled="False" Click="TrackingButton_Click"/>
                         <Border Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,12,0,0">
-                            <TextBlock Text="O GPS em tempo real continua vindo do EventMenu GO no celular do entregador. O computador acompanha a operação, mas não substitui a localização do aparelho." Foreground="#1D4ED8" TextWrapping="Wrap"/>
+                            <TextBlock Text="A localização da entrega é enviada pelo celular do entregador quando o acompanhamento estiver ativo." Foreground="#1D4ED8" TextWrapping="Wrap"/>
                         </Border>
                     </StackPanel>
                 </ScrollViewer>
