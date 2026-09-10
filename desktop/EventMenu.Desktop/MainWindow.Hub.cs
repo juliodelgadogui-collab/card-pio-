@@ -76,7 +76,7 @@ public partial class MainWindow
         {
             Content="Ler QR / código",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Ler mesa, ingresso, convidado ou outro código autorizado"
+            ToolTip="Ler pedido, mesa, ingresso ou convidado"
         };
         _qrNavButton.Click+=async(_,_)=>await OpenQrOperationsAsync();
 
@@ -143,7 +143,7 @@ public partial class MainWindow
         if(_deliveryMonitorButton is not null)
             _deliveryMonitorButton.Visibility=(Can("delivery_assign")||Can("reports"))?Visibility.Visible:Visibility.Collapsed;
         if(_qrNavButton is not null)
-            _qrNavButton.Visibility=(Can("tables")||Can("tickets")||Can("guests")||Can("orders_create"))?Visibility.Visible:Visibility.Collapsed;
+            _qrNavButton.Visibility=(Can("tables")||Can("tickets")||Can("guests")||Can("orders_create")||Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign"))?Visibility.Visible:Visibility.Collapsed;
         if(_fiscalNavButton is not null)
             _fiscalNavButton.Visibility=(Can("fiscal_manage")||Can("fiscal_issue"))?Visibility.Visible:Visibility.Collapsed;
         if(_hubNavButton is not null)
@@ -257,7 +257,8 @@ public partial class MainWindow
         var canTables=Can("tables")||Can("orders_create");
         var canTickets=Can("tickets");
         var canGuests=Can("guests");
-        if(!canTables&&!canTickets&&!canGuests)return;
+        var canOrders=Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign");
+        if(!canTables&&!canTickets&&!canGuests&&!canOrders)return;
         if(!HasShift)
         {
             MessageBox.Show("Inicie um turno antes de usar a leitura de códigos.","Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Information);
@@ -266,9 +267,13 @@ public partial class MainWindow
 
         try
         {
-            var window=new QrOperationsWindow(_store,canTables,canTickets,canGuests){Owner=this};
+            var window=new QrOperationsWindow(_store,canTables,canTickets,canGuests,canOrders,Can("delivery_assign")){Owner=this};
             window.ShowDialog();
-            if(window.OperationChanged&&canTables&&ShiftIs("operation"))await TryLoadTablesAsync(false);
+            if(window.OperationChanged)
+            {
+                await TryLoadOrdersAsync(false);
+                if(canTables&&ShiftIs("operation"))await TryLoadTablesAsync(false);
+            }
         }
         catch(Exception ex){MessageBox.Show(ex.Message,"Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Warning);}
     }
