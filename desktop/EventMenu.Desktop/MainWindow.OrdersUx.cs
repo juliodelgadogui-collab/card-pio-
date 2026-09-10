@@ -22,6 +22,7 @@ public partial class MainWindow
     {
         if (_ordersUxReady) return;
         _ordersUxReady = true;
+        EnsureDashboardUx();
 
         if (OrdersGrid.Columns.Count >= 7)
         {
@@ -238,6 +239,7 @@ public partial class MainWindow
         PreviewKeyDown -= MainWindow_OrdersPreviewKeyDown;
         _ordersItemsSourceDescriptor?.RemoveValueChanged(OrdersGrid, OrdersGrid_ItemsSourceChanged);
         _ordersItemsSourceDescriptor = null;
+        DisposeDashboardUx();
         _ordersUxReady = false;
     }
 }
