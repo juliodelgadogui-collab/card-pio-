@@ -34,7 +34,7 @@
                         <Border Style="{StaticResource Card}" Padding="16" Margin="0,0,8,0"><StackPanel><TextBlock Text="Receita ingressos" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="TicketRevenueText" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel></Border>
                         <Border Style="{StaticResource Card}" Padding="16"><StackPanel><TextBlock Text="Receita bar" Style="{StaticResource FieldLabel}"/><TextBlock x:Name="BarRevenueText" Text="—" FontSize="22" FontWeight="SemiBold"/></StackPanel></Border>
                     </UniformGrid>
-                    <Border Grid.Row="1" Style="{StaticResource Card}" Padding="12">
+                    <Border x:Name="RecentEntriesCard" Grid.Row="1" Style="{StaticResource Card}" Padding="12">
                         <Grid><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
                             <TextBlock Text="Entradas recentes" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,10"/>
                             <DataGrid Grid.Row="1" x:Name="RecentEntriesGrid" IsReadOnly="True" AutoGenerateColumns="False">
