@@ -47,6 +47,10 @@ final class MaintenanceService
         // O principal verifica o nó adicional a cada execução do cron. No servidor
         // de contingência o próprio serviço retorna "skipped", evitando loops.
         try{$result['contingency_probe']=(new PlatformFailoverService())->probeSecondary();}catch(\Throwable$e){$result['contingency_probe']=['status'=>'error','message'=>mb_substr($e->getMessage(),0,250)];}
+        // Políticas Android/Windows e roteamento são reenviados no máximo a cada
+        // 5 minutos quando o nó adicional está verificado. Alterações salvas no
+        // painel também tentam sincronização imediata.
+        try{$result['contingency_control_plane']=(new ClusterControlPlaneSchedulerService())->syncIfDue(300);}catch(\Throwable$e){$result['contingency_control_plane']=['status'=>'error','message'=>mb_substr($e->getMessage(),0,250)];}
 
         try{$jobs=new BackgroundJobService();$jobs->enqueue('backup.daily',[],null,'backup:'.gmdate('Y-m-d'),null,2);$result['jobs']=$jobs->runBatch(max(1,(int)env('QUEUE_BATCH_SIZE',40)),'cron');$result['job_cleanup']=$jobs->purge();}catch(\Throwable$e){$result['jobs']=['error'=>mb_substr($e->getMessage(),0,300)];}
         try{
