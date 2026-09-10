@@ -101,6 +101,10 @@ public sealed class EventMenuApiClient : IDisposable
 
     public Task<DesktopContextResponse> GoContextAsync(CancellationToken ct = default) => GetAsync<DesktopContextResponse>("api-go.php", "context", null, ct);
     public Task<UnitsResponse> UnitsAsync(CancellationToken ct = default) => GetAsync<UnitsResponse>("api-go-units.php", "list", null, ct);
+    public Task<ShiftSummaryResponse> ShiftSummaryAsync(CancellationToken ct = default) => GetAsync<ShiftSummaryResponse>("api-go.php", "shift-summary", null, ct);
+    public Task<UnassignedDeliveriesResponse> UnassignedDeliveriesAsync(CancellationToken ct = default) => GetAsync<UnassignedDeliveriesResponse>("api-go-units.php", "delivery-unassigned", null, ct);
+    public Task<UnitRoutingMutationResponse> AssignDeliveryUnitAsync(int orderId, int unitId, CancellationToken ct = default) =>
+        PostAsync<UnitRoutingMutationResponse>("api-go-units.php", "delivery-assign-unit", new { order_id = orderId, unit_id = unitId }, ct);
     public Task<ShiftResponse> ShiftOpenAsync(string mode, int? unitId, CancellationToken ct = default) =>
         PostAsync<ShiftResponse>("api-go-units.php", "shift-open", new { mode, unit_id = unitId }, ct);
     public Task<ShiftResponse> ShiftCloseAsync(string notes = "", CancellationToken ct = default) =>
