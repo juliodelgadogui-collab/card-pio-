@@ -16,6 +16,7 @@ final class ApiAuthService
 
     public function login(string $email,string $password,string $deviceId,string $deviceLabel=''):array
     {
+        (new ClientPolicyGateService())->assertCurrentRequestAllowed();
         $email=mb_strtolower(trim($email));$deviceId=trim($deviceId);$deviceLabel=mb_substr(trim($deviceLabel),0,120);
         if(!filter_var($email,FILTER_VALIDATE_EMAIL)||$password==='')throw new RuntimeException('Credenciais inválidas.');
         if(strlen($deviceId)<8)throw new RuntimeException('Identificador do aparelho inválido.');
@@ -34,6 +35,7 @@ final class ApiAuthService
 
     public function refresh(string $rawRefreshToken,string $deviceId):array
     {
+        (new ClientPolicyGateService())->assertCurrentRequestAllowed();
         $rawRefreshToken=trim($rawRefreshToken);$deviceId=trim($deviceId);if(strlen($rawRefreshToken)<32||strlen($deviceId)<8)throw new RuntimeException('Refresh token ou aparelho inválido.');
         $hash=hash('sha256',$rawRefreshToken);$deviceHash=hash('sha256',$deviceId);$pdo=Database::connection();
         $stmt=$pdo->prepare('SELECT rt.*,u.name,u.email,u.role,u.status user_status,t.status tenant_status,t.name tenant_name FROM api_refresh_tokens rt JOIN users u ON u.id=rt.user_id JOIN tenants t ON t.id=rt.tenant_id WHERE rt.token_hash=? LIMIT 1');$stmt->execute([$hash]);$row=$stmt->fetch();
@@ -53,6 +55,7 @@ final class ApiAuthService
 
     public function authenticate(string $rawToken,string $deviceId):array
     {
+        (new ClientPolicyGateService())->assertCurrentRequestAllowed();
         $rawToken=trim($rawToken);$deviceId=trim($deviceId);if(strlen($rawToken)<32)throw new RuntimeException('Token inválido.');
         $hash=hash('sha256',$rawToken);$pdo=Database::connection();$stmt=$pdo->prepare('SELECT at.id token_id,at.device_hash,at.expires_at,u.*,t.status tenant_status,t.name tenant_name FROM api_tokens at JOIN users u ON u.id=at.user_id JOIN tenants t ON t.id=at.tenant_id WHERE at.token_hash=? AND at.revoked_at IS NULL LIMIT 1');$stmt->execute([$hash]);$user=$stmt->fetch();
         if(!$user||$user['status']!=='active'||$user['tenant_status']!=='active'||strtotime((string)$user['expires_at'])<time())throw new RuntimeException('Sessão do app expirada ou revogada.');
