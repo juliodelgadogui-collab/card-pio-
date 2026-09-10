@@ -1,0 +1,267 @@
+using System.Text.Json;
+using System.Windows;
+using System.Windows.Input;
+using EventMenu.Desktop.Models;
+using EventMenu.Desktop.Services;
+
+namespace EventMenu.Desktop;
+
+public partial class QrOperationsWindow : Window
+{
+    private readonly OperationalActionsApiClient _api;
+    private readonly bool _canTables;
+    private readonly bool _canTickets;
+    private readonly bool _canGuests;
+    private QrResolveResponse? _current;
+    private string _rawValue = "";
+    private bool _busy;
+
+    public bool OperationChanged { get; private set; }
+
+    public QrOperationsWindow(SecureSessionStore store, bool canTables, bool canTickets, bool canGuests)
+    {
+        _api = new OperationalActionsApiClient(store);
+        _canTables = canTables;
+        _canTickets = canTickets;
+        _canGuests = canGuests;
+        InitializeComponent();
+        Loaded += (_, _) => CodeBox.Focus();
+        Closed += (_, _) => _api.Dispose();
+    }
+
+    private async Task ResolveAsync()
+    {
+        if (_busy) return;
+        var value = CodeBox.Text.Trim();
+        if (value.Length == 0)
+        {
+            OperationStatusText.Text = "Leia ou informe um código.";
+            CodeBox.Focus();
+            return;
+        }
+
+        _busy = true;
+        _rawValue = value;
+        ActionButton.IsEnabled = false;
+        OperationStatusText.Text = "Consultando...";
+        try
+        {
+            _current = await _api.ResolveQrAsync(value);
+            RenderResult(_current);
+            OperationStatusText.Text = "Código reconhecido.";
+        }
+        catch (Exception ex)
+        {
+            _current = null;
+            TypeText.Text = "CÓDIGO NÃO RECONHECIDO";
+            ResultTitleText.Text = "Não encontramos este código";
+            PrimaryInfoText.Text = "Confira a leitura e tente novamente.";
+            SecondaryInfoText.Text = "";
+            TertiaryInfoText.Text = "";
+            StateText.Text = "Atenção";
+            TableLabelPanel.Visibility = Visibility.Collapsed;
+            ActionButton.Visibility = Visibility.Collapsed;
+            OperationStatusText.Text = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            UpdateActionAvailability();
+        }
+    }
+
+    private void RenderResult(QrResolveResponse response)
+    {
+        var data = response.Data;
+        TableLabelPanel.Visibility = Visibility.Collapsed;
+        ActionButton.Visibility = Visibility.Collapsed;
+
+        switch (response.Type)
+        {
+            case "table":
+            {
+                var name = Text(data, "name", "Mesa");
+                var status = Text(data, "status", "");
+                var tabId = Number(data, "tab_id");
+                var tabLabel = Text(data, "tab_label", "");
+                TypeText.Text = "MESA / COMANDA";
+                ResultTitleText.Text = name;
+                PrimaryInfoText.Text = tabId > 0 ? "Existe uma comanda aberta nesta mesa." : "Mesa pronta para atendimento.";
+                SecondaryInfoText.Text = tabId > 0
+                    ? $"Comanda: {(string.IsNullOrWhiteSpace(tabLabel) ? $"#{tabId}" : tabLabel)}"
+                    : "Você pode abrir uma nova comanda diretamente daqui.";
+                TertiaryInfoText.Text = string.IsNullOrWhiteSpace(status) ? "" : $"Situação: {FriendlyTableStatus(status)}";
+                StateText.Text = tabId > 0 ? "Em atendimento" : "Livre";
+                if (tabId <= 0 && _canTables)
+                {
+                    TableLabelPanel.Visibility = Visibility.Visible;
+                    ActionButton.Content = "Abrir comanda";
+                    ActionButton.Visibility = Visibility.Visible;
+                }
+                break;
+            }
+            case "ticket":
+            {
+                var eventName = Text(data, "event_name", "Evento");
+                var customer = Text(data, "customer_name", "Participante não informado");
+                var status = Text(data, "status", "");
+                TypeText.Text = "INGRESSO";
+                ResultTitleText.Text = eventName;
+                PrimaryInfoText.Text = customer;
+                SecondaryInfoText.Text = $"Ingresso: {Text(data, "code", "")}";
+                TertiaryInfoText.Text = string.IsNullOrWhiteSpace(status) ? "" : $"Situação: {FriendlyEntryStatus(status)}";
+                StateText.Text = FriendlyEntryStatus(status);
+                if (_canTickets && !EntryAlreadyUsed(status))
+                {
+                    ActionButton.Content = "Confirmar entrada";
+                    ActionButton.Visibility = Visibility.Visible;
+                }
+                break;
+            }
+            case "guest":
+            {
+                var eventName = Text(data, "event_name", "Evento");
+                var guestName = Text(data, "name", "Convidado");
+                var status = Text(data, "status", "");
+                var plusOnes = Number(data, "plus_ones");
+                TypeText.Text = "CONVIDADO";
+                ResultTitleText.Text = eventName;
+                PrimaryInfoText.Text = guestName;
+                SecondaryInfoText.Text = plusOnes > 0 ? $"Acompanhantes permitidos: {plusOnes}" : "Sem acompanhantes cadastrados.";
+                TertiaryInfoText.Text = string.IsNullOrWhiteSpace(status) ? "" : $"Situação: {FriendlyEntryStatus(status)}";
+                StateText.Text = FriendlyEntryStatus(status);
+                if (_canGuests && !EntryAlreadyUsed(status))
+                {
+                    ActionButton.Content = "Confirmar entrada";
+                    ActionButton.Visibility = Visibility.Visible;
+                }
+                break;
+            }
+            default:
+                TypeText.Text = "CÓDIGO";
+                ResultTitleText.Text = "Código reconhecido";
+                PrimaryInfoText.Text = "Este código foi reconhecido, mas não possui uma ação disponível nesta versão.";
+                SecondaryInfoText.Text = "";
+                TertiaryInfoText.Text = "";
+                StateText.Text = "Reconhecido";
+                break;
+        }
+    }
+
+    private async Task ExecuteActionAsync()
+    {
+        if (_busy || _current is null) return;
+        _busy = true;
+        ActionButton.IsEnabled = false;
+        OperationStatusText.Text = "Confirmando...";
+        try
+        {
+            switch (_current.Type)
+            {
+                case "table":
+                {
+                    if (!_canTables) return;
+                    var tableId = Number(_current.Data, "id");
+                    if (tableId < 1) throw new InvalidOperationException("Mesa inválida.");
+                    await _api.OpenTableAsync(tableId, TableLabelBox.Text.Trim());
+                    OperationChanged = true;
+                    OperationStatusText.Text = "Comanda aberta com sucesso.";
+                    break;
+                }
+                case "ticket":
+                    if (!_canTickets) return;
+                    await _api.TicketCheckInAsync(_rawValue);
+                    OperationChanged = true;
+                    OperationStatusText.Text = "Entrada confirmada.";
+                    break;
+                case "guest":
+                    if (!_canGuests) return;
+                    await _api.GuestCheckInAsync(_rawValue);
+                    OperationChanged = true;
+                    OperationStatusText.Text = "Entrada do convidado confirmada.";
+                    break;
+                default:
+                    return;
+            }
+
+            await ResolveAsyncAfterAction();
+        }
+        catch (Exception ex)
+        {
+            OperationStatusText.Text = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            UpdateActionAvailability();
+        }
+    }
+
+    private async Task ResolveAsyncAfterAction()
+    {
+        try
+        {
+            _current = await _api.ResolveQrAsync(_rawValue);
+            RenderResult(_current);
+        }
+        catch
+        {
+            ActionButton.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void UpdateActionAvailability()
+    {
+        ActionButton.IsEnabled = !_busy && ActionButton.Visibility == Visibility.Visible;
+    }
+
+    private static string Text(Dictionary<string, JsonElement> data, string key, string fallback)
+    {
+        if (!data.TryGetValue(key, out var value) || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined) return fallback;
+        var text = value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString();
+        return string.IsNullOrWhiteSpace(text) ? fallback : text!;
+    }
+
+    private static int Number(Dictionary<string, JsonElement> data, string key)
+    {
+        if (!data.TryGetValue(key, out var value)) return 0;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
+        return int.TryParse(value.ToString(), out number) ? number : 0;
+    }
+
+    private static bool EntryAlreadyUsed(string status) => status.Equals("used", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("checked_in", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("checked-in", StringComparison.OrdinalIgnoreCase)
+        || status.Equals("cancelled", StringComparison.OrdinalIgnoreCase);
+
+    private static string FriendlyEntryStatus(string status) => status.ToLowerInvariant() switch
+    {
+        "valid" => "Liberado",
+        "active" => "Liberado",
+        "pending" => "Aguardando",
+        "used" => "Entrada realizada",
+        "checked_in" => "Entrada realizada",
+        "checked-in" => "Entrada realizada",
+        "cancelled" => "Cancelado",
+        _ when string.IsNullOrWhiteSpace(status) => "Reconhecido",
+        _ => status
+    };
+
+    private static string FriendlyTableStatus(string status) => status.ToLowerInvariant() switch
+    {
+        "available" => "Livre",
+        "occupied" => "Ocupada",
+        "inactive" => "Inativa",
+        _ => status
+    };
+
+    private async void ResolveButton_Click(object sender, RoutedEventArgs e) => await ResolveAsync();
+    private async void ActionButton_Click(object sender, RoutedEventArgs e) => await ExecuteActionAsync();
+    private async void CodeBox_PreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Enter) return;
+        e.Handled = true;
+        await ResolveAsync();
+    }
+    private void CloseButton_Click(object sender, RoutedEventArgs e) => Close();
+}
