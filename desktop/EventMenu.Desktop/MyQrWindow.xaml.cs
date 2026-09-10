@@ -6,21 +6,19 @@ namespace EventMenu.Desktop;
 
 public partial class MyQrWindow : Window
 {
-    private readonly SecureSessionStore _sessionStore;
     private readonly UniversalQrApiClient _api;
     private readonly LocalUserQrStore _localStore;
     private readonly UserInfo _user;
-    private readonly bool _deliveryUser;
+    private readonly string _qrType;
     private LocalUserQrState? _state;
     private bool _busy;
 
     public MyQrWindow(SecureSessionStore sessionStore, bool deliveryUser)
     {
-        _sessionStore = sessionStore;
         _api = new UniversalQrApiClient(sessionStore);
         _localStore = new LocalUserQrStore();
         _user = sessionStore.Load()?.User ?? throw new InvalidOperationException("Faça login novamente.");
-        _deliveryUser = deliveryUser;
+        _qrType = deliveryUser ? "delivery_user" : "employee";
         InitializeComponent();
         Loaded += (_, _) => LoadView();
         Closed += (_, _) => _api.Dispose();
@@ -31,7 +29,7 @@ public partial class MyQrWindow : Window
         NameText.Text = string.IsNullOrWhiteSpace(_user.Name) ? "Meu usuário" : _user.Name;
         RoleText.Text = RoleLabel(_user.Role);
         CompanyText.Text = string.IsNullOrWhiteSpace(_user.TenantName) ? "EventMenu" : _user.TenantName;
-        _state = _localStore.Load(_user.Id);
+        _state = _localStore.Load(_user.TenantId, _user.Id, _qrType);
         RenderState();
     }
 
@@ -88,13 +86,13 @@ public partial class MyQrWindow : Window
         StatusText.Text = "Gerando seu QR...";
         try
         {
-            var type = _deliveryUser ? "delivery_user" : "employee";
-            var response = await _api.IssueAsync(type, _user.Id, _user.Name, 720);
+            var response = await _api.IssueAsync(_qrType, _user.Id, _user.Name, 720);
             var qr = response.Qr ?? throw new InvalidOperationException("Não foi possível gerar o QR.");
             if (string.IsNullOrWhiteSpace(qr.Payload)) throw new InvalidOperationException("O QR foi criado sem conteúdo válido.");
 
             _state = new LocalUserQrState
             {
+                TenantId = _user.TenantId,
                 Type = qr.Type,
                 EntityId = qr.EntityId,
                 Label = qr.Label,
