@@ -94,7 +94,7 @@ public partial class MainWindow
         {
             Content="Ler QR / código",
             HorizontalContentAlignment=HorizontalAlignment.Left,
-            ToolTip="Ler pedido, mesa, ingresso ou convidado"
+            ToolTip="Ler pedido, mesa, ingresso, convidado ou repasse de entrega"
         };
         _qrNavButton.Click+=async(_,_)=>await OpenQrOperationsAsync();
 
@@ -167,7 +167,7 @@ public partial class MainWindow
         if(_notificationsNavButton is not null)
             _notificationsNavButton.Visibility=ShellPanel.Visibility==Visibility.Visible?Visibility.Visible:Visibility.Collapsed;
         if(_qrNavButton is not null)
-            _qrNavButton.Visibility=(Can("tables")||Can("tickets")||Can("guests")||Can("orders_create")||Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign"))?Visibility.Visible:Visibility.Collapsed;
+            _qrNavButton.Visibility=(Can("tables")||Can("tickets")||Can("guests")||Can("orders_create")||Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign")||Can("cash"))?Visibility.Visible:Visibility.Collapsed;
         if(_fiscalNavButton is not null)
             _fiscalNavButton.Visibility=(Can("fiscal_manage")||Can("fiscal_issue"))?Visibility.Visible:Visibility.Collapsed;
         if(_hubNavButton is not null)
@@ -329,7 +329,8 @@ public partial class MainWindow
         var canTickets=Can("tickets");
         var canGuests=Can("guests");
         var canOrders=Can("orders_view")||Can("orders_manage")||Can("orders_dispatch")||Can("delivery_assign");
-        if(!canTables&&!canTickets&&!canGuests&&!canOrders)return;
+        var canCash=Can("cash");
+        if(!canTables&&!canTickets&&!canGuests&&!canOrders&&!canCash)return;
         if(!HasShift)
         {
             MessageBox.Show("Inicie um turno antes de usar a leitura de códigos.","Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Information);
@@ -346,12 +347,14 @@ public partial class MainWindow
                 canOrders,
                 Can("delivery_assign"),
                 Can("discount_request"),
-                Can("cancellation_request")){Owner=this};
+                Can("cancellation_request"),
+                canCash){Owner=this};
             window.ShowDialog();
             if(window.OperationChanged)
             {
-                await TryLoadOrdersAsync(false);
+                if(canOrders)await TryLoadOrdersAsync(false);
                 if(canTables&&ShiftIs("operation"))await TryLoadTablesAsync(false);
+                if(canCash)await TryLoadCashAsync(false);
             }
         }
         catch(Exception ex){MessageBox.Show(ex.Message,"Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Warning);}
@@ -393,8 +396,7 @@ public partial class MainWindow
         if(ShellPanel.Visibility!=Visibility.Visible||_store is null||_api is null)return;
         if(!HasShift)
         {
-            MessageBox.Show("Inicie um turno para conectar o celular a esta unidade.","Conectar celular",MessageBoxButton.OK,MessageBoxImage.Information);
-            return;
+            MessageBox.Show("Inicie um turno para conectar o celular a esta unidade.","Conectar celular",MessageBoxButton.OK,MessageBoxImage.Information);return;
         }
         var unitId=ShiftInt("unit_id");if(unitId<1){MessageBox.Show("Selecione uma unidade antes de conectar o celular.","Conectar celular",MessageBoxButton.OK,MessageBoxImage.Warning);return;}
         try
@@ -417,8 +419,7 @@ public partial class MainWindow
         if(!Can("hardware_manage"))return;
         if(!HasShift)
         {
-            MessageBox.Show("Inicie um turno para escolher a unidade que será configurada.","Configurações",MessageBoxButton.OK,MessageBoxImage.Information);
-            return;
+            MessageBox.Show("Inicie um turno para escolher a unidade que será configurada.","Configurações",MessageBoxButton.OK,MessageBoxImage.Information);return;
         }
         var unitId=ShiftInt("unit_id");if(unitId<1)return;
         try
