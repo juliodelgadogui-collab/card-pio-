@@ -30,7 +30,7 @@ public partial class MainWindow
 
         _deliveryWorkButton = CreateParityButton(
             "Minhas entregas",
-            "Retirada, rota, chegada e conclusão das entregas atribuídas",
+            "Retirada, rota, chegada, recebimento e conclusão das entregas atribuídas",
             async () => await OpenDeliveryWorkAsync());
 
         _managerCenterButton = CreateParityButton(
@@ -191,6 +191,7 @@ public partial class MainWindow
         {
             var window = new EventOperationsWindow(
                 _store,
+                Can("events"),
                 Can("tickets"),
                 Can("guests"),
                 Can("event_bar"),
