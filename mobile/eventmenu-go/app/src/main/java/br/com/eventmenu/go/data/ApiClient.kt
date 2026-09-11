@@ -70,6 +70,25 @@ class ApiClient(
     suspend fun getInventory(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-inventory.php", "GET", action, token, query, null)
     suspend fun getExpedition(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-expedition.php", "GET", action, token, query, null)
 
+    /**
+     * Primeira raiz de confiança do APK. Esta consulta ignora o roteador e vai
+     * exclusivamente para a URL principal compilada no aplicativo. Assim o
+     * contingência nunca consegue trocar a chave pública usada para validar as
+     * políticas remotas. O transporte HTTPS continua sendo obrigatório.
+     */
+    suspend fun bootstrapControlPlane(): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val compiledPrimary = baseUrl.trimEnd('/')
+        val root = runCatching {
+            execute(compiledPrimary, "api-app-config.php", "GET", "bootstrap", null, emptyMap(), null)
+        }.getOrNull() ?: return@withContext false
+        if (!root.optString("served_by").equals("primary", ignoreCase = true)) return@withContext false
+
+        acceptRoutingFromPrimary(root)
+        val envelope = root.optJSONObject("policy_android")
+        if (envelope != null) runCatching { ClientPolicyManager.applyEnvelope(envelope) }
+        true
+    }
+
     suspend fun refreshRouting(token: String) {
         val root = request("api-go-routing.php", "GET", "config", token, emptyMap(), null)
         acceptRoutingFromPrimary(root)
@@ -320,7 +339,7 @@ class ApiClient(
         path == "api.php" && action in setOf("login", "refresh")
 
     private fun policyExempt(path: String, action: String): Boolean =
-        path == "api-client-policy.php" || path == "api-go-routing.php" ||
+        path in setOf("api-app-config.php", "api-client-policy.php", "api-go-routing.php") ||
             (path == "api.php" && action == "logout")
 
     private fun friendlyError(message: String, status: Int): String {
@@ -381,7 +400,7 @@ class ApiClient(
     private fun isCacheableRead(path: String, method: String, action: String, token: String?): Boolean {
         if (method != "GET" || token.isNullOrBlank()) return false
         if (path == "api-go-events.php" && action == "bar-order-resolve") return false
-        if (path in setOf("api-hub.php", "api-go-expedition.php", "api-go-inventory.php", "api-go-routing.php", "api-client-policy.php")) return false
+        if (path in setOf("api-hub.php", "api-go-expedition.php", "api-go-inventory.php", "api-go-routing.php", "api-client-policy.php", "api-app-config.php")) return false
         return path in CACHEABLE_PATHS
     }
 
@@ -392,7 +411,7 @@ class ApiClient(
         @Volatile private var sharedSessionStore: SecureSessionStore? = null
         @Volatile private var sharedOfflineCache: OfflineReadCache? = null
 
-        private val CONTROL_PLANE_PATHS = setOf("api-go-routing.php", "api-client-policy.php")
+        private val CONTROL_PLANE_PATHS = setOf("api-app-config.php", "api-go-routing.php", "api-client-policy.php")
 
         private val CACHEABLE_PATHS = setOf(
             "api-go.php",
