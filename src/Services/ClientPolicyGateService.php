@@ -65,6 +65,12 @@ final class ClientPolicyGateService
                 throw new RuntimeException('Assinatura deste aplicativo/programa não está autorizada.');
             }
         }
+
+        $feature = $this->featureForCurrentEndpoint();
+        $features = is_array($policy['features'] ?? null) ? $policy['features'] : [];
+        if ($feature !== null && $features !== [] && empty($features[$feature])) {
+            throw new RuntimeException('Este recurso foi desativado remotamente pelo administrador: ' . $feature . '.');
+        }
     }
 
     /** @return array<string,mixed> */
@@ -125,10 +131,21 @@ final class ClientPolicyGateService
         $now = time();
         if ($issuedAt > $now + self::CLOCK_SKEW_SECONDS) return false;
         if ($expiresAt < $now - self::CLOCK_SKEW_SECONDS) return false;
-        // O servidor principal limita o TTL a 7 dias. Impede que um cache
-        // adulterado mantenha uma autorização assinada fora da janela esperada.
         if ($expiresAt - $issuedAt > 604800 + self::CLOCK_SKEW_SECONDS) return false;
         return true;
+    }
+
+    private function featureForCurrentEndpoint(): ?string
+    {
+        $script = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+        return match ($script) {
+            'api-hub.php' => 'hub',
+            'api-go-delivery.php' => 'delivery',
+            'api-go-expedition.php' => 'expedition',
+            'api-go-inventory.php' => 'inventory_alerts',
+            'api-go-events.php' => 'events',
+            default => null,
+        };
     }
 
     private function versionCore(string $value): string
