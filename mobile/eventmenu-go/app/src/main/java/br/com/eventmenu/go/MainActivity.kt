@@ -32,7 +32,10 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.data.ApiConnectionMonitor
 import br.com.eventmenu.go.data.ApiConnectivity
+import br.com.eventmenu.go.data.ApiServerRole
 import br.com.eventmenu.go.data.AppMode
+import br.com.eventmenu.go.data.ClientPolicyManager
+import br.com.eventmenu.go.data.FailoverEndpointRouter
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.navigation.AppDeepLinkTarget
 import br.com.eventmenu.go.navigation.AppDeepLinks
@@ -64,6 +67,8 @@ class MainActivity : FragmentActivity() {
             )
             val state by vm.state.collectAsState()
             val connectivity by ApiConnectionMonitor.state.collectAsState()
+            val serverRole by ApiConnectionMonitor.serverRole.collectAsState()
+            val policyState by ClientPolicyManager.state.collectAsState()
             var brand by remember { mutableStateOf(app.brandRepository.cached()) }
 
             LaunchedEffect(state.session?.user?.id) {
@@ -94,6 +99,24 @@ class MainActivity : FragmentActivity() {
                 pendingDeepLink = null
             }
 
+            val policyBlock = if (policyState.trusted) ClientPolicyManager.blockReason(BuildConfig.VERSION_NAME) else null
+            val recommendedUpdate = if (policyState.trusted) ClientPolicyManager.recommendedUpdate(BuildConfig.VERSION_NAME) else null
+            val bannerText = when {
+                connectivity == ApiConnectivity.OFFLINE -> if (state.session != null) {
+                    "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
+                } else {
+                    "Sem conexão com os servidores · verifique sua internet."
+                }
+                policyBlock != null -> policyBlock
+                serverRole == ApiServerRole.CONTINGENCY -> if (FailoverEndpointRouter.contingencyWritable()) {
+                    "Servidor de contingência ativo · operação online pelo servidor adicional."
+                } else {
+                    "Servidor de contingência ativo · modo somente leitura."
+                }
+                recommendedUpdate != null -> "Atualização recomendada do EventMenu GO: versão $recommendedUpdate."
+                else -> null
+            }
+
             EventMenuTheme(brand) {
                 Box(Modifier.fillMaxSize()) {
                     EventMenuGoHubShell(
@@ -102,21 +125,18 @@ class MainActivity : FragmentActivity() {
                         onBiometric = { authenticateBiometric(vm) },
                         onTapOn = ::launchTapOn,
                     )
-                    if (connectivity == ApiConnectivity.OFFLINE) {
+                    if (bannerText != null) {
+                        val errorBanner = policyBlock != null
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .align(Alignment.TopCenter),
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            color = if (errorBanner) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = if (errorBanner) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onTertiaryContainer,
                             tonalElevation = 3.dp,
                         ) {
                             Text(
-                                text = if (state.session != null) {
-                                    "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
-                                } else {
-                                    "Sem conexão com o servidor · verifique sua internet."
-                                },
+                                text = bannerText,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
                                 style = MaterialTheme.typography.labelMedium,
                             )
