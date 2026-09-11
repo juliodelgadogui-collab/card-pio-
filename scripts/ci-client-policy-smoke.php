@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../app/bootstrap.php';
 
+use EventMenu\Core\Crypto;
 use EventMenu\Core\Database;
 use EventMenu\Services\ClientPolicyGateService;
 use EventMenu\Services\ClientPolicyService;
@@ -66,6 +67,47 @@ try {
     $blocked = str_contains($e->getMessage(), 'Atualização obrigatória');
 }
 cp_assert($blocked, 'Gate não bloqueou cliente abaixo da versão mínima.');
+
+// O contingência não pode continuar autorizando clientes com uma política antiga
+// só porque a assinatura ainda é criptograficamente válida.
+$signing = $pdo->query('SELECT private_key_encrypted FROM platform_policy_signing WHERE id=1')->fetch();
+cp_assert(is_array($signing) && !empty($signing['private_key_encrypted']), 'Chave privada de teste não encontrada.');
+$expiredPayload = $payload;
+$expiredPayload['issued_at'] = gmdate('c', time() - 7200);
+$expiredPayload['expires_at'] = gmdate('c', time() - 3600);
+$expiredRaw = json_encode($expiredPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+$expiredSignature = '';
+cp_assert(openssl_sign($expiredRaw, $expiredSignature, Crypto::decrypt((string)$signing['private_key_encrypted']), OPENSSL_ALGO_SHA256), 'Não foi possível assinar envelope expirado de teste.');
+$service->cacheEnvelope('android', [
+    'ok' => true,
+    'service' => 'eventmenu-client-policy',
+    'algorithm' => 'RS256',
+    'key_id' => (string)$key['key_id'],
+    'payload_b64' => base64_encode($expiredRaw),
+    'signature_b64' => base64_encode($expiredSignature),
+    'payload' => $expiredPayload,
+]);
+
+$previousRole = getenv('EVENTMENU_NODE_ROLE');
+putenv('EVENTMENU_NODE_ROLE=contingency');
+$_ENV['EVENTMENU_NODE_ROLE'] = 'contingency';
+$_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.2.0';
+$expiredBlocked = false;
+try {
+    (new ClientPolicyGateService())->assertCurrentRequestAllowed();
+} catch (RuntimeException $e) {
+    $expiredBlocked = str_contains($e->getMessage(), 'Autorização remota indisponível') || str_contains($e->getMessage(), 'expirada');
+}
+cp_assert($expiredBlocked, 'Contingência aceitou política assinada expirada.');
+
+if ($previousRole === false || $previousRole === '') {
+    putenv('EVENTMENU_NODE_ROLE');
+    unset($_ENV['EVENTMENU_NODE_ROLE']);
+} else {
+    putenv('EVENTMENU_NODE_ROLE=' . $previousRole);
+    $_ENV['EVENTMENU_NODE_ROLE'] = $previousRole;
+}
+$service->cacheEnvelope('android', $envelope);
 
 unset($_SERVER['HTTP_X_EVENTMENU_CLIENT'], $_SERVER['HTTP_X_EVENTMENU_VERSION'], $_SERVER['HTTP_X_EVENTMENU_SIGNING_FINGERPRINT']);
 echo "client-policy smoke ok\n";
