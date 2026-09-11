@@ -59,6 +59,19 @@ $_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.2.0';
 $_SERVER['HTTP_X_EVENTMENU_SIGNING_FINGERPRINT'] = $fingerprint;
 (new ClientPolicyGateService())->assertCurrentRequestAllowed();
 
+$originalScriptName = (string)($_SERVER['SCRIPT_NAME'] ?? '');
+$_SERVER['SCRIPT_NAME'] = '/1/api-go-delivery.php';
+(new ClientPolicyGateService())->assertCurrentRequestAllowed();
+$_SERVER['SCRIPT_NAME'] = '/1/api-hub.php';
+$featureBlocked = false;
+try {
+    (new ClientPolicyGateService())->assertCurrentRequestAllowed();
+} catch (RuntimeException $e) {
+    $featureBlocked = str_contains($e->getMessage(), 'recurso foi desativado') && str_contains($e->getMessage(), 'hub');
+}
+cp_assert($featureBlocked, 'Gate não bloqueou API do Hub desativada pela política remota.');
+$_SERVER['SCRIPT_NAME'] = $originalScriptName;
+
 $_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.1.9';
 $blocked = false;
 try {
@@ -110,4 +123,5 @@ if ($previousRole === false || $previousRole === '') {
 $service->cacheEnvelope('android', $envelope);
 
 unset($_SERVER['HTTP_X_EVENTMENU_CLIENT'], $_SERVER['HTTP_X_EVENTMENU_VERSION'], $_SERVER['HTTP_X_EVENTMENU_SIGNING_FINGERPRINT']);
+if ($originalScriptName === '') unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $originalScriptName;
 echo "client-policy smoke ok\n";
