@@ -32,6 +32,8 @@ object ClientPolicyManager {
     private const val KEY_SIGNATURE_B64 = "signature_b64"
     private const val KEY_ENVELOPE_KEY_ID = "envelope_key_id"
     private const val KEY_ALGORITHM = "algorithm"
+    private const val CLOCK_SKEW_MS = 5L * 60L * 1000L
+    private const val MAX_POLICY_TTL_MS = 7L * 24L * 60L * 60L * 1000L
 
     data class State(
         val trusted: Boolean = false,
@@ -100,7 +102,7 @@ object ClientPolicyManager {
         }
 
         val parsed = verifyAndParse(algorithm, keyId, payloadB64, signatureB64, publicPem) ?: run {
-            _state.value = _state.value.copy(lastError = "Assinatura da política remota inválida.")
+            _state.value = _state.value.copy(lastError = "Política remota inválida, expirada ou com assinatura incorreta.")
             return false
         }
 
@@ -120,7 +122,7 @@ object ClientPolicyManager {
     fun blockReason(currentVersion: String): String? {
         val policy = _state.value
         if (!policy.trusted) return null
-        if (policy.expiresAtMs > 0 && System.currentTimeMillis() > policy.expiresAtMs) return null
+        if (policy.expiresAtMs > 0 && System.currentTimeMillis() > policy.expiresAtMs + CLOCK_SKEW_MS) return null
         if (!policy.signingAllowed) return "A assinatura deste EventMenu GO não está autorizada."
         if (!policy.enabled) return "Este EventMenu GO foi desativado pelo administrador."
         if (policy.maintenance) return policy.maintenanceMessage.ifBlank { "EventMenu GO temporariamente em manutenção." }
@@ -130,8 +132,19 @@ object ClientPolicyManager {
         return null
     }
 
+    fun recommendedUpdate(currentVersion: String): String? {
+        val policy = _state.value
+        if (!policy.trusted || policy.recommendedVersion.isBlank()) return null
+        if (policy.expiresAtMs > 0 && System.currentTimeMillis() > policy.expiresAtMs + CLOCK_SKEW_MS) return null
+        return policy.recommendedVersion.takeIf { isBelowVersion(currentVersion, it) }
+    }
+
     fun featureEnabled(name: String, defaultWhenUnspecified: Boolean = true): Boolean {
-        val features = _state.value.features
+        val policy = _state.value
+        if (!policy.trusted || (policy.expiresAtMs > 0 && System.currentTimeMillis() > policy.expiresAtMs + CLOCK_SKEW_MS)) {
+            return defaultWhenUnspecified
+        }
+        val features = policy.features
         if (features.isEmpty()) return defaultWhenUnspecified
         return features[name] ?: false
     }
@@ -155,7 +168,7 @@ object ClientPolicyManager {
             return
         }
         val parsed = verifyAndParse(algorithm, keyId, payload, signature, publicPem)
-        _state.value = (parsed ?: State(lastError = "Política local descartada por assinatura inválida.")).copy(signingFingerprint = fingerprint)
+        _state.value = (parsed ?: State(lastError = "Política local descartada por estar inválida ou expirada.")).copy(signingFingerprint = fingerprint)
     }
 
     private fun verifyAndParse(
@@ -185,6 +198,14 @@ object ClientPolicyManager {
         val receivedCluster = payload.optString("cluster_id").trim()
         if (expectedCluster.isNotBlank() && receivedCluster.isNotBlank() && expectedCluster != receivedCluster) return@runCatching null
 
+        val issuedAtMs = parseIsoMillis(payload.optString("issued_at"))
+        val expiresAtMs = parseIsoMillis(payload.optString("expires_at"))
+        val now = System.currentTimeMillis()
+        if (issuedAtMs <= 0L || expiresAtMs <= issuedAtMs) return@runCatching null
+        if (issuedAtMs > now + CLOCK_SKEW_MS) return@runCatching null
+        if (expiresAtMs < now - CLOCK_SKEW_MS) return@runCatching null
+        if (expiresAtMs - issuedAtMs > MAX_POLICY_TTL_MS + CLOCK_SKEW_MS) return@runCatching null
+
         val featureObject = payload.optJSONObject("features") ?: JSONObject()
         val features = buildMap {
             val keys = featureObject.keys()
@@ -210,7 +231,7 @@ object ClientPolicyManager {
             recommendedVersion = payload.optString("recommended_version"),
             features = features,
             configVersion = payload.optLong("config_version", 0L),
-            expiresAtMs = parseIsoMillis(payload.optString("expires_at")),
+            expiresAtMs = expiresAtMs,
             signingAllowed = signingAllowed,
             signingFingerprint = _state.value.signingFingerprint,
             lastError = "",
@@ -238,7 +259,10 @@ object ClientPolicyManager {
         val formats = listOf("yyyy-MM-dd'T'HH:mm:ssXXX", "yyyy-MM-dd'T'HH:mm:ss'Z'")
         for (pattern in formats) {
             val parsed = runCatching {
-                SimpleDateFormat(pattern, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(value)?.time ?: 0L
+                SimpleDateFormat(pattern, Locale.US).apply {
+                    timeZone = TimeZone.getTimeZone("UTC")
+                    isLenient = false
+                }.parse(value)?.time ?: 0L
             }.getOrDefault(0L)
             if (parsed > 0L) return parsed
         }
