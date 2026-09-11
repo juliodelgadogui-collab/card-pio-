@@ -24,6 +24,7 @@ import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.HubViewModel
 import br.com.eventmenu.go.MainViewModel
+import br.com.eventmenu.go.data.ClientPolicyManager
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.HubDialog
 import kotlinx.coroutines.delay
@@ -38,11 +39,13 @@ fun EventMenuGoHubShell(
     val context = LocalContext.current
     val app = context.applicationContext as EventMenuGoApplication
     val state by viewModel.state.collectAsState()
+    val policyState by ClientPolicyManager.state.collectAsState()
     val hubViewModel: HubViewModel = composeViewModel(factory = HubViewModel.Factory(app.hubRepository))
     val hubState by hubViewModel.state.collectAsState()
     var showHub by remember { mutableStateOf(false) }
     val permissions = state.session?.permissions.orEmpty()
-    val canUseHub = permissions.any {
+    val hubFeatureEnabled = if (policyState.trusted) ClientPolicyManager.featureEnabled("hub", true) else true
+    val canUseHub = hubFeatureEnabled && permissions.any {
         it in setOf(
             "orders_view",
             "orders_create",
@@ -58,12 +61,13 @@ fun EventMenuGoHubShell(
 
     // O ViewModel do Hub vive no escopo da Activity. Limpar explicitamente quando
     // muda usuário, tenant, turno ou unidade impede que vínculos/comandos da sessão
-    // anterior apareçam por alguns instantes para o próximo operador.
+    // anterior apareçam por alguns instantes para o próximo operador. A política
+    // remota também pode desligar o Hub sem exigir nova compilação.
     val sessionUserId = state.session?.user?.id
     val sessionTenantId = state.session?.user?.tenantId
     val shiftId = state.workShift?.id
     val unitId = state.workShift?.unitId
-    LaunchedEffect(sessionUserId, sessionTenantId, shiftId, unitId) {
+    LaunchedEffect(sessionUserId, sessionTenantId, shiftId, unitId, hubFeatureEnabled) {
         showHub = false
         hubViewModel.reset()
     }
