@@ -6,6 +6,10 @@ import br.com.eventmenu.go.notifications.FirebasePushCoordinator
 import br.com.eventmenu.go.notifications.OperationNotificationScheduler
 import br.com.eventmenu.go.security.DeviceIdentity
 import br.com.eventmenu.go.security.SecureSessionStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class EventMenuGoApplication : Application() {
     lateinit var repository:EventMenuRepository;private set
@@ -28,6 +32,8 @@ class EventMenuGoApplication : Application() {
     lateinit var hubRepository:HubRepository;private set
     lateinit var pushCoordinator:FirebasePushCoordinator;private set
 
+    private val bootstrapScope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
+
     override fun onCreate(){
         super.onCreate()
         instance=this
@@ -38,6 +44,15 @@ class EventMenuGoApplication : Application() {
         ClientPolicyManager.initialize(this)
         ApiClient.configureSessionStore(store)
         ApiClient.configureOfflineCache(OfflineReadCache(this))
+
+        // Consulta exclusivamente a URL principal compilada. Isso permite obter
+        // antes do login a chave pública de política, a rota de contingência já
+        // verificada e o manifesto Android assinado, sem confiar no nó reserva
+        // para substituir a raiz de confiança.
+        bootstrapScope.launch{
+            runCatching{ApiClient(baseUrl,deviceId,store).bootstrapControlPlane()}
+        }
+
         repository=EventMenuRepository(baseUrl,deviceId,store)
         eventRepository=EventOperationsRepository(baseUrl,deviceId,store)
         eventBarRepository=EventBarRepository(baseUrl,deviceId,store)
