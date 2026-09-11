@@ -9,6 +9,8 @@ use Throwable;
 
 final class ClientPolicyGateService
 {
+    private const CLOCK_SKEW_SECONDS = 300;
+
     /**
      * Aplica a política central quando a chamada declara ser de um cliente
      * EventMenu conhecido. Chamadas web tradicionais continuam inalteradas.
@@ -18,12 +20,20 @@ final class ClientPolicyGateService
         $platform = strtolower(trim((string)($_SERVER['HTTP_X_EVENTMENU_CLIENT'] ?? '')));
         if (!in_array($platform, ['android', 'windows'], true)) return;
 
+        $nodeRole = 'primary';
+        try { $nodeRole = (new PlatformFailoverService())->nodeRole(); } catch (Throwable) {}
+
         try {
             $service = new ClientPolicyService();
             $policy = $this->effectivePolicy($service, $platform);
-        } catch (Throwable) {
-            // Compatibilidade durante a primeira atualização: antes da migration
-            // 105 existir, não bloqueia todo o sistema.
+        } catch (Throwable $e) {
+            // No principal preserva compatibilidade durante a primeira atualização,
+            // quando a migration 105 ainda pode não existir. No contingência não
+            // fazemos fail-open: um cache ausente, corrompido ou expirado não pode
+            // liberar um APK/Windows que o principal já tenha bloqueado.
+            if ($nodeRole === 'contingency') {
+                throw new RuntimeException('Autorização remota indisponível ou expirada no servidor de contingência. Tente o servidor principal.', 0, $e);
+            }
             return;
         }
 
@@ -65,7 +75,10 @@ final class ClientPolicyGateService
             $settings = $failover->get();
             if ((string)($settings['mode'] ?? 'read_only') === 'read_only') {
                 $cached = $this->verifiedCachedPolicy($service, $platform);
-                if ($cached !== null) return $cached;
+                if ($cached === null) {
+                    throw new RuntimeException('Política assinada ausente, inválida ou expirada.');
+                }
+                return $cached;
             }
         }
         return $service->get($platform);
@@ -87,6 +100,8 @@ final class ClientPolicyGateService
 
         $payload = json_decode($payloadRaw, true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($payload) || (string)($payload['platform'] ?? '') !== $platform) return null;
+        if (!$this->validEnvelopeWindow($payload)) return null;
+
         return [
             'platform' => $platform,
             'enabled' => !empty($payload['enabled']),
@@ -97,8 +112,23 @@ final class ClientPolicyGateService
             'features' => is_array($payload['features'] ?? null) ? $payload['features'] : [],
             'allowed_signing_fingerprints' => is_array($payload['allowed_signing_fingerprints'] ?? null) ? array_values($payload['allowed_signing_fingerprints']) : [],
             'config_version' => (int)($payload['config_version'] ?? 0),
-            'ttl_seconds' => 86400,
+            'ttl_seconds' => max(300, min(604800, (int)($payload['ttl_seconds'] ?? 86400))),
         ];
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function validEnvelopeWindow(array $payload): bool
+    {
+        $issuedAt = strtotime(trim((string)($payload['issued_at'] ?? '')));
+        $expiresAt = strtotime(trim((string)($payload['expires_at'] ?? '')));
+        if ($issuedAt === false || $expiresAt === false || $expiresAt <= $issuedAt) return false;
+        $now = time();
+        if ($issuedAt > $now + self::CLOCK_SKEW_SECONDS) return false;
+        if ($expiresAt < $now - self::CLOCK_SKEW_SECONDS) return false;
+        // O servidor principal limita o TTL a 7 dias. Impede que um cache
+        // adulterado mantenha uma autorização assinada fora da janela esperada.
+        if ($expiresAt - $issuedAt > 604800 + self::CLOCK_SKEW_SECONDS) return false;
+        return true;
     }
 
     private function versionCore(string $value): string
