@@ -160,8 +160,8 @@ final class ClusterSyncService
         if (empty($publicKey['key_id']) || empty($publicKey['public_key_pem'])) throw new RuntimeException('Chave pública de política ausente.');
 
         $policyService = new ClientPolicyService();
-        $this->verifyEnvelope($policies['android'] ?? null, 'android', $publicKey);
-        $this->verifyEnvelope($policies['windows'] ?? null, 'windows', $publicKey);
+        $this->verifyEnvelope($policies['android'] ?? null, 'android', $publicKey, $clusterId);
+        $this->verifyEnvelope($policies['windows'] ?? null, 'windows', $publicKey, $clusterId);
         $policyService->cacheKeyBundle([
             'key_id' => (string)$publicKey['key_id'],
             'public_key_pem' => (string)$publicKey['public_key_pem'],
@@ -183,7 +183,7 @@ final class ClusterSyncService
     }
 
     /** @param mixed $envelope @param array<string,mixed> $publicKey */
-    private function verifyEnvelope(mixed $envelope, string $platform, array $publicKey): void
+    private function verifyEnvelope(mixed $envelope, string $platform, array $publicKey, string $expectedClusterId): void
     {
         if (!is_array($envelope)) throw new RuntimeException('Política ' . $platform . ' ausente.');
         if ((string)($envelope['algorithm'] ?? '') !== 'RS256') throw new RuntimeException('Algoritmo de política inválido.');
@@ -193,6 +193,14 @@ final class ClusterSyncService
         if ($payloadRaw === false || $signature === false) throw new RuntimeException('Política assinada corrompida.');
         $payload = json_decode($payloadRaw, true, 512, JSON_THROW_ON_ERROR);
         if (!is_array($payload) || (string)($payload['platform'] ?? '') !== $platform) throw new RuntimeException('Política de plataforma inválida.');
+        if (!hash_equals($expectedClusterId, trim((string)($payload['cluster_id'] ?? '')))) throw new RuntimeException('Política assinada pertence a outro cluster.');
+        $issuedAt = strtotime(trim((string)($payload['issued_at'] ?? '')));
+        $expiresAt = strtotime(trim((string)($payload['expires_at'] ?? '')));
+        if ($issuedAt === false || $expiresAt === false || $expiresAt <= $issuedAt) throw new RuntimeException('Janela de validade da política é inválida.');
+        $now = time();
+        if ($issuedAt > $now + 300) throw new RuntimeException('Política emitida no futuro além da tolerância permitida.');
+        if ($expiresAt < $now - 300) throw new RuntimeException('Política sincronizada já está expirada.');
+        if ($expiresAt - $issuedAt > 605100) throw new RuntimeException('Validade da política excede o limite permitido.');
         $ok = openssl_verify($payloadRaw, $signature, (string)$publicKey['public_key_pem'], OPENSSL_ALGO_SHA256);
         if ($ok !== 1) throw new RuntimeException('Assinatura digital da política ' . $platform . ' é inválida.');
     }
