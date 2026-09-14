@@ -8,6 +8,7 @@ use EventMenu\Core\Crypto;
 use EventMenu\Core\Database;
 use EventMenu\Services\ClientPolicyGateService;
 use EventMenu\Services\ClientPolicyService;
+use EventMenu\Services\ClientReleaseService;
 
 function cp_assert(bool $condition, string $message): void
 {
@@ -17,6 +18,7 @@ function cp_assert(bool $condition, string $message): void
 $pdo = Database::connection();
 $pdo->query('SELECT 1 FROM platform_client_policies LIMIT 1');
 $pdo->query('SELECT 1 FROM platform_policy_signing LIMIT 1');
+$pdo->query('SELECT 1 FROM platform_client_releases LIMIT 1');
 
 $_SESSION['user_id'] = 999999;
 $_SESSION['tenant_id'] = null;
@@ -27,6 +29,7 @@ unset($_SESSION['acting_tenant_id']);
 $fingerprintHex = str_repeat('AB', 32);
 $fingerprint = implode(':', str_split($fingerprintHex, 2));
 $service = new ClientPolicyService();
+$releaseService = new ClientReleaseService();
 $policy = $service->save('android', [
     'enabled' => true,
     'maintenance' => false,
@@ -36,9 +39,17 @@ $policy = $service->save('android', [
     'features' => ['delivery' => true, 'hub' => false],
     'allowed_signing_fingerprints' => [$fingerprint],
 ]);
+$release = $releaseService->save('android', [
+    'published' => true,
+    'version' => '0.3.0',
+    'download_url' => 'https://updates.example.test/EventMenu-GO-0.3.0.apk',
+    'sha256' => str_repeat('CD', 32),
+    'release_notes' => 'Atualização de teste assinada pelo control plane.',
+]);
 cp_assert($policy['platform'] === 'android', 'Política Android não foi salva.');
 cp_assert(!empty($policy['enabled']), 'Política Android ficou desativada.');
 cp_assert(($policy['features']['delivery'] ?? false) === true, 'Feature delivery não foi persistida.');
+cp_assert(!empty($release['published']) && $release['version'] === '0.3.0', 'Distribuição Android não foi salva.');
 
 $envelope = $service->signedEnvelope('android');
 cp_assert(($envelope['algorithm'] ?? '') === 'RS256', 'Envelope não usa RS256.');
@@ -53,6 +64,23 @@ $payload = json_decode($payloadRaw, true, 512, JSON_THROW_ON_ERROR);
 cp_assert(($payload['platform'] ?? '') === 'android', 'Payload assinou plataforma errada.');
 cp_assert(($payload['min_version'] ?? '') === '0.2.0', 'Versão mínima ausente do payload.');
 cp_assert(!empty($payload['expires_at']), 'Expiração ausente do payload.');
+cp_assert(($payload['release']['published'] ?? false) === true, 'Atualização publicada não entrou no manifesto assinado.');
+cp_assert(($payload['release']['version'] ?? '') === '0.3.0', 'Versão da atualização ausente do manifesto.');
+cp_assert(($payload['release']['download_url'] ?? '') === 'https://updates.example.test/EventMenu-GO-0.3.0.apk', 'URL da atualização divergente.');
+cp_assert(($payload['release']['sha256'] ?? '') === str_repeat('CD', 32), 'SHA-256 da atualização divergente.');
+
+$invalidReleaseBlocked = false;
+try {
+    $releaseService->save('windows', [
+        'published' => true,
+        'version' => '1.0.0',
+        'download_url' => 'http://inseguro.example.test/EventMenu.exe',
+        'sha256' => str_repeat('EF', 32),
+    ]);
+} catch (RuntimeException $e) {
+    $invalidReleaseBlocked = str_contains($e->getMessage(), 'HTTPS');
+}
+cp_assert($invalidReleaseBlocked, 'Distribuição aceitou URL de atualização sem HTTPS.');
 
 $_SERVER['HTTP_X_EVENTMENU_CLIENT'] = 'android';
 $_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.2.0';
