@@ -34,6 +34,8 @@ jobs:
           test -f app/src/main/java/br/com/eventmenu/go/data/ExpeditionStatusRepository.kt
           test -f app/src/main/java/br/com/eventmenu/go/data/FailoverEndpointRouter.kt
           test -f app/src/main/java/br/com/eventmenu/go/data/ClientPolicyManager.kt
+          test -f app/src/main/java/br/com/eventmenu/go/updates/AppUpdateInstaller.kt
+          test -f app/src/main/res/xml/eventmenu_update_paths.xml
           test -f app/src/main/java/br/com/eventmenu/go/location/DeliveryLocationService.kt
           test -f app/src/main/java/br/com/eventmenu/go/location/DeliveryLocationBuffer.kt
           test -f app/src/main/java/br/com/eventmenu/go/location/LocationPermissionActivity.kt
@@ -47,13 +49,16 @@ jobs:
           grep -q 'ClientPolicyManager.initialize' app/src/main/java/br/com/eventmenu/go/EventMenuGoApplication.kt
           grep -q 'releaseUrl' app/src/main/java/br/com/eventmenu/go/data/ClientPolicyManager.kt
           grep -q 'releaseSha256' app/src/main/java/br/com/eventmenu/go/data/ClientPolicyManager.kt
-          grep -q 'Toque para baixar' app/src/main/java/br/com/eventmenu/go/MainActivity.kt
+          grep -q 'AppUpdateInstaller' app/src/main/java/br/com/eventmenu/go/MainActivity.kt
+          grep -q 'repeatOnLifecycle' app/src/main/java/br/com/eventmenu/go/MainActivity.kt
+          grep -q 'REQUEST_INSTALL_PACKAGES' app/src/main/AndroidManifest.xml
+          grep -q 'FileProvider' app/src/main/AndroidManifest.xml
           grep -q 'ClientPolicyManager.featureEnabled("hub"' app/src/main/java/br/com/eventmenu/go/ui/EventMenuGoHubShell.kt
           grep -q 'ApiServerRole.CONTINGENCY' app/src/main/java/br/com/eventmenu/go/MainActivity.kt
           grep -q 'trackingLink(order.id)' app/src/main/java/br/com/eventmenu/go/ui/screens/DeliveryOperationsScreen.kt
           grep -q 'WhatsApp' app/src/main/java/br/com/eventmenu/go/ui/screens/DeliveryOperationsScreen.kt
           grep -q 'DeliveryLocationService' app/src/main/java/br/com/eventmenu/go/DeliveryProgressViewModel.kt
-          echo "EventMenu GO mobile-sync + failover + signed policy + remote release sources OK"
+          echo "EventMenu GO mobile-sync + failover + signed policy + verified updater + GPS sources OK"
 
       - uses: actions/setup-java@v4
         with:
