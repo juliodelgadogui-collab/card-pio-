@@ -46,6 +46,7 @@ object ClientPolicyManager {
         val recommendedVersion: String = "",
         val features: Map<String, Boolean> = emptyMap(),
         val configVersion: Long = 0L,
+        val issuedAtMs: Long = 0L,
         val expiresAtMs: Long = 0L,
         val signingAllowed: Boolean = true,
         val signingFingerprint: String = "",
@@ -53,6 +54,7 @@ object ClientPolicyManager {
         val releaseUrl: String = "",
         val releaseSha256: String = "",
         val releaseNotes: String = "",
+        val releaseConfigVersion: Long = 0L,
         val lastError: String = "",
     )
 
@@ -112,8 +114,17 @@ object ClientPolicyManager {
             return false
         }
 
+        // Bloqueia replay/rollback de um manifesto antigo ainda dentro do TTL.
+        // A release tem versão de configuração própria porque pode mudar sem que
+        // a política geral precise ser editada no mesmo momento.
         val current = _state.value
-        if (parsed.configVersion in 1 until current.configVersion && current.trusted) return false
+        if (current.trusted) {
+            if (parsed.configVersion < current.configVersion) return false
+            if (parsed.configVersion == current.configVersion) {
+                if (parsed.releaseConfigVersion < current.releaseConfigVersion) return false
+                if (parsed.releaseConfigVersion == current.releaseConfigVersion && parsed.issuedAtMs < current.issuedAtMs) return false
+            }
+        }
 
         prefs.edit()
             .putString(KEY_ALGORITHM, algorithm)
@@ -248,6 +259,7 @@ object ClientPolicyManager {
             recommendedVersion = payload.optString("recommended_version"),
             features = features,
             configVersion = payload.optLong("config_version", 0L),
+            issuedAtMs = issuedAtMs,
             expiresAtMs = expiresAtMs,
             signingAllowed = signingAllowed,
             signingFingerprint = _state.value.signingFingerprint,
@@ -255,6 +267,7 @@ object ClientPolicyManager {
             releaseUrl = if (validRelease) validReleaseUrl.orEmpty() else "",
             releaseSha256 = if (validRelease) validReleaseSha.orEmpty() else "",
             releaseNotes = if (validRelease) release?.optString("release_notes").orEmpty().take(1000) else "",
+            releaseConfigVersion = release?.optLong("config_version", 0L) ?: 0L,
             lastError = "",
         )
     }.getOrNull()
