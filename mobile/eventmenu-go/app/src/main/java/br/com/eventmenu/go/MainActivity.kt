@@ -46,6 +46,7 @@ import br.com.eventmenu.go.ui.theme.EventMenuTheme
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 class MainActivity : FragmentActivity() {
@@ -77,6 +78,16 @@ class MainActivity : FragmentActivity() {
                 state.session?.let { session ->
                     app.pushCoordinator.updateSession(session.user.tenantId, session.user.id)
                     brand = app.brandRepository.load()
+                }
+            }
+
+            // Mantém autorização, versão publicada e rota de contingência frescas
+            // mesmo quando o operador permanece parado na tela por muito tempo.
+            LaunchedEffect(Unit) {
+                delay(300_000L)
+                while (true) {
+                    runCatching { app.controlPlaneApi.bootstrapControlPlane() }
+                    delay(300_000L)
                 }
             }
 
