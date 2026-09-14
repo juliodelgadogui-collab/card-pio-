@@ -45,12 +45,15 @@ jobs:
           grep -q 'bootstrapControlPlane' app/src/main/java/br/com/eventmenu/go/EventMenuGoApplication.kt
           grep -q 'FailoverEndpointRouter.initialize' app/src/main/java/br/com/eventmenu/go/EventMenuGoApplication.kt
           grep -q 'ClientPolicyManager.initialize' app/src/main/java/br/com/eventmenu/go/EventMenuGoApplication.kt
+          grep -q 'releaseUrl' app/src/main/java/br/com/eventmenu/go/data/ClientPolicyManager.kt
+          grep -q 'releaseSha256' app/src/main/java/br/com/eventmenu/go/data/ClientPolicyManager.kt
+          grep -q 'Toque para baixar' app/src/main/java/br/com/eventmenu/go/MainActivity.kt
           grep -q 'ClientPolicyManager.featureEnabled("hub"' app/src/main/java/br/com/eventmenu/go/ui/EventMenuGoHubShell.kt
           grep -q 'ApiServerRole.CONTINGENCY' app/src/main/java/br/com/eventmenu/go/MainActivity.kt
           grep -q 'trackingLink(order.id)' app/src/main/java/br/com/eventmenu/go/ui/screens/DeliveryOperationsScreen.kt
           grep -q 'WhatsApp' app/src/main/java/br/com/eventmenu/go/ui/screens/DeliveryOperationsScreen.kt
           grep -q 'DeliveryLocationService' app/src/main/java/br/com/eventmenu/go/DeliveryProgressViewModel.kt
-          echo "EventMenu GO mobile-sync + failover + signed client policy sources OK"
+          echo "EventMenu GO mobile-sync + failover + signed policy + remote release sources OK"
 
       - uses: actions/setup-java@v4
         with:
