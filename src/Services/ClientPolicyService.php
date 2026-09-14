@@ -121,6 +121,7 @@ final class ClientPolicyService
         }
 
         $policy = $this->get($platform);
+        $release = (new ClientReleaseService())->get($platform);
         $key = $this->signingRow() ?: $this->createSigningKey();
         $privatePem = Crypto::decrypt((string)$key['private_key_encrypted']);
         $now = time();
@@ -136,6 +137,14 @@ final class ClientPolicyService
             'features' => (array)$policy['features'],
             'allowed_signing_fingerprints' => (array)$policy['allowed_signing_fingerprints'],
             'config_version' => (int)$policy['config_version'],
+            'release' => [
+                'published' => (bool)$release['published'],
+                'version' => (string)$release['version'],
+                'download_url' => (string)$release['download_url'],
+                'sha256' => (string)$release['sha256'],
+                'release_notes' => (string)$release['release_notes'],
+                'config_version' => (int)$release['config_version'],
+            ],
             'cluster_id' => (string)($routing['cluster_id'] ?? ''),
             'primary_url' => (string)($routing['primary_url'] ?? ''),
             'contingency_url' => (string)($routing['contingency_url'] ?? ''),
