@@ -2,6 +2,7 @@ package br.com.eventmenu.go.data
 
 import android.content.Context
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.util.Base64
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,8 +22,9 @@ import java.util.TimeZone
  *
  * A chave pública só é aceita quando vem do servidor principal autenticado.
  * O servidor de contingência recebe/serve apenas o manifesto já assinado. Isso
- * permite mudar versão mínima, manutenção e flags sem recompilar o APK, sem
- * transformar o arquivo remoto em substituto do login/token do backend.
+ * permite mudar versão mínima, manutenção, flags e distribuição da atualização
+ * sem recompilar o APK, sem transformar o arquivo remoto em substituto do
+ * login/token do backend.
  */
 object ClientPolicyManager {
     private const val PREFS = "eventmenu_client_policy"
@@ -47,6 +49,10 @@ object ClientPolicyManager {
         val expiresAtMs: Long = 0L,
         val signingAllowed: Boolean = true,
         val signingFingerprint: String = "",
+        val releaseVersion: String = "",
+        val releaseUrl: String = "",
+        val releaseSha256: String = "",
+        val releaseNotes: String = "",
         val lastError: String = "",
     )
 
@@ -134,9 +140,11 @@ object ClientPolicyManager {
 
     fun recommendedUpdate(currentVersion: String): String? {
         val policy = _state.value
-        if (!policy.trusted || policy.recommendedVersion.isBlank()) return null
+        if (!policy.trusted) return null
         if (policy.expiresAtMs > 0 && System.currentTimeMillis() > policy.expiresAtMs + CLOCK_SKEW_MS) return null
-        return policy.recommendedVersion.takeIf { isBelowVersion(currentVersion, it) }
+        val candidates = listOf(policy.recommendedVersion, policy.releaseVersion)
+            .filter { it.isNotBlank() && isBelowVersion(currentVersion, it) }
+        return candidates.maxWithOrNull { a, b -> compareVersions(a, b) }
     }
 
     fun featureEnabled(name: String, defaultWhenUnspecified: Boolean = true): Boolean {
@@ -222,6 +230,15 @@ object ClientPolicyManager {
         val localFingerprint = normalizeFingerprint(_state.value.signingFingerprint).orEmpty()
         val signingAllowed = allowed.isEmpty() || (localFingerprint.isNotBlank() && localFingerprint in allowed)
 
+        val release = payload.optJSONObject("release")
+        val releasePublished = release?.optBoolean("published", false) == true
+        val releaseVersionRaw = release?.optString("version").orEmpty().trim()
+        val releaseUrlRaw = release?.optString("download_url").orEmpty().trim()
+        val releaseShaRaw = release?.optString("sha256").orEmpty().trim()
+        val validReleaseUrl = normalizeReleaseUrl(releaseUrlRaw)
+        val validReleaseSha = normalizeSha256(releaseShaRaw)
+        val validRelease = releasePublished && releaseVersionRaw.isNotBlank() && validReleaseUrl != null && validReleaseSha != null
+
         State(
             trusted = true,
             enabled = payload.optBoolean("enabled", true),
@@ -234,6 +251,10 @@ object ClientPolicyManager {
             expiresAtMs = expiresAtMs,
             signingAllowed = signingAllowed,
             signingFingerprint = _state.value.signingFingerprint,
+            releaseVersion = if (validRelease) releaseVersionRaw else "",
+            releaseUrl = if (validRelease) validReleaseUrl.orEmpty() else "",
+            releaseSha256 = if (validRelease) validReleaseSha.orEmpty() else "",
+            releaseNotes = if (validRelease) release?.optString("release_notes").orEmpty().take(1000) else "",
             lastError = "",
         )
     }.getOrNull()
@@ -274,16 +295,31 @@ object ClientPolicyManager {
         return hex.takeIf { it.length == 64 }
     }
 
-    private fun isBelowVersion(current: String, minimum: String): Boolean {
+    private fun normalizeSha256(value: String): String? {
+        val hex = value.uppercase(Locale.US).replace(Regex("[^A-F0-9]"), "")
+        return hex.takeIf { it.length == 64 }
+    }
+
+    private fun normalizeReleaseUrl(value: String): String? {
+        if (value.isBlank()) return null
+        val uri = runCatching { Uri.parse(value) }.getOrNull() ?: return null
+        if (!uri.scheme.equals("https", ignoreCase = true)) return null
+        if (uri.host.isNullOrBlank() || !uri.userInfo.isNullOrBlank() || !uri.fragment.isNullOrBlank()) return null
+        return value
+    }
+
+    private fun isBelowVersion(current: String, minimum: String): Boolean = compareVersions(current, minimum) < 0
+
+    private fun compareVersions(leftVersion: String, rightVersion: String): Int {
         fun parts(value: String): List<Int> = Regex("\\d+").findAll(value).take(4).map { it.value.toIntOrNull() ?: 0 }.toList()
-        val a = parts(current)
-        val b = parts(minimum)
-        for (i in 0 until maxOf(a.size, b.size, 3)) {
-            val left = a.getOrElse(i) { 0 }
-            val right = b.getOrElse(i) { 0 }
-            if (left != right) return left < right
+        val left = parts(leftVersion)
+        val right = parts(rightVersion)
+        for (i in 0 until maxOf(left.size, right.size, 3)) {
+            val a = left.getOrElse(i) { 0 }
+            val b = right.getOrElse(i) { 0 }
+            if (a != b) return a.compareTo(b)
         }
-        return false
+        return 0
     }
 
     private fun ensureInitialized() {
