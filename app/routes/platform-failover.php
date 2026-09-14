@@ -3,8 +3,10 @@
 declare(strict_types=1);
 
 use EventMenu\Core\Auth;
+use EventMenu\Core\Database;
 use EventMenu\Core\Security;
 use EventMenu\Services\ClientPolicyService;
+use EventMenu\Services\ClientReleaseService;
 use EventMenu\Services\ClusterSyncService;
 use EventMenu\Services\PlatformFailoverService;
 
@@ -13,6 +15,7 @@ if (!Auth::isSuperAdmin()) { http_response_code(403); exit('Acesso restrito ao S
 
 $service = new PlatformFailoverService();
 $policyService = new ClientPolicyService();
+$releaseService = new ClientReleaseService();
 $syncService = new ClusterSyncService();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -57,16 +60,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $name = preg_replace('/[^a-z0-9_.-]/i', '', (string)$feature) ?? '';
                 if ($name !== '') $features[$name] = true;
             }
-            $policyService->save($platform, [
-                'enabled' => isset($_POST['policy_enabled']),
-                'maintenance' => isset($_POST['maintenance']),
-                'maintenance_message' => $_POST['maintenance_message'] ?? '',
-                'min_version' => $_POST['min_version'] ?? '',
-                'recommended_version' => $_POST['recommended_version'] ?? '',
-                'ttl_seconds' => $_POST['ttl_seconds'] ?? 86400,
-                'features' => $features,
-                'allowed_signing_fingerprints' => $_POST['allowed_signing_fingerprints'] ?? '',
-            ]);
+
+            $pdo = Database::connection();
+            $started = !$pdo->inTransaction();
+            if ($started) $pdo->beginTransaction();
+            try {
+                $policyService->save($platform, [
+                    'enabled' => isset($_POST['policy_enabled']),
+                    'maintenance' => isset($_POST['maintenance']),
+                    'maintenance_message' => $_POST['maintenance_message'] ?? '',
+                    'min_version' => $_POST['min_version'] ?? '',
+                    'recommended_version' => $_POST['recommended_version'] ?? '',
+                    'ttl_seconds' => $_POST['ttl_seconds'] ?? 86400,
+                    'features' => $features,
+                    'allowed_signing_fingerprints' => $_POST['allowed_signing_fingerprints'] ?? '',
+                ]);
+                $releaseService->save($platform, [
+                    'published' => isset($_POST['release_published']),
+                    'version' => $_POST['release_version'] ?? '',
+                    'download_url' => $_POST['release_url'] ?? '',
+                    'sha256' => $_POST['release_sha256'] ?? '',
+                    'release_notes' => $_POST['release_notes'] ?? '',
+                ]);
+                if ($started && $pdo->inTransaction()) $pdo->commit();
+            } catch (Throwable $e) {
+                if ($started && $pdo->inTransaction()) $pdo->rollBack();
+                throw $e;
+            }
 
             $settings = $service->get();
             $autoSynced = false;
@@ -87,6 +107,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $settings = $service->get();
 $androidPolicy = $policyService->get('android');
 $windowsPolicy = $policyService->get('windows');
+$androidRelease = $releaseService->get('android');
+$windowsRelease = $releaseService->get('windows');
 $policyKey = null;
 try { $policyKey = $policyService->publicKeyBundle(); } catch (Throwable) {}
 $status = (string)$settings['last_health_status'];
@@ -98,7 +120,7 @@ $statusLabels = [
     'misconfigured' => 'Configuração incompleta',
 ];
 
-$renderPolicy = static function(array $policy, string $title, array $featureLabels): void {
+$renderPolicy = static function(array $policy, array $release, string $title, array $featureLabels): void {
     $platform = (string)$policy['platform'];
     $features = (array)$policy['features'];
     $fingerprints = implode("\n", (array)$policy['allowed_signing_fingerprints']);
@@ -120,6 +142,14 @@ $renderPolicy = static function(array $policy, string $title, array $featureLabe
           <?php endforeach; ?>
         </select></label>
         <label>Assinaturas permitidas<textarea name="allowed_signing_fingerprints" rows="3" placeholder="SHA-256, uma por linha"><?= Security::e($fingerprints) ?></textarea><small>Opcional. O arquivo é assinado pelo servidor; este campo permite também restringir o certificado do cliente.</small></label>
+
+        <div class="span-2" style="margin-top:6px"><strong>Distribuição da atualização</strong><p class="muted" style="margin-top:4px">O arquivo pode ficar no servidor de contingência. O cliente recebe URL e SHA-256 dentro do manifesto assinado pelo principal.</p></div>
+        <label class="checkbox span-2"><input type="checkbox" name="release_published"<?= em_checked($release['published']) ?>> Publicar esta atualização para os clientes</label>
+        <label>Versão do arquivo<input name="release_version" value="<?= Security::e((string)$release['version']) ?>" placeholder="0.3.0"></label>
+        <label>SHA-256 do arquivo<input name="release_sha256" value="<?= Security::e((string)$release['sha256']) ?>" maxlength="95" placeholder="64 caracteres hexadecimais"></label>
+        <label class="span-2">URL HTTPS para baixar<input name="release_url" value="<?= Security::e((string)$release['download_url']) ?>" placeholder="https://backup.exemplo.com/updates/EventMenu-GO.apk"><small>O servidor não envia chave privada nem credencial junto com o arquivo.</small></label>
+        <label class="span-2">Notas da versão<textarea name="release_notes" rows="3" maxlength="1000" placeholder="Resumo das mudanças desta versão"><?= Security::e((string)$release['release_notes']) ?></textarea></label>
+
         <div class="span-2"><strong>Recursos publicados no manifesto</strong><div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;margin-top:8px">
           <?php foreach($featureLabels as $key=>$label): ?><label class="checkbox"><input type="checkbox" name="features[]" value="<?= Security::e($key) ?>"<?= em_checked(!empty($features[$key])) ?>> <?= Security::e($label) ?></label><?php endforeach; ?>
         </div></div>
@@ -185,14 +215,14 @@ em_header('Servidor de contingência', 'platform-failover');
 
 <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(360px,1fr));gap:18px;margin-top:18px">
 <?php
-$renderPolicy($androidPolicy, 'EventMenu GO / Android', [
+$renderPolicy($androidPolicy, $androidRelease, 'EventMenu GO / Android', [
     'delivery' => 'Delivery e GPS',
     'hub' => 'EventMenu Hub',
     'expedition' => 'Expedição',
     'inventory_alerts' => 'Alertas de estoque',
     'events' => 'Eventos',
 ]);
-$renderPolicy($windowsPolicy, 'EventMenu Desktop / Windows', [
+$renderPolicy($windowsPolicy, $windowsRelease, 'EventMenu Desktop / Windows', [
     'desktop' => 'Operação Desktop',
     'hub' => 'EventMenu Hub',
     'printing' => 'Impressão e periféricos',
@@ -204,8 +234,8 @@ $renderPolicy($windowsPolicy, 'EventMenu Desktop / Windows', [
 
 <section class="card" style="margin-top:18px">
   <span class="eyebrow">COMO FUNCIONA</span><h2>Arquivo de autorização sem recompilar</h2>
-  <p>Android e Windows podem baixar periodicamente um manifesto assinado contendo versão mínima, manutenção, recursos liberados e endereços dos servidores. Alterar esse manifesto no principal não exige recompilar o aplicativo. O arquivo não contém senha, token de usuário nem chave privada.</p>
-  <p>A autenticação real continua no backend. O manifesto serve para controlar <strong>qual versão pode operar</strong>, ativar/desativar recursos e orientar o cliente para principal/contingência. Isso impede que um simples arquivo baixado vire uma forma de burlar login ou pagamentos.</p>
+  <p>Android e Windows podem baixar periodicamente um manifesto assinado contendo versão mínima, manutenção, recursos liberados, atualização publicada e endereços dos servidores. Alterar esse manifesto no principal não exige recompilar o aplicativo. O arquivo não contém senha, token de usuário nem chave privada.</p>
+  <p>A autenticação real continua no backend. O manifesto serve para controlar <strong>qual versão pode operar</strong>, ativar/desativar recursos, publicar uma atualização e orientar o cliente para principal/contingência. Isso impede que um simples arquivo baixado vire uma forma de burlar login ou pagamentos.</p>
 </section>
 
 <section class="card" style="margin-top:18px">
