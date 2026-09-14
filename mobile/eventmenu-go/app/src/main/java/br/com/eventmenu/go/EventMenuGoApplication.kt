@@ -31,6 +31,7 @@ class EventMenuGoApplication : Application() {
     lateinit var brandRepository:TenantBrandRepository;private set
     lateinit var hubRepository:HubRepository;private set
     lateinit var pushCoordinator:FirebasePushCoordinator;private set
+    lateinit var controlPlaneApi:ApiClient;private set
 
     private val bootstrapScope=CoroutineScope(SupervisorJob()+Dispatchers.IO)
 
@@ -44,13 +45,14 @@ class EventMenuGoApplication : Application() {
         ClientPolicyManager.initialize(this)
         ApiClient.configureSessionStore(store)
         ApiClient.configureOfflineCache(OfflineReadCache(this))
+        controlPlaneApi=ApiClient(baseUrl,deviceId,store)
 
         // Consulta exclusivamente a URL principal compilada. Isso permite obter
         // antes do login a chave pública de política, a rota de contingência já
         // verificada e o manifesto Android assinado, sem confiar no nó reserva
         // para substituir a raiz de confiança.
         bootstrapScope.launch{
-            runCatching{ApiClient(baseUrl,deviceId,store).bootstrapControlPlane()}
+            runCatching{controlPlaneApi.bootstrapControlPlane()}
         }
 
         repository=EventMenuRepository(baseUrl,deviceId,store)
