@@ -99,7 +99,7 @@ class AppUpdateInstaller(private val context: Context) {
             }
         }
 
-    fun launchInstall(prepared: PreparedUpdate): InstallResult {
+    suspend fun launchInstall(prepared: PreparedUpdate): InstallResult {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
             return InstallResult.PermissionRequired(
                 Intent(
@@ -109,11 +109,12 @@ class AppUpdateInstaller(private val context: Context) {
             )
         }
 
-        // Confere novamente antes de entregar ao instalador, inclusive quando o
-        // arquivo veio do cache após o usuário liberar a permissão de instalação.
-        val actual = sha256(prepared.file)
-        if (actual != prepared.sha256) throw SecurityException("O arquivo da atualização foi alterado depois do download.")
-        validateArchive(prepared.file, prepared.version)
+        // A segunda conferência pode ler dezenas de MB; mantenha essa I/O fora da UI.
+        withContext(Dispatchers.IO) {
+            val actual = sha256(prepared.file)
+            if (actual != prepared.sha256) throw SecurityException("O arquivo da atualização foi alterado depois do download.")
+            validateArchive(prepared.file, prepared.version)
+        }
 
         val uri = FileProvider.getUriForFile(
             context,
@@ -123,7 +124,7 @@ class AppUpdateInstaller(private val context: Context) {
         val install = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, APK_MIME)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(install)
+        withContext(Dispatchers.Main) { context.startActivity(install) }
         return InstallResult.Started
     }
 
