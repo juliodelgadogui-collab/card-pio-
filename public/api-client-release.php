@@ -8,6 +8,10 @@ use EventMenu\Services\ApiRateLimitExceededException;
 use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\ClientReleaseDownloadService;
 
+// O bootstrap mantém um buffer de reescrita de URLs para páginas HTML. Binários
+// de atualização não podem passar por esse callback nem ficar retidos em memória.
+while (ob_get_level() > 0) @ob_end_clean();
+
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');
 header('Cache-Control: no-store, max-age=0');
@@ -38,11 +42,12 @@ try {
     if ($handle === false) throw new RuntimeException('Não foi possível abrir o arquivo da atualização.');
     while (!feof($handle)) {
         $chunk = fread($handle, 1024 * 1024);
-        if ($chunk === false) break;
-        echo $chunk;
-        if (function_exists('fastcgi_finish_request')) {
-            // Não chamar finish_request aqui: ainda há conteúdo a transmitir.
+        if ($chunk === false) {
+            fclose($handle);
+            throw new RuntimeException('Falha durante a leitura do arquivo da atualização.');
         }
+        if ($chunk === '') continue;
+        echo $chunk;
         flush();
     }
     fclose($handle);
