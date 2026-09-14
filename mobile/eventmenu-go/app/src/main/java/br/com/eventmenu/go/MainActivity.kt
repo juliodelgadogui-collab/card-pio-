@@ -127,13 +127,23 @@ class MainActivity : FragmentActivity() {
 
             val policyBlock = if (policyState.trusted) ClientPolicyManager.blockReason(BuildConfig.VERSION_NAME) else null
             val recommendedUpdate = if (policyState.trusted) ClientPolicyManager.recommendedUpdate(BuildConfig.VERSION_NAME) else null
+            val mandatoryVersionBlock = policyBlock?.contains("Atualização obrigatória", ignoreCase = true) == true
             val releaseCanInstall = policyState.trusted &&
                 policyState.releaseVersion.isNotBlank() &&
                 policyState.releaseUrl.isNotBlank() &&
                 policyState.releaseSha256.length == 64 &&
                 compareAppVersions(BuildConfig.VERSION_NAME, policyState.releaseVersion) < 0 &&
                 (policyState.minVersion.isBlank() || compareAppVersions(policyState.releaseVersion, policyState.minVersion) >= 0)
-            val updateUrl = policyState.releaseUrl.takeIf { releaseCanInstall }
+            val publishedUpdateUrl = policyState.releaseUrl.takeIf { releaseCanInstall }
+            val bannerUpdateUrl = when {
+                updateBusy -> null
+                updateFeedback != null -> publishedUpdateUrl
+                connectivity == ApiConnectivity.OFFLINE -> null
+                policyBlock != null -> publishedUpdateUrl.takeIf { mandatoryVersionBlock }
+                serverRole == ApiServerRole.CONTINGENCY -> null
+                recommendedUpdate != null -> publishedUpdateUrl
+                else -> null
+            }
             val bannerText = when {
                 updateBusy -> "Baixando e verificando a atualização do EventMenu GO…"
                 updateFeedback != null -> updateFeedback
@@ -142,13 +152,17 @@ class MainActivity : FragmentActivity() {
                 } else {
                     "Sem conexão com os servidores · verifique sua internet."
                 }
-                policyBlock != null -> if (updateUrl != null) "$policyBlock Toque aqui para atualizar." else policyBlock
+                policyBlock != null -> if (mandatoryVersionBlock && publishedUpdateUrl != null) {
+                    "$policyBlock Toque aqui para atualizar."
+                } else {
+                    policyBlock
+                }
                 serverRole == ApiServerRole.CONTINGENCY -> if (FailoverEndpointRouter.contingencyWritable()) {
                     "Servidor de contingência ativo · operação online pelo servidor adicional."
                 } else {
                     "Servidor de contingência ativo · modo somente leitura."
                 }
-                recommendedUpdate != null -> if (updateUrl != null) {
+                recommendedUpdate != null -> if (publishedUpdateUrl != null) {
                     "Atualização do EventMenu GO disponível: versão ${policyState.releaseVersion}. Toque para atualizar."
                 } else {
                     "Atualização recomendada do EventMenu GO: versão $recommendedUpdate."
@@ -157,14 +171,15 @@ class MainActivity : FragmentActivity() {
             }
 
             fun startSignedUpdate() {
-                if (updateBusy || updateUrl == null) return
+                val targetUrl = bannerUpdateUrl ?: return
+                if (updateBusy) return
                 updateBusy = true
                 updateFeedback = null
                 updateScope.launch {
                     try {
                         val prepared = updateInstaller.prepare(
                             version = policyState.releaseVersion,
-                            downloadUrl = updateUrl,
+                            downloadUrl = targetUrl,
                             expectedSha256 = policyState.releaseSha256,
                         )
                         when (val install = updateInstaller.launchInstall(prepared)) {
@@ -206,7 +221,7 @@ class MainActivity : FragmentActivity() {
                             Text(
                                 text = bannerText,
                                 modifier = Modifier
-                                    .then(if (updateUrl != null && !updateBusy) Modifier.clickable { startSignedUpdate() } else Modifier)
+                                    .then(if (bannerUpdateUrl != null && !updateBusy) Modifier.clickable { startSignedUpdate() } else Modifier)
                                     .padding(horizontal = 16.dp, vertical = 9.dp),
                                 style = MaterialTheme.typography.labelMedium,
                             )
