@@ -4,12 +4,14 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -101,19 +103,30 @@ class MainActivity : FragmentActivity() {
 
             val policyBlock = if (policyState.trusted) ClientPolicyManager.blockReason(BuildConfig.VERSION_NAME) else null
             val recommendedUpdate = if (policyState.trusted) ClientPolicyManager.recommendedUpdate(BuildConfig.VERSION_NAME) else null
+            val releaseMatchesUpdate = recommendedUpdate != null &&
+                policyState.releaseVersion == recommendedUpdate &&
+                policyState.releaseUrl.isNotBlank()
+            val mandatoryUpdateWithRelease = policyBlock?.contains("Atualização obrigatória", ignoreCase = true) == true &&
+                policyState.releaseUrl.isNotBlank() &&
+                policyState.releaseVersion.isNotBlank()
+            val updateUrl = policyState.releaseUrl.takeIf { releaseMatchesUpdate || mandatoryUpdateWithRelease }
             val bannerText = when {
                 connectivity == ApiConnectivity.OFFLINE -> if (state.session != null) {
                     "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
                 } else {
                     "Sem conexão com os servidores · verifique sua internet."
                 }
-                policyBlock != null -> policyBlock
+                policyBlock != null -> if (updateUrl != null) "$policyBlock Toque aqui para baixar a atualização." else policyBlock
                 serverRole == ApiServerRole.CONTINGENCY -> if (FailoverEndpointRouter.contingencyWritable()) {
                     "Servidor de contingência ativo · operação online pelo servidor adicional."
                 } else {
                     "Servidor de contingência ativo · modo somente leitura."
                 }
-                recommendedUpdate != null -> "Atualização recomendada do EventMenu GO: versão $recommendedUpdate."
+                recommendedUpdate != null -> if (updateUrl != null) {
+                    "Atualização do EventMenu GO disponível: versão $recommendedUpdate. Toque para baixar."
+                } else {
+                    "Atualização recomendada do EventMenu GO: versão $recommendedUpdate."
+                }
                 else -> null
             }
 
@@ -137,7 +150,17 @@ class MainActivity : FragmentActivity() {
                         ) {
                             Text(
                                 text = bannerText,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                modifier = Modifier
+                                    .then(
+                                        if (updateUrl != null) {
+                                            Modifier.clickable {
+                                                runCatching {
+                                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
+                                                }
+                                            }
+                                        } else Modifier
+                                    )
+                                    .padding(horizontal = 16.dp, vertical = 9.dp),
                                 style = MaterialTheme.typography.labelMedium,
                             )
                         }
