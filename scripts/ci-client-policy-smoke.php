@@ -8,6 +8,7 @@ use EventMenu\Core\Crypto;
 use EventMenu\Core\Database;
 use EventMenu\Services\ClientPolicyGateService;
 use EventMenu\Services\ClientPolicyService;
+use EventMenu\Services\ClientReleaseDownloadService;
 use EventMenu\Services\ClientReleaseService;
 
 function cp_assert(bool $condition, string $message): void
@@ -81,6 +82,34 @@ try {
     $invalidReleaseBlocked = str_contains($e->getMessage(), 'HTTPS');
 }
 cp_assert($invalidReleaseBlocked, 'Distribuição aceitou URL de atualização sem HTTPS.');
+
+// O servidor adicional só entrega o binário quando o arquivo local corresponde
+// exatamente ao SHA-256 que o principal publicou dentro do manifesto assinado.
+$releaseDir = dirname(__DIR__) . '/storage/client-releases';
+if (!is_dir($releaseDir) && !mkdir($releaseDir, 0775, true) && !is_dir($releaseDir)) throw new RuntimeException('Não foi possível criar pasta de release no smoke.');
+$releasePath = $releaseDir . '/EventMenu-GO.apk';
+file_put_contents($releasePath, "eventmenu-ci-apk\n", LOCK_EX);
+$localHash = strtoupper((string)hash_file('sha256', $releasePath));
+$releaseService->save('android', [
+    'published' => true,
+    'version' => '0.3.1',
+    'download_url' => 'https://example.test/1/api-client-release.php?platform=android',
+    'sha256' => $localHash,
+    'release_notes' => 'Arquivo local protegido por hash.',
+]);
+$resolvedRelease = (new ClientReleaseDownloadService())->resolve('android');
+cp_assert(($resolvedRelease['version'] ?? '') === '0.3.1', 'Download service resolveu versão errada.');
+cp_assert(($resolvedRelease['sha256'] ?? '') === $localHash, 'Download service resolveu hash errado.');
+cp_assert(($resolvedRelease['path'] ?? '') === $releasePath, 'Download service resolveu arquivo inesperado.');
+file_put_contents($releasePath, "alterado\n", FILE_APPEND | LOCK_EX);
+$tamperedBlocked = false;
+try {
+    (new ClientReleaseDownloadService())->resolve('android');
+} catch (RuntimeException $e) {
+    $tamperedBlocked = str_contains($e->getMessage(), 'SHA-256');
+}
+cp_assert($tamperedBlocked, 'Download service entregaria arquivo alterado após a publicação.');
+@unlink($releasePath);
 
 $_SERVER['HTTP_X_EVENTMENU_CLIENT'] = 'android';
 $_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.2.0';
