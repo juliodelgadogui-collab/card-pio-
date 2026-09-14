@@ -30,8 +30,14 @@ final class ClientReleaseDownloadService
         if (strlen($expected) !== 64 || $version === '') throw new RuntimeException('Manifesto da atualização está incompleto.');
 
         $filename = $platform === 'android' ? 'EventMenu-GO.apk' : 'EventMenu-Desktop.exe';
-        $path = dirname(__DIR__, 2) . '/storage/client-releases/' . $filename;
-        if (!is_file($path) || !is_readable($path)) throw new RuntimeException('Arquivo da atualização ainda não foi enviado para este servidor.');
+        $dir = dirname(__DIR__, 2) . '/storage/client-releases';
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            throw new RuntimeException('Não foi possível preparar a pasta privada de atualizações.');
+        }
+        $path = $dir . '/' . $filename;
+        if (!is_file($path) || !is_readable($path)) {
+            throw new RuntimeException('Arquivo da atualização ainda não foi enviado para storage/client-releases/' . $filename . '.');
+        }
         $size = filesize($path);
         if ($size === false || $size < 1 || $size > self::MAX_BYTES) throw new RuntimeException('Arquivo da atualização possui tamanho inválido.');
 
