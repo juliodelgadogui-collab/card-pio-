@@ -2,7 +2,7 @@ name: EventMenu GO Atualizável
 
 on:
   push:
-    branches: [main, feature/eventmenu-go-mobile-sync]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
