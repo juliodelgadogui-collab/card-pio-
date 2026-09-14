@@ -4,7 +4,6 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -24,6 +23,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +31,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.data.ApiConnectionMonitor
 import br.com.eventmenu.go.data.ApiConnectivity
@@ -43,10 +46,12 @@ import br.com.eventmenu.go.navigation.AppDeepLinkTarget
 import br.com.eventmenu.go.navigation.AppDeepLinks
 import br.com.eventmenu.go.ui.EventMenuGoHubShell
 import br.com.eventmenu.go.ui.theme.EventMenuTheme
+import br.com.eventmenu.go.updates.AppUpdateInstaller
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class MainActivity : FragmentActivity() {
@@ -59,6 +64,20 @@ class MainActivity : FragmentActivity() {
         pendingDeepLink = AppDeepLinks.parse(intent)
         requestNotificationPermissionIfNeeded()
         val app = application as EventMenuGoApplication
+
+        // A Application faz o primeiro bootstrap imediatamente. Depois disso,
+        // atualizamos o control plane somente enquanto a Activity está visível,
+        // evitando rede periódica em segundo plano e retomando ao voltar ao app.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                delay(60_000L)
+                while (true) {
+                    runCatching { app.controlPlaneApi.bootstrapControlPlane() }
+                    delay(300_000L)
+                }
+            }
+        }
+
         setContent {
             val vm: MainViewModel = viewModel(
                 factory = MainViewModel.Factory(
@@ -72,22 +91,16 @@ class MainActivity : FragmentActivity() {
             val connectivity by ApiConnectionMonitor.state.collectAsState()
             val serverRole by ApiConnectionMonitor.serverRole.collectAsState()
             val policyState by ClientPolicyManager.state.collectAsState()
+            val updateInstaller = remember { AppUpdateInstaller(applicationContext) }
+            val updateScope = rememberCoroutineScope()
+            var updateBusy by remember { mutableStateOf(false) }
+            var updateFeedback by remember { mutableStateOf<String?>(null) }
             var brand by remember { mutableStateOf(app.brandRepository.cached()) }
 
             LaunchedEffect(state.session?.user?.id) {
                 state.session?.let { session ->
                     app.pushCoordinator.updateSession(session.user.tenantId, session.user.id)
                     brand = app.brandRepository.load()
-                }
-            }
-
-            // Mantém autorização, versão publicada e rota de contingência frescas
-            // mesmo quando o operador permanece parado na tela por muito tempo.
-            LaunchedEffect(Unit) {
-                delay(300_000L)
-                while (true) {
-                    runCatching { app.controlPlaneApi.bootstrapControlPlane() }
-                    delay(300_000L)
                 }
             }
 
@@ -114,31 +127,62 @@ class MainActivity : FragmentActivity() {
 
             val policyBlock = if (policyState.trusted) ClientPolicyManager.blockReason(BuildConfig.VERSION_NAME) else null
             val recommendedUpdate = if (policyState.trusted) ClientPolicyManager.recommendedUpdate(BuildConfig.VERSION_NAME) else null
-            val releaseMatchesUpdate = recommendedUpdate != null &&
-                policyState.releaseVersion == recommendedUpdate &&
-                policyState.releaseUrl.isNotBlank()
-            val mandatoryUpdateWithRelease = policyBlock?.contains("Atualização obrigatória", ignoreCase = true) == true &&
+            val releaseCanInstall = policyState.trusted &&
+                policyState.releaseVersion.isNotBlank() &&
                 policyState.releaseUrl.isNotBlank() &&
-                policyState.releaseVersion.isNotBlank()
-            val updateUrl = policyState.releaseUrl.takeIf { releaseMatchesUpdate || mandatoryUpdateWithRelease }
+                policyState.releaseSha256.length == 64 &&
+                compareAppVersions(BuildConfig.VERSION_NAME, policyState.releaseVersion) < 0 &&
+                (policyState.minVersion.isBlank() || compareAppVersions(policyState.releaseVersion, policyState.minVersion) >= 0)
+            val updateUrl = policyState.releaseUrl.takeIf { releaseCanInstall }
             val bannerText = when {
+                updateBusy -> "Baixando e verificando a atualização do EventMenu GO…"
+                updateFeedback != null -> updateFeedback
                 connectivity == ApiConnectivity.OFFLINE -> if (state.session != null) {
                     "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
                 } else {
                     "Sem conexão com os servidores · verifique sua internet."
                 }
-                policyBlock != null -> if (updateUrl != null) "$policyBlock Toque aqui para baixar a atualização." else policyBlock
+                policyBlock != null -> if (updateUrl != null) "$policyBlock Toque aqui para atualizar." else policyBlock
                 serverRole == ApiServerRole.CONTINGENCY -> if (FailoverEndpointRouter.contingencyWritable()) {
                     "Servidor de contingência ativo · operação online pelo servidor adicional."
                 } else {
                     "Servidor de contingência ativo · modo somente leitura."
                 }
                 recommendedUpdate != null -> if (updateUrl != null) {
-                    "Atualização do EventMenu GO disponível: versão $recommendedUpdate. Toque para baixar."
+                    "Atualização do EventMenu GO disponível: versão ${policyState.releaseVersion}. Toque para atualizar."
                 } else {
                     "Atualização recomendada do EventMenu GO: versão $recommendedUpdate."
                 }
                 else -> null
+            }
+
+            fun startSignedUpdate() {
+                if (updateBusy || updateUrl == null) return
+                updateBusy = true
+                updateFeedback = null
+                updateScope.launch {
+                    try {
+                        val prepared = updateInstaller.prepare(
+                            version = policyState.releaseVersion,
+                            downloadUrl = updateUrl,
+                            expectedSha256 = policyState.releaseSha256,
+                        )
+                        when (val install = updateInstaller.launchInstall(prepared)) {
+                            AppUpdateInstaller.InstallResult.Started -> {
+                                updateFeedback = "Atualização verificada. Confirme a instalação na tela do Android."
+                            }
+                            is AppUpdateInstaller.InstallResult.PermissionRequired -> {
+                                updateFeedback = "Autorize o EventMenu GO a instalar atualizações e depois toque aqui novamente."
+                                startActivity(install.intent)
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        updateFeedback = error.message?.takeIf { it.isNotBlank() }
+                            ?: "Não foi possível preparar a atualização. Tente novamente."
+                    } finally {
+                        updateBusy = false
+                    }
+                }
             }
 
             EventMenuTheme(brand) {
@@ -150,7 +194,7 @@ class MainActivity : FragmentActivity() {
                         onTapOn = ::launchTapOn,
                     )
                     if (bannerText != null) {
-                        val errorBanner = policyBlock != null
+                        val errorBanner = policyBlock != null || (updateFeedback != null && !updateFeedback!!.startsWith("Atualização verificada"))
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -162,15 +206,7 @@ class MainActivity : FragmentActivity() {
                             Text(
                                 text = bannerText,
                                 modifier = Modifier
-                                    .then(
-                                        if (updateUrl != null) {
-                                            Modifier.clickable {
-                                                runCatching {
-                                                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(updateUrl)))
-                                                }
-                                            }
-                                        } else Modifier
-                                    )
+                                    .then(if (updateUrl != null && !updateBusy) Modifier.clickable { startSignedUpdate() } else Modifier)
                                     .padding(horizontal = 16.dp, vertical = 9.dp),
                                 style = MaterialTheme.typography.labelMedium,
                             )
@@ -317,6 +353,18 @@ class MainActivity : FragmentActivity() {
                 .setAllowedAuthenticators(allowed)
                 .build()
         )
+    }
+
+    private fun compareAppVersions(leftVersion: String, rightVersion: String): Int {
+        fun parts(value: String): List<Int> = Regex("\\d+").findAll(value).take(4).map { it.value.toIntOrNull() ?: 0 }.toList()
+        val left = parts(leftVersion)
+        val right = parts(rightVersion)
+        for (i in 0 until maxOf(left.size, right.size, 3)) {
+            val a = left.getOrElse(i) { 0 }
+            val b = right.getOrElse(i) { 0 }
+            if (a != b) return a.compareTo(b)
+        }
+        return 0
     }
 
     companion object {
