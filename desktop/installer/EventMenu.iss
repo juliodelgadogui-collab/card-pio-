@@ -1,5 +1,5 @@
 #define MyAppName "EventMenu Desktop"
-#define MyAppVersion "0.3.1"
+#define MyAppVersion "0.3.2"
 #define MyAppPublisher "EventMenu"
 #define MyAppExeName "EventMenu.Desktop.exe"
 
@@ -12,7 +12,7 @@ DefaultDirName={localappdata}\Programs\EventMenu Desktop
 DefaultGroupName=EventMenu Desktop
 DisableProgramGroupPage=yes
 OutputDir=..\..\artifacts\EventMenu-Desktop-installer
-OutputBaseFilename=EventMenu-Desktop-Setup-v0.3.1
+OutputBaseFilename=EventMenu-Desktop-Setup-v0.3.2
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
