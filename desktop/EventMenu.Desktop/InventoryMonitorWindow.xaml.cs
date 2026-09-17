@@ -79,7 +79,7 @@ public partial class InventoryMonitorWindow : Window
         var search = _searchBox.Text.Trim();
         IEnumerable<InventoryProductRow> query = _products;
         if (search.Length > 0)
-            query = query.Where(x => x.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || x.Sku.Contains(search, StringComparison.OrdinalIgnoreCase));
+            query = query.Where(x => x.Name.Contains(search, StringComparison.OrdinalIgnoreCase) || (x.Sku?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false));
         var rows = query
             .OrderBy(x => x.StockStatus == "zero" ? 0 : x.StockStatus == "low" ? 1 : 2)
             .ThenBy(x => x.Name)
