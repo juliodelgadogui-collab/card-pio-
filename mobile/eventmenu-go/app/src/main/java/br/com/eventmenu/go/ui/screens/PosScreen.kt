@@ -186,7 +186,13 @@ private fun PosPaymentScreen(
     val context = LocalContext.current
     val app = context.applicationContext as EventMenuGoApplication
     val scope = rememberCoroutineScope()
-    val canRedeemLoyalty = "loyalty_redeem" in state.session?.permissions.orEmpty()
+    val permissions = state.session?.permissions.orEmpty()
+    val canManagePayments = "payments" in permissions
+    val canCash = canManagePayments && "cash" in permissions
+    val canPix = canManagePayments
+    val canNfc = "nfc_collect" in permissions
+    val canCollectHere = canCash || canPix || canNfc
+    val canRedeemLoyalty = "loyalty_redeem" in permissions
     var loyalty by remember(order.id) { mutableStateOf<LoyaltyOrderSummary?>(null) }
     var loyaltyLoaded by remember(order.id) { mutableStateOf(false) }
     var loyaltyBusy by remember(order.id) { mutableStateOf(false) }
@@ -319,7 +325,7 @@ private fun PosPaymentScreen(
             }
         }
 
-        if (remaining > 0) {
+        if (remaining > 0 && canCollectHere) {
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -327,11 +333,26 @@ private fun PosPaymentScreen(
                         Text("Você pode receber o valor inteiro ou apenas uma parte.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         OutlinedTextField(amountText, { amountText = it }, label = { Text("Valor (R$)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                         Text("Disponível para receber: ${posMoney(remaining)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { onCash(amount) }, enabled = state.cashOpen && amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("Dinheiro") }
-                        if (!state.cashOpen) Text("Abra o caixa para receber em dinheiro.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { pixTaxDialog = true }, enabled = amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("PIX") }
-                        Button(onClick = { onNfc(amount) }, enabled = amount in 100..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("Cartão por aproximação") }
+                        if (canCash) {
+                            Button(onClick = { onCash(amount) }, enabled = state.cashOpen && amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("Dinheiro") }
+                            if (!state.cashOpen) Text("Abra o caixa para receber em dinheiro.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (canPix) Button(onClick = { pixTaxDialog = true }, enabled = amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("PIX") }
+                        if (canNfc) Button(onClick = { onNfc(amount) }, enabled = amount in 100..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("Cartão por aproximação") }
                         if (discountRequest?.status == "pending") Text("Aguarde a aprovação do desconto para continuar.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        } else if (remaining > 0) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
+                            Text("Pedido criado", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
+                        }
+                        Text("Sua função não recebe pagamentos. O pedido foi salvo e pode ser recebido pelo caixa ou por um operador autorizado.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Pedido #${order.id} · Pendente ${posMoney(remaining)}", fontWeight = FontWeight.Bold)
+                        Button(onClick = onFinishFlow, modifier = Modifier.fillMaxWidth()) { Text(if (state.posReturnScreen == AppScreen.TABLE_ACCOUNT) "Voltar à conta" else "Novo pedido") }
                     }
                 }
             }
@@ -375,7 +396,7 @@ private fun PosPaymentScreen(
         )
     }
 
-    if (pixTaxDialog) {
+    if (pixTaxDialog && canPix) {
         var taxId by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { pixTaxDialog = false },
