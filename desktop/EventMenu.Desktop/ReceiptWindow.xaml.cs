@@ -25,7 +25,7 @@ public partial class ReceiptWindow : Window
         if (_busy) return;
         _busy = true;
         PrintButton.IsEnabled = false;
-        StatusText.Text = "Carregando comprovante...";
+        StatusText.Text = "Carregando cupom...";
         try
         {
             var response = await _api.OrderReceiptAsync(_orderId);
@@ -47,30 +47,47 @@ public partial class ReceiptWindow : Window
 
     private void Render(OrderReceipt receipt)
     {
-        TitleText.Text = $"Comprovante do pedido #{receipt.OrderId}";
-        SubtitleText.Text = $"{receipt.CreatedDisplay} • comprovante não fiscal";
+        TitleText.Text = $"Cupom do pedido #{receipt.OrderId}";
+        SubtitleText.Text = $"{receipt.CreatedDisplay} • padrão térmico do site";
 
         var tradeName = string.IsNullOrWhiteSpace(receipt.Identity.TradeName) ? receipt.TenantName : receipt.Identity.TradeName;
-        BusinessNameText.Text = tradeName;
-        BusinessDetailText.Text = JoinNonEmpty(" • ", receipt.Identity.Document, receipt.Identity.Address, receipt.Identity.Phone);
+        BusinessNameText.Text = string.IsNullOrWhiteSpace(tradeName) ? "EventMenu" : tradeName;
+        BusinessDetailText.Text = JoinNonEmpty("\n", receipt.Identity.LegalName, DocumentLine(receipt.Identity.Document), receipt.Identity.Address);
+        IdentityExtraText.Text = JoinNonEmpty(" • ", PhoneLine(receipt.Identity.Phone), receipt.Identity.Email);
+        IdentityExtraText.Visibility = string.IsNullOrWhiteSpace(IdentityExtraText.Text) ? Visibility.Collapsed : Visibility.Visible;
 
+        // 58 mm and 80 mm use the same proportions as the website receipt.
+        ReceiptPaper.Width = receipt.Identity.PaperWidth == "58" ? 326 : 430;
+
+        ReceiptNumberText.Text = $"Documento operacional EventMenu · {receipt.ReceiptNumber}";
         OrderText.Text = $"#{receipt.OrderId}";
-        CustomerText.Text = JoinNonEmpty(" • ", receipt.CustomerDisplay, receipt.LocationDisplay);
-        TotalText.Text = receipt.TotalDisplay;
-        PaidText.Text = receipt.RemainingCents <= 0
-            ? $"Pago: {receipt.PaidDisplay}"
-            : $"Pago: {receipt.PaidDisplay} • falta {receipt.RemainingDisplay}";
+        ReceiptDateText.Text = receipt.CreatedDisplay;
+        ReceiptChannelText.Text = ChannelLabel(receipt.Channel);
+        ReceiptCustomerText.Text = receipt.CustomerName;
+        ReceiptPhoneText.Text = receipt.CustomerPhone;
+        ReceiptLocationText.Text = JoinNonEmpty(" • ", receipt.TableName, receipt.TabLabel);
+        ReceiptOperatorText.Text = receipt.CreatedByName;
 
-        ReceiptItemsGrid.ItemsSource = receipt.Items;
-        PaymentsGrid.ItemsSource = receipt.Payments;
+        CustomerRow.Visibility = Has(receipt.CustomerName);
+        PhoneRow.Visibility = Has(receipt.CustomerPhone);
+        LocationRow.Visibility = Has(ReceiptLocationText.Text);
+        OperatorRow.Visibility = Has(receipt.CreatedByName);
+
+        ReceiptItemsList.ItemsSource = receipt.Items;
+        ReceiptPaymentsList.ItemsSource = receipt.Payments;
 
         SubtotalText.Text = receipt.SubtotalDisplay;
-        DiscountText.Text = receipt.DiscountCents > 0 ? $"- {receipt.DiscountDisplay}" : receipt.DiscountDisplay;
+        DiscountText.Text = $"- {receipt.DiscountDisplay}";
         DeliveryFeeText.Text = receipt.DeliveryFeeDisplay;
-        SummaryTotalText.Text = receipt.TotalDisplay;
-        SummaryPaidText.Text = receipt.PaidDisplay;
+        DiscountRow.Visibility = receipt.DiscountCents > 0 ? Visibility.Visible : Visibility.Collapsed;
+        DeliveryFeeRow.Visibility = receipt.DeliveryFeeCents > 0 ? Visibility.Visible : Visibility.Collapsed;
+        TotalText.Text = receipt.TotalDisplay;
+        PaidText.Text = receipt.PaidDisplay;
         RemainingText.Text = receipt.RemainingDisplay;
+        RemainingRow.Visibility = receipt.RemainingCents > 0 ? Visibility.Visible : Visibility.Collapsed;
+
         FooterMessageText.Text = string.IsNullOrWhiteSpace(receipt.Identity.Footer) ? "Obrigado pela preferência!" : receipt.Identity.Footer;
+        PrintedAtText.Text = $"EventMenu · visualização em {DateTime.Now:dd/MM/yyyy HH:mm:ss}";
     }
 
     private void PrintButton_Click(object sender, RoutedEventArgs e)
@@ -79,7 +96,7 @@ public partial class ReceiptWindow : Window
         try
         {
             StatusText.Text = ReceiptPrinter.PrintReceipt(_receipt)
-                ? "Comprovante enviado para impressão."
+                ? "Cupom enviado para impressão."
                 : "Impressão cancelada.";
         }
         catch (Exception ex)
@@ -87,6 +104,21 @@ public partial class ReceiptWindow : Window
             StatusText.Text = Friendly(ex.Message);
         }
     }
+
+    private static Visibility Has(string? value) => string.IsNullOrWhiteSpace(value) ? Visibility.Collapsed : Visibility.Visible;
+    private static string DocumentLine(string value) => string.IsNullOrWhiteSpace(value) ? "" : $"CPF/CNPJ: {value}";
+    private static string PhoneLine(string value) => string.IsNullOrWhiteSpace(value) ? "" : $"Tel/WhatsApp: {value}";
+
+    private static string ChannelLabel(string channel) => channel switch
+    {
+        "counter" => "Balcão / PDV",
+        "pickup" => "Retirada",
+        "delivery" => "Delivery",
+        "table" => "Mesa / comanda",
+        "event" => "Evento / Ingresso",
+        "bar" or "event_bar" => "Evento / Bar",
+        _ => channel
+    };
 
     private static string JoinNonEmpty(string separator, params string[] values) =>
         string.Join(separator, values.Where(x => !string.IsNullOrWhiteSpace(x)));
