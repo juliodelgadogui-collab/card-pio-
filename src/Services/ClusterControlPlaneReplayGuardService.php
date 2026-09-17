@@ -13,8 +13,13 @@ use Throwable;
  */
 final class ClusterControlPlaneReplayGuardService
 {
+    private const MAX_BYTES = 2_000_000;
+
     public function assertNotOlder(string $raw): void
     {
+        // O limite espelha o ClusterSyncService para não fazer parse preliminar
+        // de um corpo que o serviço autenticado recusará logo depois.
+        if ($raw === '' || strlen($raw) > self::MAX_BYTES) return;
         try {
             $request = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         } catch (Throwable) {
