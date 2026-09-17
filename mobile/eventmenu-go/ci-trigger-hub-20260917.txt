@@ -1,1 +1,2 @@
 Trigger a fresh EventMenu GO Hub Android validation build after Android SDK workflow correction.
+Attempt 2: force branch push event for EventMenu GO Branch workflow.
