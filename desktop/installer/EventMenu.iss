@@ -13,6 +13,7 @@ DefaultGroupName=EventMenu Desktop
 DisableProgramGroupPage=yes
 OutputDir=..\..\artifacts\EventMenu-Desktop-installer
 OutputBaseFilename=EventMenu-Desktop-Setup
+SetupIconFile=..\EventMenu.Desktop\Assets\EventMenu.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
