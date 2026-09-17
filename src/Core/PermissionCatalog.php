@@ -106,8 +106,8 @@ final class PermissionCatalog
     public static function modesForPermissions(array $permissions): array
     {
         $set=array_fill_keys($permissions,true);$modes=[];
-        if(isset($set['orders.create'])||isset($set['orders.kitchen'])||isset($set['orders.dispatch'])||isset($set['orders.fulfill'])||isset($set['orders.fulfillment_correct'])||isset($set['production.manage'])||isset($set['production.print'])||isset($set['orders.reopen'])||isset($set['tables.manage'])||isset($set['cash.manage']))$modes[]='operation';
-        if(isset($set['orders.delivery'])||isset($set['delivery.assign']))$modes[]='delivery';
+        if(isset($set['orders.create'])||isset($set['orders.kitchen'])||isset($set['orders.dispatch'])||isset($set['orders.fulfill'])||isset($set['orders.fulfillment_correct'])||isset($set['production.manage'])||isset($set['production.print'])||isset($set['orders.reopen'])||isset($set['tables.manage'])||isset($set['cash.manage'])||isset($set['delivery.assign']))$modes[]='operation';
+        if(isset($set['orders.delivery']))$modes[]='delivery';
         if(isset($set['tickets.manage'])||isset($set['guests.manage'])||isset($set['events.manage'])||isset($set['events.bar'])||isset($set['events.promoter']))$modes[]='events';
         if(isset($set['payments.manage'])||isset($set['cash.manage'])||isset($set['nfc.collect'])||isset($set['terminal.collect']))$modes[]='pay';
         return array_values(array_unique($modes));
