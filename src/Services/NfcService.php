@@ -54,8 +54,21 @@ final class NfcService
     {
         $pdo=Database::connection();$g=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider="pagbank" AND active=1 LIMIT 1');$g->execute([$tenantId]);$gateway=$g->fetch();if(!$gateway)throw new RuntimeException('PagBank não está ativo.');$config=Crypto::decryptJson($gateway['config_encrypted']);
         $email=trim((string)($config['legacy_email']??''));$token=trim((string)($config['legacy_token']??$config['token']??''));$base=rtrim((string)($config['tap_on_query_base']??'https://ws.pagseguro.uol.com.br/v3/transactions'),'/');if($email===''||$token==='')throw new RuntimeException('Credenciais de consulta Tap On não configuradas no PagBank.');
-        $url=$base.'/'.rawurlencode($transactionCode).'?'.http_build_query(['email'=>$email,'token'=>$token]);$ch=curl_init($url);if($ch===false)throw new RuntimeException('Falha ao consultar PagBank.');curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>['Accept: application/xml'],CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>20]);$body=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$error=curl_error($ch);curl_close($ch);if($body===false||$status<200||$status>=300)throw new RuntimeException('PagBank não confirmou a consulta da transação (HTTP '.$status.')'.($error?' '.$error:''));
+
+        // A URL é configurável para permitir sandbox/produção, mas credenciais
+        // PagBank nunca podem ser enviadas para HTTP, host externo, userinfo ou
+        // redirecionamento. Isso bloqueia SSRF/exfiltração por configuração ruim.
+        $parts=parse_url($base);$scheme=strtolower((string)($parts['scheme']??''));$host=strtolower(rtrim((string)($parts['host']??''),'.'));
+        if($scheme!=='https'||$host===''||isset($parts['user'])||isset($parts['pass'])||isset($parts['fragment'])||!$this->isAllowedPagBankHost($host))throw new RuntimeException('URL de consulta Tap On não autorizada.');
+
+        $url=$base.'/'.rawurlencode($transactionCode).'?'.http_build_query(['email'=>$email,'token'=>$token]);$ch=curl_init($url);if($ch===false)throw new RuntimeException('Falha ao consultar PagBank.');curl_setopt_array($ch,[CURLOPT_RETURNTRANSFER=>true,CURLOPT_HTTPHEADER=>['Accept: application/xml'],CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>20,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_MAXREDIRS=>0,CURLOPT_PROTOCOLS=>CURLPROTO_HTTPS]);$body=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$error=curl_error($ch);curl_close($ch);if($body===false||$status<200||$status>=300)throw new RuntimeException('PagBank não confirmou a consulta da transação (HTTP '.$status.')'.($error?' '.$error:''));
         if(!function_exists('simplexml_load_string'))throw new RuntimeException('Extensão SimpleXML é necessária para validar Tap On.');libxml_use_internal_errors(true);$xml=simplexml_load_string((string)$body);if($xml===false)throw new RuntimeException('Resposta Tap On inválida.');$returnedCode=trim((string)($xml->code??''));if($returnedCode!==''&&strcasecmp(str_replace('-','',$returnedCode),str_replace('-','',$transactionCode))!==0)throw new RuntimeException('Código da transação PagBank divergente.');$rawStatus=(int)($xml->status??0);$gross=(string)($xml->grossAmount??'0');$amount=(int)round(((float)str_replace(',','.',$gross))*100);
         return ['paid'=>in_array($rawStatus,[3,4],true),'raw_status'=>$rawStatus,'amount_cents'=>$amount,'account_reference'=>(string)$gateway['account_reference']];
+    }
+
+    private function isAllowedPagBankHost(string $host):bool
+    {
+        foreach(['pagseguro.uol.com.br','pagbank.com.br'] as $root){if($host===$root||str_ends_with($host,'.'.$root))return true;}
+        return false;
     }
 }
