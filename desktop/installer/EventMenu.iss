@@ -1,5 +1,5 @@
 #define MyAppName "EventMenu Desktop"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "EventMenu"
 #define MyAppExeName "EventMenu.Desktop.exe"
 
