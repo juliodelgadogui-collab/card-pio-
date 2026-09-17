@@ -82,8 +82,37 @@ final class Auth
 
     public static function requirePermission(string $permission):void
     {
-        if(!self::check())\app_redirect('?route=login');
-        if(!self::can($permission)){http_response_code(403);exit('Acesso negado.');}
+        if(!self::check()){
+            if(self::expectsJson()){self::jsonDenied('Sessão inválida ou expirada.',401);}
+            \app_redirect('?route=login');
+        }
+        if(!self::can($permission)){
+            if(self::expectsJson()){self::jsonDenied('Acesso negado.',403);}
+            http_response_code(403);exit('Acesso negado.');
+        }
+    }
+
+    private static function expectsJson():bool
+    {
+        $accept=strtolower((string)($_SERVER['HTTP_ACCEPT']??''));
+        $requestedWith=strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH']??''));
+        $uri=(string)($_SERVER['REQUEST_URI']??'');
+        $path=(string)(parse_url($uri,PHP_URL_PATH)??'');
+        return str_contains($accept,'application/json')
+            || $requestedWith==='xmlhttprequest'
+            || (bool)preg_match('~/(?:api|webhook)(?:-[a-z0-9-]+)?\.php$~i',$path);
+    }
+
+    private static function jsonDenied(string $message,int $status):never
+    {
+        if(!headers_sent()){
+            http_response_code($status);
+            header('Content-Type: application/json; charset=utf-8');
+            header('Cache-Control: no-store, private, max-age=0');
+            header('X-Content-Type-Options: nosniff');
+        }
+        echo json_encode(['ok'=>false,'error'=>$message],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        exit;
     }
 
     public static function audit(string $action,?string $entityType=null,?string $entityId=null,array $metadata=[]):void
