@@ -16,7 +16,7 @@ final class PaymentService
     public function create(int $orderId,string $provider,string $idempotencyKey,?int $amountCents=null):array
     {
         Auth::requirePermission('payments.manage');
-        $tenantId=Auth::tenantId();$provider=strtolower(trim($provider));
+        $tenantId=Auth::tenantId();$provider=strtolower(trim($provider));$idempotencyKey=trim($idempotencyKey);
         if(!$tenantId||!in_array($provider,self::PROVIDERS,true))throw new RuntimeException('Empresa ou provedor inválido.');
         if(strlen($idempotencyKey)<12)throw new RuntimeException('Chave de idempotência inválida.');
 
@@ -24,12 +24,23 @@ final class PaymentService
             $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$stmt->execute([$orderId,$tenantId]);$order=$stmt->fetch();
             if(!$order)throw new RuntimeException('Pedido não encontrado.');
             if(in_array($order['status'],['cancelled','completed'],true))throw new RuntimeException('Pedido cancelado ou finalizado não pode receber nova cobrança.');
-            $existing=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$existing->execute([$tenantId,$idempotencyKey]);if($payment=$existing->fetch())return $payment;
+
+            $existing=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1 FOR UPDATE'));
+            $existing->execute([$tenantId,$idempotencyKey]);
+            if($payment=$existing->fetch()){
+                if((int)$payment['order_id']!==$orderId||(string)$payment['provider']!==$provider)throw new RuntimeException('Chave de idempotência já utilizada em outra cobrança.');
+                return $payment;
+            }
+
             $paid=$this->paidAmount($pdo,$tenantId,$orderId);$remaining=max(0,(int)$order['total_cents']-$paid);
             if($remaining<=0||$order['payment_status']==='paid')throw new RuntimeException('Pedido já está integralmente pago.');
             $amount=$amountCents??$remaining;if($amount<=0||$amount>$remaining)throw new RuntimeException('Valor da parcela inválido. Saldo restante: R$ '.number_format($remaining/100,2,',','.').'.');
             if($provider!=='manual'){$gw=$pdo->prepare('SELECT id FROM payment_gateways WHERE tenant_id=? AND provider=? AND active=1');$gw->execute([$tenantId,$provider]);if(!$gw->fetchColumn())throw new RuntimeException('Gateway não está ativo para esta empresa.');}
-            $open=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE'));$open->execute([$tenantId,$orderId]);if($payment=$open->fetch())return $payment;
+
+            $open=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE'));
+            $open->execute([$tenantId,$orderId]);
+            if($open->fetch())throw new RuntimeException('Já existe outra cobrança em andamento para este pedido. Aguarde, conclua ou cancele a cobrança atual.');
+
             $stmt=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")');$stmt->execute([$tenantId,$orderId,$provider,$idempotencyKey,$amount]);$id=(int)$pdo->lastInsertId();
             $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status<>"paid"')->execute([$orderId]);
             Auth::audit('payment.created','payment',(string)$id,['order_id'=>$orderId,'provider'=>$provider,'amount_cents'=>$amount,'remaining_before_cents'=>$remaining]);
