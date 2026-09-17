@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EventMenu\Services;
 
+use DateTimeImmutable;
 use EventMenu\Core\Database;
 use PDO;
 use RuntimeException;
@@ -24,7 +25,7 @@ final class StockReservationService
     }
 
     public function holdForPayment(int$tenantId,int$orderId):void{Database::connection()->prepare('UPDATE stock_reservations SET expires_at=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);}
-    public function rearmAfterPaymentFailure(int$tenantId,int$orderId,int$minutes=30):void{$expires=(new\DateTimeImmutable('+'.max(5,$minutes).' minutes'))->format('Y-m-d H:i:s');Database::connection()->prepare('UPDATE stock_reservations SET expires_at=? WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$expires,$tenantId,$orderId]);}
+    public function rearmAfterPaymentFailure(int$tenantId,int$orderId,int$minutes=30):void{$expires=(new DateTimeImmutable('+'.max(5,$minutes).' minutes'))->format('Y-m-d H:i:s');Database::connection()->prepare('UPDATE stock_reservations SET expires_at=? WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$expires,$tenantId,$orderId]);}
     public function consumeForPayment(PDO$pdo,int$tenantId,int$orderId,int$paymentId):void{$this->consumeForSettlement($pdo,$tenantId,$orderId,'payment:'.$paymentId);}
 
     public function consumeForSettlement(PDO$pdo,int$tenantId,int$orderId,string$settlementKey):void
