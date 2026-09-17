@@ -144,9 +144,11 @@ class MainActivity : FragmentActivity() {
                 recommendedUpdate != null -> publishedUpdateUrl
                 else -> null
             }
+            val loginError = state.error?.takeIf { state.session == null }
             val bannerText = when {
                 updateBusy -> "Baixando e verificando a atualização do EventMenu GO…"
                 updateFeedback != null -> updateFeedback
+                loginError != null -> loginError
                 connectivity == ApiConnectivity.OFFLINE -> if (state.session != null) {
                     "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
                 } else {
@@ -209,7 +211,7 @@ class MainActivity : FragmentActivity() {
                         onTapOn = ::launchTapOn,
                     )
                     if (bannerText != null) {
-                        val errorBanner = policyBlock != null || (updateFeedback != null && !updateFeedback!!.startsWith("Atualização verificada"))
+                        val errorBanner = loginError != null || policyBlock != null || (updateFeedback != null && !updateFeedback!!.startsWith("Atualização verificada"))
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
