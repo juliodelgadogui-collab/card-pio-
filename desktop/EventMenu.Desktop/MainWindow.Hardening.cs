@@ -13,6 +13,7 @@ public partial class MainWindow
 
     private int _hubFailureCount;
     private string _lastNavigationSignature = "";
+    private StackPanel? _professionalNavigationSidebar;
     private Button? _dashboardNavButton;
     private Button? _ordersNavButton;
     private bool _hardeningRuntimeReady;
@@ -139,7 +140,8 @@ public partial class MainWindow
 
     private void RebuildProfessionalNavigation(bool force = false)
     {
-        if (PosNavButton.Parent is not StackPanel sidebar) return;
+        _professionalNavigationSidebar ??= PosNavButton.Parent as StackPanel;
+        if (_professionalNavigationSidebar is not StackPanel sidebar) return;
 
         _dashboardNavButton ??= FindNavigationButton(sidebar, "Visão geral");
         _ordersNavButton ??= FindNavigationButton(sidebar, "Pedidos");
@@ -275,7 +277,7 @@ public partial class MainWindow
 
     private void ProfessionalNavigationButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button active || PosNavButton.Parent is not StackPanel sidebar) return;
+        if (sender is not Button active || _professionalNavigationSidebar is not StackPanel sidebar) return;
         foreach (var button in sidebar.Children.OfType<Button>())
             button.Tag = null;
         active.Tag = "active";
@@ -288,6 +290,7 @@ public partial class MainWindow
         Closed -= MainWindow_HardeningClosed;
         _refreshTimer.Tick -= HardeningRefreshTimer_Tick;
         if (_hubTimer is not null) _hubTimer.Tick -= HardenedHubTimer_Tick;
+        _professionalNavigationSidebar = null;
     }
 
     private sealed record NavigationGroup(string Title, bool IsCurrent, Button?[] Buttons);
