@@ -13,7 +13,26 @@ final class DeliveryProgressService
 {
     public function listMine():array
     {
-        [$tenantId,$userId,$shift]=$this->deliveryContext();$unitId=$shift['unit_id']!==null?(int)$shift['unit_id']:null;$pdo=Database::connection();
+        [$tenantId,$userId,$shift]=$this->deliveryContext();
+        $unitId=$shift['unit_id']!==null?(int)$shift['unit_id']:null;
+        $pdo=Database::connection();
+
+        // Materializa o vínculo operacional assim que um pedido pronto é atribuído.
+        // Não marca retirada nem início de rota: estes eventos continuam dependendo
+        // de ação explícita do entregador. A operação é idempotente.
+        $sql='SELECT o.id,o.unit_id FROM orders o LEFT JOIN delivery_progress dp ON dp.tenant_id=o.tenant_id AND dp.order_id=o.id WHERE o.tenant_id=? AND o.channel="delivery" AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery") AND dp.id IS NULL';
+        $args=[$tenantId,$userId];
+        if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}else{$sql.=' AND o.unit_id IS NULL';}
+        $missing=$pdo->prepare($sql);$missing->execute($args);
+        foreach($missing->fetchAll() as $order){
+            try{
+                $insert=Database::portableSql($pdo,'INSERT IGNORE INTO delivery_progress (tenant_id,order_id,delivery_user_id,unit_id) VALUES (?,?,?,?)');
+                $pdo->prepare($insert)->execute([$tenantId,(int)$order['id'],$userId,$order['unit_id']!==null?(int)$order['unit_id']:null]);
+            }catch(\Throwable $e){
+                // Corrida de sincronização/registro já criado: a consulta abaixo é a fonte final.
+            }
+        }
+
         $sql='SELECT o.id order_id,o.status order_status,dp.picked_up_at,dp.route_started_at,dp.arrived_at,dp.completed_at FROM orders o LEFT JOIN delivery_progress dp ON dp.tenant_id=o.tenant_id AND dp.order_id=o.id WHERE o.tenant_id=? AND o.channel="delivery" AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery","completed")';$args=[$tenantId,$userId];
         if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}else{$sql.=' AND o.unit_id IS NULL';}
         $sql.=' ORDER BY o.id DESC LIMIT 200';$s=$pdo->prepare($sql);$s->execute($args);return $s->fetchAll();
@@ -55,9 +74,7 @@ final class DeliveryProgressService
                 if(!str_starts_with(strtolower($url),'https://'))throw new RuntimeException('APP_URL HTTPS é necessário para enviar o rastreamento.');
                 $queued=(new CustomerCommunicationService())->queueDeliveryTracking($tenantId,$orderId,$url);
                 Auth::audit('delivery.tracking_queued','order',(string)$orderId,['channels_queued'=>$queued]);
-            }catch(\Throwable $e){
-                Auth::audit('delivery.tracking_queue_failed','order',(string)$orderId,['error'=>mb_substr($e->getMessage(),0,240)]);
-            }
+            }catch(\Throwable $e){Auth::audit('delivery.tracking_queue_failed','order',(string)$orderId,['error'=>mb_substr($e->getMessage(),0,240)]);}
         }
         return $this->progressByOrder(Database::connection(),$tenantId,$orderId);
     }
@@ -68,10 +85,7 @@ final class DeliveryProgressService
         return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$shift,$orderId):array{
             $order=$this->lockedAssignedOrder($pdo,$tenantId,$userId,$shift,$orderId);if($order['status']!=='out_for_delivery')throw new RuntimeException('Inicie a rota antes de marcar chegada.');
             $p=$this->lockedProgress($pdo,$tenantId,$orderId);if(!$p||!$p['route_started_at'])throw new RuntimeException('Rota não iniciada.');
-            if(!$p['arrived_at']){
-                $pdo->prepare('UPDATE delivery_progress SET arrived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
-                (new OrderHistoryService())->record($pdo,$tenantId,$orderId,'out_for_delivery','out_for_delivery','delivery_arrived','Entregador informou chegada ao endereço do cliente.',$userId);
-            }
+            if(!$p['arrived_at']){$pdo->prepare('UPDATE delivery_progress SET arrived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);(new OrderHistoryService())->record($pdo,$tenantId,$orderId,'out_for_delivery','out_for_delivery','delivery_arrived','Entregador informou chegada ao endereço do cliente.',$userId);}
             Auth::audit('delivery.arrived','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return $this->progressByOrder($pdo,$tenantId,$orderId);
         });
     }
@@ -108,8 +122,6 @@ final class DeliveryProgressService
 
     private function progressByOrder(PDO $pdo,int $tenantId,int $orderId):array
     {
-        $s=$pdo->prepare('SELECT dp.*,o.status AS order_status FROM delivery_progress dp JOIN orders o ON o.id=dp.order_id AND o.tenant_id=dp.tenant_id WHERE dp.tenant_id=? AND dp.order_id=? LIMIT 1');
-        $s->execute([$tenantId,$orderId]);
-        return $s->fetch()?:throw new RuntimeException('Progresso da entrega não encontrado.');
+        $s=$pdo->prepare('SELECT dp.*,o.status AS order_status FROM delivery_progress dp JOIN orders o ON o.id=dp.order_id AND o.tenant_id=dp.tenant_id WHERE dp.tenant_id=? AND dp.order_id=? LIMIT 1');$s->execute([$tenantId,$orderId]);return $s->fetch()?:throw new RuntimeException('Progresso da entrega não encontrado.');
     }
 }
