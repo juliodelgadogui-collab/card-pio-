@@ -4,28 +4,44 @@ declare(strict_types=1);
 
 namespace EventMenu\Services;
 
+use EventMenu\Core\Crypto;
+use EventMenu\Core\Database;
 use RuntimeException;
 use Throwable;
 
 /**
  * Impede que uma sincronização válida, porém mais antiga, substitua o estado
  * mais novo já armazenado no servidor de contingência.
+ *
+ * A comparação monotônica só acontece depois de confirmar o HMAC do pacote.
+ * Requisições não autenticadas seguem para o ClusterSyncService, que devolve
+ * o erro criptográfico normal sem revelar a ordem/versão do estado armazenado.
  */
 final class ClusterControlPlaneReplayGuardService
 {
     private const MAX_BYTES = 2_000_000;
 
-    public function assertNotOlder(string $raw): void
+    public function assertAuthenticatedNotOlder(string $raw, string $signature): void
     {
-        // O limite espelha o ClusterSyncService para não fazer parse preliminar
-        // de um corpo que o serviço autenticado recusará logo depois.
-        if ($raw === '' || strlen($raw) > self::MAX_BYTES) return;
+        if ($raw === '' || strlen($raw) > self::MAX_BYTES || $signature === '') return;
+
+        $credentials = $this->credentialsOrNull();
+        if ($credentials === null) return;
+        [$clusterId, $secret] = $credentials;
+        if (!hash_equals(hash_hmac('sha256', $raw, $secret), $signature)) return;
+
         try {
             $request = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
         } catch (Throwable) {
-            return; // A validação estrutural/autenticada continua no ClusterSyncService.
+            return;
         }
         if (!is_array($request)) return;
+        if (!hash_equals($clusterId, trim((string)($request['cluster_id'] ?? '')))) return;
+        if ((string)($request['type'] ?? '') !== 'control_plane') return;
+        $timestamp = (int)($request['timestamp'] ?? 0);
+        if ($timestamp < 1 || abs(time() - $timestamp) > 300) return;
+        if (strlen(trim((string)($request['nonce'] ?? ''))) < 16) return;
+
         $bundle = $request['bundle'] ?? null;
         if (!is_array($bundle)) return;
 
@@ -47,6 +63,33 @@ final class ClusterControlPlaneReplayGuardService
                 throw new RuntimeException('Sincronização rejeitada: política ' . $platform . ' é anterior ao estado já armazenado na contingência.');
             }
         }
+    }
+
+    /** @return array{0:string,1:string}|null */
+    private function credentialsOrNull(): ?array
+    {
+        $clusterId = trim((string)env('EVENTMENU_CLUSTER_ID', ''));
+        $secret = trim((string)env('EVENTMENU_CLUSTER_SECRET', ''));
+        try {
+            $stmt = Database::connection()->prepare('SELECT cluster_id,cluster_secret_encrypted FROM platform_failover_settings WHERE id=1 LIMIT 1');
+            $stmt->execute();
+            $row = $stmt->fetch();
+            if ($row) {
+                if (trim((string)($row['cluster_id'] ?? '')) !== '') $clusterId = trim((string)$row['cluster_id']);
+                if (!empty($row['cluster_secret_encrypted'])) $secret = Crypto::decrypt((string)$row['cluster_secret_encrypted']);
+            }
+        } catch (Throwable) {
+        }
+        if ($clusterId === '' || strlen($secret) < 32) {
+            try {
+                $node = new ClusterNodeConfigService();
+                if ($clusterId === '') $clusterId = $node->clusterId();
+                if (strlen($secret) < 32) $secret = $node->clusterSecret();
+            } catch (Throwable) {
+            }
+        }
+        if ($clusterId === '' || strlen($secret) < 32) return null;
+        return [$clusterId, $secret];
     }
 
     /** @param array<string,mixed> $bundle */
