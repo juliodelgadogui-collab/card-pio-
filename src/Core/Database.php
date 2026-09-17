@@ -10,6 +10,9 @@ use Throwable;
 
 final class Database
 {
+    private const SQLITE_BUSY_TIMEOUT_MS = 3000;
+    private const SQLITE_TRANSACTION_ATTEMPTS = 4;
+
     private static ?PDO $pdo = null;
     private static bool $sqliteImmediateTransaction = false;
 
@@ -41,8 +44,13 @@ final class Database
 
             self::$pdo = new PDO('sqlite:' . $path, null, null, $options);
             self::$pdo->exec('PRAGMA foreign_keys = ON');
-            self::$pdo->exec('PRAGMA busy_timeout = 5000');
-            if ($path !== ':memory:') self::$pdo->exec('PRAGMA journal_mode = WAL');
+            self::$pdo->exec('PRAGMA busy_timeout = ' . self::SQLITE_BUSY_TIMEOUT_MS);
+            if ($path !== ':memory:') {
+                $currentMode = strtolower((string)self::$pdo->query('PRAGMA journal_mode')->fetchColumn());
+                if ($currentMode !== 'wal') self::$pdo->exec('PRAGMA journal_mode = WAL');
+                self::$pdo->exec('PRAGMA synchronous = NORMAL');
+                self::$pdo->exec('PRAGMA wal_autocheckpoint = 1000');
+            }
             self::registerSqliteFunctions(self::$pdo);
             return self::$pdo;
         }
@@ -100,7 +108,7 @@ final class Database
 
         $sqlite = self::isSqlite($pdo);
         if ($sqlite) {
-            $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+            self::retrySqliteBusy(static fn() => $pdo->exec('BEGIN IMMEDIATE TRANSACTION'));
             self::$sqliteImmediateTransaction = true;
         } else {
             $pdo->beginTransaction();
@@ -109,7 +117,7 @@ final class Database
         try {
             $result = $callback($pdo);
             if ($sqlite) {
-                $pdo->exec('COMMIT');
+                self::retrySqliteBusy(static fn() => $pdo->exec('COMMIT'));
                 self::$sqliteImmediateTransaction = false;
             } else {
                 $pdo->commit();
@@ -127,6 +135,31 @@ final class Database
             }
             throw $e;
         }
+    }
+
+    private static function retrySqliteBusy(callable $operation): mixed
+    {
+        $attempt = 0;
+        while (true) {
+            try {
+                return $operation();
+            } catch (Throwable $e) {
+                $attempt++;
+                if ($attempt >= self::SQLITE_TRANSACTION_ATTEMPTS || !self::isSqliteBusy($e)) throw $e;
+                $backoffMicros = min(700000, 50000 * (2 ** ($attempt - 1))) + random_int(10000, 70000);
+                usleep($backoffMicros);
+            }
+        }
+    }
+
+    private static function isSqliteBusy(Throwable $e): bool
+    {
+        $message = strtolower($e->getMessage());
+        return str_contains($message, 'database is locked')
+            || str_contains($message, 'database table is locked')
+            || str_contains($message, 'database schema is locked')
+            || str_contains($message, 'general error: 5')
+            || str_contains($message, 'general error: 6');
     }
 
     private static function registerSqliteFunctions(PDO $pdo): void
