@@ -239,7 +239,7 @@ public partial class MainWindow
             EnsureHubRuntime();if(_hubIntegrationApi is null)return;
             var window=new ProductionWindow(_hubIntegrationApi,Can("orders_dispatch"),Can("production_manage")){Owner=this};window.ShowDialog();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Produção",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Produção",this);}
         await Task.CompletedTask;
     }
 
@@ -255,7 +255,7 @@ public partial class MainWindow
             using var inventoryApi=new InventoryMonitorApiClient(_store);
             var window=new InventoryMonitorWindow(inventoryApi){Owner=this};window.ShowDialog();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Estoque",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Estoque",this);}
         await Task.CompletedTask;
     }
 
@@ -271,7 +271,7 @@ public partial class MainWindow
         {
             var window=new DeliveryMonitorWindow(_store){Owner=this};window.ShowDialog();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Entregas",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Entregas",this);}
         await Task.CompletedTask;
     }
 
@@ -293,7 +293,7 @@ public partial class MainWindow
             window.ShowDialog();
             if(window.ApprovalChanged)await RefreshAfterSensitiveOrderChangeAsync();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Aprovações",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Aprovações",this);}
     }
 
     private async Task OpenNotificationsAsync()
@@ -311,7 +311,7 @@ public partial class MainWindow
             window.ShowDialog();
             if(window.OperationChanged)await RefreshAfterSensitiveOrderChangeAsync();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Notificações",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Notificações",this);}
     }
 
     private async Task RefreshAfterSensitiveOrderChangeAsync()
@@ -358,7 +358,7 @@ public partial class MainWindow
                 if(canCash)await TryLoadCashAsync(false);
             }
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Ler QR / código",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Ler QR / código",this);}
     }
 
     private async Task OpenFiscalAreaAsync()
@@ -388,7 +388,7 @@ public partial class MainWindow
                 Can("fiscal_issue")){Owner=this};
             window.ShowDialog();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Nota fiscal",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Nota fiscal",this);}
     }
 
     private async Task OpenHubPairingAsync()
@@ -404,14 +404,33 @@ public partial class MainWindow
         {
             EnsureHubRuntime();
             if(_hubIntegrationApi is null||_hubHardwareStore is null)return;
-            var profile=_hubHardwareStore.Load();
-            await _hubIntegrationApi.HardwareHeartbeatAsync(unitId,_hubHardwareStore,profile);
-            _lastHubHeartbeat=DateTimeOffset.UtcNow;
+
+            // O vínculo com o celular depende do Hub. O registro de hardware é útil,
+            // mas não deve impedir o pareamento se esse módulo opcional estiver ausente.
+            try
+            {
+                var profile=_hubHardwareStore.Load();
+                await _hubIntegrationApi.HardwareHeartbeatAsync(unitId,_hubHardwareStore,profile);
+                _lastHubHeartbeat=DateTimeOffset.UtcNow;
+                DesktopFeatureAvailability.MarkAvailable(DesktopFeatureNames.Hardware);
+            }
+            catch(ApiClientException heartbeatError) when(DesktopFeatureAvailability.MarkUnavailableIfUnsupported(DesktopFeatureNames.Hardware,heartbeatError))
+            {
+                ApplyServerCapabilityVisibility();
+            }
+
             var pairing=await _hubIntegrationApi.CreateHubPairingAsync(unitId);
+            DesktopFeatureAvailability.MarkAvailable(DesktopFeatureNames.Hub);
             var value=pairing.Pairing??throw new InvalidOperationException("Não foi possível gerar o código de conexão.");
             var window=new HubPairingWindow(value){Owner=this};window.ShowDialog();
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Conectar celular",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(ApiClientException ex) when(DesktopFeatureAvailability.MarkUnavailableIfUnsupported(DesktopFeatureNames.Hub,ex))
+        {
+            ApplyServerCapabilityVisibility();
+            RebuildProfessionalNavigation(true);
+            DesktopErrorPresenter.Show(ex,"Conectar celular",this);
+        }
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Conectar celular",this);}
     }
 
     private async Task OpenHardwareSettingsAsync()
@@ -433,7 +452,7 @@ public partial class MainWindow
             await _hubIntegrationApi.HardwareHeartbeatAsync(unitId,_hubHardwareStore,_hubHardwareStore.Load());
             _lastHubHeartbeat=DateTimeOffset.UtcNow;
         }
-        catch(Exception ex){MessageBox.Show(ex.Message,"Configurações",MessageBoxButton.OK,MessageBoxImage.Warning);}
+        catch(Exception ex){DesktopErrorPresenter.Show(ex,"Configurações",this);}
     }
 
     private async void HubTimer_Tick(object? sender,EventArgs e)
