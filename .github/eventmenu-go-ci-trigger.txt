@@ -1,0 +1,2 @@
+EventMenu GO CI validation trigger.
+Source baseline: main after commit 8f2f80f087340f2b35006810e0c5ffacb90622de.
