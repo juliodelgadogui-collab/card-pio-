@@ -10,7 +10,7 @@ if (Test-Path $output) {
 Write-Host 'Restaurando dependencias...'
 dotnet restore $project
 
-Write-Host 'Compilando EventMenu Desktop 0.2.0...'
+Write-Host 'Compilando EventMenu Desktop 0.3.0...'
 dotnet build $project -c Release --no-restore
 
 Write-Host 'Gerando pacote Windows x64 self-contained...'
