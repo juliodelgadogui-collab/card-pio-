@@ -190,7 +190,27 @@ class MainViewModel(
     fun addProduct(productId:Int){val p=_state.value.products.firstOrNull{it.id==productId}?:return;val current=_state.value.cart[productId]?:0;if(p.trackStock&&current+1>p.stockQty.toInt()){_state.update{it.copy(error="Não há estoque suficiente de ${p.name}.")};return};_state.update{it.copy(cart=it.cart+(productId to current+1))}}
     fun removeProduct(productId:Int){val current=_state.value.cart[productId]?:return;_state.update{s->if(current<=1)s.copy(cart=s.cart-productId)else s.copy(cart=s.cart+(productId to current-1))}}
     fun clearCart()=_state.update{it.copy(cart=emptyMap())}
-    fun createPosOrder(channel:String,customerName:String,phone:String,address:String,notes:String)=launchBusy{val table=_state.value.selectedTable;val effectiveChannel=if(table!=null)"table"else channel;val order=repo.createOrder(effectiveChannel,_state.value.cart,customerName,phone,address,notes,table?.id);if(effectiveChannel=="table"){_state.update{it.copy(cart=emptyMap(),posOrder=null,paymentBalance=null,selectedTable=null,screen=AppScreen.TABLES,message="Pedido #${order.id} adicionado à ${table?.name?:"mesa"}.")};refreshOrdersInternal();refreshTablesInternal();refreshCatalogInternal();if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))refreshKitchenInternal()}else{val balance=repo.paymentBalance(order.id);_state.update{it.copy(cart=emptyMap(),posOrder=order,paymentBalance=balance,posReturnScreen=null,message="Pedido #${order.id} criado. Escolha como receber.")};refreshOrdersInternal();refreshCatalogInternal();if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))refreshKitchenInternal()};if("reports" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshManagerInternal()};refreshNotificationsInternal()}
+    fun createPosOrder(channel:String,customerName:String,phone:String,address:String,notes:String)=launchBusy{
+        val table=_state.value.selectedTable
+        val effectiveChannel=if(table!=null)"table"else channel
+        val order=repo.createOrder(effectiveChannel,_state.value.cart,customerName,phone,address,notes,table?.id)
+        if(effectiveChannel=="table"){
+            _state.update{it.copy(cart=emptyMap(),posOrder=null,paymentBalance=null,selectedTable=null,screen=AppScreen.TABLES,error=null,message="Pedido #${order.id} adicionado à ${table?.name?:"mesa"}.")}
+            runCatching{refreshOrdersInternal()}
+            runCatching{refreshTablesInternal()}
+            runCatching{refreshCatalogInternal()}
+            if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshKitchenInternal()}
+        }else{
+            val fallback=PaymentBalance(order.id,order.totalCents,0,order.totalCents,"unpaid")
+            _state.update{it.copy(cart=emptyMap(),posOrder=order,paymentBalance=fallback,posReturnScreen=null,error=null,message="Pedido #${order.id} criado. Escolha como receber.")}
+            runCatching{repo.paymentBalance(order.id)}.onSuccess{balance->_state.update{it.copy(paymentBalance=balance)}}
+            runCatching{refreshOrdersInternal()}
+            runCatching{refreshCatalogInternal()}
+            if("orders_kitchen" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshKitchenInternal()}
+        }
+        if("reports" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshManagerInternal()}
+        runCatching{refreshNotificationsInternal()}
+    }
     fun finishPosFlow()=launchBusy{val back=_state.value.posReturnScreen;_state.update{it.copy(posOrder=null,paymentBalance=null,pixCharge=null,tapOnRequest=null,cart=emptyMap(),selectedTable=if(back==AppScreen.TABLE_ACCOUNT)it.selectedTable else null,posReturnScreen=null,screen=back?:AppScreen.POS)};if(back==AppScreen.TABLE_ACCOUNT){refreshTablesInternal();refreshTableAccountInternal()}else refreshCatalogInternal();if("reports" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshManagerInternal()};refreshNotificationsInternal()}
     fun refreshPosPayment()=launchBusy{val id=_state.value.posOrder?.id?:return@launchBusy;_state.update{it.copy(paymentBalance=repo.paymentBalance(id))};refreshNotificationsInternal()}
     fun payPosCash(amountCents:Int)=launchBusy{val id=_state.value.posOrder?.id?:throw IllegalStateException("Pedido não encontrado.");val balance=repo.payCashPart(id,amountCents);_state.update{it.copy(paymentBalance=balance,message="Dinheiro recebido: ${money(amountCents)}")};refreshOrdersInternal();refreshCashInternal();if("reports" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshManagerInternal()};refreshNotificationsInternal()}
