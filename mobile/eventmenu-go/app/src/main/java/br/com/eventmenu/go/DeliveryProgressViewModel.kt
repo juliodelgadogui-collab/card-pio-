@@ -41,7 +41,13 @@ class DeliveryProgressViewModel(
         _state.update { it.copy(loading = true, error = null) }
         try {
             val rows = repository.listMine()
-            _state.update { it.copy(items = rows.associateBy { row -> row.orderId }, loading = false) }
+            _state.update {
+                it.copy(
+                    items = rows.associateBy { row -> row.orderId },
+                    loading = false,
+                    changeVersion = it.changeVersion + 1,
+                )
+            }
             syncGps(rows)
         } catch (error: Throwable) {
             _state.update {
@@ -107,9 +113,6 @@ class DeliveryProgressViewModel(
             }
             DeliveryLocationService.start(EventMenuGoApplication.instance)
         } catch (error: Throwable) {
-            // Se a tela estava com um pedido atrasado em cache/estado local, consulta o
-            // progresso atual antes de exibir erro. Assim um segundo toque ou uma
-            // resposta tardia não tenta reiniciar uma rota que já existe.
             val latest = try {
                 repository.listMine().firstOrNull { it.orderId == orderId }
             } catch (_: Throwable) {
