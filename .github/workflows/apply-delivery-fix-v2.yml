@@ -1,0 +1,38 @@
+name: Apply Delivery Fix V2
+on: push
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/delivery-live-refresh-20260917
+          fetch-depth: 20
+      - name: Restore app file and apply synchronization fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout 1ca0f750bc209bb3115f16b62f1e667ed4224776 -- mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/ui/EventMenuGoApp.kt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/ui/EventMenuGoApp.kt')
+          s=p.read_text()
+          s=s.replace('''        if (state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()\n        while (true) { delay(10_000); viewModel.refreshNotifications() }''','''        if (state.workShift?.mode == "delivery") {\n            viewModel.refreshOrders()\n            deliveryProgressViewModel.refresh()\n        }\n        while (true) {\n            delay(if (state.workShift?.mode == "delivery") 5_000 else 10_000)\n            if (state.workShift?.mode == "delivery") {\n                viewModel.refreshOrders()\n                deliveryProgressViewModel.refresh()\n            }\n            viewModel.refreshNotifications()\n        }''')
+          s=s.replace('''        if (state.screen == AppScreen.DELIVERY && state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()''','''        if (state.screen == AppScreen.DELIVERY && state.workShift?.mode == "delivery") {\n            viewModel.refreshOrders()\n            deliveryProgressViewModel.refresh()\n        }''')
+          old='''AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, deliveryProgressState.items, state.pixCharge, deliveryProgressViewModel::refresh,'''
+          new='''AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, deliveryProgressState.items, state.pixCharge, { viewModel.refreshOrders(); deliveryProgressViewModel.refresh() },'''
+          s=s.replace(old,new)
+          p.write_text(s)
+          PY
+          grep -q 'delay(if (state.workShift?.mode == "delivery") 5_000 else 10_000)' mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/ui/EventMenuGoApp.kt
+          grep -q 'viewModel.refreshOrders()' mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/ui/EventMenuGoApp.kt
+      - name: Commit corrected app flow
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/ui/EventMenuGoApp.kt
+          git commit -m 'fix(android): synchronize delivery orders and progress'
+          git push origin HEAD:fix/delivery-live-refresh-20260917

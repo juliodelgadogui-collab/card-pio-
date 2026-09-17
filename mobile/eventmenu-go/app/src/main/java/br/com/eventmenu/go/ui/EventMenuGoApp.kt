@@ -181,8 +181,18 @@ fun EventMenuGoApp(
     LaunchedEffect(state.notifications) { OperationNotificationScheduler.showUnread(context, state.notifications) }
     LaunchedEffect(state.workShift?.id) {
         if (state.workShift?.status != "open") return@LaunchedEffect
-        if (state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()
-        while (true) { delay(10_000); viewModel.refreshNotifications() }
+        if (state.workShift?.mode == "delivery") {
+            viewModel.refreshOrders()
+            deliveryProgressViewModel.refresh()
+        }
+        while (true) {
+            delay(if (state.workShift?.mode == "delivery") 5_000 else 10_000)
+            if (state.workShift?.mode == "delivery") {
+                viewModel.refreshOrders()
+                deliveryProgressViewModel.refresh()
+            }
+            viewModel.refreshNotifications()
+        }
     }
     LaunchedEffect(state.tapOnRequest) {
         state.tapOnRequest?.let { request -> onTapOn(request) { transactionCode -> if (transactionCode.isNullOrBlank()) viewModel.tapOnCancelled() else viewModel.verifyTapOn(request, transactionCode) }; viewModel.tapOnLaunchConsumed() }
@@ -219,7 +229,10 @@ fun EventMenuGoApp(
         if (state.screen == AppScreen.PROFILE && state.workShift?.id != null) { profileViewModel.refresh(); deviceViewModel.refresh(); printerViewModel.refresh() }
         if (state.screen == AppScreen.MANAGER && state.workShift?.id != null) { managerActionsViewModel.refresh(); if (state.session?.permissions?.contains("discount_approve") == true) discountViewModel.loadPending() }
         if (state.screen == AppScreen.DISPATCH && state.workShift?.id != null && ("delivery_assign" in state.session?.permissions.orEmpty() || "orders_manage" in state.session?.permissions.orEmpty())) triageViewModel.refresh()
-        if (state.screen == AppScreen.DELIVERY && state.workShift?.mode == "delivery") deliveryProgressViewModel.refresh()
+        if (state.screen == AppScreen.DELIVERY && state.workShift?.mode == "delivery") {
+            viewModel.refreshOrders()
+            deliveryProgressViewModel.refresh()
+        }
         if (state.screen == AppScreen.POS && state.posOrder != null && state.session?.permissions?.contains("discount_request") == true) discountViewModel.watchOrder(state.posOrder!!.id)
     }
     LaunchedEffect(state.screen, state.posOrder?.id, discountState.orderRequest?.id, discountState.orderRequest?.status) {
@@ -375,7 +388,7 @@ fun EventMenuGoApp(
                     AppScreen.KITCHEN -> KitchenScreen(state.kitchenTickets, viewModel::refreshKitchen, viewModel::kitchenStatus)
                     AppScreen.DISPATCH -> DispatchScreen(state.orders, state.deliveryUsers, "delivery_assign" in permissions, state.dispatchFocusOrderId, triageState.orders, triageState.units, "delivery_assign" in permissions || "orders_manage" in permissions, { viewModel.refreshDispatch(); triageViewModel.refresh() }, viewModel::dispatchReady, viewModel::assignDelivery, { orderId -> pendingDeliveryQrOrderId = orderId; startScan() }, triageViewModel::assign)
                     AppScreen.CASH -> CashOperationsScreen(state.cashOpen, state.cashSummary, viewModel::openCash, viewModel::addCashSupply, viewModel::addCashWithdrawal, viewModel::closeCash, viewModel::refreshCash)
-                    AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, deliveryProgressState.items, state.pixCharge, deliveryProgressViewModel::refresh, deliveryProgressViewModel::pickup, deliveryProgressViewModel::startRoute, deliveryProgressViewModel::arrive, deliveryProgressViewModel::complete, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, printerViewModel::printReceipt, viewModel::pollPixStatus, viewModel::dismissPix)
+                    AppScreen.DELIVERY -> DeliveryOperationsScreen(state.orders, deliveryProgressState.items, state.pixCharge, { viewModel.refreshOrders(); deliveryProgressViewModel.refresh() }, deliveryProgressViewModel::pickup, deliveryProgressViewModel::startRoute, deliveryProgressViewModel::arrive, deliveryProgressViewModel::complete, viewModel::requestPix, viewModel::requestNfc, viewModel::collectDeliveryCash, receiptViewModel::prepare, printerViewModel::printReceipt, viewModel::pollPixStatus, viewModel::dismissPix)
                     AppScreen.EVENTS -> EventModeScreen(state.events, state.selectedEventId, state.eventEntries, "tickets" in permissions, "guests" in permissions, "event_bar" in permissions, viewModel::selectEvent, { eventId -> state.events.firstOrNull { it.id == eventId }?.let { eventBarViewModel.open(it.id, it.name) } }, viewModel::refreshEvents, ::startScan)
                     AppScreen.PROFILE -> EmployeeProfileScreen(state, profileState.summary, profileState.loading, profileViewModel::refresh, { universalQrViewModel.issueSelf(session.user.id, session.user.name, state.workShift?.mode == "delivery") }, deviceState, deviceViewModel::refresh, printerState, printerViewModel::refresh, printerViewModel::selectDevice, printerViewModel::clearDevice, printerViewModel::setEnabled, printerViewModel::setAutoPrint, printerViewModel::setPaperWidth, printerViewModel::printTest, viewModel::savePin, viewModel::setBiometric, viewModel::closeShift, viewModel::createCashHandoff, viewModel::dismissCashHandoff, viewModel::refreshDeliveryCash, viewModel::logout)
                 }
