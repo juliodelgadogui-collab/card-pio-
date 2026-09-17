@@ -6,14 +6,25 @@ namespace EventMenu.Desktop;
 
 public partial class MainWindow
 {
-    protected override void OnInitialized(EventArgs e)
+    private bool _desktopLayoutHooksReady;
+
+    static MainWindow()
     {
-        base.OnInitialized(e);
-        MinWidth = 980;
-        MinHeight = 620;
-        SizeChanged += (_, _) => ApplyDesktopLayout();
-        StateChanged += (_, _) => Dispatcher.BeginInvoke(ApplyDesktopLayout);
-        Loaded += (_, _) => ApplyDesktopLayout();
+        EventManager.RegisterClassHandler(typeof(MainWindow), FrameworkElement.LoadedEvent, new RoutedEventHandler(DesktopLayout_Loaded));
+    }
+
+    private static void DesktopLayout_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MainWindow window) return;
+        if (!window._desktopLayoutHooksReady)
+        {
+            window._desktopLayoutHooksReady = true;
+            window.MinWidth = 980;
+            window.MinHeight = 620;
+            window.SizeChanged += (_, _) => window.ApplyDesktopLayout();
+            window.StateChanged += (_, _) => window.Dispatcher.BeginInvoke(window.ApplyDesktopLayout);
+        }
+        window.ApplyDesktopLayout();
     }
 
     private void ApplyDesktopLayout()
@@ -69,21 +80,21 @@ public partial class MainWindow
 
     private static void ApplyOperationalCardDensity(DependencyObject root, double radius)
     {
-        foreach (var border in Descendants<Border>(root))
+        foreach (var border in DesktopDescendants<Border>(root))
         {
             if (border.Style == Application.Current.TryFindResource("Card") as Style)
                 border.CornerRadius = new CornerRadius(radius);
         }
     }
 
-    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    private static IEnumerable<T> DesktopDescendants<T>(DependencyObject root) where T : DependencyObject
     {
         var count = VisualTreeHelper.GetChildrenCount(root);
         for (var i = 0; i < count; i++)
         {
             var child = VisualTreeHelper.GetChild(root, i);
             if (child is T match) yield return match;
-            foreach (var nested in Descendants<T>(child)) yield return nested;
+            foreach (var nested in DesktopDescendants<T>(child)) yield return nested;
         }
     }
 }
