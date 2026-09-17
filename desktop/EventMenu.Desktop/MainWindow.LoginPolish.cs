@@ -34,7 +34,7 @@ public partial class MainWindow
         EmailBox.FontWeight = FontWeights.Normal;
         EmailBox.Height = 50;
         EmailBox.MinHeight = 50;
-        EmailBox.Padding = new Thickness(14, 8);
+        EmailBox.Padding = new Thickness(14, 8, 14, 8);
         EmailBox.Foreground = new SolidColorBrush(Color.FromRgb(16, 24, 40));
         EmailBox.CaretBrush = new SolidColorBrush(Color.FromRgb(37, 99, 235));
         EmailBox.VerticalContentAlignment = VerticalAlignment.Center;
@@ -44,7 +44,7 @@ public partial class MainWindow
         PasswordBox.FontWeight = FontWeights.Normal;
         PasswordBox.Height = 50;
         PasswordBox.MinHeight = 50;
-        PasswordBox.Padding = new Thickness(14, 8);
+        PasswordBox.Padding = new Thickness(14, 8, 14, 8);
         PasswordBox.Foreground = new SolidColorBrush(Color.FromRgb(16, 24, 40));
         PasswordBox.CaretBrush = new SolidColorBrush(Color.FromRgb(37, 99, 235));
         PasswordBox.VerticalContentAlignment = VerticalAlignment.Center;
@@ -73,8 +73,8 @@ public partial class MainWindow
         {
             promo.Visibility = singlePane ? Visibility.Collapsed : Visibility.Visible;
             promo.Padding = width < 1360
-                ? new Thickness(42, 38)
-                : new Thickness(64, 54);
+                ? new Thickness(42, 38, 42, 38)
+                : new Thickness(64, 54, 64, 54);
         }
 
         var loginHost = LoginPanel.Children
@@ -83,10 +83,10 @@ public partial class MainWindow
         if (loginHost is null) return;
 
         loginHost.Margin = singlePane
-            ? new Thickness(24, 20)
+            ? new Thickness(24, 20, 24, 20)
             : width < 1360
-                ? new Thickness(42, 34)
-                : new Thickness(64, 46);
+                ? new Thickness(42, 34, 42, 34)
+                : new Thickness(64, 46, 64, 46);
 
         var card = loginHost.Children.OfType<Border>().FirstOrDefault();
         if (card is not null)
