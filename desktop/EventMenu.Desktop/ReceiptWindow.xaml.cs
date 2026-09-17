@@ -95,7 +95,7 @@ public partial class ReceiptWindow : Window
         if (_busy || _receipt is null) return;
         try
         {
-            StatusText.Text = ReceiptPrinter.PrintReceipt(_receipt)
+            StatusText.Text = SiteReceiptPrinter.Print(_receipt)
                 ? "Cupom enviado para impressão."
                 : "Impressão cancelada.";
         }
