@@ -344,9 +344,40 @@ class ApiClient(
                 "contingency" -> ApiServerRole.CONTINGENCY
                 else -> ApiServerRole.PRIMARY
             }
-            role == expectedRole
+            if (role != expectedRole) return false
+
+            // O health é apenas diagnóstico. Antes de enviar Bearer/refresh para
+            // um nó após failover, exigimos também um manifesto Android RS256
+            // válido e não regressivo assinado pela raiz confiada do principal.
+            probeSignedPolicy(serverBase)
         } catch (_: IOException) {
             false
+        } catch (_: Exception) {
+            false
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun probeSignedPolicy(serverBase: String): Boolean {
+        val connection = runCatching {
+            URL(serverBase.trimEnd('/') + "/api-client-policy.php?action=manifest&platform=android").openConnection() as HttpURLConnection
+        }.getOrNull() ?: return false
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 4_000
+            connection.readTimeout = 6_000
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Cache-Control", "no-cache")
+            connection.setRequestProperty("X-EventMenu-Client", "android")
+            connection.setRequestProperty("X-EventMenu-Version", BuildConfig.VERSION_NAME)
+            val fingerprint = runCatching { ClientPolicyManager.signingFingerprint() }.getOrDefault("")
+            if (fingerprint.isNotBlank()) connection.setRequestProperty("X-EventMenu-Signing-Fingerprint", fingerprint)
+            val status = connection.responseCode
+            if (status !in 200..299) return false
+            val text = connection.inputStream.bufferedReader().use { it.readText() }
+            val envelope = runCatching { JSONObject(text) }.getOrNull() ?: return false
+            envelope.optBoolean("ok", false) && ClientPolicyManager.applyEnvelope(envelope)
         } catch (_: Exception) {
             false
         } finally {
