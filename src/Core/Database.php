@@ -40,17 +40,15 @@ final class Database
                 if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
                     throw new RuntimeException('Não foi possível criar a pasta do banco SQLite.');
                 }
+                if (!is_writable($directory)) {
+                    throw new RuntimeException('A pasta do banco SQLite não possui permissão de escrita: ' . $directory);
+                }
             }
 
             self::$pdo = new PDO('sqlite:' . $path, null, null, $options);
             self::$pdo->exec('PRAGMA foreign_keys = ON');
             self::$pdo->exec('PRAGMA busy_timeout = ' . self::SQLITE_BUSY_TIMEOUT_MS);
-            if ($path !== ':memory:') {
-                $currentMode = strtolower((string)self::$pdo->query('PRAGMA journal_mode')->fetchColumn());
-                if ($currentMode !== 'wal') self::$pdo->exec('PRAGMA journal_mode = WAL');
-                self::$pdo->exec('PRAGMA synchronous = NORMAL');
-                self::$pdo->exec('PRAGMA wal_autocheckpoint = 1000');
-            }
+            if ($path !== ':memory:') self::configureSqliteJournal(self::$pdo);
             self::registerSqliteFunctions(self::$pdo);
             return self::$pdo;
         }
@@ -69,6 +67,41 @@ final class Database
         $dsn = "mysql:host={$host};port={$port};dbname={$db};charset=utf8mb4";
         self::$pdo = new PDO($dsn, $user, $pass, $options);
         return self::$pdo;
+    }
+
+    private static function configureSqliteJournal(PDO $pdo): void
+    {
+        // WAL is preferred, but some shared/network filesystems cannot create or
+        // reliably use the -wal/-shm files. A WAL I/O failure must not take the
+        // entire EventMenu API down. Fall back to DELETE journal mode instead.
+        $preferWal = strtolower((string)env('DB_SQLITE_WAL', 'auto')) !== 'false';
+        if ($preferWal) {
+            try {
+                $mode = strtolower((string)$pdo->query('PRAGMA journal_mode')->fetchColumn());
+                if ($mode !== 'wal') {
+                    $mode = strtolower((string)$pdo->query('PRAGMA journal_mode = WAL')->fetchColumn());
+                }
+                if ($mode === 'wal') {
+                    $pdo->exec('PRAGMA synchronous = NORMAL');
+                    $pdo->exec('PRAGMA wal_autocheckpoint = 1000');
+                    return;
+                }
+            } catch (Throwable $e) {
+                // Continue with a journal mode compatible with shared hosting.
+            }
+        }
+
+        try {
+            $pdo->query('PRAGMA journal_mode = DELETE')->fetchColumn();
+        } catch (Throwable $e) {
+            // If changing journal mode is itself blocked, keep SQLite's current
+            // mode and allow normal queries to decide whether the DB is usable.
+        }
+        try {
+            $pdo->exec('PRAGMA synchronous = FULL');
+        } catch (Throwable $e) {
+            // Non-fatal compatibility tuning.
+        }
     }
 
     public static function driver(?PDO $pdo = null): string
