@@ -41,7 +41,15 @@ class DeliveryProgressViewModel(
         _state.update { it.copy(loading = true, error = null) }
         runCatching { repository.listMine() }
             .onSuccess { rows ->
-                _state.update { it.copy(items = rows.associateBy { row -> row.orderId }, loading = false) }
+                _state.update {
+                    it.copy(
+                        items = rows.associateBy { row -> row.orderId },
+                        loading = false,
+                        // O EventMenuGoApp observa esta versão e atualiza também state.orders.
+                        // Assim abrir/atualizar Minhas entregas nunca depende de uma lista de pedidos antiga.
+                        changeVersion = it.changeVersion + 1,
+                    )
+                }
                 syncGps(rows)
             }
             .onFailure { _state.update { it.copy(loading = false, error = "Não foi possível atualizar as entregas.") } }
