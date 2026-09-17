@@ -9,6 +9,7 @@ public partial class ReceiptWindow : Window
     private readonly OperationalActionsApiClient _api;
     private readonly int _orderId;
     private OrderReceipt? _receipt;
+    private string? _orderQrPayload;
     private bool _busy;
 
     public ReceiptWindow(SecureSessionStore store, int orderId)
@@ -30,6 +31,27 @@ public partial class ReceiptWindow : Window
         {
             var response = await _api.OrderReceiptAsync(_orderId);
             _receipt = response.Receipt ?? throw new InvalidOperationException("Comprovante não encontrado.");
+
+            // The website uses OrderFulfillmentService::qrPayload(public_token), whose
+            // public URL is ?route=pickup&token=<public_token>. Read the token from the
+            // same server order and build it against the configured EventMenu base URL.
+            // If this optional lookup fails, the receipt remains usable without crashing.
+            _orderQrPayload = null;
+            if (_receipt.Channel is "counter" or "pickup" or "delivery")
+            {
+                try
+                {
+                    var orderResponse = await _api.OrderAsync(_orderId);
+                    var publicToken = orderResponse.Order?.PublicToken?.Trim();
+                    if (!string.IsNullOrWhiteSpace(publicToken))
+                        _orderQrPayload = BuildPublicOrderQrPayload(publicToken);
+                }
+                catch
+                {
+                    _orderQrPayload = null;
+                }
+            }
+
             Render(_receipt);
             PrintButton.IsEnabled = true;
             StatusText.Text = $"{_receipt.ReceiptNumber} • {_receipt.CreatedDisplay}";
@@ -37,6 +59,7 @@ public partial class ReceiptWindow : Window
         catch (Exception ex)
         {
             _receipt = null;
+            _orderQrPayload = null;
             StatusText.Text = Friendly(ex.Message);
         }
         finally
@@ -95,7 +118,7 @@ public partial class ReceiptWindow : Window
         if (_busy || _receipt is null) return;
         try
         {
-            StatusText.Text = SiteReceiptPrinter.Print(_receipt)
+            StatusText.Text = SiteReceiptPrinter.Print(_receipt, _orderQrPayload)
                 ? "Cupom enviado para impressão."
                 : "Impressão cancelada.";
         }
@@ -103,6 +126,15 @@ public partial class ReceiptWindow : Window
         {
             StatusText.Text = Friendly(ex.Message);
         }
+    }
+
+    private static string BuildPublicOrderQrPayload(string publicToken)
+    {
+        var baseUrl = (Environment.GetEnvironmentVariable("EVENTMENU_DESKTOP_API_BASE_URL") ?? "https://go.gestao2.store/1/").Trim();
+        if (!baseUrl.EndsWith('/')) baseUrl += "/";
+        if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var baseUri) || baseUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("A configuração de conexão do EventMenu está inválida.");
+        return new Uri(baseUri, $"?route=pickup&token={Uri.EscapeDataString(publicToken)}").AbsoluteUri;
     }
 
     private static Visibility Has(string? value) => string.IsNullOrWhiteSpace(value) ? Visibility.Collapsed : Visibility.Visible;
