@@ -54,8 +54,7 @@ final class DeliveryTrackingService
             $writes = 0;
             foreach ($normalized as $point) {
                 foreach ($orders as $orderId) {
-                    $this->upsertLive($tx, $tenantId, $orderId, $userId, $point);
-                    $writes++;
+                    if ($this->upsertLive($tx, $tenantId, $orderId, $userId, $point)) $writes++;
 
                     $trusted = !$point['is_mock'] && ($point['accuracy_m'] === null || $point['accuracy_m'] <= self::TRUSTED_ACCURACY_METERS);
                     if (!$trusted) continue;
@@ -196,16 +195,43 @@ final class DeliveryTrackingService
             'captured_at' => $p['captured_at'],
         ], $history);
 
-        $publicLat = $row['latitude'] !== null ? (float)$row['latitude'] : null;
-        $publicLng = $row['longitude'] !== null ? (float)$row['longitude'] : null;
         $mock = !empty($row['is_mock']);
-        if ($mock && $history !== []) {
+        $liveAccuracy = $row['accuracy_m'] !== null ? (float)$row['accuracy_m'] : null;
+        $liveTrusted = !$mock && ($liveAccuracy === null || $liveAccuracy <= self::TRUSTED_ACCURACY_METERS);
+
+        $publicLat = null;
+        $publicLng = null;
+        $publicAccuracy = null;
+        $publicSpeed = null;
+        $publicBearing = null;
+        $publicCapturedAt = null;
+        $signal = ['status' => 'untrusted', 'label' => 'Localização indisponível', 'age_seconds' => 999999];
+
+        if ($liveTrusted && $row['latitude'] !== null && $row['longitude'] !== null) {
+            $publicLat = (float)$row['latitude'];
+            $publicLng = (float)$row['longitude'];
+            $publicAccuracy = $liveAccuracy;
+            $publicSpeed = $row['speed_mps'] !== null ? round((float)$row['speed_mps'] * 3.6, 1) : null;
+            $publicBearing = $row['bearing_deg'] !== null ? (float)$row['bearing_deg'] : null;
+            $publicCapturedAt = $row['captured_at'];
+            $signal = $this->signalMeta($row['captured_at'] ?? null, $liveAccuracy, false);
+        } elseif ($history !== []) {
+            // Nunca publica coordenada mock ou fora do limite de confiança. Se a
+            // leitura ao vivo estiver ruim, o cliente vê apenas o último ponto
+            // confiável já registrado no histórico.
             $lastTrusted = end($history);
             $publicLat = $lastTrusted['latitude'];
             $publicLng = $lastTrusted['longitude'];
+            $publicAccuracy = $lastTrusted['accuracy_m'];
+            $publicSpeed = $lastTrusted['speed_kmh'];
+            $publicBearing = $lastTrusted['bearing_deg'];
+            $publicCapturedAt = $lastTrusted['captured_at'];
+            $signal = $this->signalMeta($lastTrusted['captured_at'], $lastTrusted['accuracy_m'], false);
+        } elseif ($row['captured_at']) {
+            $age = max(0, time() - (strtotime((string)$row['captured_at']) ?: time()));
+            $signal = ['status' => 'untrusted', 'label' => 'Localização indisponível', 'age_seconds' => $age];
         }
 
-        $signal = $this->signalMeta($row['captured_at'] ?? null, $row['accuracy_m'] ?? null, $mock);
         if ($row['status'] === 'completed') $signal = ['status' => 'completed', 'label' => 'Entregue', 'age_seconds' => 0];
 
         return [
@@ -214,10 +240,10 @@ final class DeliveryTrackingService
             'tenant_name' => (string)($row['tenant_name'] ?: 'EventMenu'),
             'latitude' => $publicLat,
             'longitude' => $publicLng,
-            'accuracy_m' => $row['accuracy_m'] !== null ? (float)$row['accuracy_m'] : null,
-            'speed_kmh' => $row['speed_mps'] !== null ? round((float)$row['speed_mps'] * 3.6, 1) : null,
-            'bearing_deg' => $row['bearing_deg'] !== null ? (float)$row['bearing_deg'] : null,
-            'captured_at' => $row['captured_at'],
+            'accuracy_m' => $publicAccuracy,
+            'speed_kmh' => $publicSpeed,
+            'bearing_deg' => $publicBearing,
+            'captured_at' => $publicCapturedAt,
             'picked_up_at' => $row['picked_up_at'],
             'route_started_at' => $row['route_started_at'],
             'arrived_at' => $row['arrived_at'],
@@ -298,8 +324,15 @@ final class DeliveryTrackingService
     }
 
     /** @param array<string,mixed> $point */
-    private function upsertLive(PDO $pdo, int $tenantId, int $orderId, int $userId, array $point): void
+    private function upsertLive(PDO $pdo, int $tenantId, int $orderId, int $userId, array $point): bool
     {
+        // Um lote offline pode chegar depois de uma amostra mais nova enviada por
+        // outra tentativa. Nunca deixa um ponto antigo fazer o mapa "andar para trás".
+        $guard = $pdo->prepare(Database::portableSql($pdo, 'SELECT captured_at FROM delivery_live_locations WHERE tenant_id=? AND order_id=? LIMIT 1 FOR UPDATE'));
+        $guard->execute([$tenantId, $orderId]);
+        $currentCapturedAt = $guard->fetchColumn();
+        if ($currentCapturedAt && strtotime((string)$currentCapturedAt) > strtotime((string)$point['captured_at'])) return false;
+
         $values = [$tenantId, $orderId, $userId, $point['latitude'], $point['longitude'], $point['accuracy_m'], $point['speed_mps'], $point['bearing_deg'], $point['battery_pct'], $point['provider'], $point['is_mock'] ? 1 : 0, $point['captured_at']];
         if (Database::isSqlite($pdo)) {
             $sql = 'INSERT INTO delivery_live_locations (tenant_id,order_id,delivery_user_id,latitude,longitude,accuracy_m,speed_mps,bearing_deg,battery_pct,provider,is_mock,captured_at,updated_at)
@@ -311,6 +344,7 @@ final class DeliveryTrackingService
                     ON DUPLICATE KEY UPDATE delivery_user_id=VALUES(delivery_user_id),latitude=VALUES(latitude),longitude=VALUES(longitude),accuracy_m=VALUES(accuracy_m),speed_mps=VALUES(speed_mps),bearing_deg=VALUES(bearing_deg),battery_pct=VALUES(battery_pct),provider=VALUES(provider),is_mock=VALUES(is_mock),captured_at=VALUES(captured_at),updated_at=CURRENT_TIMESTAMP';
         }
         $pdo->prepare($sql)->execute($values);
+        return true;
     }
 
     /** @param array<string,mixed> $point */
