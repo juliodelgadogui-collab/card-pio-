@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using EventMenu.Desktop.Services;
 
 namespace EventMenu.Desktop;
 
@@ -133,7 +134,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Triagem de Delivery", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DesktopErrorPresenter.Show(ex, "Triagem de Delivery", this);
         }
     }
 
@@ -154,7 +155,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Minhas entregas", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DesktopErrorPresenter.Show(ex, "Minhas entregas", this);
         }
     }
 
@@ -183,7 +184,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Gerência", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DesktopErrorPresenter.Show(ex, "Gerência", this);
         }
     }
 
@@ -212,7 +213,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Eventos", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DesktopErrorPresenter.Show(ex, "Eventos", this);
         }
     }
 
@@ -233,7 +234,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Meu QR", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DesktopErrorPresenter.Show(ex, "Meu QR", this);
         }
         await Task.CompletedTask;
     }
@@ -248,7 +249,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Meu turno", MessageBoxButton.OK, MessageBoxImage.Warning);
+            DesktopErrorPresenter.Show(ex, "Meu turno", this);
         }
         await Task.CompletedTask;
     }
