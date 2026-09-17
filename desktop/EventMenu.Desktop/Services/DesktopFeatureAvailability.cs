@@ -19,7 +19,12 @@ public static class DesktopFeatureAvailability
     public static bool ShouldProbe(string feature)
     {
         if (!States.TryGetValue(feature, out var state)) return true;
-        if (state.Available.HasValue) return false;
+
+        // Recursos confirmados continuam disponíveis enquanto a sessão estiver aberta.
+        // Recursos desconhecidos ou que estavam ausentes são verificados novamente após
+        // o cooldown. Assim uma atualização do servidor passa a ser percebida sem
+        // exigir que o operador reinicie o EventMenu Desktop.
+        if (state.Available == true) return false;
         return DateTimeOffset.UtcNow - state.LastProbeAt >= ProbeCooldown;
     }
 
