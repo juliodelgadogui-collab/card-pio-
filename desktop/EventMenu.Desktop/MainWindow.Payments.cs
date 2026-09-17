@@ -13,12 +13,6 @@ public partial class MainWindow
     private bool _paymentControlsReady;
     private bool _canPayments;
 
-    protected override void OnContentRendered(EventArgs e)
-    {
-        base.OnContentRendered(e);
-        EnsurePaymentControls();
-    }
-
     private void EnsurePaymentControls()
     {
         if (_paymentControlsReady) return;
