@@ -18,6 +18,16 @@ function hub_out(array $data,int $status=200):never{http_response_code($status);
 function hub_body():array{$raw=file_get_contents('php://input');if($raw===false||trim($raw)==='')return $_POST?:[];try{$data=json_decode($raw,true,512,JSON_THROW_ON_ERROR);return is_array($data)?$data:[];}catch(Throwable){hub_out(['ok'=>false,'error'=>'JSON inválido.'],400);}}
 function hub_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)hub_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
 function hub_device(array $body,string $sessionDevice):string{$reported=trim((string)($body['device_id']??$sessionDevice));if($reported==='')throw new RuntimeException('Dispositivo não identificado.');if($sessionDevice!==''&&!hash_equals($sessionDevice,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');return$reported;}
+function hub_schema_missing(Throwable $error):bool{
+    $message=strtolower($error->getMessage());
+    $code=strtoupper((string)$error->getCode());
+    return in_array($code,['42S02','42S22'],true)
+        ||str_contains($message,'no such table')
+        ||str_contains($message,"doesn't exist")
+        ||str_contains($message,'base table or view not found')
+        ||str_contains($message,'unknown column')
+        ||str_contains($message,'no such column');
+}
 
 try{
     $auth=new ApiAuthService();$token=ApiAuthService::bearerToken();$sessionDevice=ApiAuthService::deviceId();if($token==='')hub_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);$auth->authenticate($token,$sessionDevice);
@@ -63,4 +73,8 @@ try{
     }
 
     hub_out(['ok'=>false,'error'=>'Endpoint do Hub não encontrado.'],404);
-}catch(RuntimeException $e){hub_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))hub_out(['ok'=>false,'error'=>$e->getMessage()],500);hub_out(['ok'=>false,'error'=>'Erro interno.'],500);}
+}catch(PDOException $e){
+    if(hub_schema_missing($e))hub_out(['ok'=>false,'error'=>'A conexão com celular precisa de uma atualização do servidor. Abra Atualizar banco no painel administrativo e tente novamente.','code'=>'hub_update_required'],503);
+    if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))hub_out(['ok'=>false,'error'=>$e->getMessage()],500);
+    hub_out(['ok'=>false,'error'=>'O servidor não conseguiu preparar a conexão com o celular.','code'=>'hub_database_error'],500);
+}catch(RuntimeException $e){hub_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))hub_out(['ok'=>false,'error'=>$e->getMessage()],500);hub_out(['ok'=>false,'error'=>'O servidor não conseguiu preparar a conexão com o celular.','code'=>'hub_internal_error'],500);}
