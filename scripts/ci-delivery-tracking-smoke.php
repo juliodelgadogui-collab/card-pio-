@@ -101,3 +101,8 @@ gps_assert(count($public['history']) === 1, 'Histórico público deveria conter 
 gps_assert(abs((float)$public['latitude'] - (float)$trusted['latitude']) < 0.000001, 'Cliente recebeu localização simulada como posição atual.');
 
 echo "CI delivery tracking smoke OK\n";
+
+// O mesmo job agora valida o fluxo completo Pronto -> atribuição -> retirada -> rota -> chegada -> entregue.
+$cmd=escapeshellarg(PHP_BINARY).' '.escapeshellarg(__DIR__.'/ci-delivery-flow-smoke.php');
+passthru($cmd,$deliveryFlowExit);
+if($deliveryFlowExit!==0)exit($deliveryFlowExit);
