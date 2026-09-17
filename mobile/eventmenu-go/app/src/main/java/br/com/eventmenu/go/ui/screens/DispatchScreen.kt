@@ -30,11 +30,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.ExpeditionStatusViewModel
 import br.com.eventmenu.go.OrderOperationsViewModel
+import br.com.eventmenu.go.data.DeliveryExpeditionStatus
 import br.com.eventmenu.go.data.DeliveryUser
 import br.com.eventmenu.go.data.OperatingUnit
 import br.com.eventmenu.go.data.Order
 import br.com.eventmenu.go.data.UnassignedUnitDelivery
+import kotlinx.coroutines.delay
 
 @Composable
 fun DispatchScreen(
@@ -54,23 +57,47 @@ fun DispatchScreen(
     val app = LocalContext.current.applicationContext as EventMenuGoApplication
     val orderViewModel: OrderOperationsViewModel = viewModel(factory = OrderOperationsViewModel.Factory(app.orderOperationsRepository))
     val orderState by orderViewModel.state.collectAsState()
+    val expeditionViewModel: ExpeditionStatusViewModel = viewModel(factory = ExpeditionStatusViewModel.Factory(app.expeditionStatusRepository))
+    val expeditionState by expeditionViewModel.state.collectAsState()
+
     val pending = orders.filter { it.status == "pending" && it.channel in setOf("counter", "pickup", "table", "delivery") }.sortedBy { it.id }
     val ready = orders
         .filter { it.status == "ready" && it.channel in setOf("counter", "pickup", "table", "delivery") }
         .sortedWith(compareByDescending<Order> { focusOrderId != null && it.id == focusOrderId }.thenBy { it.id })
+    val deliveryInProgress = orders
+        .filter { it.channel == "delivery" && it.status == "out_for_delivery" }
+        .sortedBy { it.id }
+    val hasDeliveryOrders = orders.any { it.channel == "delivery" }
+
     var assigning by remember { mutableStateOf<Order?>(null) }
     var routing by remember { mutableStateOf<UnassignedUnitDelivery?>(null) }
 
+    LaunchedEffect(hasDeliveryOrders) {
+        if (!hasDeliveryOrders) return@LaunchedEffect
+        while (true) {
+            expeditionViewModel.refresh()
+            delay(10_000L)
+        }
+    }
+
+    LaunchedEffect(orders.map { it.id to it.status }) {
+        if (hasDeliveryOrders) expeditionViewModel.refresh()
+    }
+
     LaunchedEffect(orderState.changedVersion) {
-        if (orderState.changedVersion > 0) onRefresh()
+        if (orderState.changedVersion > 0) {
+            onRefresh()
+            expeditionViewModel.refresh()
+        }
     }
 
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Text("Saída de pedidos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            Text("Aceite, organize e libere os pedidos prontos.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Aceite, organize e acompanhe os pedidos até a saída.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             orderState.error?.let { Text("Não foi possível concluir a última ação. Tente novamente.", color = MaterialTheme.colorScheme.error) }
             orderState.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+            expeditionState.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
 
         if (canRouteUnit && unassignedUnitOrders.isNotEmpty()) {
@@ -126,6 +153,7 @@ fun DispatchScreen(
         if (ready.isNotEmpty()) item { Text("Prontos para sair", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
         items(ready, key = { it.id }) { order ->
             val focused = focusOrderId == order.id
+            val deliveryStatus = expeditionState.items[order.id]
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (focused) Text("Pedido localizado pelo QR", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
@@ -139,6 +167,7 @@ fun DispatchScreen(
                         Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                     }
                     DispatchPaymentPill(order.paymentStatus)
+                    if (order.channel == "delivery") DeliveryStageBlock(deliveryStatus, order)
                     OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ver pedido") }
 
                     when (order.channel) {
@@ -150,7 +179,9 @@ fun DispatchScreen(
                         "delivery" -> {
                             if (useful(order.deliveryName) != null) {
                                 Text("Entregador: ${useful(order.deliveryName)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                if (canAssignDelivery) OutlinedButton(onClick = { assigning = order }, modifier = Modifier.fillMaxWidth()) { Text("Trocar entregador") }
+                                if (canAssignDelivery && deliveryStatus?.pickedUp != true) {
+                                    OutlinedButton(onClick = { assigning = order }, modifier = Modifier.fillMaxWidth()) { Text("Trocar entregador") }
+                                }
                             } else if (canAssignDelivery) {
                                 Button(onClick = { assigning = order }, modifier = Modifier.fillMaxWidth()) { Text("Escolher entregador") }
                             } else {
@@ -162,8 +193,37 @@ fun DispatchScreen(
             }
         }
 
-        if (ready.isEmpty() && pending.isEmpty() && unassignedUnitOrders.isEmpty()) item { Text("Nenhum pedido aguardando ação.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
+        if (deliveryInProgress.isNotEmpty()) {
+            item { Text("Delivery em andamento", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black) }
+            items(deliveryInProgress, key = { "route-${it.id}" }) { order ->
+                val deliveryStatus = expeditionState.items[order.id]
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Column {
+                                Text("Pedido #${order.id}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                                useful(order.customerName)?.takeIf { !it.equals("Consumidor", true) }?.let { Text(it, fontWeight = FontWeight.SemiBold) }
+                                useful(order.deliveryName)?.let { Text("Entregador: $it") }
+                            }
+                            Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
+                        }
+                        DeliveryStageBlock(deliveryStatus, order)
+                        useful(order.deliveryAddress)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ver pedido") }
+                    }
+                }
+            }
+        }
+
+        if (ready.isEmpty() && pending.isEmpty() && deliveryInProgress.isEmpty() && unassignedUnitOrders.isEmpty()) {
+            item { Text("Nenhum pedido aguardando ação.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+        item {
+            OutlinedButton(
+                onClick = { onRefresh(); expeditionViewModel.refresh() },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Atualizar") }
+        }
     }
 
     orderState.detail?.let { detail ->
@@ -230,6 +290,34 @@ fun DispatchScreen(
             confirmButton = {},
             dismissButton = { TextButton(onClick = { assigning = null }) { Text("Fechar") } },
         )
+    }
+}
+
+@Composable
+private fun DeliveryStageBlock(status: DeliveryExpeditionStatus?, order: Order) {
+    val fallback = if (order.assignedDeliveryUserId == null) "Sem entregador" else "Aguardando retirada"
+    val stage = status?.stage?.takeIf { it.isNotBlank() } ?: fallback
+    val route = status?.routeStarted == true
+
+    Surface(
+        color = when (stage) {
+            "Sem entregador" -> MaterialTheme.colorScheme.errorContainer
+            "Chegou" -> MaterialTheme.colorScheme.tertiaryContainer
+            "Em rota" -> MaterialTheme.colorScheme.secondaryContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        },
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(stage, fontWeight = FontWeight.Bold)
+            if (route) {
+                Text(
+                    if (status?.locationFresh == true) "GPS do entregador atualizado" else "GPS sem atualização recente",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
