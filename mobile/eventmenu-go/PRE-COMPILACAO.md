@@ -1,17 +1,20 @@
 # EventMenu GO — preflight da próxima compilação
 
-Branch de desenvolvimento: `feature/eventmenu-go-mobile-sync`.
+Branch integrada de desenvolvimento: `eventmenu-go/integration-no-actions`.
 
-A próxima compilação deve ser **Debug Atualizável**, mantendo o package `br.com.eventmenu.go` e a mesma assinatura fixa de desenvolvimento já validada pelo workflow `EventMenu GO Atualizável`. A chave privada não deve ser copiada, exibida ou movida para o APK.
+Esta branch reúne o APK Android e o suporte compartilhado do servidor. **Não executar compilação, GitHub Actions, merge no `main` ou publicação sem autorização explícita.**
+
+A próxima compilação autorizada deve ser **Debug Atualizável**, mantendo o package `br.com.eventmenu.go` e a mesma assinatura fixa de desenvolvimento já validada pelo workflow `EventMenu GO Atualizável`. A chave privada não deve ser copiada, exibida ou movida para o APK.
 
 ## Antes de compilar
 
 - Usar Java 17, Android SDK 36, Build Tools 36.0.0 e Gradle 9.3.1.
 - Não exigir Firebase no build Debug. Firebase/Release continuam fora da homologação desta etapa.
-- Não alterar NFC/Tap On durante esta homologação.
-- Confirmar que o backend de teste contém `api-go-delivery.php`, `api-go-expedition.php`, `api-go-inventory.php`, `api-go-routing.php`, `api-cluster.php`, `api-client-policy.php`, `api-client-release.php` e `api-hub.php` da branch `feature/eventmenu-go-server-support`.
+- Manter o fluxo NFC/Tap On atual e sua autorização remota por aparelho.
+- Confirmar que o backend de teste foi implantado a partir da mesma branch `eventmenu-go/integration-no-actions` e contém `api-go-delivery.php`, `api-go-expedition.php`, `api-go-inventory.php`, `api-go-routing.php`, `api-cluster.php`, `api-client-policy.php`, `api-client-release.php` e `api-hub.php`.
 - Confirmar no servidor os componentes de contingência `api-cluster-bootstrap.php`, `api-cluster-sync.php`, migrations 104, 105 e 106.
 - Confirmar `APP_URL` em HTTPS e `APP_BASE_PATH=/1` no servidor.
+- Manter `EVENTMENU_CLIENT_POLICY_FAIL_OPEN=false` em produção. A opção `true` existe somente para migração legada deliberada.
 - Se a contingência estiver habilitada, confirmar no Super ADM que o servidor adicional foi inicializado, verificado e sincronizado.
 - Para a primeira ativação do servidor adicional, usar somente um `EVENTMENU_CLUSTER_BOOTSTRAP_TOKEN` temporário; depois do pareamento remover esse valor do `.env` do adicional.
 - Para contingência com escrita, os dois nós devem enxergar o mesmo MySQL/MariaDB (ou uma camada de banco com failover próprio) e usar a mesma `APP_KEY`. SQLite independente fica somente leitura.
@@ -23,7 +26,7 @@ A próxima compilação deve ser **Debug Atualizável**, mantendo o package `br.
 
 ## Compilação
 
-Quando houver espaço/runner do GitHub Actions, executar manualmente o workflow **EventMenu GO Atualizável** escolhendo a branch `feature/eventmenu-go-mobile-sync`. O workflow faz preflight dos módulos novos, incluindo failover e atualização remota assinada, restaura a assinatura de desenvolvimento, roda testes unitários, monta `assembleDebug`, valida package/certificado e publica o artefato `EventMenu-GO-ATUALIZAVEL` por 3 dias.
+Somente após autorização explícita, executar manualmente o workflow **EventMenu GO Atualizável** escolhendo a branch `eventmenu-go/integration-no-actions`. O workflow deve fazer preflight dos módulos novos, incluindo failover e atualização remota assinada, restaurar a assinatura de desenvolvimento, rodar testes unitários, montar `assembleDebug`, validar package/certificado e publicar o artefato de homologação.
 
 Para um build local de diagnóstico, a partir de `mobile/eventmenu-go`, usar `gradle :app:testDebugUnitTest --stacktrace --no-daemon` e depois `gradle :app:assembleDebug --stacktrace --no-daemon`. Um build local sem a assinatura fixa não deve ser distribuído como APK atualizável por cima do APK já instalado.
 
@@ -34,24 +37,26 @@ Para um build local de diagnóstico, a partir de `mobile/eventmenu-go`, usar `gr
 3. Alterar no Super ADM a versão recomendada ou uma política não bloqueante, sincronizar e confirmar que o APK recebe a mudança sem recompilação.
 4. Ativar manutenção Android no painel e confirmar que o backend e o APK bloqueiam a operação com a mensagem configurada; depois reativar.
 5. Se o certificado estiver restringido, confirmar que somente o APK com o fingerprint permitido é aceito.
-6. Publicar uma atualização Android de teste com versão, URL HTTPS, SHA-256 e notas. Confirmar que o manifesto assinado contém os mesmos dados e que o contingência recebe a mesma política.
+6. Publicar uma atualização Android de teste com versão, URL HTTPS, SHA-256 e notas. Confirmar que o manifesto assinado contém os mesmos dados e que a contingência recebe a mesma política.
 7. Tocar no aviso de atualização no APK. Confirmar download pelo próprio EventMenu GO, conferência do SHA-256, package `br.com.eventmenu.go`, certificado igual ao app instalado e bloqueio de downgrade antes de abrir o Package Installer.
 8. Em Android 8+, se solicitado, liberar uma única vez a permissão de “instalar apps desconhecidos” para o EventMenu GO; voltar ao app, tocar novamente e confirmar que o arquivo já verificado pode ser reutilizado do cache.
 9. Alterar propositalmente o arquivo hospedado sem atualizar o SHA-256 e confirmar que o download/instalação é bloqueado.
-10. Delivery: retirar pedido, iniciar rota, validar GPS em primeiro plano, abrir WhatsApp somente com descrição dos itens + link HTTPS privado, abrir Google Maps/Waze, marcar chegada, receber pagamento e concluir.
+10. Delivery: retirar pedido, iniciar rota, validar GPS em primeiro plano e com tela apagada, abrir WhatsApp somente com descrição dos itens + link HTTPS privado, abrir Google Maps/Waze, marcar chegada, receber pagamento e concluir.
 11. Confirmar que entrega concluída some da lista ativa e encerra compartilhamento de localização.
-12. Expedição: validar Sem entregador, Aguardando retirada, Retirado, Em rota, Chegou e Entregue.
-13. Gestão: validar alertas de estoque baixo/zerado sem permitir administração completa de estoque no celular.
-14. Hub: computador online/offline, QR temporário, vínculo por unidade, impressão, recibo, tela do cliente, alerta, gaveta conforme permissão e prevenção de comando duplicado.
-15. PINPad/TEF via Hub: o celular só solicita; aprovação local não pode marcar o pedido como pago. A confirmação continua dependendo do servidor/provedor.
-16. Trocar usuário/unidade/turno e confirmar que vínculos e comandos antigos não permanecem na tela.
-17. Failover: com os dois servidores online, autenticar e deixar o APK baixar a configuração de roteamento. Em seguida indisponibilizar apenas o servidor principal e confirmar que uma consulta GET troca para o servidor de contingência.
-18. Com o principal fora do ar, confirmar que `api-client-policy.php?platform=android` continua entregando no adicional o mesmo manifesto assinado que foi sincronizado pelo principal.
-19. No modo `shared_db`, depois da troca, confirmar que a primeira gravação que detectou a queda não é repetida automaticamente; repetir manualmente a ação e confirmar que ela é executada uma única vez no servidor adicional.
-20. No modo `read_only`, confirmar que consultas continuam pelo adicional e que pedidos, pagamentos, estoque e outras gravações ficam bloqueados até o principal voltar.
-21. Reativar o servidor principal e confirmar que o APK volta automaticamente a ele após a sondagem de recuperação.
-22. Testar perda total da internet. Hub, expedição e estoque operacional não podem usar cache antigo como se fosse estado atual.
-23. Só depois da homologação fazer merge seletivo no `main` e iniciar a etapa Release/Firebase.
+12. Confirmar que coordenada mock ou imprecisa não é publicada ao cliente; deve permanecer o último ponto confiável ou localização indisponível.
+13. Expedição: validar Sem entregador, Aguardando retirada, Retirado, Em rota, Chegou e Entregue.
+14. Gestão: validar alertas de estoque baixo/zerado sem permitir administração completa de estoque no celular.
+15. Hub: computador online/offline, QR temporário, vínculo por unidade, impressão, recibo, tela do cliente, alerta, gaveta conforme permissão e prevenção de comando duplicado.
+16. PINPad/TEF via Hub: o celular só solicita; aprovação local não pode marcar o pedido como pago. A confirmação continua dependendo do servidor/provedor.
+17. Solicitar autorização NFC, aprovar no servidor e confirmar que a tela muda de `pending` para `active` automaticamente sem logout ou reinstalação.
+18. Trocar usuário/unidade/turno e confirmar que vínculos e comandos antigos não permanecem na tela.
+19. Failover: com os dois servidores online, autenticar e deixar o APK baixar a configuração de roteamento. Em seguida indisponibilizar apenas o servidor principal e confirmar que uma consulta GET troca para o servidor de contingência somente depois de validar o manifesto RS256 do nó candidato.
+20. Com o principal fora do ar, confirmar que `api-client-policy.php?platform=android` continua entregando no adicional o mesmo manifesto assinado que foi sincronizado pelo principal.
+21. No modo `shared_db`, depois da troca, confirmar que a primeira gravação que detectou a queda não é repetida automaticamente; repetir manualmente a ação e confirmar que ela é executada uma única vez no servidor adicional.
+22. No modo `read_only`, confirmar que consultas continuam pelo adicional apenas quando ele possui acesso aos dados necessários e que pedidos, pagamentos, estoque e outras gravações ficam bloqueados até o principal voltar.
+23. Reativar o servidor principal e confirmar que o APK volta automaticamente a ele após a sondagem de recuperação.
+24. Testar perda total da internet. Hub, expedição e estoque operacional não podem usar cache antigo como se fosse estado atual.
+25. Só depois da homologação fazer merge seletivo no `main` e iniciar a etapa Release/Firebase.
 
 ## Política remota, autorização e atualização
 
