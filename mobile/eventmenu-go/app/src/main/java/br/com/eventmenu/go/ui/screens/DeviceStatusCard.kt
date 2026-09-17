@@ -13,6 +13,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.DeviceStatusState
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.security.AppPermissionManager
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @Composable
@@ -39,6 +41,17 @@ fun DeviceStatusCard(state: DeviceStatusState, onRefresh: () -> Unit) {
     var requestMessage by remember { mutableStateOf<String?>(null) }
     var requestError by remember { mutableStateOf<String?>(null) }
 
+    // Enquanto o administrador ainda não decidiu, a tela acompanha a autorização
+    // sozinha. Assim a aprovação aparece no aparelho sem logout, reinstalação ou
+    // ficar apertando "Atualizar".
+    LaunchedEffect(status?.nfc?.status, status?.nfc?.id) {
+        if (status?.nfc?.status != "pending") return@LaunchedEffect
+        while (true) {
+            delay(8_000L)
+            if (!requestBusy && !state.loading) onRefresh()
+        }
+    }
+
     fun requestNfcAuthorization() {
         if (requestBusy) return
         requestBusy = true
@@ -47,14 +60,17 @@ fun DeviceStatusCard(state: DeviceStatusState, onRefresh: () -> Unit) {
         scope.launch {
             runCatching { app.deviceStatusRepository.requestNfcAuthorization() }
                 .onSuccess { updated ->
-                    requestMessage = if (updated.tapOnReady) {
-                        "Pagamento por aproximação já está pronto neste aparelho."
-                    } else {
-                        "Solicitação enviada para aprovação."
+                    requestMessage = when {
+                        updated.tapOnReady -> "Pagamento por aproximação já está pronto neste aparelho."
+                        updated.nfc?.status == "pending" -> "Solicitação aguardando aprovação do responsável."
+                        else -> "Solicitação enviada para aprovação."
                     }
                     onRefresh()
                 }
-                .onFailure { requestError = "Não foi possível enviar a solicitação. Tente novamente." }
+                .onFailure { error ->
+                    requestError = error.message?.takeIf { it.isNotBlank() }
+                        ?: "Não foi possível enviar a solicitação. Tente novamente."
+                }
             requestBusy = false
         }
     }
@@ -119,7 +135,7 @@ fun DeviceStatusCard(state: DeviceStatusState, onRefresh: () -> Unit) {
                         ) {
                             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Text("Aguardando aprovação", fontWeight = FontWeight.Bold)
-                                Text("A solicitação já foi enviada. Atualize depois que o responsável aprovar.")
+                                Text("O EventMenu verifica automaticamente. Assim que o responsável aprovar, este aparelho será liberado sem reinstalar o app.")
                             }
                         }
                     }
