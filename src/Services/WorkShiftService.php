@@ -42,7 +42,9 @@ final class WorkShiftService
         return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$notes):array{
             $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM work_shifts WHERE tenant_id=? AND user_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$s->execute([$tenantId,$userId]);$shift=$s->fetch();if(!$shift)throw new RuntimeException('Não há turno operacional aberto.');
             if($shift['mode']==='delivery'){
-                $pending=$pdo->prepare('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND assigned_delivery_user_id=? AND status IN ("ready","out_for_delivery")');$pending->execute([$tenantId,$userId]);if((int)$pending->fetchColumn()>0)throw new RuntimeException('Finalize ou transfira suas entregas antes de encerrar o turno.');
+                $sql='SELECT COUNT(*) FROM orders WHERE tenant_id=? AND assigned_delivery_user_id=? AND channel="delivery" AND status IN ("ready","out_for_delivery")';$args=[$tenantId,$userId];
+                if($shift['unit_id']!==null){$sql.=' AND unit_id=?';$args[]=(int)$shift['unit_id'];}
+                $pending=$pdo->prepare($sql);$pending->execute($args);if((int)$pending->fetchColumn()>0)throw new RuntimeException('Finalize ou transfira suas entregas antes de encerrar o turno.');
                 $cash=(new DeliveryCashService())->outstanding((int)$shift['id']);if((int)$cash['outstanding_cents']>0)throw new RuntimeException('Entregue R$ '.number_format($cash['outstanding_cents']/100,2,',','.').' ao caixa e aguarde a confirmação antes de encerrar o turno.');
             }
             $pdo->prepare('UPDATE work_shifts SET status="closed",closing_notes=?,ended_at=CURRENT_TIMESTAMP WHERE id=? AND status="open"')->execute([$notes?:null,$shift['id']]);$shift['status']='closed';$shift['closing_notes']=$notes?:null;$shift['ended_at']=gmdate('Y-m-d H:i:s');Auth::audit('work_shift.closed','work_shift',(string)$shift['id'],['mode'=>$shift['mode'],'unit_id'=>$shift['unit_id']??null]);return $shift;
