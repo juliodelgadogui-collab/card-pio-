@@ -1,0 +1,7 @@
+using System.Net.Http.Headers;using System.Text.Json;using EventMenu.Desktop.Models;
+namespace EventMenu.Desktop.Services;
+public sealed class ReceiptPresentationApiClient:IDisposable{
+ private readonly HttpClient _http;private readonly SecureSessionStore _store;
+ public ReceiptPresentationApiClient(SecureSessionStore store){_store=store;var b=(Environment.GetEnvironmentVariable("EVENTMENU_DESKTOP_API_BASE_URL")??"https://go.gestao2.store/1/").Trim();if(!b.EndsWith('/'))b+="/";_http=new HttpClient{BaseAddress=new Uri(b),Timeout=TimeSpan.FromSeconds(25)};_http.DefaultRequestHeaders.Add("X-Device-Id",DeviceIdentity.GetOrCreate());}
+ public async Task<ReceiptPresentation> GetAsync(int orderId,CancellationToken ct=default){var session=_store.Load()??throw new InvalidOperationException("Faça login novamente.");using var req=new HttpRequestMessage(HttpMethod.Get,$"api-go-receipts.php?action=order&order_id={orderId}");req.Headers.Authorization=new AuthenticationHeaderValue("Bearer",session.Token);using var res=await _http.SendAsync(req,ct);var json=await res.Content.ReadAsStringAsync(ct);if(!res.IsSuccessStatusCode)throw new InvalidOperationException("Não foi possível obter o padrão do comprovante no servidor.");var env=JsonSerializer.Deserialize<ReceiptPresentationEnvelope>(json,new JsonSerializerOptions{PropertyNameCaseInsensitive=true});return env?.Receipt?.Presentation??throw new InvalidOperationException("Padrão do comprovante não retornado pelo servidor.");}
+ public void Dispose()=>_http.Dispose();}
