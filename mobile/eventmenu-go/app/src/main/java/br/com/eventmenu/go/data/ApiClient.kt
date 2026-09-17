@@ -83,15 +83,24 @@ class ApiClient(
         }.getOrNull() ?: return@withContext false
         if (!root.optString("served_by").equals("primary", ignoreCase = true)) return@withContext false
 
-        acceptRoutingFromPrimary(root)
+        acceptRoutingFromPrimary(root, compiledPrimary)
         val envelope = root.optJSONObject("policy_android")
         if (envelope != null) runCatching { ClientPolicyManager.applyEnvelope(envelope) }
         true
     }
 
-    suspend fun refreshRouting(token: String) {
-        val root = request("api-go-routing.php", "GET", "config", token, emptyMap(), null)
-        acceptRoutingFromPrimary(root)
+    /**
+     * Roteamento e chave de confiança são atualizados exclusivamente consultando
+     * o principal já conhecido. A contingência pode servir políticas assinadas,
+     * mas não pode se autodeclarar principal para trocar endpoints/chaves.
+     */
+    suspend fun refreshRouting(token: String) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val primary = runCatching { FailoverEndpointRouter.primaryBaseUrl() }
+            .getOrDefault(baseUrl.trimEnd('/'))
+            .trimEnd('/')
+        val store = sessionStore ?: sharedSessionStore
+        val root = executeWithRefresh(primary, "api-go-routing.php", "GET", "config", token, emptyMap(), null, store)
+        acceptRoutingFromPrimary(root, primary)
     }
 
     suspend fun refreshClientPolicy(): Boolean {
@@ -221,7 +230,9 @@ class ApiClient(
         body: JSONObject?,
     ): JSONObject {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
-        val qs = params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}" }
+        val qs = params.entries.joinToString("&") {
+            "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}"
+        }
         val connection = URL(serverBase.trimEnd('/') + "/$path?$qs").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = method
@@ -264,11 +275,14 @@ class ApiClient(
             lastRoutingSyncAtMs = now
         }
 
-        if (!token.isNullOrBlank()) {
+        // Somente o transporte que já conhecemos como principal pode alterar
+        // roteamento/chave. A contingência continua apta a entregar o envelope
+        // assinado da política, pois ele é verificado localmente por RSA.
+        if (!token.isNullOrBlank() && isTrustedPrimaryTransport(serverBase)) {
             val routing = runCatching {
                 execute(serverBase, "api-go-routing.php", "GET", "config", token, emptyMap(), null)
             }.getOrNull()
-            if (routing != null) acceptRoutingFromPrimary(routing)
+            if (routing != null) acceptRoutingFromPrimary(routing, serverBase)
         }
 
         val policy = runCatching {
@@ -277,11 +291,24 @@ class ApiClient(
         if (policy != null) runCatching { ClientPolicyManager.applyEnvelope(policy) }
     }
 
-    private fun acceptRoutingFromPrimary(root: JSONObject) {
+    private fun acceptRoutingFromPrimary(root: JSONObject, sourceBase: String) {
+        if (!isTrustedPrimaryTransport(sourceBase)) return
         if (!root.optString("served_by").equals("primary", ignoreCase = true)) return
         runCatching { FailoverEndpointRouter.updateFromRouting(root) }
         runCatching { ClientPolicyManager.updateTrustFromRouting(root) }
     }
+
+    private fun isTrustedPrimaryTransport(sourceBase: String): Boolean {
+        val source = sourceBase.trimEnd('/')
+        val compiled = baseUrl.trimEnd('/')
+        val currentPrimary = runCatching { FailoverEndpointRouter.primaryBaseUrl().trimEnd('/') }.getOrDefault(compiled)
+        val contingency = runCatching { FailoverEndpointRouter.contingencyBaseUrl(false)?.trimEnd('/') }.getOrNull()
+        if (!contingency.isNullOrBlank() && sameBase(source, contingency)) return false
+        return sameBase(source, compiled) || sameBase(source, currentPrimary)
+    }
+
+    private fun sameBase(left: String, right: String): Boolean =
+        left.trimEnd('/').equals(right.trimEnd('/'), ignoreCase = true)
 
     private fun routedBase(forWrite: Boolean): String = runCatching {
         FailoverEndpointRouter.currentBaseUrl(forWrite)
