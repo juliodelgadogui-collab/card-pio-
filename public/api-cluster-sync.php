@@ -27,10 +27,10 @@ try {
     $raw = (string)file_get_contents('php://input');
     $signature = trim((string)($_SERVER['HTTP_X_EVENTMENU_CLUSTER_SIGNATURE'] ?? ''));
 
-    // A autenticação criptográfica e toda a validação continuam no serviço de sync.
-    // Esta guarda adicional impede apenas que um pacote antigo, ainda válido,
-    // substitua políticas/roteamento mais novos já armazenados na contingência.
-    (new ClusterControlPlaneReplayGuardService())->assertNotOlder($raw);
+    // A guarda só compara versões depois de confirmar o mesmo HMAC do cluster.
+    // O ClusterSyncService continua sendo a autoridade final e repete toda a
+    // autenticação/validação antes de gravar qualquer estado.
+    (new ClusterControlPlaneReplayGuardService())->assertAuthenticatedNotOlder($raw, $signature);
     $result = (new ClusterSyncService())->acceptControlPlane($raw, $signature);
     cluster_sync_out($result);
 } catch (JsonException $e) {
