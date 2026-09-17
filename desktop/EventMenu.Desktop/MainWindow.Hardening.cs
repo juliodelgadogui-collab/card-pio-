@@ -31,8 +31,8 @@ public partial class MainWindow
         if (_hardeningRuntimeReady) return;
         _hardeningRuntimeReady = true;
 
-        // O Hub é importante, mas não pode martelar o servidor a cada poucos segundos
-        // quando um endpoint opcional ainda não estiver implantado.
+        // O Hub é importante, mas não pode martelar o servidor quando um módulo
+        // opcional ainda não estiver implantado ou estiver temporariamente fora.
         if (_hubTimer is not null)
         {
             _hubTimer.Tick -= HubTimer_Tick;
@@ -53,12 +53,14 @@ public partial class MainWindow
         {
             ApplySecondaryNavigationVisibility();
             ApplyAndroidParityVisibility();
+            ApplyServerCapabilityVisibility();
             RebuildProfessionalNavigation(true);
         }));
     }
 
     private void HardeningRefreshTimer_Tick(object? sender, EventArgs e)
     {
+        ApplyServerCapabilityVisibility();
         RebuildProfessionalNavigation();
     }
 
@@ -77,34 +79,22 @@ public partial class MainWindow
             await RefreshOperationalPermissionsAsync();
             ApplySecondaryNavigationVisibility();
             ApplyAndroidParityVisibility();
-            RebuildProfessionalNavigation();
 
             EnsureHubRuntime();
             if (_hubIntegrationApi is null || _hubHardwareStore is null || _hubProcessor is null)
                 return;
 
-            if (DateTimeOffset.UtcNow - _lastHubHeartbeat > TimeSpan.FromSeconds(30))
-            {
-                await _hubIntegrationApi.HardwareHeartbeatAsync(unitId, _hubHardwareStore, _hubHardwareStore.Load());
-                _lastHubHeartbeat = DateTimeOffset.UtcNow;
-            }
+            await ProbeOptionalFeaturesAsync(unitId);
+            ApplyServerCapabilityVisibility();
+            RebuildProfessionalNavigation();
 
-            var response = await _hubIntegrationApi.PollHubAsync(10);
-            foreach (var command in response.Commands)
-            {
-                if (command.UnitId != unitId) continue;
-                await _hubProcessor.ProcessAsync(command);
-            }
+            var healthy = true;
+            healthy &= await TryHardwareHeartbeatAsync(unitId);
+            healthy &= await TryHubCommandsAsync(unitId);
+            healthy &= await TryProductionPrintAsync();
 
-            if (ShiftIs("operation") &&
-                (Can("production_print") || Can("orders_kitchen")) &&
-                _productionPrintProcessor is not null)
-            {
-                for (var i = 0; i < 2; i++)
-                    if (!await _productionPrintProcessor.ProcessOneAsync()) break;
-            }
-
-            ResetHubBackoff();
+            if (healthy) ResetHubBackoff();
+            else IncreaseHubBackoff();
         }
         catch (ApiClientException)
         {
@@ -112,12 +102,184 @@ public partial class MainWindow
         }
         catch
         {
+            // Recursos em segundo plano nunca devem derrubar PDV, caixa ou pedidos.
             IncreaseHubBackoff();
         }
         finally
         {
             _hubBusy = false;
         }
+    }
+
+    private async Task ProbeOptionalFeaturesAsync(int unitId)
+    {
+        if (_hubIntegrationApi is null || _hubHardwareStore is null) return;
+
+        if (Can("hardware_manage"))
+        {
+            await ProbeFeatureAsync(
+                DesktopFeatureNames.Hardware,
+                async () =>
+                {
+                    await _hubIntegrationApi.HardwareHeartbeatAsync(unitId, _hubHardwareStore, _hubHardwareStore.Load());
+                    _lastHubHeartbeat = DateTimeOffset.UtcNow;
+                });
+
+            await ProbeFeatureAsync(
+                DesktopFeatureNames.Terminal,
+                async () => { await _hubIntegrationApi.TerminalListAsync(unitId); });
+
+            await ProbeFeatureAsync(
+                DesktopFeatureNames.Hub,
+                async () => { await _hubIntegrationApi.PollHubAsync(1); });
+        }
+
+        if (Can("orders_kitchen") || Can("orders_dispatch") || Can("production_print") || Can("production_manage"))
+        {
+            await ProbeFeatureAsync(
+                DesktopFeatureNames.Production,
+                async () => { await _hubIntegrationApi.ProductionBoardAsync(); });
+        }
+
+        if (Can("fiscal_manage") || Can("fiscal_issue"))
+        {
+            await ProbeFeatureAsync(
+                DesktopFeatureNames.Fiscal,
+                async () => { await _hubIntegrationApi.FiscalReadinessAsync(unitId); });
+        }
+    }
+
+    private static async Task ProbeFeatureAsync(string feature, Func<Task> probe)
+    {
+        if (!DesktopFeatureAvailability.ShouldProbe(feature)) return;
+        DesktopFeatureAvailability.MarkProbeAttempt(feature);
+
+        try
+        {
+            await probe();
+            DesktopFeatureAvailability.MarkAvailable(feature);
+        }
+        catch (ApiClientException ex)
+        {
+            DesktopFeatureAvailability.MarkUnavailableIfUnsupported(feature, ex);
+            // Falha transitória permanece como desconhecida e só será testada novamente
+            // depois do cooldown, evitando requisições repetitivas.
+        }
+        catch
+        {
+            // Falhas locais/transitórias não significam que o recurso não existe.
+        }
+    }
+
+    private async Task<bool> TryHardwareHeartbeatAsync(int unitId)
+    {
+        if (_hubIntegrationApi is null || _hubHardwareStore is null) return true;
+        if (!DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Hardware)) return true;
+        if (DateTimeOffset.UtcNow - _lastHubHeartbeat <= TimeSpan.FromSeconds(30)) return true;
+
+        try
+        {
+            await _hubIntegrationApi.HardwareHeartbeatAsync(unitId, _hubHardwareStore, _hubHardwareStore.Load());
+            _lastHubHeartbeat = DateTimeOffset.UtcNow;
+            DesktopFeatureAvailability.MarkAvailable(DesktopFeatureNames.Hardware);
+            return true;
+        }
+        catch (ApiClientException ex) when (DesktopFeatureAvailability.MarkUnavailableIfUnsupported(DesktopFeatureNames.Hardware, ex))
+        {
+            ApplyServerCapabilityVisibility();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> TryHubCommandsAsync(int unitId)
+    {
+        if (_hubIntegrationApi is null || _hubProcessor is null) return true;
+        if (!DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Hub)) return true;
+
+        try
+        {
+            var response = await _hubIntegrationApi.PollHubAsync(10);
+            DesktopFeatureAvailability.MarkAvailable(DesktopFeatureNames.Hub);
+            foreach (var command in response.Commands)
+            {
+                if (command.UnitId != unitId) continue;
+                await _hubProcessor.ProcessAsync(command);
+            }
+            return true;
+        }
+        catch (ApiClientException ex) when (DesktopFeatureAvailability.MarkUnavailableIfUnsupported(DesktopFeatureNames.Hub, ex))
+        {
+            ApplyServerCapabilityVisibility();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task<bool> TryProductionPrintAsync()
+    {
+        if (!ShiftIs("operation") ||
+            (!Can("production_print") && !Can("orders_kitchen")) ||
+            _productionPrintProcessor is null ||
+            !DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Production))
+            return true;
+
+        try
+        {
+            for (var i = 0; i < 2; i++)
+                if (!await _productionPrintProcessor.ProcessOneAsync()) break;
+            DesktopFeatureAvailability.MarkAvailable(DesktopFeatureNames.Production);
+            return true;
+        }
+        catch (ApiClientException ex) when (DesktopFeatureAvailability.MarkUnavailableIfUnsupported(DesktopFeatureNames.Production, ex))
+        {
+            ApplyServerCapabilityVisibility();
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void ApplyServerCapabilityVisibility()
+    {
+        if (_productionNavButton is not null && !DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Production))
+            _productionNavButton.Visibility = Visibility.Collapsed;
+
+        if (_fiscalNavButton is not null && !DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Fiscal))
+            _fiscalNavButton.Visibility = Visibility.Collapsed;
+
+        if (_hubNavButton is not null && !DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Hub))
+            _hubNavButton.Visibility = Visibility.Collapsed;
+
+        if (_hardwareSettingsButton is not null &&
+            !DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Hardware) &&
+            !DesktopFeatureAvailability.IsAvailable(DesktopFeatureNames.Terminal))
+            _hardwareSettingsButton.Visibility = Visibility.Collapsed;
+
+        var unavailable = new[]
+        {
+            DesktopFeatureNames.Production,
+            DesktopFeatureNames.Fiscal,
+            DesktopFeatureNames.Hub,
+            DesktopFeatureNames.Hardware,
+            DesktopFeatureNames.Terminal
+        }
+        .Where(feature => !DesktopFeatureAvailability.IsAvailable(feature))
+        .Select(DesktopFeatureNames.Label)
+        .Distinct()
+        .ToList();
+
+        AutoRefreshText.Text = unavailable.Count == 0
+            ? "Atualização automática ativa"
+            : $"Operação ativa • indisponível neste servidor: {string.Join(", ", unavailable)}";
     }
 
     private void ResetHubBackoff()
