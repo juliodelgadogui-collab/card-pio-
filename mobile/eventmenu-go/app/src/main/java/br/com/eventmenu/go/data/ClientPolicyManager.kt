@@ -30,6 +30,7 @@ object ClientPolicyManager {
     private const val PREFS = "eventmenu_client_policy"
     private const val KEY_TRUST_ID = "trust_key_id"
     private const val KEY_TRUST_PEM = "trust_public_key_pem"
+    private const val KEY_TRUST_CONFIG_VERSION = "trust_config_version"
     private const val KEY_PAYLOAD_B64 = "payload_b64"
     private const val KEY_SIGNATURE_B64 = "signature_b64"
     private const val KEY_ENVELOPE_KEY_ID = "envelope_key_id"
@@ -77,19 +78,43 @@ object ClientPolicyManager {
 
     /**
      * A raiz de confiança pode ser atualizada somente por resposta declarada do
-     * principal. O ApiClient garante que esta chamada só ocorre após uma rota
-     * autenticada; respostas do nó de contingência não podem trocar a chave.
+     * principal e transportada pela URL principal já confiada pelo ApiClient.
+     * Também vinculamos a chave à versão de configuração do roteamento: um
+     * pacote antigo não consegue restaurar uma chave pública anterior.
      */
     fun updateTrustFromRouting(root: JSONObject) {
         ensureInitialized()
         if (!root.optString("served_by").equals("primary", ignoreCase = true)) return
+        val routing = root.optJSONObject("routing") ?: return
+        val incomingConfigVersion = routing.optLong("config_version", 0L)
         val signing = root.optJSONObject("policy_signing") ?: return
         val keyId = signing.optString("key_id").trim()
         val pem = signing.optString("public_key_pem").trim()
         if (keyId.length < 8 || !pem.contains("BEGIN PUBLIC KEY") || !pem.contains("END PUBLIC KEY")) return
 
+        // O key_id do servidor é derivado da própria chave pública. Validar essa
+        // relação evita persistir um identificador arbitrário/desalinhado.
+        val calculatedKeyId = runCatching {
+            MessageDigest.getInstance("SHA-256")
+                .digest(pem.toByteArray(Charsets.UTF_8))
+                .joinToString("") { "%02x".format(Locale.US, it.toInt() and 0xFF) }
+                .take(32)
+        }.getOrDefault("")
+        if (calculatedKeyId.isBlank() || !keyId.equals(calculatedKeyId, ignoreCase = true)) return
+
         val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        prefs.edit().putString(KEY_TRUST_ID, keyId).putString(KEY_TRUST_PEM, pem).apply()
+        val currentKeyId = prefs.getString(KEY_TRUST_ID, "").orEmpty()
+        val currentTrustVersion = prefs.getLong(KEY_TRUST_CONFIG_VERSION, 0L)
+        if (currentKeyId.isNotBlank()) {
+            if (incomingConfigVersion < currentTrustVersion) return
+            if (incomingConfigVersion == currentTrustVersion && !keyId.equals(currentKeyId, ignoreCase = false)) return
+        }
+
+        prefs.edit()
+            .putString(KEY_TRUST_ID, keyId)
+            .putString(KEY_TRUST_PEM, pem)
+            .putLong(KEY_TRUST_CONFIG_VERSION, maxOf(currentTrustVersion, incomingConfigVersion))
+            .apply()
         restoreCachedEnvelope()
     }
 
