@@ -1,5 +1,6 @@
 package br.com.eventmenu.go.data
 
+import br.com.eventmenu.go.BuildConfig
 import br.com.eventmenu.go.security.SecureSessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,7 +22,14 @@ object ApiConnectionMonitor {
     private val _state = MutableStateFlow(ApiConnectivity.UNKNOWN)
     val state: StateFlow<ApiConnectivity> = _state.asStateFlow()
 
-    internal fun online() { _state.value = ApiConnectivity.ONLINE }
+    private val _serverRole = MutableStateFlow(ApiServerRole.PRIMARY)
+    val serverRole: StateFlow<ApiServerRole> = _serverRole.asStateFlow()
+
+    internal fun online(role: ApiServerRole = ApiServerRole.PRIMARY) {
+        _serverRole.value = role
+        _state.value = ApiConnectivity.ONLINE
+    }
+
     internal fun offline() { _state.value = ApiConnectivity.OFFLINE }
 }
 
@@ -57,6 +65,48 @@ class ApiClient(
     suspend fun postTabPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-tab-payments.php", "POST", action, token, emptyMap(), body)
     suspend fun getUnits(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-units.php", "GET", action, token, query, null)
     suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-units.php", "POST", action, token, emptyMap(), body)
+    suspend fun getHub(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-hub.php", "GET", action, token, query, null)
+    suspend fun postHub(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-hub.php", "POST", action, token, emptyMap(), body)
+    suspend fun getInventory(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-inventory.php", "GET", action, token, query, null)
+    suspend fun getExpedition(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-expedition.php", "GET", action, token, query, null)
+
+    /**
+     * Primeira raiz de confiança do APK. Esta consulta ignora o roteador e vai
+     * exclusivamente para a URL principal compilada no aplicativo. Assim o
+     * contingência nunca consegue trocar a chave pública usada para validar as
+     * políticas remotas. O transporte HTTPS continua sendo obrigatório.
+     */
+    suspend fun bootstrapControlPlane(): Boolean = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val compiledPrimary = baseUrl.trimEnd('/')
+        val root = runCatching {
+            execute(compiledPrimary, "api-app-config.php", "GET", "bootstrap", null, emptyMap(), null)
+        }.getOrNull() ?: return@withContext false
+        if (!root.optString("served_by").equals("primary", ignoreCase = true)) return@withContext false
+
+        acceptRoutingFromPrimary(root, compiledPrimary)
+        val envelope = root.optJSONObject("policy_android")
+        if (envelope != null) runCatching { ClientPolicyManager.applyEnvelope(envelope) }
+        true
+    }
+
+    /**
+     * Roteamento e chave de confiança são atualizados exclusivamente consultando
+     * o principal já conhecido. A contingência pode servir políticas assinadas,
+     * mas não pode se autodeclarar principal para trocar endpoints/chaves.
+     */
+    suspend fun refreshRouting(token: String) = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        val primary = runCatching { FailoverEndpointRouter.primaryBaseUrl() }
+            .getOrDefault(baseUrl.trimEnd('/'))
+            .trimEnd('/')
+        val store = sessionStore ?: sharedSessionStore
+        val root = executeWithRefresh(primary, "api-go-routing.php", "GET", "config", token, emptyMap(), null, store)
+        acceptRoutingFromPrimary(root, primary)
+    }
+
+    suspend fun refreshClientPolicy(): Boolean {
+        val root = request("api-client-policy.php", "GET", "manifest", null, mapOf("platform" to "android"), null)
+        return ClientPolicyManager.applyEnvelope(root)
+    }
 
     private suspend fun request(
         path: String,
@@ -66,41 +116,112 @@ class ApiClient(
         query: Map<String, String>,
         body: JSONObject?,
     ): JSONObject = kotlinx.coroutines.withContext(Dispatchers.IO) {
+        if (!policyExempt(path, action)) {
+            ClientPolicyManager.blockReason(BuildConfig.VERSION_NAME)?.let { throw ApiException(it, 403) }
+        }
+
         val store = sessionStore ?: sharedSessionStore
         val requestKey = cacheRequestKey(path, action, query)
         val cacheable = isCacheableRead(path, method, action, token)
+        val forWrite = method != "GET"
 
-        try {
-            val result = try {
-                execute(path, method, action, token, query, body)
-            } catch (error: ApiException) {
-                if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) throw error
-                val refreshed = refreshAccessToken(store, token)
-                execute(path, method, action, refreshed, query, body)
+        if (!forWrite && runCatching { FailoverEndpointRouter.shouldProbePrimary() }.getOrDefault(false)) {
+            FailoverEndpointRouter.markPrimaryProbe()
+            val primary = FailoverEndpointRouter.primaryBaseUrl()
+            if (probeCluster(primary, ApiServerRole.PRIMARY)) {
+                FailoverEndpointRouter.activate(ApiServerRole.PRIMARY)
             }
+        }
 
+        var selectedBase = routedBase(forWrite)
+        try {
+            val result = executeWithRefresh(selectedBase, path, method, action, token, query, body, store)
             if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
+            val routingToken = store?.token()?.takeIf { it.isNotBlank() }
+                ?: token?.takeIf { it.isNotBlank() }
+                ?: result.optString("token").takeIf { it.isNotBlank() }
+            if (path !in CONTROL_PLANE_PATHS) maybeRefreshControlPlane(selectedBase, routingToken)
             if (cacheable) {
                 val scope = cacheScope(store, token)
                 if (scope.isNotBlank()) sharedOfflineCache?.save(scope, requestKey, result)
             }
-            result
-        } catch (error: IOException) {
+            return@withContext result
+        } catch (error: Throwable) {
+            if (!isUnavailable(error)) throw error
+
+            val currentRole = roleFor(selectedBase)
+            val alternativeForWrite = oppositeBase(selectedBase, forWrite = forWrite)
+            val alternativeForRead = oppositeBase(selectedBase, forWrite = false)
+            val candidate = alternativeForWrite ?: alternativeForRead
+            if (candidate != null) {
+                val expectedRole = if (currentRole == ApiServerRole.PRIMARY) ApiServerRole.CONTINGENCY else ApiServerRole.PRIMARY
+                if (probeCluster(candidate, expectedRole)) {
+                    FailoverEndpointRouter.activate(expectedRole)
+                    ApiConnectionMonitor.online(expectedRole)
+
+                    if (!forWrite || isReplaySafePost(path, action)) {
+                        selectedBase = candidate
+                        val result = executeWithRefresh(selectedBase, path, method, action, token, query, body, store)
+                        if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
+                        val routingToken = store?.token()?.takeIf { it.isNotBlank() }
+                            ?: token?.takeIf { it.isNotBlank() }
+                            ?: result.optString("token").takeIf { it.isNotBlank() }
+                        if (path !in CONTROL_PLANE_PATHS) maybeRefreshControlPlane(selectedBase, routingToken)
+                        if (cacheable) {
+                            val scope = cacheScope(store, token)
+                            if (scope.isNotBlank()) sharedOfflineCache?.save(scope, requestKey, result)
+                        }
+                        return@withContext result
+                    }
+
+                    if (alternativeForWrite == null) {
+                        throw ApiException(
+                            "Servidor principal indisponível. O EventMenu GO entrou em contingência somente leitura; esta ação precisa aguardar o servidor principal.",
+                            0,
+                        )
+                    }
+                    throw ApiException(
+                        "O servidor mudou para a contingência. Por segurança, repita esta ação para evitar duplicidade.",
+                        0,
+                    )
+                }
+            }
+
             ApiConnectionMonitor.offline()
             if (cacheable) {
                 val scope = cacheScope(store, token)
                 sharedOfflineCache?.read(scope, requestKey)?.let { cached -> return@withContext cached }
             }
             val message = if (method == "GET") {
-                "Sem conexão com o servidor. Reconecte para atualizar esta tela."
+                "Sem conexão com os servidores. Reconecte para atualizar esta tela."
             } else {
-                "Sem conexão com o servidor. Reconecte para concluir esta ação."
+                "Sem conexão com os servidores. Reconecte para concluir esta ação."
             }
             throw ApiException(message, 0)
         }
     }
 
+    private suspend fun executeWithRefresh(
+        serverBase: String,
+        path: String,
+        method: String,
+        action: String,
+        token: String?,
+        query: Map<String, String>,
+        body: JSONObject?,
+        store: SecureSessionStore?,
+    ): JSONObject {
+        return try {
+            execute(serverBase, path, method, action, token, query, body)
+        } catch (error: ApiException) {
+            if (token == null || action == "refresh" || !shouldRefresh(error) || store == null) throw error
+            val refreshed = refreshAccessToken(store, token, serverBase)
+            execute(serverBase, path, method, action, refreshed, query, body)
+        }
+    }
+
     private fun execute(
+        serverBase: String,
         path: String,
         method: String,
         action: String,
@@ -109,14 +230,20 @@ class ApiClient(
         body: JSONObject?,
     ): JSONObject {
         val params = linkedMapOf("action" to action).apply { putAll(query) }
-        val qs = params.entries.joinToString("&") { "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}" }
-        val connection = URL(baseUrl.trimEnd('/') + "/$path?$qs").openConnection() as HttpURLConnection
+        val qs = params.entries.joinToString("&") {
+            "${URLEncoder.encode(it.key, "UTF-8") }=${URLEncoder.encode(it.value, "UTF-8")}"
+        }
+        val connection = URL(serverBase.trimEnd('/') + "/$path?$qs").openConnection() as HttpURLConnection
         try {
             connection.requestMethod = method
             connection.connectTimeout = 12_000
             connection.readTimeout = 25_000
             connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("X-Device-Id", deviceId)
+            connection.setRequestProperty("X-EventMenu-Client", "android")
+            connection.setRequestProperty("X-EventMenu-Version", BuildConfig.VERSION_NAME)
+            val signingFingerprint = runCatching { ClientPolicyManager.signingFingerprint() }.getOrDefault("")
+            if (signingFingerprint.isNotBlank()) connection.setRequestProperty("X-EventMenu-Signing-Fingerprint", signingFingerprint)
             token?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
             if (body != null) {
                 connection.doOutput = true
@@ -124,20 +251,154 @@ class ApiClient(
                 connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
             }
             val status = connection.responseCode
-            ApiConnectionMonitor.online()
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val json = runCatching { JSONObject(text) }
                 .getOrElse { JSONObject().put("ok", false).put("error", "Resposta inválida do servidor.") }
+            val role = roleFor(serverBase)
             if (status !in 200..299 || !json.optBoolean("ok", false)) {
+                if (!isFailoverHttpStatus(status)) ApiConnectionMonitor.online(role)
                 val serverMessage = json.optString("error", "Falha na API.")
                 throw ApiException(friendlyError(serverMessage, status), status)
             }
+            ApiConnectionMonitor.online(role)
             return json
         } finally {
             connection.disconnect()
         }
     }
+
+    private fun maybeRefreshControlPlane(serverBase: String, token: String?) {
+        val now = System.currentTimeMillis()
+        synchronized(routingSyncLock) {
+            if (now - lastRoutingSyncAtMs < 300_000L) return
+            lastRoutingSyncAtMs = now
+        }
+
+        // Somente o transporte que já conhecemos como principal pode alterar
+        // roteamento/chave. A contingência continua apta a entregar o envelope
+        // assinado da política, pois ele é verificado localmente por RSA.
+        if (!token.isNullOrBlank() && isTrustedPrimaryTransport(serverBase)) {
+            val routing = runCatching {
+                execute(serverBase, "api-go-routing.php", "GET", "config", token, emptyMap(), null)
+            }.getOrNull()
+            if (routing != null) acceptRoutingFromPrimary(routing, serverBase)
+        }
+
+        val policy = runCatching {
+            execute(serverBase, "api-client-policy.php", "GET", "manifest", null, mapOf("platform" to "android"), null)
+        }.getOrNull()
+        if (policy != null) runCatching { ClientPolicyManager.applyEnvelope(policy) }
+    }
+
+    private fun acceptRoutingFromPrimary(root: JSONObject, sourceBase: String) {
+        if (!isTrustedPrimaryTransport(sourceBase)) return
+        if (!root.optString("served_by").equals("primary", ignoreCase = true)) return
+        runCatching { FailoverEndpointRouter.updateFromRouting(root) }
+        runCatching { ClientPolicyManager.updateTrustFromRouting(root) }
+    }
+
+    private fun isTrustedPrimaryTransport(sourceBase: String): Boolean {
+        val source = sourceBase.trimEnd('/')
+        val compiled = baseUrl.trimEnd('/')
+        val currentPrimary = runCatching { FailoverEndpointRouter.primaryBaseUrl().trimEnd('/') }.getOrDefault(compiled)
+        val contingency = runCatching { FailoverEndpointRouter.contingencyBaseUrl(false)?.trimEnd('/') }.getOrNull()
+        if (!contingency.isNullOrBlank() && sameBase(source, contingency)) return false
+        return sameBase(source, compiled) || sameBase(source, currentPrimary)
+    }
+
+    private fun sameBase(left: String, right: String): Boolean =
+        left.trimEnd('/').equals(right.trimEnd('/'), ignoreCase = true)
+
+    private fun routedBase(forWrite: Boolean): String = runCatching {
+        FailoverEndpointRouter.currentBaseUrl(forWrite)
+    }.getOrDefault(baseUrl.trimEnd('/'))
+
+    private fun roleFor(serverBase: String): ApiServerRole = runCatching {
+        FailoverEndpointRouter.roleFor(serverBase)
+    }.getOrDefault(ApiServerRole.PRIMARY)
+
+    private fun oppositeBase(serverBase: String, forWrite: Boolean): String? = runCatching {
+        FailoverEndpointRouter.oppositeBaseUrl(serverBase, forWrite)
+    }.getOrNull()
+
+    private fun probeCluster(serverBase: String, expectedRole: ApiServerRole): Boolean {
+        val connection = runCatching {
+            URL(serverBase.trimEnd('/') + "/api-cluster.php?action=health").openConnection() as HttpURLConnection
+        }.getOrNull() ?: return false
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 4_000
+            connection.readTimeout = 5_000
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Cache-Control", "no-cache")
+            val status = connection.responseCode
+            if (status !in 200..299) return false
+            val text = connection.inputStream.bufferedReader().use { it.readText() }
+            val json = runCatching { JSONObject(text) }.getOrNull() ?: return false
+            if (!json.optBoolean("ok", false) || json.optString("service") != "eventmenu-cluster") return false
+            val expectedCluster = runCatching { FailoverEndpointRouter.clusterId() }.getOrDefault("")
+            val receivedCluster = json.optString("cluster_id")
+            if (expectedCluster.isNotBlank() && !receivedCluster.equals(expectedCluster, ignoreCase = false)) return false
+            val role = when (json.optString("node_role")) {
+                "contingency" -> ApiServerRole.CONTINGENCY
+                else -> ApiServerRole.PRIMARY
+            }
+            if (role != expectedRole) return false
+
+            // O health é apenas diagnóstico. Antes de enviar Bearer/refresh para
+            // um nó após failover, exigimos também um manifesto Android RS256
+            // válido e não regressivo assinado pela raiz confiada do principal.
+            probeSignedPolicy(serverBase)
+        } catch (_: IOException) {
+            false
+        } catch (_: Exception) {
+            false
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun probeSignedPolicy(serverBase: String): Boolean {
+        val connection = runCatching {
+            URL(serverBase.trimEnd('/') + "/api-client-policy.php?action=manifest&platform=android").openConnection() as HttpURLConnection
+        }.getOrNull() ?: return false
+        return try {
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 4_000
+            connection.readTimeout = 6_000
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("Cache-Control", "no-cache")
+            connection.setRequestProperty("X-EventMenu-Client", "android")
+            connection.setRequestProperty("X-EventMenu-Version", BuildConfig.VERSION_NAME)
+            val fingerprint = runCatching { ClientPolicyManager.signingFingerprint() }.getOrDefault("")
+            if (fingerprint.isNotBlank()) connection.setRequestProperty("X-EventMenu-Signing-Fingerprint", fingerprint)
+            val status = connection.responseCode
+            if (status !in 200..299) return false
+            val text = connection.inputStream.bufferedReader().use { it.readText() }
+            val envelope = runCatching { JSONObject(text) }.getOrNull() ?: return false
+            envelope.optBoolean("ok", false) && ClientPolicyManager.applyEnvelope(envelope)
+        } catch (_: Exception) {
+            false
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun isUnavailable(error: Throwable): Boolean = when (error) {
+        is IOException -> true
+        is ApiException -> isFailoverHttpStatus(error.status)
+        else -> false
+    }
+
+    private fun isFailoverHttpStatus(status: Int): Boolean = status in setOf(502, 503, 504, 521, 522, 523, 524)
+
+    private fun isReplaySafePost(path: String, action: String): Boolean =
+        path == "api.php" && action in setOf("login", "refresh")
+
+    private fun policyExempt(path: String, action: String): Boolean =
+        path in setOf("api-app-config.php", "api-client-policy.php", "api-go-routing.php") ||
+            (path == "api.php" && action == "logout")
 
     private fun friendlyError(message: String, status: Int): String {
         val normalized = message.lowercase()
@@ -154,12 +415,13 @@ class ApiClient(
         return error.status == 401 || (error.status == 422 && (message.contains("Sessão do app expirada", ignoreCase = true) || message.contains("Token inválido", ignoreCase = true)))
     }
 
-    private suspend fun refreshAccessToken(store: SecureSessionStore, failedToken: String): String = refreshMutex.withLock {
+    private suspend fun refreshAccessToken(store: SecureSessionStore, failedToken: String, preferredBase: String): String = refreshMutex.withLock {
         val current = store.token()
         if (!current.isNullOrBlank() && current != failedToken) return@withLock current
         val refresh = store.refreshToken() ?: throw ApiException("Faça login novamente.", 401)
         try {
             val root = execute(
+                preferredBase,
                 "api.php",
                 "POST",
                 "refresh",
@@ -196,13 +458,18 @@ class ApiClient(
     private fun isCacheableRead(path: String, method: String, action: String, token: String?): Boolean {
         if (method != "GET" || token.isNullOrBlank()) return false
         if (path == "api-go-events.php" && action == "bar-order-resolve") return false
+        if (path in setOf("api-hub.php", "api-go-expedition.php", "api-go-inventory.php", "api-go-routing.php", "api-client-policy.php", "api-app-config.php")) return false
         return path in CACHEABLE_PATHS
     }
 
     companion object {
         private val refreshMutex = Mutex()
+        private val routingSyncLock = Any()
+        @Volatile private var lastRoutingSyncAtMs: Long = 0L
         @Volatile private var sharedSessionStore: SecureSessionStore? = null
         @Volatile private var sharedOfflineCache: OfflineReadCache? = null
+
+        private val CONTROL_PLANE_PATHS = setOf("api-app-config.php", "api-go-routing.php", "api-client-policy.php")
 
         private val CACHEABLE_PATHS = setOf(
             "api-go.php",

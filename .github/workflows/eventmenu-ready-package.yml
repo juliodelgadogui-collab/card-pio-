@@ -1,0 +1,166 @@
+name: EventMenu Ready Package
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mobile/eventmenu-go/**'
+      - 'app/**'
+      - 'public/**'
+      - 'src/**'
+      - 'scripts/**'
+      - 'database/**'
+      - 'composer.*'
+      - '.github/workflows/eventmenu-ready-package.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eventmenu-ready-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-server:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_mysql, pdo_sqlite
+          coverage: none
+      - run: composer validate --strict
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - name: PHP syntax
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Hardening and URL checks
+        env:
+          APP_BASE_PATH: /1
+          APP_URL: https://example.test
+        run: |
+          php scripts/ci-url-smoke.php
+          php scripts/ci-production-readiness-smoke.php
+          php scripts/ci-permission-smoke.php
+          php scripts/ci-server-hardening-smoke.php
+
+  sqlite:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_sqlite
+          coverage: none
+      - run: composer install --no-interaction --no-progress --prefer-dist
+      - name: SQLite tests
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: ci-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-ready.sqlite
+          SESSION_NAME: eventmenu_ready_sqlite
+        run: |
+          rm -f /tmp/eventmenu-ready.sqlite*
+          php scripts/ci-db-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-auth-mail-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-sensitive-rate-limit-smoke.php
+          php scripts/ci-super-admin-smoke.php
+          php scripts/ci-operations-smoke.php
+          php scripts/ci-delivery-tracking-smoke.php
+          php scripts/ci-backup-smoke.php
+
+  android-apk:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: mobile/eventmenu-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Prepare Android SDK 36
+        shell: bash
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager 2>/dev/null | head -n1)"
+          fi
+          if [ -z "$SDKMANAGER" ] || [ ! -x "$SDKMANAGER" ]; then
+            echo 'sdkmanager not found in preinstalled Android SDK' >&2
+            find "$ANDROID_SDK_ROOT" -maxdepth 4 -name sdkmanager -print || true
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0'
+          echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Stable debug signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname 'CN=EventMenu GO Development,O=EventMenu,C=BR' -keyalg RSA -keysize 2048 -validity 10000
+          fi
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
+      - name: Build debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-GO-APK
+          path: mobile/eventmenu-go/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  server-package:
+    needs: [validate-server, sqlite]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_sqlite
+          coverage: none
+      - run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: Build installable server
+        env:
+          EVENTMENU_RELEASE_VERSION: 1.0.0-ready.${{ github.run_number }}
+          EVENTMENU_BUILD_COMMIT: ${{ github.sha }}
+        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-Pronto"
+      - name: Verify essential files
+        run: |
+          P="$RUNNER_TEMP/EventMenu-Premium-Servidor-Pronto"
+          test -f "$P/index.php"
+          test -f "$P/install.php"
+          test -f "$P/update.php"
+          test -f "$P/api.php"
+          test -f "$P/api-go.php"
+          test -f "$P/api-go-delivery.php"
+          test -f "$P/src/Services/DeliveryProgressService.php"
+          test -f "$P/database/sqlite/schema.sql"
+          test -d "$P/database/sqlite/migrations"
+          test -d "$P/vendor"
+          test -d "$P/storage"
+          test ! -f "$P/.env"
+      - name: Checksums
+        run: |
+          cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-Pronto"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-Servidor-Pronto
+          path: ${{ runner.temp }}/EventMenu-Premium-Servidor-Pronto
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

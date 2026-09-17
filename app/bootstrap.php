@@ -88,8 +88,6 @@ if (PHP_SAPI !== 'cli' && !headers_sent()) {
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
     header('Permissions-Policy: camera=(self), microphone=(), geolocation=()');
-    // Compatível com o painel atual, que ainda possui scripts/estilos inline.
-    // O mapa público de eventos usa o embed oficial do Google Maps.
     header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; frame-src 'self' https://maps.google.com https://www.google.com; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests");
     $production = strtolower(trim((string)env('APP_ENV', 'production'))) === 'production';
     $httpsConfigured = strtolower((string)parse_url((string)env('APP_URL', ''), PHP_URL_SCHEME)) === 'https';
@@ -108,6 +106,46 @@ spl_autoload_register(function (string $class): void {
     $path = __DIR__ . '/../src/' . str_replace('\\', '/', $relative) . '.php';
     if (is_file($path)) require $path;
 });
+
+// O nó de contingência em modo somente leitura é protegido também no servidor,
+// não apenas no APK. Isso impede que uma versão antiga do app ou uma chamada
+// manual grave pedidos/estoque/pagamentos em um banco que não é compartilhado.
+if (PHP_SAPI !== 'cli' && !in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET','HEAD','OPTIONS'], true)) {
+    try {
+        $failover = new \EventMenu\Services\PlatformFailoverService();
+        if ($failover->nodeRole() === 'contingency') {
+            $failoverSettings = $failover->get();
+            if (($failoverSettings['mode'] ?? 'read_only') === 'read_only') {
+                $script = basename((string)($_SERVER['SCRIPT_NAME'] ?? ''));
+                $action = (string)($_GET['action'] ?? '');
+                $allowed = in_array($script, ['install.php','update.php'], true)
+                    || ($script === 'api-cluster.php' && $action === 'verify')
+                    || ($script === 'api-cluster-bootstrap.php' && $action === 'configure')
+                    || ($script === 'api-cluster-sync.php' && $action === 'push')
+                    || ($script === 'api.php' && in_array($action, ['login','refresh','logout'], true));
+                if (!$allowed) {
+                    http_response_code(503);
+                    header('Retry-After: 15');
+                    $jsonApi = str_starts_with($script, 'api-') || $script === 'api.php' || $script === 'webhook.php';
+                    if ($jsonApi) {
+                        header('Content-Type: application/json; charset=utf-8');
+                        echo json_encode([
+                            'ok' => false,
+                            'error' => 'Servidor de contingência ativo em modo somente leitura.',
+                            'failover' => ['node_role' => 'contingency', 'mode' => 'read_only'],
+                        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    } else {
+                        echo 'Servidor de contingência ativo em modo somente leitura.';
+                    }
+                    exit;
+                }
+            }
+        }
+    } catch (Throwable) {
+        // Se o banco ainda não foi instalado/configurado, o fluxo normal de
+        // instalação continua responsável por exibir o erro apropriado.
+    }
+}
 
 if (PHP_SAPI !== 'cli' && ob_get_level() === 0) ob_start('app_rewrite_root_urls');
 

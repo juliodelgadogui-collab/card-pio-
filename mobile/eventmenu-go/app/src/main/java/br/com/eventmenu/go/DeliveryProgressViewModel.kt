@@ -39,17 +39,52 @@ class DeliveryProgressViewModel(
 
     fun refresh() = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null) }
-        runCatching { repository.listMine() }
-            .onSuccess { rows ->
-                _state.update { it.copy(items = rows.associateBy { row -> row.orderId }, loading = false) }
-                syncGps(rows)
+        try {
+            val rows = repository.listMine()
+            _state.update {
+                it.copy(
+                    items = rows.associateBy { row -> row.orderId },
+                    loading = false,
+                    changeVersion = it.changeVersion + 1,
+                )
             }
-            .onFailure { _state.update { it.copy(loading = false, error = "Não foi possível atualizar as entregas.") } }
+            syncGps(rows)
+        } catch (error: Throwable) {
+            _state.update {
+                it.copy(
+                    loading = false,
+                    error = deliveryError(error, "Não foi possível atualizar as entregas."),
+                )
+            }
+        }
     }
 
     fun pickup(orderId: Int) = runAction(orderId, "Pedido retirado.") { repository.pickup(orderId) }
 
     fun startRoute(orderId: Int) {
+        val current = _state.value.items[orderId]
+        if (current?.completed == true) {
+            _state.update { it.copy(error = null, message = "Esta entrega já foi concluída.") }
+            return
+        }
+        if (current?.routeStarted == true || current?.arrived == true) {
+            val app = EventMenuGoApplication.instance
+            if (DeliveryLocationService.hasLocationPermission(app)) {
+                DeliveryLocationService.start(app)
+            }
+            _state.update {
+                it.copy(
+                    error = null,
+                    message = if (current.arrived) {
+                        "A chegada já foi confirmada. Continue com a finalização da entrega."
+                    } else {
+                        "A rota já está iniciada. GPS ao vivo mantido."
+                    },
+                )
+            }
+            return
+        }
+
         val app = EventMenuGoApplication.instance
         if (!DeliveryLocationService.hasLocationPermission(app)) {
             _state.update {
@@ -66,21 +101,67 @@ class DeliveryProgressViewModel(
 
     private fun startRouteInternal(orderId: Int) = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null, message = null) }
-        runCatching { repository.startRoute(orderId) }
-            .onSuccess { progress ->
-                _state.update {
-                    it.copy(
-                        items = it.items + (orderId to progress),
-                        loading = false,
-                        message = "Rota iniciada. GPS ao vivo ativado para esta entrega.",
-                        changeVersion = it.changeVersion + 1,
-                    )
+        try {
+            val progress = repository.startRoute(orderId)
+            _state.update {
+                it.copy(
+                    items = it.items + (orderId to progress),
+                    loading = false,
+                    message = "Rota iniciada. GPS ao vivo ativado para esta entrega.",
+                    changeVersion = it.changeVersion + 1,
+                )
+            }
+            DeliveryLocationService.start(EventMenuGoApplication.instance)
+        } catch (error: Throwable) {
+            val latest = try {
+                repository.listMine().firstOrNull { it.orderId == orderId }
+            } catch (_: Throwable) {
+                null
+            }
+
+            when {
+                latest?.completed == true -> {
+                    _state.update {
+                        it.copy(
+                            items = it.items + (orderId to latest),
+                            loading = false,
+                            error = null,
+                            message = "Esta entrega já foi concluída.",
+                            changeVersion = it.changeVersion + 1,
+                        )
+                    }
+                    syncGps(_state.value.items.values.toList())
                 }
-                DeliveryLocationService.start(EventMenuGoApplication.instance)
+
+                latest?.routeStarted == true || latest?.arrived == true -> {
+                    _state.update {
+                        it.copy(
+                            items = it.items + (orderId to latest),
+                            loading = false,
+                            error = null,
+                            message = if (latest.arrived) {
+                                "A chegada já estava confirmada. Estado da entrega atualizado."
+                            } else {
+                                "A rota já estava iniciada. GPS ao vivo mantido."
+                            },
+                            changeVersion = it.changeVersion + 1,
+                        )
+                    }
+                    if (DeliveryLocationService.hasLocationPermission(EventMenuGoApplication.instance)) {
+                        DeliveryLocationService.start(EventMenuGoApplication.instance)
+                    }
+                }
+
+                else -> {
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            error = deliveryError(error, "Não foi possível iniciar a rota. Atualize a entrega e tente novamente."),
+                        )
+                    }
+                }
             }
-            .onFailure {
-                _state.update { state -> state.copy(loading = false, error = "Não foi possível iniciar a rota. Atualize a entrega e tente novamente.") }
-            }
+        }
     }
 
     fun arrive(orderId: Int) = runAction(
@@ -90,19 +171,25 @@ class DeliveryProgressViewModel(
 
     fun complete(orderId: Int) = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null, message = null) }
-        runCatching { repository.complete(orderId) }
-            .onSuccess { progress ->
-                _state.update {
-                    it.copy(
-                        items = it.items + (orderId to progress),
-                        loading = false,
-                        message = "Entrega concluída. Rastreamento encerrado.",
-                        changeVersion = it.changeVersion + 1,
-                    )
-                }
-                refresh()
+        try {
+            val progress = repository.complete(orderId)
+            _state.update {
+                it.copy(
+                    items = it.items + (orderId to progress),
+                    loading = false,
+                    message = "Entrega concluída. Rastreamento encerrado.",
+                    changeVersion = it.changeVersion + 1,
+                )
             }
-            .onFailure { _state.update { it.copy(loading = false, error = "Não foi possível concluir a entrega.") } }
+            refresh()
+        } catch (error: Throwable) {
+            _state.update {
+                it.copy(
+                    loading = false,
+                    error = deliveryError(error, "Não foi possível concluir a entrega."),
+                )
+            }
+        }
     }
 
     private fun runAction(
@@ -111,18 +198,24 @@ class DeliveryProgressViewModel(
         block: suspend () -> DeliveryProgress,
     ) = viewModelScope.launch {
         _state.update { it.copy(loading = true, error = null, message = null) }
-        runCatching { block() }
-            .onSuccess { progress ->
-                _state.update {
-                    it.copy(
-                        items = it.items + (orderId to progress),
-                        loading = false,
-                        message = message,
-                        changeVersion = it.changeVersion + 1,
-                    )
-                }
+        try {
+            val progress = block()
+            _state.update {
+                it.copy(
+                    items = it.items + (orderId to progress),
+                    loading = false,
+                    message = message,
+                    changeVersion = it.changeVersion + 1,
+                )
             }
-            .onFailure { _state.update { it.copy(loading = false, error = "Não foi possível atualizar a entrega. Tente novamente.") } }
+        } catch (error: Throwable) {
+            _state.update {
+                it.copy(
+                    loading = false,
+                    error = deliveryError(error, "Não foi possível atualizar a entrega. Tente novamente."),
+                )
+            }
+        }
     }
 
     private fun syncGps(rows: List<DeliveryProgress>) {
@@ -132,6 +225,11 @@ class DeliveryProgressViewModel(
         } else if (!hasActiveRoute) {
             DeliveryLocationService.stop(EventMenuGoApplication.instance)
         }
+    }
+
+    private fun deliveryError(error: Throwable, fallback: String): String {
+        val message = error.message?.trim().orEmpty()
+        return message.takeIf { it.isNotBlank() } ?: fallback
     }
 
     fun clearFeedback() = _state.update { it.copy(error = null, message = null) }

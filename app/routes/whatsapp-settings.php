@@ -26,7 +26,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         if($action==='test'){
             $phone=(string)($_POST['test_phone']??'');if(trim($phone)==='')throw new RuntimeException('Informe um número para o teste.');
             $effective=$service->effective($tenantId);if(!$effective)throw new RuntimeException('Ative e salve o WhatsApp antes do teste.');
-            (new WhatsAppCloudService())->sendTemplate($tenantId,$phone,(string)$effective['confirmation_template'],(string)$effective['language_code'],['Teste EventMenu','0',rtrim((string)env('APP_URL',''),'/')]);
+            (new WhatsAppCloudService())->sendTemplate($tenantId,$phone,(string)$effective['confirmation_template'],(string)$effective['language_code'],['Teste EventMenu','0',app_absolute_url('')]);
             Auth::audit('whatsapp.test_sent','whatsapp_settings',$service->scopeKey($tenantId),[]);em_flash('ok','Mensagem de teste enviada para o WhatsApp informado.');em_go('whatsapp-settings');
         }
     }catch(Throwable $e){em_flash('error',$e->getMessage());em_go('whatsapp-settings');}

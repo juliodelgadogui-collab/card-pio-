@@ -1,0 +1,184 @@
+<?php
+
+declare(strict_types=1);
+
+require __DIR__ . '/../app/bootstrap.php';
+
+use EventMenu\Core\Crypto;
+use EventMenu\Core\Database;
+use EventMenu\Services\ClientPolicyGateService;
+use EventMenu\Services\ClientPolicyService;
+use EventMenu\Services\ClientReleaseDownloadService;
+use EventMenu\Services\ClientReleaseService;
+
+function cp_assert(bool $condition, string $message): void
+{
+    if (!$condition) throw new RuntimeException($message);
+}
+
+$pdo = Database::connection();
+$pdo->query('SELECT 1 FROM platform_client_policies LIMIT 1');
+$pdo->query('SELECT 1 FROM platform_policy_signing LIMIT 1');
+$pdo->query('SELECT 1 FROM platform_client_releases LIMIT 1');
+
+$_SESSION['user_id'] = 999999;
+$_SESSION['tenant_id'] = null;
+$_SESSION['role'] = 'super_admin';
+$_SESSION['name'] = 'CI Super Admin';
+unset($_SESSION['acting_tenant_id']);
+
+$fingerprintHex = str_repeat('AB', 32);
+$fingerprint = implode(':', str_split($fingerprintHex, 2));
+$service = new ClientPolicyService();
+$releaseService = new ClientReleaseService();
+$policy = $service->save('android', [
+    'enabled' => true,
+    'maintenance' => false,
+    'min_version' => '0.2.0',
+    'recommended_version' => '0.3.0',
+    'ttl_seconds' => 3600,
+    'features' => ['delivery' => true, 'hub' => false],
+    'allowed_signing_fingerprints' => [$fingerprint],
+]);
+$release = $releaseService->save('android', [
+    'published' => true,
+    'version' => '0.3.0',
+    'download_url' => 'https://updates.example.test/EventMenu-GO-0.3.0.apk',
+    'sha256' => str_repeat('CD', 32),
+    'release_notes' => 'Atualização de teste assinada pelo control plane.',
+]);
+cp_assert($policy['platform'] === 'android', 'Política Android não foi salva.');
+cp_assert(!empty($policy['enabled']), 'Política Android ficou desativada.');
+cp_assert(($policy['features']['delivery'] ?? false) === true, 'Feature delivery não foi persistida.');
+cp_assert(!empty($release['published']) && $release['version'] === '0.3.0', 'Distribuição Android não foi salva.');
+
+$envelope = $service->signedEnvelope('android');
+cp_assert(($envelope['algorithm'] ?? '') === 'RS256', 'Envelope não usa RS256.');
+cp_assert(!isset($envelope['private_key']) && !isset($envelope['private_key_pem']), 'Envelope expôs chave privada.');
+$key = $service->publicKeyBundle();
+cp_assert(($key['key_id'] ?? '') === ($envelope['key_id'] ?? ''), 'Key ID do envelope divergente.');
+$payloadRaw = base64_decode((string)$envelope['payload_b64'], true);
+$signature = base64_decode((string)$envelope['signature_b64'], true);
+cp_assert($payloadRaw !== false && $signature !== false, 'Envelope base64 inválido.');
+cp_assert(openssl_verify($payloadRaw, $signature, (string)$key['public_key_pem'], OPENSSL_ALGO_SHA256) === 1, 'Assinatura RS256 inválida.');
+$payload = json_decode($payloadRaw, true, 512, JSON_THROW_ON_ERROR);
+cp_assert(($payload['platform'] ?? '') === 'android', 'Payload assinou plataforma errada.');
+cp_assert(($payload['min_version'] ?? '') === '0.2.0', 'Versão mínima ausente do payload.');
+cp_assert(!empty($payload['expires_at']), 'Expiração ausente do payload.');
+cp_assert(($payload['release']['published'] ?? false) === true, 'Atualização publicada não entrou no manifesto assinado.');
+cp_assert(($payload['release']['version'] ?? '') === '0.3.0', 'Versão da atualização ausente do manifesto.');
+cp_assert(($payload['release']['download_url'] ?? '') === 'https://updates.example.test/EventMenu-GO-0.3.0.apk', 'URL da atualização divergente.');
+cp_assert(($payload['release']['sha256'] ?? '') === str_repeat('CD', 32), 'SHA-256 da atualização divergente.');
+
+$invalidReleaseBlocked = false;
+try {
+    $releaseService->save('windows', [
+        'published' => true,
+        'version' => '1.0.0',
+        'download_url' => 'http://inseguro.example.test/EventMenu.exe',
+        'sha256' => str_repeat('EF', 32),
+    ]);
+} catch (RuntimeException $e) {
+    $invalidReleaseBlocked = str_contains($e->getMessage(), 'HTTPS');
+}
+cp_assert($invalidReleaseBlocked, 'Distribuição aceitou URL de atualização sem HTTPS.');
+
+// O servidor adicional só entrega o binário quando o arquivo local corresponde
+// exatamente ao SHA-256 que o principal publicou dentro do manifesto assinado.
+$releaseDir = dirname(__DIR__) . '/storage/client-releases';
+if (!is_dir($releaseDir) && !mkdir($releaseDir, 0775, true) && !is_dir($releaseDir)) throw new RuntimeException('Não foi possível criar pasta de release no smoke.');
+$releasePath = $releaseDir . '/EventMenu-GO.apk';
+file_put_contents($releasePath, "eventmenu-ci-apk\n", LOCK_EX);
+$localHash = strtoupper((string)hash_file('sha256', $releasePath));
+$releaseService->save('android', [
+    'published' => true,
+    'version' => '0.3.1',
+    'download_url' => 'https://example.test/1/api-client-release.php?platform=android',
+    'sha256' => $localHash,
+    'release_notes' => 'Arquivo local protegido por hash.',
+]);
+$resolvedRelease = (new ClientReleaseDownloadService())->resolve('android');
+cp_assert(($resolvedRelease['version'] ?? '') === '0.3.1', 'Download service resolveu versão errada.');
+cp_assert(($resolvedRelease['sha256'] ?? '') === $localHash, 'Download service resolveu hash errado.');
+cp_assert(($resolvedRelease['path'] ?? '') === $releasePath, 'Download service resolveu arquivo inesperado.');
+file_put_contents($releasePath, "alterado\n", FILE_APPEND | LOCK_EX);
+$tamperedBlocked = false;
+try {
+    (new ClientReleaseDownloadService())->resolve('android');
+} catch (RuntimeException $e) {
+    $tamperedBlocked = str_contains($e->getMessage(), 'SHA-256');
+}
+cp_assert($tamperedBlocked, 'Download service entregaria arquivo alterado após a publicação.');
+@unlink($releasePath);
+
+$_SERVER['HTTP_X_EVENTMENU_CLIENT'] = 'android';
+$_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.2.0';
+$_SERVER['HTTP_X_EVENTMENU_SIGNING_FINGERPRINT'] = $fingerprint;
+(new ClientPolicyGateService())->assertCurrentRequestAllowed();
+
+$originalScriptName = (string)($_SERVER['SCRIPT_NAME'] ?? '');
+$_SERVER['SCRIPT_NAME'] = '/1/api-go-delivery.php';
+(new ClientPolicyGateService())->assertCurrentRequestAllowed();
+$_SERVER['SCRIPT_NAME'] = '/1/api-hub.php';
+$featureBlocked = false;
+try {
+    (new ClientPolicyGateService())->assertCurrentRequestAllowed();
+} catch (RuntimeException $e) {
+    $featureBlocked = str_contains($e->getMessage(), 'recurso foi desativado') && str_contains($e->getMessage(), 'hub');
+}
+cp_assert($featureBlocked, 'Gate não bloqueou API do Hub desativada pela política remota.');
+$_SERVER['SCRIPT_NAME'] = $originalScriptName;
+
+$_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.1.9';
+$blocked = false;
+try {
+    (new ClientPolicyGateService())->assertCurrentRequestAllowed();
+} catch (RuntimeException $e) {
+    $blocked = str_contains($e->getMessage(), 'Atualização obrigatória');
+}
+cp_assert($blocked, 'Gate não bloqueou cliente abaixo da versão mínima.');
+
+// O contingência não pode continuar autorizando clientes com uma política antiga
+// só porque a assinatura ainda é criptograficamente válida.
+$signing = $pdo->query('SELECT private_key_encrypted FROM platform_policy_signing WHERE id=1')->fetch();
+cp_assert(is_array($signing) && !empty($signing['private_key_encrypted']), 'Chave privada de teste não encontrada.');
+$expiredPayload = $payload;
+$expiredPayload['issued_at'] = gmdate('c', time() - 7200);
+$expiredPayload['expires_at'] = gmdate('c', time() - 3600);
+$expiredRaw = json_encode($expiredPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+$expiredSignature = '';
+cp_assert(openssl_sign($expiredRaw, $expiredSignature, Crypto::decrypt((string)$signing['private_key_encrypted']), OPENSSL_ALGO_SHA256), 'Não foi possível assinar envelope expirado de teste.');
+$service->cacheEnvelope('android', [
+    'ok' => true,
+    'service' => 'eventmenu-client-policy',
+    'algorithm' => 'RS256',
+    'key_id' => (string)$key['key_id'],
+    'payload_b64' => base64_encode($expiredRaw),
+    'signature_b64' => base64_encode($expiredSignature),
+    'payload' => $expiredPayload,
+]);
+
+$previousRole = getenv('EVENTMENU_NODE_ROLE');
+putenv('EVENTMENU_NODE_ROLE=contingency');
+$_ENV['EVENTMENU_NODE_ROLE'] = 'contingency';
+$_SERVER['HTTP_X_EVENTMENU_VERSION'] = '0.2.0';
+$expiredBlocked = false;
+try {
+    (new ClientPolicyGateService())->assertCurrentRequestAllowed();
+} catch (RuntimeException $e) {
+    $expiredBlocked = str_contains($e->getMessage(), 'Autorização remota indisponível') || str_contains($e->getMessage(), 'expirada');
+}
+cp_assert($expiredBlocked, 'Contingência aceitou política assinada expirada.');
+
+if ($previousRole === false || $previousRole === '') {
+    putenv('EVENTMENU_NODE_ROLE');
+    unset($_ENV['EVENTMENU_NODE_ROLE']);
+} else {
+    putenv('EVENTMENU_NODE_ROLE=' . $previousRole);
+    $_ENV['EVENTMENU_NODE_ROLE'] = $previousRole;
+}
+$service->cacheEnvelope('android', $envelope);
+
+unset($_SERVER['HTTP_X_EVENTMENU_CLIENT'], $_SERVER['HTTP_X_EVENTMENU_VERSION'], $_SERVER['HTTP_X_EVENTMENU_SIGNING_FINGERPRINT']);
+if ($originalScriptName === '') unset($_SERVER['SCRIPT_NAME']); else $_SERVER['SCRIPT_NAME'] = $originalScriptName;
+echo "client-policy smoke ok\n";

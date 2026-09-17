@@ -1,0 +1,103 @@
+CREATE TABLE IF NOT EXISTS payment_terminal_configs (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  unit_id BIGINT UNSIGNED NOT NULL,
+  provider ENUM('pagbank_tef','stone_tef','sitef','generic_tef') NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  integration_mode ENUM('dll','local_service','tcp','serial') NOT NULL DEFAULT 'local_service',
+  terminal_label VARCHAR(160) NULL,
+  pinpad_identifier VARCHAR(190) NULL,
+  config_encrypted LONGTEXT NULL,
+  auto_capture TINYINT(1) NOT NULL DEFAULT 1,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_terminal_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_terminal_unit FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE CASCADE,
+  INDEX idx_terminal_unit (tenant_id, unit_id, enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS desktop_hardware_bindings (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  unit_id BIGINT UNSIGNED NOT NULL,
+  device_hash CHAR(64) NOT NULL,
+  device_label VARCHAR(190) NULL,
+  hardware_json LONGTEXT NULL,
+  last_seen_at DATETIME NULL,
+  revoked_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_hw_binding_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hw_binding_unit FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_hw_binding_device (tenant_id, device_hash),
+  INDEX idx_hw_binding_unit (tenant_id, unit_id, revoked_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS hub_pairing_codes (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  unit_id BIGINT UNSIGNED NOT NULL,
+  desktop_binding_id BIGINT UNSIGNED NOT NULL,
+  code_hash CHAR(64) NOT NULL,
+  status ENUM('pending','claimed','expired','revoked') NOT NULL DEFAULT 'pending',
+  claimed_by_user_id BIGINT UNSIGNED NULL,
+  claimed_device_hash CHAR(64) NULL,
+  expires_at DATETIME NOT NULL,
+  claimed_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT fk_hub_pair_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_pair_unit FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_pair_desktop FOREIGN KEY (desktop_binding_id) REFERENCES desktop_hardware_bindings(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_pair_user FOREIGN KEY (claimed_by_user_id) REFERENCES users(id) ON DELETE SET NULL,
+  UNIQUE KEY uq_hub_pair_code (code_hash),
+  INDEX idx_hub_pair_pending (tenant_id, desktop_binding_id, status, expires_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS hub_device_links (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  unit_id BIGINT UNSIGNED NOT NULL,
+  desktop_binding_id BIGINT UNSIGNED NOT NULL,
+  mobile_user_id BIGINT UNSIGNED NOT NULL,
+  mobile_device_hash CHAR(64) NOT NULL,
+  label VARCHAR(190) NULL,
+  status ENUM('active','revoked') NOT NULL DEFAULT 'active',
+  last_seen_at DATETIME NULL,
+  revoked_at DATETIME NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_hub_link_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_link_unit FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_link_desktop FOREIGN KEY (desktop_binding_id) REFERENCES desktop_hardware_bindings(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_link_user FOREIGN KEY (mobile_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_hub_link_device (tenant_id, desktop_binding_id, mobile_device_hash),
+  INDEX idx_hub_link_mobile (tenant_id, mobile_user_id, status),
+  INDEX idx_hub_link_unit (tenant_id, unit_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS hub_commands (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  tenant_id BIGINT UNSIGNED NOT NULL,
+  unit_id BIGINT UNSIGNED NOT NULL,
+  target_binding_id BIGINT UNSIGNED NOT NULL,
+  requested_by_user_id BIGINT UNSIGNED NOT NULL,
+  source_device_hash CHAR(64) NULL,
+  command_type ENUM('print_order','print_receipt','open_drawer','tef_charge','customer_display','kitchen_alert','play_alert','print_label') NOT NULL,
+  payload_json LONGTEXT NULL,
+  idempotency_key VARCHAR(190) NOT NULL,
+  status ENUM('queued','claimed','completed','failed','cancelled','expired') NOT NULL DEFAULT 'queued',
+  result_json LONGTEXT NULL,
+  error_message VARCHAR(1000) NULL,
+  claimed_at DATETIME NULL,
+  completed_at DATETIME NULL,
+  expires_at DATETIME NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_hub_cmd_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_cmd_unit FOREIGN KEY (unit_id) REFERENCES operating_units(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_cmd_target FOREIGN KEY (target_binding_id) REFERENCES desktop_hardware_bindings(id) ON DELETE CASCADE,
+  CONSTRAINT fk_hub_cmd_user FOREIGN KEY (requested_by_user_id) REFERENCES users(id) ON DELETE RESTRICT,
+  UNIQUE KEY uq_hub_cmd_idempotency (tenant_id, idempotency_key),
+  INDEX idx_hub_cmd_poll (tenant_id, target_binding_id, status, expires_at, id),
+  INDEX idx_hub_cmd_source (tenant_id, requested_by_user_id, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

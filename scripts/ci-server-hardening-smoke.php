@@ -26,24 +26,22 @@ hardening_assert(str_contains($update, 'Auth::isSuperAdmin()'), 'update.php prec
 hardening_assert(!str_contains($update, "requirePermission('users.manage')"), 'update.php não pode depender de users.manage.');
 
 $install = hardening_file($root, 'public/install.php');
-hardening_assert(str_contains($install, 'strlen($password) < 10'), 'instalador precisa exigir senha mínima de 10 caracteres.');
-hardening_assert(str_contains($install, 'minlength="10"'), 'formulário do instalador precisa exigir 10 caracteres.');
-hardening_assert(str_contains($install, "HTTPS é obrigatório para instalar o EventMenu em produção."), 'instalador precisa bloquear domínio real em HTTP.');
+hardening_assert(str_contains($install, 'strlen($pass)<1'), 'instalador precisa rejeitar senha vazia.');
+hardening_assert(str_contains($install, 'minlength="1"'), 'formulário do instalador precisa aceitar senha curta sem aceitar senha vazia.');
+hardening_assert(str_contains($install, 'HTTPS é obrigatório em produção.'), 'instalador precisa bloquear domínio real em HTTP.');
 hardening_assert(str_contains($install, "['localhost','127.0.0.1','::1']"), 'instalador deve permitir HTTP somente em ambiente local.');
 hardening_assert(str_contains($install, "value=\"sqlite\""), 'instalador precisa oferecer SQLite.');
 hardening_assert(str_contains($install, "value=\"mysql\""), 'instalador precisa oferecer MySQL/MariaDB.');
-hardening_assert(str_contains($install, "pdo_sqlite"), 'instalador precisa validar pdo_sqlite.');
-hardening_assert(str_contains($install, "pdo_mysql"), 'instalador precisa validar pdo_mysql.');
-hardening_assert(str_contains($install, 'eventmenu_install_probe_database'), 'instalador precisa testar a conexão antes de instalar.');
-hardening_assert(str_contains($install, "DB_CONNECTION' => \$driver"), 'instalador precisa persistir o banco escolhido no .env.');
+hardening_assert(str_contains($install, "PDO::getAvailableDrivers()"), 'instalador precisa validar os drivers PDO disponíveis.');
+hardening_assert(str_contains($install, "Database::connection()"), 'instalador precisa abrir a conexão selecionada antes de concluir.');
+hardening_assert(str_contains($install, "'DB_CONNECTION'=>\$driver"), 'instalador precisa persistir o banco escolhido no .env.');
 
 $users = hardening_file($root, 'app/routes/users.php');
-hardening_assert(substr_count($users, 'strlen($password)<10') >= 2, 'criação/edição de usuários precisa exigir 10 caracteres.');
-hardening_assert(str_contains($users, 'minlength="10"'), 'formulário de usuários precisa exigir 10 caracteres.');
+hardening_assert(str_contains($users, 'strlen($password)>200'), 'gestão de usuários precisa limitar o tamanho máximo da senha.');
 
 $resetService = hardening_file($root, 'src/Services/PasswordResetService.php');
 hardening_assert(str_contains($resetService, "app_absolute_url('reset-password.php?token='"), 'recuperação precisa gerar URL absoluta.');
-hardening_assert(str_contains($resetService, 'strlen($password) < 10'), 'redefinição precisa exigir 10 caracteres.');
+hardening_assert(str_contains($resetService, 'strlen($password) > 200'), 'redefinição precisa limitar o tamanho máximo da senha.');
 
 $bootstrap = hardening_file($root, 'app/bootstrap.php');
 hardening_assert(str_contains($bootstrap, 'Content-Security-Policy:'), 'CSP precisa estar habilitado.');

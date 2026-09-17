@@ -11,18 +11,49 @@ use RuntimeException;
 
 final class PosPaymentService
 {
-    public function status(int $orderId):array
+    public function status(int $orderId): array
     {
-        Auth::requirePermission('payments.manage');
-        $tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');
+        $tenantId=Auth::tenantId();$userId=Auth::id();
+        if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');
+        if($orderId<1)throw new RuntimeException('Pedido inválido.');
+
+        $pdo=Database::connection();
+        $o=$pdo->prepare('SELECT id,channel,assigned_delivery_user_id,unit_id FROM orders WHERE id=? AND tenant_id=? LIMIT 1');
+        $o->execute([$orderId,$tenantId]);$order=$o->fetch();
+        if(!$order)throw new RuntimeException('Pedido não encontrado.');
+
+        $shift=(new WorkShiftService())->current();
+        $mode=(string)($shift['mode']??'');
+        if($mode==='delivery'){
+            if(!Auth::can('orders.delivery')||$order['channel']!=='delivery'||(int)($order['assigned_delivery_user_id']??0)!==$userId){
+                throw new RuntimeException('Este pedido não está atribuído a você.');
+            }
+        }elseif(
+            !Auth::can('payments.manage')&&
+            !Auth::can('cash.manage')&&
+            !Auth::can('orders.create')&&
+            !Auth::can('orders.view')&&
+            !Auth::can('orders.manage')&&
+            !Auth::can('nfc.collect')
+        ){
+            throw new RuntimeException('Sua função não pode consultar o pagamento deste pedido.');
+        }
+
+        if($shift&&$shift['unit_id']!==null&&($order['unit_id']===null||(int)$order['unit_id']!==(int)$shift['unit_id'])){
+            throw new RuntimeException('Este pedido pertence a outra unidade.');
+        }
+
         $balance=(new PaymentService())->remaining($orderId,$tenantId);
-        $s=Database::connection()->prepare('SELECT id,provider,amount_cents,status,verified_at,created_at FROM payments WHERE tenant_id=? AND order_id=? ORDER BY id');$s->execute([$tenantId,$orderId]);
-        $balance['payments']=$s->fetchAll();return $balance;
+        $s=$pdo->prepare('SELECT id,provider,amount_cents,status,verified_at,created_at FROM payments WHERE tenant_id=? AND order_id=? ORDER BY id');
+        $s->execute([$tenantId,$orderId]);
+        $balance['payments']=$s->fetchAll();
+        return $balance;
     }
 
     public function cash(int $orderId,int $amountCents,string $idempotencyKey):array
     {
-        Auth::requirePermission('payments.manage');Auth::requirePermission('cash.manage');
+        if(!Auth::can('payments.manage'))throw new RuntimeException('Sua função não pode receber pagamentos.');
+        if(!Auth::can('cash.manage'))throw new RuntimeException('Sua função não pode operar o caixa.');
         $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Operador ou empresa inválidos.');
         if($amountCents<=0)throw new RuntimeException('Informe um valor de parcela maior que zero.');if(strlen(trim($idempotencyKey))<12)throw new RuntimeException('Chave de idempotência inválida.');
 

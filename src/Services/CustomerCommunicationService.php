@@ -50,7 +50,7 @@ final class CustomerCommunicationService
         $order=$this->orderContact($tenantId,$orderId);if(!$order){$this->mark($tenantId,$orderId,$event,$channel,'skipped',null,'Pedido ou cliente indisponível.');return;}
         if((string)$order['status']==='cancelled'){$this->mark($tenantId,$orderId,$event,$channel,'skipped',null,'Pedido cancelado.');return;}
         $url=$event===self::ORDER_CONFIRMATION
-            ? rtrim((string)env('APP_URL',''),'/').'/pedido.php?t='.rawurlencode((string)$order['public_token'])
+            ? app_absolute_url('pedido.php?t='.rawurlencode((string)$order['public_token']))
             : $this->trackingUrl($payload);
         if(!filter_var($url,FILTER_VALIDATE_URL))throw new RuntimeException('URL pública do pedido não está configurada corretamente.');
 

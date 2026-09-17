@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import br.com.eventmenu.go.data.DeviceStatus
 import br.com.eventmenu.go.data.DeviceStatusRepository
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -20,12 +21,23 @@ data class DeviceStatusState(
 class DeviceStatusViewModel(private val repo: DeviceStatusRepository) : ViewModel() {
     private val _state = MutableStateFlow(DeviceStatusState())
     val state: StateFlow<DeviceStatusState> = _state.asStateFlow()
+    private var refreshJob: Job? = null
 
-    fun refresh() = viewModelScope.launch {
-        _state.update { it.copy(loading = true, error = null) }
-        runCatching { repo.status() }
-            .onSuccess { value -> _state.update { it.copy(status = value, loading = false) } }
-            .onFailure { error -> _state.update { it.copy(loading = false, error = error.message ?: "Falha ao consultar aparelho.") } }
+    fun refresh() {
+        if (refreshJob?.isActive == true) return
+        refreshJob = viewModelScope.launch {
+            _state.update { it.copy(loading = true, error = null) }
+            runCatching { repo.status() }
+                .onSuccess { value -> _state.update { it.copy(status = value, loading = false) } }
+                .onFailure { error ->
+                    _state.update {
+                        it.copy(
+                            loading = false,
+                            error = error.message?.takeIf(String::isNotBlank) ?: "Falha ao consultar aparelho.",
+                        )
+                    }
+                }
+        }
     }
 
     fun clearError() = _state.update { it.copy(error = null) }

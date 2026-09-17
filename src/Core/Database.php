@@ -10,6 +10,9 @@ use Throwable;
 
 final class Database
 {
+    private const SQLITE_BUSY_TIMEOUT_MS = 3000;
+    private const SQLITE_TRANSACTION_ATTEMPTS = 4;
+
     private static ?PDO $pdo = null;
     private static bool $sqliteImmediateTransaction = false;
 
@@ -37,12 +40,15 @@ final class Database
                 if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
                     throw new RuntimeException('Não foi possível criar a pasta do banco SQLite.');
                 }
+                if (!is_writable($directory)) {
+                    throw new RuntimeException('A pasta do banco SQLite não possui permissão de escrita: ' . $directory);
+                }
             }
 
             self::$pdo = new PDO('sqlite:' . $path, null, null, $options);
             self::$pdo->exec('PRAGMA foreign_keys = ON');
-            self::$pdo->exec('PRAGMA busy_timeout = 5000');
-            if ($path !== ':memory:') self::$pdo->exec('PRAGMA journal_mode = WAL');
+            self::$pdo->exec('PRAGMA busy_timeout = ' . self::SQLITE_BUSY_TIMEOUT_MS);
+            if ($path !== ':memory:') self::configureSqliteJournal(self::$pdo);
             self::registerSqliteFunctions(self::$pdo);
             return self::$pdo;
         }
@@ -61,6 +67,41 @@ final class Database
         $dsn = "mysql:host={$host};port={$port};dbname={$db};charset=utf8mb4";
         self::$pdo = new PDO($dsn, $user, $pass, $options);
         return self::$pdo;
+    }
+
+    private static function configureSqliteJournal(PDO $pdo): void
+    {
+        // WAL is preferred, but some shared/network filesystems cannot create or
+        // reliably use the -wal/-shm files. A WAL I/O failure must not take the
+        // entire EventMenu API down. Fall back to DELETE journal mode instead.
+        $preferWal = strtolower((string)env('DB_SQLITE_WAL', 'auto')) !== 'false';
+        if ($preferWal) {
+            try {
+                $mode = strtolower((string)$pdo->query('PRAGMA journal_mode')->fetchColumn());
+                if ($mode !== 'wal') {
+                    $mode = strtolower((string)$pdo->query('PRAGMA journal_mode = WAL')->fetchColumn());
+                }
+                if ($mode === 'wal') {
+                    $pdo->exec('PRAGMA synchronous = NORMAL');
+                    $pdo->exec('PRAGMA wal_autocheckpoint = 1000');
+                    return;
+                }
+            } catch (Throwable $e) {
+                // Continue with a journal mode compatible with shared hosting.
+            }
+        }
+
+        try {
+            $pdo->query('PRAGMA journal_mode = DELETE')->fetchColumn();
+        } catch (Throwable $e) {
+            // If changing journal mode is itself blocked, keep SQLite's current
+            // mode and allow normal queries to decide whether the DB is usable.
+        }
+        try {
+            $pdo->exec('PRAGMA synchronous = FULL');
+        } catch (Throwable $e) {
+            // Non-fatal compatibility tuning.
+        }
     }
 
     public static function driver(?PDO $pdo = null): string
@@ -100,7 +141,7 @@ final class Database
 
         $sqlite = self::isSqlite($pdo);
         if ($sqlite) {
-            $pdo->exec('BEGIN IMMEDIATE TRANSACTION');
+            self::retrySqliteBusy(static fn() => $pdo->exec('BEGIN IMMEDIATE TRANSACTION'));
             self::$sqliteImmediateTransaction = true;
         } else {
             $pdo->beginTransaction();
@@ -109,7 +150,7 @@ final class Database
         try {
             $result = $callback($pdo);
             if ($sqlite) {
-                $pdo->exec('COMMIT');
+                self::retrySqliteBusy(static fn() => $pdo->exec('COMMIT'));
                 self::$sqliteImmediateTransaction = false;
             } else {
                 $pdo->commit();
@@ -127,6 +168,31 @@ final class Database
             }
             throw $e;
         }
+    }
+
+    private static function retrySqliteBusy(callable $operation): mixed
+    {
+        $attempt = 0;
+        while (true) {
+            try {
+                return $operation();
+            } catch (Throwable $e) {
+                $attempt++;
+                if ($attempt >= self::SQLITE_TRANSACTION_ATTEMPTS || !self::isSqliteBusy($e)) throw $e;
+                $backoffMicros = min(700000, 50000 * (2 ** ($attempt - 1))) + random_int(10000, 70000);
+                usleep($backoffMicros);
+            }
+        }
+    }
+
+    private static function isSqliteBusy(Throwable $e): bool
+    {
+        $message = strtolower($e->getMessage());
+        return str_contains($message, 'database is locked')
+            || str_contains($message, 'database table is locked')
+            || str_contains($message, 'database schema is locked')
+            || str_contains($message, 'general error: 5')
+            || str_contains($message, 'general error: 6');
     }
 
     private static function registerSqliteFunctions(PDO $pdo): void

@@ -1,0 +1,71 @@
+name: EventMenu Server Install Ready
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo, pdo_sqlite, sqlite3, mbstring, curl, openssl, json
+          tools: composer:v2
+
+      - name: Validate Composer
+        run: composer validate --no-check-publish
+
+      - name: Install production dependencies
+        run: composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction --no-progress
+
+      - name: Verify install-ready package
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f composer.json
+          test -f composer.lock
+          test -d vendor
+          test -f vendor/autoload.php
+          test -d app
+          test -d database
+          test -d public
+          test -d src
+          echo 'Production dependency verification passed.'
+
+      - name: Build clean production directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/eventmenu-server
+          rsync -a ./ dist/eventmenu-server/ \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='mobile' \
+            --exclude='dist' \
+            --exclude='node_modules' \
+            --exclude='tests' \
+            --exclude='.env'
+          find dist/eventmenu-server -type f -name '*.log' -delete || true
+
+      - name: Verify packaged vendor
+        run: test -f dist/eventmenu-server/vendor/autoload.php
+
+      - name: Create ZIP
+        working-directory: dist
+        run: zip -qr EventMenu-Servidor-PRODUCAO.zip eventmenu-server
+
+      - name: Upload install-ready server
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Servidor-PRODUCAO
+          path: dist/EventMenu-Servidor-PRODUCAO.zip
+          if-no-files-found: error
+          retention-days: 14

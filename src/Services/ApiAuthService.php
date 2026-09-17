@@ -8,6 +8,7 @@ use EventMenu\Core\Database;
 use EventMenu\Core\Security;
 use PDO;
 use RuntimeException;
+use Throwable;
 
 final class ApiAuthService
 {
@@ -16,6 +17,7 @@ final class ApiAuthService
 
     public function login(string $email,string $password,string $deviceId,string $deviceLabel=''):array
     {
+        (new ClientPolicyGateService())->assertCurrentRequestAllowed();
         $email=mb_strtolower(trim($email));$deviceId=trim($deviceId);$deviceLabel=mb_substr(trim($deviceLabel),0,120);
         if(!filter_var($email,FILTER_VALIDATE_EMAIL)||$password==='')throw new RuntimeException('Credenciais inválidas.');
         if(strlen($deviceId)<8)throw new RuntimeException('Identificador do aparelho inválido.');
@@ -34,6 +36,7 @@ final class ApiAuthService
 
     public function refresh(string $rawRefreshToken,string $deviceId):array
     {
+        (new ClientPolicyGateService())->assertCurrentRequestAllowed();
         $rawRefreshToken=trim($rawRefreshToken);$deviceId=trim($deviceId);if(strlen($rawRefreshToken)<32||strlen($deviceId)<8)throw new RuntimeException('Refresh token ou aparelho inválido.');
         $hash=hash('sha256',$rawRefreshToken);$deviceHash=hash('sha256',$deviceId);$pdo=Database::connection();
         $stmt=$pdo->prepare('SELECT rt.*,u.name,u.email,u.role,u.status user_status,t.status tenant_status,t.name tenant_name FROM api_refresh_tokens rt JOIN users u ON u.id=rt.user_id JOIN tenants t ON t.id=rt.tenant_id WHERE rt.token_hash=? LIMIT 1');$stmt->execute([$hash]);$row=$stmt->fetch();
@@ -53,11 +56,25 @@ final class ApiAuthService
 
     public function authenticate(string $rawToken,string $deviceId):array
     {
+        (new ClientPolicyGateService())->assertCurrentRequestAllowed();
         $rawToken=trim($rawToken);$deviceId=trim($deviceId);if(strlen($rawToken)<32)throw new RuntimeException('Token inválido.');
-        $hash=hash('sha256',$rawToken);$pdo=Database::connection();$stmt=$pdo->prepare('SELECT at.id token_id,at.device_hash,at.expires_at,u.*,t.status tenant_status,t.name tenant_name FROM api_tokens at JOIN users u ON u.id=at.user_id JOIN tenants t ON t.id=at.tenant_id WHERE at.token_hash=? AND at.revoked_at IS NULL LIMIT 1');$stmt->execute([$hash]);$user=$stmt->fetch();
+        $hash=hash('sha256',$rawToken);$pdo=Database::connection();$stmt=$pdo->prepare('SELECT at.id token_id,at.device_hash,at.expires_at,at.last_used_at token_last_used_at,u.*,t.status tenant_status,t.name tenant_name FROM api_tokens at JOIN users u ON u.id=at.user_id JOIN tenants t ON t.id=at.tenant_id WHERE at.token_hash=? AND at.revoked_at IS NULL LIMIT 1');$stmt->execute([$hash]);$user=$stmt->fetch();
         if(!$user||$user['status']!=='active'||$user['tenant_status']!=='active'||strtotime((string)$user['expires_at'])<time())throw new RuntimeException('Sessão do app expirada ou revogada.');
         if($user['device_hash']){if(strlen($deviceId)<8||!hash_equals((string)$user['device_hash'],hash('sha256',$deviceId)))throw new RuntimeException('Token não pertence a este aparelho.');}
-        $pdo->prepare('UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$user['token_id']]);
+
+        // Em SQLite, autenticação precisa continuar sendo leitura. O app abre várias
+        // APIs em paralelo (entregas, notificações, contexto, etc.) e gravar
+        // last_used_at em toda requisição transforma cada GET em um escritor,
+        // causando SQLITE_BUSY / database is locked. A emissão/renovação do token
+        // já registra last_used_at. Em MySQL mantemos um touch amortizado.
+        if(!Database::isSqlite($pdo)){
+            $lastUsed=(string)($user['token_last_used_at']??'');
+            $lastTs=$lastUsed!==''?strtotime($lastUsed):false;
+            if($lastTs===false||$lastTs<time()-300){
+                try{$pdo->prepare('UPDATE api_tokens SET last_used_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$user['token_id']]);}catch(Throwable){}
+            }
+        }
+
         $_SESSION['user_id']=(int)$user['id'];$_SESSION['tenant_id']=(int)$user['tenant_id'];$_SESSION['role']=(string)$user['role'];$_SESSION['name']=(string)$user['name'];unset($_SESSION['acting_tenant_id']);
         return [
             'id'=>(int)$user['id'],
@@ -103,7 +120,7 @@ final class ApiAuthService
     {
         $accessRaw=bin2hex(random_bytes(32));$refreshRaw=bin2hex(random_bytes(48));$accessHash=hash('sha256',$accessRaw);$refreshHash=hash('sha256',$refreshRaw);
         $accessExpires=(new \DateTimeImmutable(self::ACCESS_TTL))->format('Y-m-d H:i:s');$refreshExpires=(new \DateTimeImmutable(self::REFRESH_TTL))->format('Y-m-d H:i:s');
-        $tx->prepare('INSERT INTO api_tokens (tenant_id,user_id,token_hash,device_hash,device_label,expires_at) VALUES (?,?,?,?,?,?)')->execute([$tenantId,$userId,$accessHash,$deviceHash,$deviceLabel?:null,$accessExpires]);$accessId=(int)$tx->lastInsertId();
+        $tx->prepare('INSERT INTO api_tokens (tenant_id,user_id,token_hash,device_hash,device_label,expires_at,last_used_at) VALUES (?,?,?,?,?,?,CURRENT_TIMESTAMP)')->execute([$tenantId,$userId,$accessHash,$deviceHash,$deviceLabel?:null,$accessExpires]);$accessId=(int)$tx->lastInsertId();
         $tx->prepare('INSERT INTO api_refresh_tokens (tenant_id,user_id,access_token_id,token_hash,device_hash,expires_at) VALUES (?,?,?,?,?,?)')->execute([$tenantId,$userId,$accessId,$refreshHash,$deviceHash,$refreshExpires]);
         return ['token'=>$accessRaw,'expires_at'=>$accessExpires,'refresh_token'=>$refreshRaw,'refresh_expires_at'=>$refreshExpires];
     }

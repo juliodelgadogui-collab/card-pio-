@@ -9,6 +9,7 @@ use EventMenu\Core\Database;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\DeliveryProgressService;
 use EventMenu\Services\DeliveryTrackingService;
+use EventMenu\Services\WorkShiftService;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
@@ -87,14 +88,23 @@ try {
     if ($action === 'tracking-link') {
         $tenantId = Auth::tenantId();
         $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Sessão inválida.');
-        $q = Database::connection()->prepare('SELECT assigned_delivery_user_id,status FROM orders WHERE tenant_id=? AND id=? AND channel="delivery" LIMIT 1');
+        if (!$tenantId || !$userId || !Auth::can('orders.delivery')) throw new RuntimeException('Acesso negado ao rastreamento da entrega.');
+        $shift = (new WorkShiftService())->current();
+        if (!$shift || (string)$shift['mode'] !== 'delivery') throw new RuntimeException('Inicie um turno Delivery para compartilhar o rastreamento.');
+        $shiftUnitId = $shift['unit_id'] !== null ? (int)$shift['unit_id'] : null;
+        $q = Database::connection()->prepare('SELECT assigned_delivery_user_id,status,unit_id FROM orders WHERE tenant_id=? AND id=? AND channel="delivery" LIMIT 1');
         $q->execute([$tenantId, $orderId]);
         $order = $q->fetch();
         if (!$order) throw new RuntimeException('Pedido não encontrado.');
-        if (Auth::role() === 'delivery' && (int)$order['assigned_delivery_user_id'] !== $userId) throw new RuntimeException('Pedido não atribuído a você.');
+        if ((int)$order['assigned_delivery_user_id'] !== $userId) throw new RuntimeException('Pedido não atribuído a você.');
+        $orderUnitId = $order['unit_id'] !== null ? (int)$order['unit_id'] : null;
+        if ($shiftUnitId !== $orderUnitId) throw new RuntimeException('Pedido pertence a outra unidade.');
+        if (in_array((string)$order['status'], ['cancelled','completed'], true)) throw new RuntimeException('Esta entrega não possui rastreamento ativo.');
         $publicToken = $tracking->publicToken($tenantId, $orderId);
-        god_out(['ok' => true, 'tracking_url' => rtrim((string)env('APP_URL', ''), '/') . '/rastreio.php?t=' . $publicToken]);
+        god_out([
+            'ok' => true,
+            'tracking_url' => app_absolute_url('rastreio.php?t=' . rawurlencode($publicToken)),
+        ]);
     }
 
     if ($action === 'pickup') god_out(['ok' => true, 'progress' => $service->pickup($orderId)]);

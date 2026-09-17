@@ -10,6 +10,7 @@ import android.provider.Settings
 import androidx.activity.compose.setContent
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -22,6 +23,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,18 +31,27 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.data.ApiConnectionMonitor
 import br.com.eventmenu.go.data.ApiConnectivity
+import br.com.eventmenu.go.data.ApiServerRole
 import br.com.eventmenu.go.data.AppMode
+import br.com.eventmenu.go.data.ClientPolicyManager
+import br.com.eventmenu.go.data.FailoverEndpointRouter
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.navigation.AppDeepLinkTarget
 import br.com.eventmenu.go.navigation.AppDeepLinks
-import br.com.eventmenu.go.ui.EventMenuGoApp
+import br.com.eventmenu.go.ui.EventMenuGoHubShell
 import br.com.eventmenu.go.ui.theme.EventMenuTheme
+import br.com.eventmenu.go.updates.AppUpdateInstaller
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class MainActivity : FragmentActivity() {
@@ -53,6 +64,20 @@ class MainActivity : FragmentActivity() {
         pendingDeepLink = AppDeepLinks.parse(intent)
         requestNotificationPermissionIfNeeded()
         val app = application as EventMenuGoApplication
+
+        // A Application faz o primeiro bootstrap imediatamente. Depois disso,
+        // atualizamos o control plane somente enquanto a Activity está visível,
+        // evitando rede periódica em segundo plano e retomando ao voltar ao app.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                delay(60_000L)
+                while (true) {
+                    runCatching { app.controlPlaneApi.bootstrapControlPlane() }
+                    delay(300_000L)
+                }
+            }
+        }
+
         setContent {
             val vm: MainViewModel = viewModel(
                 factory = MainViewModel.Factory(
@@ -64,6 +89,12 @@ class MainActivity : FragmentActivity() {
             )
             val state by vm.state.collectAsState()
             val connectivity by ApiConnectionMonitor.state.collectAsState()
+            val serverRole by ApiConnectionMonitor.serverRole.collectAsState()
+            val policyState by ClientPolicyManager.state.collectAsState()
+            val updateInstaller = remember { AppUpdateInstaller(applicationContext) }
+            val updateScope = rememberCoroutineScope()
+            var updateBusy by remember { mutableStateOf(false) }
+            var updateFeedback by remember { mutableStateOf<String?>(null) }
             var brand by remember { mutableStateOf(app.brandRepository.cached()) }
 
             LaunchedEffect(state.session?.user?.id) {
@@ -94,30 +125,106 @@ class MainActivity : FragmentActivity() {
                 pendingDeepLink = null
             }
 
+            val policyBlock = if (policyState.trusted) ClientPolicyManager.blockReason(BuildConfig.VERSION_NAME) else null
+            val recommendedUpdate = if (policyState.trusted) ClientPolicyManager.recommendedUpdate(BuildConfig.VERSION_NAME) else null
+            val mandatoryVersionBlock = policyBlock?.contains("Atualização obrigatória", ignoreCase = true) == true
+            val releaseCanInstall = policyState.trusted &&
+                policyState.releaseVersion.isNotBlank() &&
+                policyState.releaseUrl.isNotBlank() &&
+                policyState.releaseSha256.length == 64 &&
+                compareAppVersions(BuildConfig.VERSION_NAME, policyState.releaseVersion) < 0 &&
+                (policyState.minVersion.isBlank() || compareAppVersions(policyState.releaseVersion, policyState.minVersion) >= 0)
+            val publishedUpdateUrl = policyState.releaseUrl.takeIf { releaseCanInstall }
+            val bannerUpdateUrl = when {
+                updateBusy -> null
+                updateFeedback != null -> publishedUpdateUrl
+                connectivity == ApiConnectivity.OFFLINE -> null
+                policyBlock != null -> publishedUpdateUrl.takeIf { mandatoryVersionBlock }
+                serverRole == ApiServerRole.CONTINGENCY -> null
+                recommendedUpdate != null -> publishedUpdateUrl
+                else -> null
+            }
+            val loginError = state.error?.takeIf { state.session == null }
+            val bannerText = when {
+                updateBusy -> "Baixando e verificando a atualização do EventMenu GO…"
+                updateFeedback != null -> updateFeedback
+                loginError != null -> loginError
+                connectivity == ApiConnectivity.OFFLINE -> if (state.session != null) {
+                    "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
+                } else {
+                    "Sem conexão com os servidores · verifique sua internet."
+                }
+                policyBlock != null -> if (mandatoryVersionBlock && publishedUpdateUrl != null) {
+                    "$policyBlock Toque aqui para atualizar."
+                } else {
+                    policyBlock
+                }
+                serverRole == ApiServerRole.CONTINGENCY -> if (FailoverEndpointRouter.contingencyWritable()) {
+                    "Servidor de contingência ativo · operação online pelo servidor adicional."
+                } else {
+                    "Servidor de contingência ativo · modo somente leitura."
+                }
+                recommendedUpdate != null -> if (publishedUpdateUrl != null) {
+                    "Atualização do EventMenu GO disponível: versão ${policyState.releaseVersion}. Toque para atualizar."
+                } else {
+                    "Atualização recomendada do EventMenu GO: versão $recommendedUpdate."
+                }
+                else -> null
+            }
+
+            fun startSignedUpdate() {
+                val targetUrl = bannerUpdateUrl ?: return
+                if (updateBusy) return
+                updateBusy = true
+                updateFeedback = null
+                updateScope.launch {
+                    try {
+                        val prepared = updateInstaller.prepare(
+                            version = policyState.releaseVersion,
+                            downloadUrl = targetUrl,
+                            expectedSha256 = policyState.releaseSha256,
+                        )
+                        when (val install = updateInstaller.launchInstall(prepared)) {
+                            AppUpdateInstaller.InstallResult.Started -> {
+                                updateFeedback = "Atualização verificada. Confirme a instalação na tela do Android."
+                            }
+                            is AppUpdateInstaller.InstallResult.PermissionRequired -> {
+                                updateFeedback = "Autorize o EventMenu GO a instalar atualizações e depois toque aqui novamente."
+                                startActivity(install.intent)
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        updateFeedback = error.message?.takeIf { it.isNotBlank() }
+                            ?: "Não foi possível preparar a atualização. Tente novamente."
+                    } finally {
+                        updateBusy = false
+                    }
+                }
+            }
+
             EventMenuTheme(brand) {
                 Box(Modifier.fillMaxSize()) {
-                    EventMenuGoApp(
+                    EventMenuGoHubShell(
                         viewModel = vm,
                         onScan = { callback -> scanQr(callback) },
                         onBiometric = { authenticateBiometric(vm) },
                         onTapOn = ::launchTapOn,
                     )
-                    if (connectivity == ApiConnectivity.OFFLINE) {
+                    if (bannerText != null) {
+                        val errorBanner = loginError != null || policyBlock != null || (updateFeedback != null && !updateFeedback!!.startsWith("Atualização verificada"))
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .align(Alignment.TopCenter),
-                            color = MaterialTheme.colorScheme.tertiaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+                            color = if (errorBanner) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.tertiaryContainer,
+                            contentColor = if (errorBanner) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onTertiaryContainer,
                             tonalElevation = 3.dp,
                         ) {
                             Text(
-                                text = if (state.session != null) {
-                                    "Sem conexão · consultas podem mostrar dados salvos. Ações exigem internet."
-                                } else {
-                                    "Sem conexão com o servidor · verifique sua internet."
-                                },
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                text = bannerText,
+                                modifier = Modifier
+                                    .then(if (bannerUpdateUrl != null && !updateBusy) Modifier.clickable { startSignedUpdate() } else Modifier)
+                                    .padding(horizontal = 16.dp, vertical = 9.dp),
                                 style = MaterialTheme.typography.labelMedium,
                             )
                         }
@@ -263,6 +370,18 @@ class MainActivity : FragmentActivity() {
                 .setAllowedAuthenticators(allowed)
                 .build()
         )
+    }
+
+    private fun compareAppVersions(leftVersion: String, rightVersion: String): Int {
+        fun parts(value: String): List<Int> = Regex("\\d+").findAll(value).take(4).map { it.value.toIntOrNull() ?: 0 }.toList()
+        val left = parts(leftVersion)
+        val right = parts(rightVersion)
+        for (i in 0 until maxOf(left.size, right.size, 3)) {
+            val a = left.getOrElse(i) { 0 }
+            val b = right.getOrElse(i) { 0 }
+            if (a != b) return a.compareTo(b)
+        }
+        return 0
     }
 
     companion object {

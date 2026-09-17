@@ -40,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if ($action === 'tracking') {
             $token = (new DeliveryTrackingService())->publicToken($tenantId, $id);
-            $url = rtrim((string)env('APP_URL', ''), '/') . '/rastreio.php?t=' . $token;
+            $url = app_absolute_url('rastreio.php?t=' . rawurlencode($token));
             em_flash('ok', 'Link privado do cliente: ' . $url);
         } else {
             if (!$isDeliveryUser) throw new RuntimeException('As etapas da entrega devem ser registradas pelo entregador responsável.');
