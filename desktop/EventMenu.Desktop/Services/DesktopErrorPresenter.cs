@@ -19,6 +19,8 @@ public static class DesktopErrorPresenter
     {
         if (exception is ApiClientException apiException)
         {
+            var apiMessage = apiException.Message?.Trim() ?? "";
+
             if (apiException.StatusCode == HttpStatusCode.Unauthorized)
                 return "Sua sessão terminou. Entre novamente.";
 
@@ -28,9 +30,21 @@ public static class DesktopErrorPresenter
                 return "Este recurso ainda não está disponível neste servidor.";
 
             if (apiException.StatusCode == HttpStatusCode.ServiceUnavailable)
+            {
+                // Preserve mensagens operacionais seguras enviadas pelo backend, como
+                // a orientação para atualizar o módulo Hub, sem expor detalhes técnicos.
+                if (LooksLikeSafeOperationalMessage(apiMessage))
+                    return Sanitize(apiMessage);
                 return "Este recurso está temporariamente indisponível. Tente novamente em instantes.";
+            }
 
-            return Sanitize(apiException.Message);
+            var lower = apiMessage.ToLowerInvariant();
+            if (lower.Contains("sem conexão") || lower.Contains("não foi possível conectar"))
+                return "Não foi possível conectar ao EventMenu. Confira a internet e tente novamente.";
+            if (lower.Contains("demorou para responder") || lower.Contains("timeout"))
+                return "A conexão demorou para responder. Tente novamente.";
+
+            return Sanitize(apiMessage);
         }
 
         if (exception is HttpRequestException)
@@ -46,6 +60,18 @@ public static class DesktopErrorPresenter
             return Sanitize(exception.Message);
 
         return "Não foi possível concluir esta operação. Tente novamente.";
+    }
+
+    private static bool LooksLikeSafeOperationalMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message)) return false;
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("atualiza")
+            || lower.Contains("indisponível")
+            || lower.Contains("indisponivel")
+            || lower.Contains("tente novamente")
+            || lower.Contains("conectar")
+            || lower.Contains("servidor");
     }
 
     private static string Sanitize(string? message)
