@@ -29,8 +29,15 @@ data class DeviceStatus(
     val tapOnReady: Boolean,
 )
 
-class DeviceStatusRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
-    private val api = ApiClient(baseUrl, deviceId)
+class DeviceStatusRepository(
+    baseUrl: String,
+    deviceId: String,
+    private val sessionStore: SecureSessionStore,
+) {
+    // Mantém o refresh token no mesmo cliente usado pelas demais APIs do app.
+    // Assim a consulta de autorização remota não força logout quando o access
+    // token expira enquanto o operador aguarda a aprovação do aparelho.
+    private val api = ApiClient(baseUrl, deviceId, sessionStore)
 
     suspend fun status(): DeviceStatus = parseDevice(
         api.getDevice("status", requireToken()).getJSONObject("device")
@@ -68,5 +75,6 @@ class DeviceStatusRepository(baseUrl: String, deviceId: String, private val sess
         )
     }
 
-    private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)
+    private fun requireToken(): String = sessionStore.token()?.takeIf { it.isNotBlank() }
+        ?: throw ApiException("Sessão não encontrada.", 401)
 }
