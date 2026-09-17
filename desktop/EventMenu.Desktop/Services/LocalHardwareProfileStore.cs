@@ -22,7 +22,10 @@ public sealed class LocalHardwareProfileStore
         {
             if(!File.Exists(_path))return NewProfile();
             var profile=JsonSerializer.Deserialize<LocalHardwareProfile>(File.ReadAllText(_path));
-            return profile??NewProfile();
+            if(profile is null)return NewProfile();
+            profile.ComputerName=Environment.MachineName;
+            profile.AppVersion=CurrentAppVersion();
+            return profile;
         }
         catch{return NewProfile();}
     }
@@ -30,7 +33,7 @@ public sealed class LocalHardwareProfileStore
     public void Save(LocalHardwareProfile profile)
     {
         profile.ComputerName=Environment.MachineName;
-        profile.AppVersion=typeof(LocalHardwareProfileStore).Assembly.GetName().Version?.ToString()??"";
+        profile.AppVersion=CurrentAppVersion();
         profile.Printers=profile.Printers.Where(v=>!string.IsNullOrWhiteSpace(v)).Select(v=>v.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).Take(30).ToList();
         File.WriteAllText(_path,JsonSerializer.Serialize(profile,JsonOptions));
     }
@@ -39,7 +42,7 @@ public sealed class LocalHardwareProfileStore
     {
         ["computer_name"]=Environment.MachineName,
         ["windows_version"]=Environment.OSVersion.VersionString,
-        ["app_version"]=profile.AppVersion,
+        ["app_version"]=CurrentAppVersion(),
         ["default_printer"]=profile.DefaultPrinter,
         ["printers"]=profile.Printers,
         ["cash_drawer"]=profile.CashDrawer,
@@ -50,9 +53,11 @@ public sealed class LocalHardwareProfileStore
         ["pinpad"]=profile.Pinpad,
     };
 
+    private static string CurrentAppVersion()=>typeof(LocalHardwareProfileStore).Assembly.GetName().Version?.ToString(3)??"0.3.0";
+
     private static LocalHardwareProfile NewProfile()=>new()
     {
         ComputerName=Environment.MachineName,
-        AppVersion=typeof(LocalHardwareProfileStore).Assembly.GetName().Version?.ToString()??""
+        AppVersion=CurrentAppVersion()
     };
 }
