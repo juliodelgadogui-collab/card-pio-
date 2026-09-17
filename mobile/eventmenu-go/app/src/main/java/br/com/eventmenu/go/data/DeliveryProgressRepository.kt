@@ -49,7 +49,11 @@ class DeliveryProgressRepository(
     suspend fun listMine(): List<DeliveryProgress> {
         val array = api.getDelivery("list", requireToken()).optJSONArray("progress") ?: JSONArray()
         return buildList {
-            for (i in 0 until array.length()) add(parse(array.getJSONObject(i)))
+            for (i in 0 until array.length()) {
+                val row = array.optJSONObject(i) ?: continue
+                val parsed = parse(row)
+                if (parsed.orderId > 0) add(parsed)
+            }
         }
     }
 
@@ -59,7 +63,7 @@ class DeliveryProgressRepository(
 
     suspend fun complete(orderId: Int): DeliveryProgress {
         val root = api.postDelivery("complete", requireToken(), JSONObject().put("order_id", orderId))
-        return parse(root.getJSONObject("progress"))
+        return parse(root.optJSONObject("progress") ?: throw ApiException("Progresso da entrega indisponível."))
     }
 
     suspend fun sendLocationBatch(samples: List<DeliveryLocationSample>): DeliveryLocationUploadResult {
@@ -91,17 +95,37 @@ class DeliveryProgressRepository(
 
     private suspend fun action(action: String, orderId: Int): DeliveryProgress {
         val root = api.postDelivery(action, requireToken(), JSONObject().put("order_id", orderId))
-        return parse(root.getJSONObject("progress"))
+        return parse(root.optJSONObject("progress") ?: throw ApiException("Progresso da entrega indisponível."))
     }
 
     private fun parse(json: JSONObject) = DeliveryProgress(
-        orderId = json.optInt("order_id"),
-        orderStatus = json.optString("order_status"),
-        pickedUpAt = json.optString("picked_up_at"),
-        routeStartedAt = json.optString("route_started_at"),
-        arrivedAt = json.optString("arrived_at"),
-        completedAt = json.optString("completed_at"),
+        orderId = safeInt(json, "order_id"),
+        orderStatus = safeText(json, "order_status"),
+        pickedUpAt = safeText(json, "picked_up_at"),
+        routeStartedAt = safeText(json, "route_started_at"),
+        arrivedAt = safeText(json, "arrived_at"),
+        completedAt = safeText(json, "completed_at"),
     )
+
+    private fun safeText(json: JSONObject, key: String): String {
+        if (!json.has(key) || json.isNull(key)) return ""
+        val value = json.opt(key) ?: return ""
+        val text = when (value) {
+            is String -> value
+            is Number, is Boolean -> value.toString()
+            else -> return ""
+        }.trim()
+        return text.takeUnless { it.isBlank() || it.equals("null", true) || it.equals("undefined", true) } ?: ""
+    }
+
+    private fun safeInt(json: JSONObject, key: String): Int {
+        if (!json.has(key) || json.isNull(key)) return 0
+        return when (val value = json.opt(key)) {
+            is Number -> value.toInt()
+            is String -> value.trim().toDoubleOrNull()?.toInt() ?: 0
+            else -> 0
+        }
+    }
 
     private fun utc(ms: Long): String = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
         timeZone = TimeZone.getTimeZone("UTC")
