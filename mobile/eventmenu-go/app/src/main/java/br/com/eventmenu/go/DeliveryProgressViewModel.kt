@@ -8,6 +8,8 @@ import br.com.eventmenu.go.data.DeliveryProgressRepository
 import br.com.eventmenu.go.location.DeliveryLocationService
 import br.com.eventmenu.go.location.DeliveryRoutePermissionCoordinator
 import br.com.eventmenu.go.location.LocationPermissionActivity
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +30,7 @@ class DeliveryProgressViewModel(
 ) : ViewModel() {
     private val _state = MutableStateFlow(DeliveryProgressState())
     val state: StateFlow<DeliveryProgressState> = _state.asStateFlow()
+    private var autoRefreshJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -41,18 +44,41 @@ class DeliveryProgressViewModel(
         _state.update { it.copy(loading = true, error = null) }
         runCatching { repository.listMine() }
             .onSuccess { rows ->
-                _state.update {
-                    it.copy(
-                        items = rows.associateBy { row -> row.orderId },
-                        loading = false,
-                        // O EventMenuGoApp observa esta versão e atualiza também state.orders.
-                        // Assim abrir/atualizar Minhas entregas nunca depende de uma lista de pedidos antiga.
-                        changeVersion = it.changeVersion + 1,
-                    )
-                }
+                applyRows(rows, loading = false)
                 syncGps(rows)
+                ensureAutoRefresh()
             }
             .onFailure { _state.update { it.copy(loading = false, error = "Não foi possível atualizar as entregas.") } }
+    }
+
+    private fun ensureAutoRefresh() {
+        if (autoRefreshJob?.isActive == true) return
+        autoRefreshJob = viewModelScope.launch {
+            while (true) {
+                delay(8_000)
+                val rows = runCatching { repository.listMine() }.getOrElse {
+                    // Normalmente significa que o turno Delivery foi encerrado/trocado.
+                    // A próxima entrada na tela chama refresh() e reinicia a sincronização.
+                    return@launch
+                }
+                applyRows(rows, loading = false)
+                syncGps(rows)
+            }
+        }
+    }
+
+    private fun applyRows(rows: List<DeliveryProgress>, loading: Boolean) {
+        val next = rows.associateBy { it.orderId }
+        _state.update {
+            it.copy(
+                items = next,
+                loading = loading,
+                error = null,
+                // O EventMenuGoApp observa esta versão e atualiza também state.orders.
+                // Isso elimina a divergência entre api-go-delivery e a lista usada pela tela.
+                changeVersion = it.changeVersion + 1,
+            )
+        }
     }
 
     fun pickup(orderId: Int) = runAction(orderId, "Pedido retirado.") { repository.pickup(orderId) }
