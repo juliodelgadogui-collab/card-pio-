@@ -15,7 +15,9 @@ final class DeliveryProgressService
     {
         [$tenantId,$userId,$shift]=$this->deliveryContext();$unitId=$shift['unit_id']!==null?(int)$shift['unit_id']:null;$pdo=Database::connection();
         $sql='SELECT o.id order_id,o.status order_status,dp.picked_up_at,dp.route_started_at,dp.arrived_at,dp.completed_at FROM orders o LEFT JOIN delivery_progress dp ON dp.tenant_id=o.tenant_id AND dp.order_id=o.id WHERE o.tenant_id=? AND o.channel="delivery" AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery","completed")';$args=[$tenantId,$userId];
-        if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}else{$sql.=' AND o.unit_id IS NULL';}
+        // Turno sem unidade significa escopo global do tenant. Não filtre por o.unit_id IS NULL,
+        // pois isso escondia pedidos validamente atribuídos que pertencem a uma unidade.
+        if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}
         $sql.=' ORDER BY o.id DESC LIMIT 200';$s=$pdo->prepare($sql);$s->execute($args);return $s->fetchAll();
     }
 
@@ -99,7 +101,11 @@ final class DeliveryProgressService
 
     private function lockedAssignedOrder(PDO $pdo,int $tenantId,int $userId,array $shift,int $orderId):array
     {
-        $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? AND channel="delivery" AND assigned_delivery_user_id=? FOR UPDATE'));$s->execute([$orderId,$tenantId,$userId]);$order=$s->fetch();if(!$order)throw new RuntimeException('Pedido não está atribuído a este entregador.');$unit=$shift['unit_id']!==null?(int)$shift['unit_id']:null;$orderUnit=$order['unit_id']!==null?(int)$order['unit_id']:null;if($unit!==$orderUnit)throw new RuntimeException('Pedido pertence a outra unidade.');return $order;
+        $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? AND channel="delivery" AND assigned_delivery_user_id=? FOR UPDATE'));$s->execute([$orderId,$tenantId,$userId]);$order=$s->fetch();if(!$order)throw new RuntimeException('Pedido não está atribuído a este entregador.');
+        $unit=$shift['unit_id']!==null?(int)$shift['unit_id']:null;$orderUnit=$order['unit_id']!==null?(int)$order['unit_id']:null;
+        // Unidade nula no turno representa escopo global. Quando o turno tem unidade explícita,
+        // o pedido deve pertencer exatamente a ela.
+        if($unit!==null&&$unit!==$orderUnit)throw new RuntimeException('Pedido pertence a outra unidade.');return $order;
     }
 
     private function lockedProgress(PDO $pdo,int $tenantId,int $orderId):?array
