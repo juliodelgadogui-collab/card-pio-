@@ -84,20 +84,43 @@ class MainViewModel(
     private val notificationRepo: NotificationRepository,
 ) : ViewModel() {
     private val _state=MutableStateFlow(GoState(hasStoredSession=repo.sessionStore.token()!=null,pinConfigured=repo.sessionStore.hasPin(),biometricEnabled=repo.sessionStore.biometricEnabled));val state:StateFlow<GoState> = _state.asStateFlow()
-    fun login(email:String,password:String,deviceLabel:String)=launchBusy{establish(repo.login(email,password,deviceLabel))}
+    fun login(email:String,password:String,deviceLabel:String)=viewModelScope.launch{
+        val normalizedEmail=email.trim()
+        if(normalizedEmail.isBlank()||password.isBlank()){
+            _state.update{it.copy(error="Informe o e-mail e a senha.",loading=false)}
+            return@launch
+        }
+        _state.update{it.copy(loading=true,error=null,message=null)}
+        try{
+            val session=repo.login(normalizedEmail,password,deviceLabel)
+            establish(session)
+        }catch(e:Throwable){
+            repo.sessionStore.clear()
+            val api=e as? ApiException
+            if(api?.status==401){
+                _state.value=GoState(error="E-mail ou senha inválidos.")
+            }else{
+                _state.update{it.copy(error=friendlyError(e),hasStoredSession=false)}
+            }
+        }finally{
+            _state.update{it.copy(loading=false)}
+        }
+    }
     fun unlockWithPin(pin:String){if(!repo.sessionStore.verifyPin(pin)){_state.update{it.copy(error="PIN inválido.")};return};restoreSession()}
     fun restoreSession()=launchBusy{establish(repo.me())}
     private suspend fun establish(session:Session){
         val modes=repo.modes(session);val shiftMode=session.shift?.let{s->modes.firstOrNull{it.wire==s.mode}}
-        _state.update{it.copy(session=session,modes=modes,mode=shiftMode?:if(modes.size==1)modes.first()else null,workShift=session.shift,screen=AppScreen.HOME,hasStoredSession=true,pinConfigured=repo.sessionStore.hasPin(),biometricEnabled=repo.sessionStore.biometricEnabled)}
-        refreshOrdersInternal();refreshCashInternal();refreshDeliveryCashInternal()
-        if("orders_create" in session.permissions)refreshCatalogInternal()
-        if("orders_kitchen" in session.permissions&&session.shift?.mode=="operation")refreshKitchenInternal()
-        if("tables" in session.permissions&&session.shift?.mode=="operation")refreshTablesInternal()
-        if("delivery_assign" in session.permissions&&session.shift?.mode=="operation")refreshDeliveryUsersInternal()
-        if(session.shift?.mode=="events")refreshEventsInternal()
-        if("reports" in session.permissions&&session.shift?.mode?.let{it in setOf("operation","pay")}==true)refreshManagerInternal()
-        if(session.shift?.status=="open")refreshNotificationsInternal()
+        _state.update{it.copy(session=session,modes=modes,mode=shiftMode?:if(modes.size==1)modes.first()else null,workShift=session.shift,screen=AppScreen.HOME,hasStoredSession=true,pinConfigured=repo.sessionStore.hasPin(),biometricEnabled=repo.sessionStore.biometricEnabled,error=null)}
+        runCatching{refreshOrdersInternal()}
+        runCatching{refreshCashInternal()}
+        runCatching{refreshDeliveryCashInternal()}
+        if("orders_create" in session.permissions)runCatching{refreshCatalogInternal()}
+        if("orders_kitchen" in session.permissions&&session.shift?.mode=="operation")runCatching{refreshKitchenInternal()}
+        if("tables" in session.permissions&&session.shift?.mode=="operation")runCatching{refreshTablesInternal()}
+        if("delivery_assign" in session.permissions&&session.shift?.mode=="operation")runCatching{refreshDeliveryUsersInternal()}
+        if(session.shift?.mode=="events")runCatching{refreshEventsInternal()}
+        if("reports" in session.permissions&&session.shift?.mode?.let{it in setOf("operation","pay")}==true)runCatching{refreshManagerInternal()}
+        if(session.shift?.status=="open")runCatching{refreshNotificationsInternal()}
     }
     fun chooseMode(mode:AppMode){if(mode!in _state.value.modes)return;val open=_state.value.workShift;if(open!=null&&open.mode!=mode.wire){_state.update{it.copy(error="Encerre o turno de ${modeName(open.mode)} antes de trocar de atividade.")};return};_state.update{it.copy(mode=mode,screen=AppScreen.HOME,error=null)}}
     fun startShift(){val mode=_state.value.mode?:return;launchBusy{
