@@ -2,7 +2,7 @@ name: EventMenu GO Atualizável
 
 on:
   push:
-    branches: [main, eventmenu-go/integration-no-actions]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
