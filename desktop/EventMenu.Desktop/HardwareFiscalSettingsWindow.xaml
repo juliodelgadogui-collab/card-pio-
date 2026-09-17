@@ -35,8 +35,10 @@
                         <TextBox x:Name="BarcodeBox" Margin="0,5,0,12" />
                         <TextBlock Text="Tela do cliente" FontWeight="SemiBold" />
                         <TextBox x:Name="CustomerDisplayBox" Margin="0,5,0,12" />
-                        <TextBlock Text="Maquininha / PINPad" FontWeight="SemiBold" />
-                        <TextBox x:Name="PinpadBox" Margin="0,5,0,18" />
+                        <TextBlock Text="Maquininha de cartão" FontWeight="SemiBold" />
+                        <TextBox x:Name="PinpadBox" Margin="0,5,0,5" />
+                        <TextBlock Text="Se a maquininha exigir uma identificação local, informe aqui. Caso contrário, deixe em branco."
+                                   Foreground="{DynamicResource MutedBrush}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,18" />
                         <Button x:Name="SaveHardwareButton" Content="Salvar equipamentos" Width="180" HorizontalAlignment="Left" Click="SaveHardwareButton_Click" />
                     </StackPanel>
                 </ScrollViewer>
@@ -46,7 +48,7 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="20">
                         <TextBlock Text="Pagamento com cartão" FontSize="20" FontWeight="SemiBold" />
-                        <TextBlock Text="Configure a maquininha disponível neste computador."
+                        <TextBlock Text="Configure a maquininha disponível neste computador. As opções técnicas ficam escondidas em Configurações avançadas."
                                    Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" Margin="0,6,0,16" />
                         <TextBlock Text="Maquininha configurada" FontWeight="SemiBold" />
                         <ComboBox x:Name="TerminalSelector" Margin="0,5,0,14" DisplayMemberPath="DisplayName" SelectionChanged="TerminalSelector_SelectionChanged" />
@@ -59,13 +61,20 @@
                                 <TextBlock Text="Identificação da maquininha" FontWeight="SemiBold" /><TextBox x:Name="TerminalPinpadBox" Margin="0,5,0,12" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Text="Tipo de integração" FontWeight="SemiBold" /><ComboBox x:Name="IntegrationModeCombo" Margin="0,5,0,12" />
-                                <TextBlock Text="Endereço do serviço local" FontWeight="SemiBold" />
-                                <TextBox x:Name="BridgeUrlBox" Margin="0,5,0,12" />
-                                <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                    <CheckBox x:Name="TerminalEnabledCheck" Content="Ativa" IsChecked="True" Margin="0,0,22,0" />
+                                <TextBlock Text="Funcionamento" FontWeight="SemiBold" />
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,14">
+                                    <CheckBox x:Name="TerminalEnabledCheck" Content="Maquininha ativa" IsChecked="True" Margin="0,0,22,0" />
                                     <CheckBox x:Name="AutoCaptureCheck" Content="Confirmar automaticamente" IsChecked="True" />
                                 </StackPanel>
+                                <Expander Header="Configurações avançadas" Margin="0,4,0,0">
+                                    <StackPanel Margin="12,10,0,4">
+                                        <TextBlock Text="Altere estes campos apenas quando o suporte ou o provedor da maquininha orientar."
+                                                   Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12" />
+                                        <TextBlock Text="Tipo de integração" FontWeight="SemiBold" /><ComboBox x:Name="IntegrationModeCombo" Margin="0,5,0,12" />
+                                        <TextBlock Text="Endereço do serviço local" FontWeight="SemiBold" />
+                                        <TextBox x:Name="BridgeUrlBox" Margin="0,5,0,12" />
+                                    </StackPanel>
+                                </Expander>
                             </StackPanel>
                         </Grid>
                         <Button x:Name="SaveTerminalButton" Content="Salvar maquininha" Width="160" HorizontalAlignment="Left" Margin="0,16,0,0" Click="SaveTerminalButton_Click" />
@@ -100,12 +109,10 @@
                             </StackPanel>
                             <StackPanel Grid.Column="2">
                                 <TextBlock Text="UF" FontWeight="SemiBold" /><TextBox x:Name="UfBox" MaxLength="2" Margin="0,5,0,12" />
-                                <TextBlock Text="Código IBGE do município" FontWeight="SemiBold" /><TextBox x:Name="CityCodeBox" Margin="0,5,0,12" />
                                 <TextBlock Text="Regime tributário" FontWeight="SemiBold" /><TextBox x:Name="TaxRegimeBox" Margin="0,5,0,12" />
                                 <TextBlock Text="Telefone (opcional)" FontWeight="SemiBold" /><TextBox x:Name="FiscalPhoneBox" Margin="0,5,0,12" />
                                 <TextBlock Text="E-mail fiscal (opcional)" FontWeight="SemiBold" /><TextBox x:Name="FiscalEmailBox" Margin="0,5,0,12" />
                                 <TextBlock Text="País" FontWeight="SemiBold" /><TextBox x:Name="CountryNameBox" Margin="0,5,0,12" Text="Brasil" />
-                                <TextBlock Text="Código do país" FontWeight="SemiBold" /><TextBox x:Name="CountryCodeBox" Margin="0,5,0,12" Text="1058" />
                             </StackPanel>
                         </Grid>
 
@@ -132,13 +139,29 @@
                             <StackPanel>
                                 <TextBlock Text="Série NFC-e" FontWeight="SemiBold" /><TextBox x:Name="NfceSeriesBox" Margin="0,5,0,12" />
                                 <TextBlock Text="Série NF-e" FontWeight="SemiBold" /><TextBox x:Name="NfeSeriesBox" Margin="0,5,0,12" />
-                                <TextBlock Text="CSC ID" FontWeight="SemiBold" /><TextBox x:Name="CscIdBox" Margin="0,5,0,12" />
                             </StackPanel>
                             <StackPanel Grid.Column="2">
-                                <TextBlock Text="Novo CSC (opcional)" FontWeight="SemiBold" /><PasswordBox x:Name="CscTokenBox" Margin="0,5,0,12" />
                                 <TextBlock Text="Local do certificado" FontWeight="SemiBold" /><ComboBox x:Name="CertificateModeCombo" Margin="0,5,0,12" />
                             </StackPanel>
                         </Grid>
+
+                        <Expander Header="Configurações fiscais avançadas" Margin="0,8,0,10">
+                            <Border Background="#F8FAFC" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="10" Padding="14" Margin="0,8,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="18"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                                    <StackPanel>
+                                        <TextBlock Text="Estes dados normalmente são informados pelo contador ou pela configuração fiscal da empresa."
+                                                   Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12" />
+                                        <TextBlock Text="Código oficial do município (IBGE)" FontWeight="SemiBold" /><TextBox x:Name="CityCodeBox" Margin="0,5,0,12" />
+                                        <TextBlock Text="Código do país" FontWeight="SemiBold" /><TextBox x:Name="CountryCodeBox" Margin="0,5,0,12" Text="1058" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="CSC ID" FontWeight="SemiBold" /><TextBox x:Name="CscIdBox" Margin="0,5,0,12" />
+                                        <TextBlock Text="Novo CSC (opcional)" FontWeight="SemiBold" /><PasswordBox x:Name="CscTokenBox" Margin="0,5,0,12" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Expander>
 
                         <WrapPanel Margin="0,8,0,0">
                             <Button x:Name="SaveFiscalButton" Content="Salvar configuração" Width="180" Click="SaveFiscalButton_Click" />
