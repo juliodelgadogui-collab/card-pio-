@@ -12,8 +12,8 @@ final class ClientPolicyGateService
     private const CLOCK_SKEW_SECONDS = 300;
 
     /**
-     * Aplica a política central quando a chamada declara ser de um cliente
-     * EventMenu conhecido. Chamadas web tradicionais continuam inalteradas.
+     * Aplica a política central somente a clientes EventMenu identificados.
+     * Chamadas web tradicionais continuam inalteradas.
      */
     public function assertCurrentRequestAllowed(): void
     {
@@ -24,17 +24,19 @@ final class ClientPolicyGateService
         try { $nodeRole = (new PlatformFailoverService())->nodeRole(); } catch (Throwable) {}
 
         try {
-            $service = new ClientPolicyService();
-            $policy = $this->effectivePolicy($service, $platform);
+            $policy = $this->effectivePolicy(new ClientPolicyService(), $platform);
         } catch (Throwable $e) {
-            // No principal preserva compatibilidade durante a primeira atualização,
-            // quando a migration 105 ainda pode não existir. No contingência não
-            // fazemos fail-open: um cache ausente, corrompido ou expirado não pode
-            // liberar um APK/Windows que o principal já tenha bloqueado.
-            if ($nodeRole === 'contingency') {
-                throw new RuntimeException('Autorização remota indisponível ou expirada no servidor de contingência. Tente o servidor principal.', 0, $e);
-            }
-            return;
+            // Produção é fail-closed por padrão. O modo legado existe apenas como
+            // válvula explícita de migração para uma instalação antiga que ainda
+            // não recebeu a migration/política inicial. Nunca é ativado sozinho.
+            if ($nodeRole === 'primary' && $this->legacyFailOpenEnabled()) return;
+            throw new RuntimeException(
+                $nodeRole === 'contingency'
+                    ? 'Autorização remota indisponível ou expirada no servidor de contingência. Tente o servidor principal.'
+                    : 'Autorização remota indisponível. O EventMenu bloqueou este cliente por segurança.',
+                0,
+                $e,
+            );
         }
 
         if (empty($policy['enabled'])) {
@@ -50,17 +52,20 @@ final class ClientPolicyGateService
 
         $clientVersion = trim((string)($_SERVER['HTTP_X_EVENTMENU_VERSION'] ?? ''));
         $minVersion = trim((string)($policy['min_version'] ?? ''));
-        if ($minVersion !== '' && $clientVersion !== '' && version_compare($this->versionCore($clientVersion), $this->versionCore($minVersion), '<')) {
-            throw new RuntimeException('Atualização obrigatória. Versão mínima permitida: ' . $minVersion . '.');
-        }
         if ($minVersion !== '' && $clientVersion === '') {
             throw new RuntimeException('Versão do aplicativo não identificada. Atualize o cliente EventMenu.');
+        }
+        if ($minVersion !== '' && version_compare($this->versionCore($clientVersion), $this->versionCore($minVersion), '<')) {
+            throw new RuntimeException('Atualização obrigatória. Versão mínima permitida: ' . $minVersion . '.');
         }
 
         $allowed = (array)($policy['allowed_signing_fingerprints'] ?? []);
         if ($allowed !== []) {
             $received = $this->normalizeFingerprint((string)($_SERVER['HTTP_X_EVENTMENU_SIGNING_FINGERPRINT'] ?? ''));
-            $normalizedAllowed = array_values(array_filter(array_map(fn($v) => $this->normalizeFingerprint((string)$v), $allowed)));
+            $normalizedAllowed = array_values(array_filter(array_map(
+                fn($value) => $this->normalizeFingerprint((string)$value),
+                $allowed,
+            )));
             if ($received === '' || !in_array($received, $normalizedAllowed, true)) {
                 throw new RuntimeException('Assinatura deste aplicativo/programa não está autorizada.');
             }
@@ -81,9 +86,7 @@ final class ClientPolicyGateService
             $settings = $failover->get();
             if ((string)($settings['mode'] ?? 'read_only') === 'read_only') {
                 $cached = $this->verifiedCachedPolicy($service, $platform);
-                if ($cached === null) {
-                    throw new RuntimeException('Política assinada ausente, inválida ou expirada.');
-                }
+                if ($cached === null) throw new RuntimeException('Política assinada ausente, inválida ou expirada.');
                 return $cached;
             }
         }
@@ -104,7 +107,11 @@ final class ClientPolicyGateService
         if ($payloadRaw === false || $signature === false) return null;
         if (openssl_verify($payloadRaw, $signature, (string)$key['public_key_pem'], OPENSSL_ALGO_SHA256) !== 1) return null;
 
-        $payload = json_decode($payloadRaw, true, 512, JSON_THROW_ON_ERROR);
+        try {
+            $payload = json_decode($payloadRaw, true, 512, JSON_THROW_ON_ERROR);
+        } catch (Throwable) {
+            return null;
+        }
         if (!is_array($payload) || (string)($payload['platform'] ?? '') !== $platform) return null;
         if (!$this->validEnvelopeWindow($payload)) return null;
 
@@ -116,7 +123,9 @@ final class ClientPolicyGateService
             'maintenance' => !empty($payload['maintenance']),
             'maintenance_message' => trim((string)($payload['maintenance_message'] ?? '')),
             'features' => is_array($payload['features'] ?? null) ? $payload['features'] : [],
-            'allowed_signing_fingerprints' => is_array($payload['allowed_signing_fingerprints'] ?? null) ? array_values($payload['allowed_signing_fingerprints']) : [],
+            'allowed_signing_fingerprints' => is_array($payload['allowed_signing_fingerprints'] ?? null)
+                ? array_values($payload['allowed_signing_fingerprints'])
+                : [],
             'config_version' => (int)($payload['config_version'] ?? 0),
             'ttl_seconds' => max(300, min(604800, (int)($payload['ttl_seconds'] ?? 86400))),
         ];
@@ -148,10 +157,15 @@ final class ClientPolicyGateService
         };
     }
 
+    private function legacyFailOpenEnabled(): bool
+    {
+        return filter_var(env('EVENTMENU_CLIENT_POLICY_FAIL_OPEN', 'false'), FILTER_VALIDATE_BOOL);
+    }
+
     private function versionCore(string $value): string
     {
         $value = trim($value);
-        if (preg_match('/\d+(?:\.\d+){0,3}/', $value, $m)) return $m[0];
+        if (preg_match('/\d+(?:\.\d+){0,3}/', $value, $matches)) return $matches[0];
         return '0.0.0';
     }
 
