@@ -12,20 +12,20 @@ namespace EventMenu.Desktop.Services;
 /// </summary>
 public static class SiteReceiptPrinter
 {
-    public static bool Print(OrderReceipt receipt)
+    public static bool Print(OrderReceipt receipt, string? orderQrPayload = null)
     {
         var dialog = new PrintDialog();
         if (dialog.ShowDialog() != true) return false;
 
         var paperMm = receipt.Identity.PaperWidth == "58" ? 58d : 80d;
         var pageWidth = Math.Min(dialog.PrintableAreaWidth, Mm(paperMm));
-        var document = Build(receipt, pageWidth);
+        var document = Build(receipt, pageWidth, orderQrPayload);
         document.PageHeight = dialog.PrintableAreaHeight;
         dialog.PrintDocument(((IDocumentPaginatorSource)document).DocumentPaginator, $"EventMenu - Cupom {receipt.OrderId}");
         return true;
     }
 
-    private static FlowDocument Build(OrderReceipt r, double width)
+    private static FlowDocument Build(OrderReceipt r, double width, string? orderQrPayload)
     {
         var d = new FlowDocument
         {
@@ -84,6 +84,32 @@ public static class SiteReceiptPrinter
         {
             foreach (var payment in r.Payments)
                 Pair(d, $"{payment.MethodDisplay} · {payment.StatusDisplay}", payment.AmountDisplay);
+        }
+
+        // Keep the same order QR semantics as app/routes/receipt.php: only print
+        // when the server order has a public token and the channel supports pickup QR.
+        if (Has(orderQrPayload) && r.Channel is "counter" or "pickup" or "delivery")
+        {
+            Divider(d);
+            Center(d, "QR DO PEDIDO", 10.5, FontWeights.Bold);
+            var qr = QrCodeRenderer.Create(orderQrPayload!, r.Identity.PaperWidth == "58" ? 5 : 6);
+            var image = new Image
+            {
+                Source = qr,
+                Width = Mm(34),
+                Height = Mm(34),
+                Stretch = Stretch.Uniform
+            };
+            d.Blocks.Add(new BlockUIContainer(image)
+            {
+                TextAlignment = TextAlignment.Center,
+                Margin = new Thickness(0, Mm(2), 0, Mm(1))
+            });
+            Center(d,
+                r.Channel is "counter" or "pickup"
+                    ? "Apresente este QR para retirada e conferência."
+                    : "QR para conferência do pedido.",
+                8.5);
         }
 
         var footer = Has(r.Identity.Footer) ? r.Identity.Footer : "Obrigado pela preferência!";
