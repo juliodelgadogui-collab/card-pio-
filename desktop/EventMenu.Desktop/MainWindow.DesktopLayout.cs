@@ -36,6 +36,10 @@ public partial class MainWindow
         var compact = width < 1420;
         var standard = width < 1680;
 
+        // Login is a native WPF surface too: keep text crisp and adapt it to
+        // Windows scaling / smaller work areas before laying out the POS shell.
+        ApplyLoginPolish(width, height);
+
         // Shell: use more of the real monitor area instead of preserving web-like gutters.
         if (PosView.Parent is Grid contentGrid && contentGrid.Parent is Grid bodyGrid && bodyGrid.ColumnDefinitions.Count >= 2)
         {
