@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require __DIR__ . '/../app/bootstrap.php';
 
+use EventMenu\Services\ClusterControlPlaneReplayGuardService;
 use EventMenu\Services\ClusterSyncService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -25,6 +26,11 @@ try {
 
     $raw = (string)file_get_contents('php://input');
     $signature = trim((string)($_SERVER['HTTP_X_EVENTMENU_CLUSTER_SIGNATURE'] ?? ''));
+
+    // A autenticação criptográfica e toda a validação continuam no serviço de sync.
+    // Esta guarda adicional impede apenas que um pacote antigo, ainda válido,
+    // substitua políticas/roteamento mais novos já armazenados na contingência.
+    (new ClusterControlPlaneReplayGuardService())->assertNotOlder($raw);
     $result = (new ClusterSyncService())->acceptControlPlane($raw, $signature);
     cluster_sync_out($result);
 } catch (JsonException $e) {
