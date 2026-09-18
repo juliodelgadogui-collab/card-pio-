@@ -193,7 +193,32 @@ class MainViewModel(
 
     fun requestPix(orderId:Int,taxId:String)=launchBusy{_state.update{it.copy(pixCharge=repo.nativePix(orderId,taxId))}}
     fun dismissPix()=_state.update{it.copy(pixCharge=null)}
-    fun pollPixStatus(){val charge=_state.value.pixCharge?:return;viewModelScope.launch{if(_state.value.posOrder?.id==charge.orderId&&"payments" in (_state.value.session?.permissions?:emptySet())){runCatching{repo.paymentBalance(charge.orderId)}.onSuccess{balance->val part=balance.payments.firstOrNull{it.id==charge.paymentId};_state.update{it.copy(paymentBalance=balance)};if(part?.status=="paid")_state.update{it.copy(pixCharge=null,message="PIX recebido: ${money(charge.amountCents)} · Falta ${money(balance.remainingCents)}")}}}else runCatching{repo.orders()}.onSuccess{orders->val order=orders.firstOrNull{it.id==charge.orderId};_state.update{it.copy(orders=orders)};if(order?.paymentStatus=="paid")_state.update{it.copy(pixCharge=null,message="PIX recebido: ${money(charge.amountCents)}")}};runCatching{refreshNotificationsInternal()}}}
+    fun pollPixStatus(){
+        val charge=_state.value.pixCharge?:return
+        viewModelScope.launch{
+            val balanceResult=runCatching{repo.paymentBalance(charge.orderId)}
+            if(balanceResult.isSuccess){
+                val balance=balanceResult.getOrThrow()
+                val part=balance.payments.firstOrNull{it.id==charge.paymentId}
+                if(_state.value.posOrder?.id==charge.orderId)_state.update{it.copy(paymentBalance=balance)}
+                when(part?.status?.lowercase()){
+                    "paid","approved","confirmed"->{
+                        _state.update{it.copy(pixCharge=null,message=if(balance.remainingCents<=0)"PIX recebido: ${money(charge.amountCents)}" else "PIX recebido: ${money(charge.amountCents)} · Falta ${money(balance.remainingCents)}")}
+                        refreshOrdersInternal()
+                    }
+                    "failed","cancelled"->_state.update{it.copy(pixCharge=null,error="A cobrança PIX não foi concluída. Gere uma nova cobrança.")}
+                    else->if(balance.remainingCents<=0){_state.update{it.copy(pixCharge=null,message="Pagamento confirmado.")};refreshOrdersInternal()}
+                }
+            }else{
+                // Compatibility fallback for older servers or transient permission failures.
+                runCatching{repo.orders()}.onSuccess{orders->
+                    val order=orders.firstOrNull{it.id==charge.orderId};_state.update{it.copy(orders=orders)}
+                    if(order?.paymentStatus=="paid")_state.update{it.copy(pixCharge=null,message="PIX recebido: ${money(charge.amountCents)}")}
+                }
+            }
+            runCatching{refreshNotificationsInternal()}
+        }
+    }
     fun requestNfc(orderId:Int)=launchBusy{_state.update{it.copy(tapOnRequest=repo.nfcIntent(orderId))}}
     fun tapOnLaunchConsumed()=_state.update{it.copy(tapOnRequest=null)}
     fun verifyTapOn(request:TapOnRequest,transactionCode:String)=launchBusy{repo.nfcVerify(request.intentToken,transactionCode);refreshOrdersInternal();if(_state.value.posOrder?.id==request.orderId&&"payments" in (_state.value.session?.permissions?:emptySet()))_state.update{it.copy(paymentBalance=repo.paymentBalance(request.orderId))};refreshCashInternal();if("reports" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshManagerInternal()};refreshNotificationsInternal();_state.update{it.copy(tapOnRequest=null,message="Cartão aprovado.")}}
