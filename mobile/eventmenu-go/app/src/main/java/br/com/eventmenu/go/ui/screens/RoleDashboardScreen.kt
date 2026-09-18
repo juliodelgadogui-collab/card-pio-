@@ -113,7 +113,7 @@ fun RoleDashboardScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text("Conectar ao computador", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            "Abra a conexão com o EventMenu Desktop e acompanhe os equipamentos do caixa.",
+                            "Toque aqui e, no Perfil, use o botão roxo de QR no canto inferior direito para parear com o EventMenu Desktop.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             style = MaterialTheme.typography.bodyMedium,
                         )
