@@ -42,6 +42,19 @@ final class DeliveryPublicTrackingService
         });
     }
 
+    public function existingForPublicOrder(int $tenantId,int $orderId,string $publicToken):?array
+    {
+        if($tenantId<1||$orderId<1||$publicToken==='')return null;
+        $pdo=Database::connection();
+        $q=$pdo->prepare('SELECT l.token_encrypted,l.expires_at,l.revoked_at,o.status,dp.route_started_at,dp.completed_at FROM orders o JOIN delivery_progress dp ON dp.tenant_id=o.tenant_id AND dp.order_id=o.id JOIN delivery_tracking_links l ON l.tenant_id=o.tenant_id AND l.order_id=o.id WHERE o.id=? AND o.tenant_id=? AND o.public_token=? AND o.channel="delivery" LIMIT 1');
+        $q->execute([$orderId,$tenantId,$publicToken]);$row=$q->fetch();
+        if(!$row||!empty($row['revoked_at'])||empty($row['route_started_at'])||!empty($row['completed_at']))return null;
+        if((string)$row['status']!=='out_for_delivery'||strtotime((string)$row['expires_at'])<=time())return null;
+        try{$token=Crypto::decrypt((string)$row['token_encrypted']);}catch(\Throwable){return null;}
+        if($token==='')return null;
+        return ['url'=>$this->url($token),'expires_at'=>$row['expires_at']];
+    }
+
     public function publicStatus(string $token):array
     {
         $token=trim($token);if(strlen($token)<32||strlen($token)>128)throw new RuntimeException('Acompanhamento indisponível.');
