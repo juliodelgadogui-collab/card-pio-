@@ -70,6 +70,7 @@ final class UiVocabulary
             'delivery'=>'Entrega',
             'table'=>'Mesa / comanda',
             'event_bar'=>'Evento / bar',
+            'event'=>'Evento',
             default=>'Atendimento',
         };
     }
@@ -95,6 +96,18 @@ final class UiVocabulary
             'route_started'=>'Rota iniciada',
             'arrived'=>'Chegada confirmada',
             'completed'=>'Entrega concluída',
+            default=>'Em andamento',
+        };
+    }
+
+    public static function ticketStatus(string $status):string
+    {
+        return match(strtolower(trim($status))){
+            'reserved'=>'Aguardando pagamento',
+            'paid'=>'Liberado para entrada',
+            'checked_in'=>'Entrada realizada',
+            'cancelled'=>'Cancelado',
+            'refunded'=>'Estornado',
             default=>'Em andamento',
         };
     }
