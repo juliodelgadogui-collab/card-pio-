@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.GoState
+import br.com.eventmenu.go.OperationalText
 import br.com.eventmenu.go.data.DiscountRequest
 import br.com.eventmenu.go.data.LoyaltyOrderSummary
 import kotlinx.coroutines.launch
@@ -141,7 +142,7 @@ fun PosScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             FilterChip(selected = channel == "counter", onClick = { channel = "counter" }, label = { Text("Balcão") })
                             FilterChip(selected = channel == "pickup", onClick = { channel = "pickup" }, label = { Text("Retirada") })
-                            FilterChip(selected = channel == "delivery", onClick = { channel = "delivery" }, label = { Text("Delivery") })
+                            FilterChip(selected = channel == "delivery", onClick = { channel = "delivery" }, label = { Text("Entrega") })
                         }
                     } else {
                         Text("Pedido para ${table.name}", fontWeight = FontWeight.Bold)
@@ -200,7 +201,7 @@ private fun PosPaymentScreen(
         scope.launch {
             runCatching { app.orderOperationsRepository.detail(order.id).loyalty }
                 .onSuccess { loyalty = it; loyaltyLoaded = true }
-                .onFailure { loyaltyError = it.message ?: "Não foi possível consultar os pontos." }
+                .onFailure { loyaltyError = OperationalText.friendlyApiMessage(it.message) }
             loyaltyBusy = false
         }
     }
@@ -209,7 +210,7 @@ private fun PosPaymentScreen(
         if (canRedeemLoyalty) {
             runCatching { app.orderOperationsRepository.detail(order.id).loyalty }
                 .onSuccess { loyalty = it; loyaltyLoaded = true }
-                .onFailure { loyaltyError = it.message ?: "Não foi possível consultar os pontos."; loyaltyLoaded = true }
+                .onFailure { loyaltyError = OperationalText.friendlyApiMessage(it.message); loyaltyLoaded = true }
         }
     }
 
@@ -232,7 +233,7 @@ private fun PosPaymentScreen(
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("Pontos do cliente", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                        Text("${current.available} pontos disponíveis", fontWeight = FontWeight.Bold)
+                        Text("Você tem ${current.available} pontos", fontWeight = FontWeight.Bold)
                         if (!current.enabled) {
                             Text("O programa de pontos está desativado para esta empresa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         } else if ((balance?.paidCents ?: 0) > 0) {
@@ -245,7 +246,7 @@ private fun PosPaymentScreen(
                                     scope.launch {
                                         runCatching { app.orderOperationsRepository.removeLoyalty(order.id) }
                                             .onSuccess { updated -> loyalty = updated; loyaltyPointsText = ""; onRefresh() }
-                                            .onFailure { loyaltyError = it.message ?: "Não foi possível remover os pontos." }
+                                            .onFailure { loyaltyError = OperationalText.friendlyApiMessage(it.message) }
                                         loyaltyBusy = false
                                     }
                                 },
@@ -268,7 +269,7 @@ private fun PosPaymentScreen(
                                     scope.launch {
                                         runCatching { app.orderOperationsRepository.applyLoyalty(order.id, requested) }
                                             .onSuccess { updated -> loyalty = updated; onRefresh() }
-                                            .onFailure { loyaltyError = it.message ?: "Não foi possível usar os pontos." }
+                                            .onFailure { loyaltyError = OperationalText.friendlyApiMessage(it.message) }
                                         loyaltyBusy = false
                                     }
                                 },
@@ -310,8 +311,8 @@ private fun PosPaymentScreen(
                 Card(Modifier.fillMaxWidth()) {
                     Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column {
-                            Text(paymentLabel(part.provider), fontWeight = FontWeight.Bold)
-                            Text(paymentStatusLabel(part.status), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(OperationalText.paymentMethod(part.provider), fontWeight = FontWeight.Bold)
+                            Text(OperationalText.paymentStatus(part.status), color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         Text(posMoney(part.amountCents), fontWeight = FontWeight.Black)
                     }
@@ -392,22 +393,6 @@ private fun PosPaymentScreen(
             dismissButton = { TextButton(onClick = { pixTaxDialog = false }) { Text("Cancelar") } },
         )
     }
-}
-
-private fun paymentLabel(provider: String) = when (provider.lowercase()) {
-    "manual" -> "Dinheiro"
-    "mercadopago" -> "Pix · Mercado Pago"
-    "pagbank" -> "Pix · PagBank"
-    "stripe" -> "Pagamento eletrônico"
-    else -> "Pagamento"
-}
-
-private fun paymentStatusLabel(status: String) = when (status.lowercase()) {
-    "paid", "approved", "confirmed" -> "Confirmado"
-    "pending", "processing" -> "Processando"
-    "refunded" -> "Estornado"
-    "failed", "cancelled" -> "Não concluído"
-    else -> "Em andamento"
 }
 
 private fun posMoney(cents: Int) = "R$ %.2f".format(cents / 100.0).replace('.', ',')
