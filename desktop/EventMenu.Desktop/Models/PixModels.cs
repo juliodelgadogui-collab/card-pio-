@@ -4,6 +4,9 @@ namespace EventMenu.Desktop.Models;
 
 public sealed class PixDetails
 {
+    // The provider is selected by the EventMenu server. The Windows client only
+    // presents the charge returned by the API and never chooses a gateway locally.
+    [JsonPropertyName("provider")] public string Provider { get; set; } = "";
     [JsonPropertyName("payment_id")] public int PaymentId { get; set; }
     [JsonPropertyName("order_id")] public int OrderId { get; set; }
     [JsonPropertyName("amount_cents")] public int AmountCents { get; set; }
