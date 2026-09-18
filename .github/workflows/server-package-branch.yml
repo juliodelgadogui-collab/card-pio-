@@ -17,16 +17,28 @@ jobs:
       - name: PHP syntax validation
         run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: SQLite smoke validation
-        env: {APP_ENV: testing, APP_DEBUG: 'false', APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz, DB_CONNECTION: sqlite, DB_SQLITE_PATH: /tmp/eventmenu-package.sqlite, SESSION_NAME: eventmenu_package_sqlite}
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          APP_URL: https://example.test/1
+          APP_BASE_PATH: /1
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-package.sqlite
+          SESSION_NAME: eventmenu_package_sqlite
         run: |
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-permission-smoke.php
+          php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-operations-smoke.php
           php scripts/ci-customer-identity-smoke.php
           php scripts/ci-loyalty-points-smoke.php
           php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-auth-mail-smoke.php
+          php scripts/ci-url-smoke.php
+          php scripts/ci-backup-smoke.php
           php scripts/ci-production-readiness-smoke.php
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-dev"
