@@ -86,7 +86,9 @@ class MarketplaceApi(
             if (body != null) connection.outputStream.bufferedWriter(StandardCharsets.UTF_8).use { it.write(body) }
             val status = connection.responseCode
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-            val raw = stream?.let { BufferedReader(InputStreamReader(it, StandardCharsets.UTF_8)).use(BufferedReader::readText) }.orEmpty()
+            val raw = stream?.let { input ->
+                BufferedReader(InputStreamReader(input, StandardCharsets.UTF_8)).use { reader -> reader.readText() }
+            }.orEmpty()
             val json = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
             if (status !in 200..299 || !json.optBoolean("ok", false)) {
                 throw MarketplaceException(json.optString("message").ifBlank { friendlyHttp(status) }, status)
@@ -151,14 +153,14 @@ class MarketplaceApi(
                 modifiers = item.optJSONArray("modifiers").orEmpty().mapObjects { mod -> "${mod.optString("group")}: ${mod.optString("name")}" },
             )
         },
-        tracking = j.optJSONObject("tracking")?.let { TrackingReference(it.optBoolean("active"), it.string("token"), it.optString("expires_at").ifBlank { null }) },
+        tracking = j.optJSONObject("tracking")?.let { TrackingReference(it.optBoolean("active"), it.string("token"), it.nullableString("expires_at")) },
     )
 
     private fun tracking(j: JSONObject): TrackingStatus = TrackingStatus(
         active = j.optBoolean("tracking_active"), status = j.string("status"), statusLabel = j.string("status_label"),
-        location = j.optJSONObject("location")?.let { TrackingLocation(it.optDouble("latitude"), it.optDouble("longitude"), if (it.isNull("accuracy_m")) null else it.optDouble("accuracy_m"), it.optString("recorded_at").ifBlank { null }) },
-        routeStartedAt = j.optString("route_started_at").ifBlank { null }, arrivedAt = j.optString("arrived_at").ifBlank { null },
-        completedAt = j.optString("completed_at").ifBlank { null }, expiresAt = j.optString("expires_at").ifBlank { null },
+        location = j.optJSONObject("location")?.let { TrackingLocation(it.optDouble("latitude"), it.optDouble("longitude"), if (it.isNull("accuracy_m")) null else it.optDouble("accuracy_m"), it.nullableString("recorded_at")) },
+        routeStartedAt = j.nullableString("route_started_at"), arrivedAt = j.nullableString("arrived_at"),
+        completedAt = j.nullableString("completed_at"), expiresAt = j.nullableString("expires_at"),
     )
 
     private fun enc(value: String): String = URLEncoder.encode(value, StandardCharsets.UTF_8.name())
@@ -170,6 +172,7 @@ private fun JSONObject.string(key: String): String = optString(key).takeIf { it.
 private fun JSONObject.int(key: String): Int = optInt(key, Int.MIN_VALUE).takeIf { it != Int.MIN_VALUE } ?: throw MarketplaceException("Não foi possível carregar esta informação.")
 private fun JSONObject.obj(key: String): JSONObject = optJSONObject(key) ?: throw MarketplaceException("Não foi possível carregar esta informação.")
 private fun JSONObject.array(key: String): JSONArray = optJSONArray(key) ?: JSONArray()
+private fun JSONObject.nullableString(key: String): String? = if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
 private fun JSONArray?.orEmpty(): JSONArray = this ?: JSONArray()
 private inline fun <T> JSONArray.mapObjects(block: (JSONObject) -> T): List<T> = buildList {
     for (i in 0 until length()) optJSONObject(i)?.let { add(block(it)) }
