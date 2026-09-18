@@ -32,10 +32,32 @@ final class UiVocabulary
             'pending','processing'=>'Aguardando confirmação',
             'authorized'=>'Autorizado',
             'paid','approved','confirmed'=>'Pago',
+            'duplicate_paid'=>'Pagamento duplicado',
             'failed'=>'Não foi possível concluir',
             'cancelled'=>'Cancelado',
             'refunded'=>'Estornado',
             'partially_refunded'=>'Estorno parcial',
+            default=>'Em andamento',
+        };
+    }
+
+    public static function paymentMethod(string $provider):string
+    {
+        return match(strtolower(trim($provider))){
+            'manual'=>'Dinheiro',
+            'pagbank','mercadopago'=>'PIX',
+            'stripe'=>'Cartão',
+            default=>'Pagamento eletrônico',
+        };
+    }
+
+    public static function refundStatus(string $status):string
+    {
+        return match(strtolower(trim($status))){
+            'created','pending','provider_pending'=>'Aguardando confirmação',
+            'completed','refunded'=>'Estorno concluído',
+            'failed'=>'Precisa de atenção',
+            'cancelled'=>'Cancelado',
             default=>'Em andamento',
         };
     }
