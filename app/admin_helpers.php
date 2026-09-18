@@ -85,6 +85,7 @@ function em_nav(): array
 {
     return [
         ['super', 'Plataforma', 'platform.manage'],
+        ['marketplace-finance', 'Financeiro Delivery', 'platform.manage'],
         ['system-health', 'Saúde do sistema', 'platform.manage'],
         ['dashboard', 'Visão geral', 'dashboard'],
         ['pos', 'Caixa / PDV', 'orders.create'],
@@ -110,6 +111,7 @@ function em_nav(): array
         ['units', 'Unidades', 'settings.manage'],
         ['reports', 'Relatórios', 'reports.any'],
         ['audit', 'Auditoria', 'audit.view'],
+        ['billing', 'Faturas e cobrança', 'settings.manage'],
         ['settings', 'Configurações', 'settings.manage'],
         ['email-settings', 'E-mail', 'email.manage'],
     ];
