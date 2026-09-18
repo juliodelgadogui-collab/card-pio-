@@ -16,6 +16,7 @@ final class MarketplaceEntryTokenService
     public function issue(PDO $pdo, int $tenantId, int $unitId, ?string $campaignCode = null): array
     {
         (new MarketplaceCommissionService())->assertTenantCanReceive($pdo, $tenantId, $unitId);
+        $this->purgeExpired($pdo);
         $nonce = bin2hex(random_bytes(24));
         $now = time();
         $expires = $now + self::TTL_SECONDS;
@@ -74,6 +75,14 @@ final class MarketplaceEntryTokenService
         $nonce = (string)($claims['nonce'] ?? '');
         if ($tenantId < 1 || $unitId < 1 || $exp < time() || $iat < 1 || $iat > time() + 60 || !preg_match('/^[a-f0-9]{48}$/', $nonce)) throw new RuntimeException('Sua sessão de compra expirou. Atualize a loja e tente novamente.');
         return $claims;
+    }
+
+    private function purgeExpired(PDO $pdo): void
+    {
+        // Limpeza oportunista e limitada no momento de emitir novas sessões. Tokens ativos nunca são removidos.
+        $cutoff = gmdate('Y-m-d H:i:s', time() - 86400);
+        $delete = $pdo->prepare('DELETE FROM marketplace_entry_tokens WHERE (used_at IS NOT NULL OR expires_at<CURRENT_TIMESTAMP) AND created_at<?');
+        $delete->execute([$cutoff]);
     }
 
     private function key(): string
