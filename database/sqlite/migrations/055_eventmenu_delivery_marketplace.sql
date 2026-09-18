@@ -96,6 +96,7 @@ CREATE TABLE platform_invoice_items (
   invoice_id INTEGER NOT NULL,
   tenant_id INTEGER NOT NULL,
   item_type TEXT NOT NULL,
+  reference_key TEXT NULL,
   order_id INTEGER NULL,
   marketplace_commission_id INTEGER NULL UNIQUE,
   description TEXT NOT NULL,
@@ -107,7 +108,8 @@ CREATE TABLE platform_invoice_items (
   FOREIGN KEY (invoice_id) REFERENCES platform_invoices(id) ON DELETE CASCADE,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
-  FOREIGN KEY (marketplace_commission_id) REFERENCES marketplace_order_commissions(id) ON DELETE SET NULL
+  FOREIGN KEY (marketplace_commission_id) REFERENCES marketplace_order_commissions(id) ON DELETE SET NULL,
+  UNIQUE (tenant_id,reference_key)
 );
 CREATE INDEX IF NOT EXISTS idx_platform_invoice_item_invoice ON platform_invoice_items (invoice_id,item_type);
 
