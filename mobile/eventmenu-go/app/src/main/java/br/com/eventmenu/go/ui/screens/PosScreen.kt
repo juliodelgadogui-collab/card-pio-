@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -27,6 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -37,6 +39,7 @@ import br.com.eventmenu.go.GoState
 import br.com.eventmenu.go.OperationalText
 import br.com.eventmenu.go.data.DiscountRequest
 import br.com.eventmenu.go.data.LoyaltyOrderSummary
+import br.com.eventmenu.go.ui.theme.EventMenuUi
 import kotlinx.coroutines.launch
 
 @Composable
@@ -67,26 +70,45 @@ fun PosScreen(
 
     val table = state.selectedTable
     var category by remember { mutableStateOf("Todos") }
+    var search by remember { mutableStateOf("") }
     var channel by remember(table?.id) { mutableStateOf(if (table != null) "table" else "counter") }
     var customer by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     val categories = listOf("Todos") + state.products.map { it.categoryName }.distinct()
-    val visible = state.products.filter { category == "Todos" || it.categoryName == category }
+    val searchTerm = search.trim().lowercase()
+    val visible = state.products.filter { product ->
+        (category == "Todos" || product.categoryName == category) &&
+            (searchTerm.isBlank() || product.name.lowercase().contains(searchTerm) || product.description.lowercase().contains(searchTerm) || product.categoryName.lowercase().contains(searchTerm))
+    }
     val cartLines = state.cart.mapNotNull { (id, qty) -> state.products.firstOrNull { it.id == id }?.let { it to qty } }
     val previewTotal = cartLines.sumOf { (product, qty) -> product.priceCents * qty }
 
-    LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(EventMenuUi.SpaceMd), verticalArrangement = Arrangement.spacedBy(EventMenuUi.SpaceMd)) {
         item {
             Text(if (table != null) "Venda · ${table.name}" else "Nova venda", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
             if (table != null) {
                 table.tabLabel.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 Text("Os itens serão adicionados à conta da mesa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedButton(onClick = onClearTable, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Voltar às mesas") }
+                OutlinedButton(onClick = onClearTable, modifier = Modifier.fillMaxWidth().padding(top = 8.dp).height(EventMenuUi.TouchTarget)) { Text("Voltar às mesas") }
             } else {
-                Text("Escolha os produtos e finalize o pedido.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Encontre o produto, adicione ao pedido e finalize.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+        }
+
+        item {
+            OutlinedTextField(
+                value = search,
+                onValueChange = { search = it.take(80) },
+                label = { Text("Buscar produto") },
+                placeholder = { Text("Nome, descrição ou categoria") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                trailingIcon = {
+                    if (search.isNotBlank()) TextButton(onClick = { search = "" }) { Text("Limpar") }
+                },
+            )
         }
 
         item {
@@ -95,54 +117,79 @@ fun PosScreen(
             }
         }
 
+        if (visible.isEmpty()) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text(if (state.products.isEmpty()) "Nenhum produto disponível" else "Nada encontrado", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                        Text(if (state.products.isEmpty()) "Atualize o catálogo ou verifique a disponibilidade dos produtos." else "Tente outro nome ou escolha uma categoria diferente.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+
         items(visible, key = { it.id }) { product ->
             Card(Modifier.fillMaxWidth()) {
-                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column(Modifier.weight(1f)) {
+                Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Text(product.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(product.categoryName, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (product.description.isNotBlank()) Text(product.description, maxLines = 2)
+                        if (product.description.isNotBlank()) Text(product.description, maxLines = 2, style = MaterialTheme.typography.bodyMedium)
                         Text(posMoney(product.priceCents), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
-                        if (product.trackStock) Text("Disponível: ${product.stockQty}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (product.trackStock) Text(if (product.stockQty > 0) "Disponível: ${product.stockQty}" else "Indisponível agora", color = if (product.stockQty > 0) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error)
                     }
-                    Button(onClick = { onAdd(product.id) }, enabled = !product.trackStock || product.stockQty > 0) { Text("+") }
+                    Button(
+                        onClick = { onAdd(product.id) },
+                        enabled = !product.trackStock || product.stockQty > 0,
+                        modifier = Modifier.height(EventMenuUi.ActionHeight),
+                    ) { Text("Adicionar") }
                 }
             }
         }
 
         item {
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Carrinho", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Column {
+                            Text("Seu pedido", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                            Text(if (cartLines.isEmpty()) "Adicione produtos para continuar." else "${cartLines.sumOf { it.second }} item(ns) selecionado(s)", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                         if (cartLines.isNotEmpty()) TextButton(onClick = onClear) { Text("Limpar") }
                     }
-                    if (cartLines.isEmpty()) Text("Nenhum item.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (cartLines.isEmpty()) {
+                        Text("O total aparecerá aqui conforme os produtos forem adicionados.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
                     cartLines.forEach { (product, qty) ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("${qty}× ${product.name}")
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(posMoney(product.priceCents * qty), fontWeight = FontWeight.Bold)
-                                OutlinedButton(onClick = { onRemove(product.id) }) { Text("−") }
-                                OutlinedButton(onClick = { onAdd(product.id) }) { Text("+") }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("${qty}× ${product.name}", fontWeight = FontWeight.SemiBold)
+                                Text(posMoney(product.priceCents * qty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedButton(onClick = { onRemove(product.id) }, modifier = Modifier.height(EventMenuUi.TouchTarget)) { Text("−") }
+                                OutlinedButton(onClick = { onAdd(product.id) }, modifier = Modifier.height(EventMenuUi.TouchTarget)) { Text("+") }
                             }
                         }
                     }
                     HorizontalDivider()
-                    Text("Total ${posMoney(previewTotal)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Total", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(posMoney(previewTotal), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                    }
                 }
             }
         }
 
         item {
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (table == null) {
-                        Text("Tipo do pedido", fontWeight = FontWeight.Bold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            FilterChip(selected = channel == "counter", onClick = { channel = "counter" }, label = { Text("Balcão") })
-                            FilterChip(selected = channel == "pickup", onClick = { channel = "pickup" }, label = { Text("Retirada") })
-                            FilterChip(selected = channel == "delivery", onClick = { channel = "delivery" }, label = { Text("Entrega") })
+                        Text("Como será o atendimento?", fontWeight = FontWeight.Bold)
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            item { FilterChip(selected = channel == "counter", onClick = { channel = "counter" }, label = { Text("Balcão") }) }
+                            item { FilterChip(selected = channel == "pickup", onClick = { channel = "pickup" }, label = { Text("Retirada") }) }
+                            item { FilterChip(selected = channel == "delivery", onClick = { channel = "delivery" }, label = { Text("Entrega") }) }
                         }
                     } else {
                         Text("Pedido para ${table.name}", fontWeight = FontWeight.Bold)
@@ -154,8 +201,8 @@ fun PosScreen(
                     Button(
                         onClick = { onCreate(channel, customer, phone, address, notes) },
                         enabled = cartLines.isNotEmpty() && (channel != "delivery" || (customer.isNotBlank() && phone.isNotBlank() && address.isNotBlank())),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) { Text(if (table != null) "Adicionar à mesa" else "Finalizar pedido") }
+                        modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight),
+                    ) { Text(if (table != null) "Adicionar à mesa" else "Continuar para pagamento") }
                 }
             }
         }
@@ -214,13 +261,22 @@ private fun PosPaymentScreen(
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().padding(EventMenuUi.SpaceMd), verticalArrangement = Arrangement.spacedBy(EventMenuUi.SpaceMd)) {
         item {
-            Text("Receber · Pedido #${order.id}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-            if (state.posReturnScreen == AppScreen.TABLE_ACCOUNT) Text("Pagamento da conta da mesa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text("Total: ${posMoney(balance?.totalCents ?: order.totalCents)}")
-            if ((balance?.paidCents ?: 0) > 0) Text("Recebido: ${posMoney(balance?.paidCents ?: 0)}")
-            Text("Falta receber: ${posMoney(remaining)}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Text("Receber · Pedido #${order.id}", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
+                    if (state.posReturnScreen == AppScreen.TABLE_ACCOUNT) Text("Pagamento da conta da mesa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Total: ${posMoney(balance?.totalCents ?: order.totalCents)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if ((balance?.paidCents ?: 0) > 0) Text("Recebido: ${posMoney(balance?.paidCents ?: 0)}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold)
+                    Surface(color = if (remaining > 0) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(13.dp)) {
+                            Text(if (remaining > 0) "Falta receber" else "Pagamento", style = MaterialTheme.typography.labelLarge)
+                            Text(if (remaining > 0) posMoney(remaining) else "✓ Confirmado", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+                        }
+                    }
+                }
+            }
         }
 
         if (canRedeemLoyalty && loyaltyLoaded && loyalty != null && remaining > 0) {
@@ -251,7 +307,7 @@ private fun PosPaymentScreen(
                                     }
                                 },
                                 enabled = !loyaltyBusy,
-                                modifier = Modifier.fillMaxWidth(),
+                                modifier = Modifier.fillMaxWidth().height(EventMenuUi.TouchTarget),
                             ) { Text("Remover pontos deste pedido") }
                         } else {
                             Text("${current.redeemPoints} pontos = ${posMoney(current.redeemValueCents)} · mínimo ${current.minRedeemPoints} pontos", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -274,11 +330,11 @@ private fun PosPaymentScreen(
                                     }
                                 },
                                 enabled = canApply,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) { Text(if (loyaltyBusy) "Aplicando..." else "Usar pontos") }
+                                modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight),
+                            ) { Text(if (loyaltyBusy) "Aplicando…" else "Usar pontos") }
                         }
                         loyaltyError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                        OutlinedButton(onClick = ::refreshLoyalty, enabled = !loyaltyBusy, modifier = Modifier.fillMaxWidth()) { Text("Atualizar saldo") }
+                        OutlinedButton(onClick = ::refreshLoyalty, enabled = !loyaltyBusy, modifier = Modifier.fillMaxWidth().height(EventMenuUi.TouchTarget)) { Text("Atualizar saldo") }
                     }
                 }
             }
@@ -293,13 +349,13 @@ private fun PosPaymentScreen(
                             "pending" -> {
                                 Text("Aguardando aprovação · ${posMoney(discountRequest.requestedCents)}", fontWeight = FontWeight.SemiBold)
                                 Text(discountRequest.reason)
-                                OutlinedButton(onClick = { onRefreshDiscount(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") }
+                                OutlinedButton(onClick = { onRefreshDiscount(order.id) }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.TouchTarget)) { Text("Atualizar situação") }
                             }
-                            "approved" -> Text("Desconto aprovado · ${posMoney(discountRequest.requestedCents)}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
+                            "approved" -> Text("✓ Desconto aprovado · ${posMoney(discountRequest.requestedCents)}", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold)
                             "rejected" -> Text("A última solicitação de desconto não foi aprovada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             else -> Text("Você pode solicitar um desconto para aprovação.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        if (discountRequest?.status != "pending") OutlinedButton(onClick = { discountDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Solicitar desconto") }
+                        if (discountRequest?.status != "pending") OutlinedButton(onClick = { discountDialog = true }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.TouchTarget)) { Text("Solicitar desconto") }
                     }
                 }
             }
@@ -323,15 +379,15 @@ private fun PosPaymentScreen(
         if (remaining > 0) {
             item {
                 Card(Modifier.fillMaxWidth()) {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                        Text("Receber", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Receber pagamento", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                         Text("Você pode receber o valor inteiro ou apenas uma parte.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         OutlinedTextField(amountText, { amountText = it }, label = { Text("Valor (R$)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                         Text("Disponível para receber: ${posMoney(remaining)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { onCash(amount) }, enabled = state.cashOpen && amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("Dinheiro") }
+                        Button(onClick = { onCash(amount) }, enabled = state.cashOpen && amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("Dinheiro") }
                         if (!state.cashOpen) Text("Abra o caixa para receber em dinheiro.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Button(onClick = { pixTaxDialog = true }, enabled = amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("PIX") }
-                        Button(onClick = { onNfc(amount) }, enabled = amount in 100..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth()) { Text("Cartão por aproximação") }
+                        Button(onClick = { pixTaxDialog = true }, enabled = amount in 1..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("PIX") }
+                        Button(onClick = { onNfc(amount) }, enabled = amount in 100..remaining && discountRequest?.status != "pending", modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("Cartão por aproximação") }
                         if (discountRequest?.status == "pending") Text("Aguarde a aprovação do desconto para continuar.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -341,19 +397,19 @@ private fun PosPaymentScreen(
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
-                            Text("Pagamento concluído", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
+                            Text("✓ Pagamento confirmado", modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
                         }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("Enviar recibo") }
-                            OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f)) { Text("Imprimir") }
+                            OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Enviar recibo") }
+                            OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Imprimir") }
                         }
-                        Button(onClick = onFinishFlow, modifier = Modifier.fillMaxWidth()) { Text(if (state.posReturnScreen == AppScreen.TABLE_ACCOUNT) "Voltar à conta" else "Novo pedido") }
+                        Button(onClick = onFinishFlow, modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text(if (state.posReturnScreen == AppScreen.TABLE_ACCOUNT) "Voltar à conta" else "Novo pedido") }
                     }
                 }
             }
         }
 
-        item { OutlinedButton(onClick = { onRefresh(); onRefreshDiscount(order.id); refreshLoyalty() }, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
+        item { OutlinedButton(onClick = { onRefresh(); onRefreshDiscount(order.id); refreshLoyalty() }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.TouchTarget)) { Text("Atualizar situação") } }
     }
 
     if (discountDialog) {
