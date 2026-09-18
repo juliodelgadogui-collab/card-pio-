@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-
 data class MarketplaceUiState(
     val stores: List<Store> = emptyList(),
     val catalog: Catalog? = null,
@@ -51,6 +50,11 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
     fun openStore(store: Store) = launchBusy {
         val catalog = api.catalog(store)
         _state.value = _state.value.copy(catalog = catalog, cart = emptyList(), screen = Screen.Menu(catalog), tracking = null)
+    }
+
+    fun openActiveOrder() {
+        val order = _state.value.order ?: return
+        _state.value = _state.value.copy(screen = Screen.Order(order), message = null)
     }
 
     fun addToCart(product: Product, quantity: Int, selectedOptionIds: Set<Int>): String? {
@@ -118,7 +122,7 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
 
     fun back() {
         when (_state.value.screen) {
-            is Screen.Stores -> Unit
+            Screen.Stores -> Unit
             is Screen.Menu -> _state.value = _state.value.copy(catalog = null, cart = emptyList(), screen = Screen.Stores, message = null)
             is Screen.Checkout -> _state.value.catalog?.let { _state.value = _state.value.copy(screen = Screen.Menu(it), message = null) }
             is Screen.Order -> _state.value = _state.value.copy(screen = Screen.Stores, message = null)
@@ -161,7 +165,15 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
 
     private suspend fun refreshOrderInternal(publicToken: String, showErrors: Boolean): ConsumerOrder? {
         return runCatching { api.orderStatus(publicToken) }
-            .onSuccess { order -> _state.value = _state.value.copy(order = order, screen = Screen.Order(order), if (showErrors) null else _state.value.message) }
+            .onSuccess { order ->
+                val current = _state.value
+                val nextScreen = if (current.screen is Screen.Order) Screen.Order(order) else current.screen
+                _state.value = current.copy(
+                    order = order,
+                    screen = nextScreen,
+                    message = if (showErrors) null else current.message,
+                )
+            }
             .onFailure { error -> if (showErrors) _state.value = _state.value.copy(message = friendly(error)) }
             .getOrNull()
     }
