@@ -39,6 +39,7 @@ jobs:
           php scripts/ci-auth-mail-smoke.php
           php scripts/ci-url-smoke.php
           php scripts/ci-backup-smoke.php
+          php scripts/ci-operational-resilience-smoke.php
           php scripts/ci-production-readiness-smoke.php
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-dev"
