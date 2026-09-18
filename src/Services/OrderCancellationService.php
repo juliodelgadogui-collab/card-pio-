@@ -65,6 +65,7 @@ final class OrderCancellationService
             $order=$this->lockOrder($pdo,$tenantId,(int)$request['order_id']);$this->assertUnit($order,$shift);$this->assertRequestable($pdo,$order);
             $current=(string)$order['status'];(new StockReservationService())->release($pdo,$tenantId,(int)$order['id']);(new LoyaltyPointsService())->releaseForOrder($pdo,$tenantId,(int)$order['id']);
             $pdo->prepare('UPDATE orders SET status="cancelled" WHERE id=? AND tenant_id=?')->execute([$order['id'],$tenantId]);
+            (new MarketplaceCommissionService())->reverse($pdo,$tenantId,(int)$order['id'],'Cancelamento autorizado: '.(string)$request['reason']);
             $pdo->prepare('UPDATE order_cancellation_requests SET status="approved",decided_by=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND status="pending"')->execute([$deciderId,$requestId]);
             $pdo->prepare('UPDATE order_cancellation_requests SET status="cancelled",decided_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND order_id=? AND id<>? AND status="pending"')->execute([$tenantId,$order['id'],$requestId]);
             (new OrderHistoryService())->record($pdo,$tenantId,(int)$order['id'],$current,'cancelled','cancellation_approved','Cancelamento autorizado. Motivo: '.$request['reason'],$deciderId);
@@ -110,17 +111,17 @@ final class OrderCancellationService
     public function pendingForUnit(?int $unitId):array
     {
         Auth::requirePermission('cancellations.approve');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');
-        $sql='SELECT r.id,r.order_id,r.reason,r.created_at,r.unit_id,u.name requester_name,o.channel,o.status order_status,o.payment_status,o.total_cents,c.name customer_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by JOIN orders o ON o.id=r.order_id AND o.tenant_id=r.tenant_id LEFT JOIN customers c ON c.id=o.customer_id WHERE r.tenant_id=? AND r.status="pending"';$args=[$tenantId];if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' ORDER BY r.created_at,r.id';$q=Database::connection()->prepare($sql);$q->execute($args);return $q->fetchAll();
+        $sql='SELECT r.id,r.order_id,r.reason,r.created_at,r.unit_id,u.name requester_name,o.channel,o.status order_status,o.payment_status,o.total_cents,c.name customer_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by JOIN orders o ON o.id=r.order_id AND o.tenant_id=r.tenant_id LEFT JOIN customers c ON c.id=o.customer_id WHERE r.tenant_id=? AND r.status="pending"';$args=[$tenantId];if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' ORDER BY r.created_at,r.id';$q=Database::connection()->prepare($sql);$q->execute($args);return$q->fetchAll();
     }
 
     public function forOrder(int $orderId):?array
     {
-        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)return null;$q=Database::connection()->prepare('SELECT r.*,u.name requester_name,d.name decider_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by LEFT JOIN users d ON d.id=r.decided_by WHERE r.tenant_id=? AND r.order_id=? ORDER BY r.id DESC LIMIT 1');$q->execute([$tenantId,$orderId]);$row=$q->fetch();return $row?:null;
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)return null;$q=Database::connection()->prepare('SELECT r.*,u.name requester_name,d.name decider_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by LEFT JOIN users d ON d.id=r.decided_by WHERE r.tenant_id=? AND r.order_id=? ORDER BY r.id DESC LIMIT 1');$q->execute([$tenantId,$orderId]);$row=$q->fetch();return$row?:null;
     }
 
     private function lockOrder(PDO $pdo,int $tenantId,int $orderId):array
     {
-        $q=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$q->execute([$orderId,$tenantId]);return $q->fetch()?:throw new RuntimeException('Pedido não encontrado.');
+        $q=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$q->execute([$orderId,$tenantId]);return$q->fetch()?:throw new RuntimeException('Pedido não encontrado.');
     }
 
     private function assertRequestable(PDO $pdo,array $order):void
