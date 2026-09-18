@@ -1,52 +1,12 @@
 <?php
 
 declare(strict_types=1);
-
 namespace EventMenu\Services;
-
-use EventMenu\Core\Auth;
-use EventMenu\Core\Crypto;
-use EventMenu\Core\Database;
-use RuntimeException;
-
-/** Server-side Pix facade. Clients never need provider-specific rules. */
-final class PixService
-{
-    private const SUPPORTED=['mercadopago','pagbank'];
-
-    public function create(int $orderId,string $taxId='',?int $amountCents=null,?string $requestedProvider=null):array
-    {
-        $provider=$this->resolveProvider($requestedProvider);
-        $result=match($provider){
-            'mercadopago'=>(new MercadoPagoPixService())->create($orderId,$taxId,$amountCents),
-            'pagbank'=>(new NativePixService())->create($orderId,$this->resolveTaxId($taxId),$amountCents),
-            default=>throw new RuntimeException('Provedor PIX não suportado.'),
-        };
-        return ['provider'=>$provider]+$result;
-    }
-
-    public function available():array
-    {
-        $tenantId=Auth::tenantId();if(!$tenantId)return [];
-        $s=Database::connection()->prepare('SELECT provider,config_encrypted FROM payment_gateways WHERE tenant_id=? AND active=1 AND provider IN ("mercadopago","pagbank")');$s->execute([$tenantId]);$out=[];
-        foreach($s->fetchAll() as $row){$config=Crypto::decryptJson((string)$row['config_encrypted']);if(array_key_exists('pix_enabled',$config)&&!filter_var($config['pix_enabled'],FILTER_VALIDATE_BOOL))continue;$out[]=(string)$row['provider'];}
-        return $out;
-    }
-
-    private function resolveProvider(?string $requested):string
-    {
-        $available=$this->available();if(!$available)throw new RuntimeException('Nenhum provedor PIX está ativo para esta empresa.');
-        $requested=strtolower(trim((string)$requested));if($requested!==''){if(!in_array($requested,self::SUPPORTED,true)||!in_array($requested,$available,true))throw new RuntimeException('Provedor PIX indisponível para esta empresa.');return $requested;}
-        $tenantId=Auth::tenantId();$s=Database::connection()->prepare('SELECT provider,config_encrypted FROM payment_gateways WHERE tenant_id=? AND active=1 AND provider IN ("mercadopago","pagbank")');$s->execute([$tenantId]);
-        $best=null;$bestPriority=PHP_INT_MAX;
-        foreach($s->fetchAll() as $row){$provider=(string)$row['provider'];if(!in_array($provider,$available,true))continue;$config=Crypto::decryptJson((string)$row['config_encrypted']);if(!empty($config['pix_default']))return $provider;$priority=max(1,(int)($config['pix_priority']??100));if($priority<$bestPriority){$bestPriority=$priority;$best=$provider;}}
-        return $best??$available[0];
-    }
-
-    private function resolveTaxId(string $provided):string
-    {
-        $digits=preg_replace('/\D+/','',$provided)??'';if($digits!=='')return $digits;
-        $tenantId=Auth::tenantId();$s=Database::connection()->prepare('SELECT settings FROM tenants WHERE id=? LIMIT 1');$s->execute([$tenantId]);$settings=json_decode((string)$s->fetchColumn(),true);if(!is_array($settings))$settings=[];
-        return preg_replace('/\D+/','',(string)($settings['pix_default_document']??$settings['receipt_document']??''))??'';
-    }
+use EventMenu\Core\Auth;use EventMenu\Core\Crypto;use EventMenu\Core\Database;use RuntimeException;
+final class PixService{
+ private const SUPPORTED=['mercadopago','pagbank'];
+ public function create(int $orderId,string $taxId='',?int $amountCents=null,?string $requestedProvider=null):array{$provider=$this->resolveProvider($requestedProvider);$taxId=$this->resolveTaxId($taxId);$result=match($provider){'mercadopago'=>(new MercadoPagoPixService())->create($orderId,$taxId,$amountCents),'pagbank'=>(new PagBankPixService())->create($orderId,$taxId,$amountCents),default=>throw new RuntimeException('Provedor PIX não suportado.')};return ['provider'=>$provider]+$result;}
+ public function available():array{$tenantId=Auth::tenantId();if(!$tenantId)return [];$s=Database::connection()->prepare('SELECT provider,config_encrypted FROM payment_gateways WHERE tenant_id=? AND active=1 AND provider IN ("mercadopago","pagbank")');$s->execute([$tenantId]);$out=[];foreach($s->fetchAll()as$row){$config=Crypto::decryptJson((string)$row['config_encrypted']);if(array_key_exists('pix_enabled',$config)&&!filter_var($config['pix_enabled'],FILTER_VALIDATE_BOOL))continue;$out[]=(string)$row['provider'];}return $out;}
+ private function resolveProvider(?string $requested):string{$available=$this->available();if(!$available)throw new RuntimeException('Nenhum provedor PIX está ativo para esta empresa.');$requested=strtolower(trim((string)$requested));if($requested!==''){if(!in_array($requested,self::SUPPORTED,true)||!in_array($requested,$available,true))throw new RuntimeException('Provedor PIX indisponível para esta empresa.');return $requested;}$tenantId=Auth::tenantId();$s=Database::connection()->prepare('SELECT provider,config_encrypted FROM payment_gateways WHERE tenant_id=? AND active=1 AND provider IN ("mercadopago","pagbank")');$s->execute([$tenantId]);$best=null;$priority=PHP_INT_MAX;foreach($s->fetchAll()as$row){$provider=(string)$row['provider'];if(!in_array($provider,$available,true))continue;$config=Crypto::decryptJson((string)$row['config_encrypted']);if(!empty($config['pix_default']))return $provider;$p=max(1,(int)($config['pix_priority']??100));if($p<$priority){$priority=$p;$best=$provider;}}return $best??$available[0];}
+ private function resolveTaxId(string $provided):string{$digits=preg_replace('/\D+/','',$provided)??'';if($digits!=='')return $digits;$tenantId=Auth::tenantId();$s=Database::connection()->prepare('SELECT settings FROM tenants WHERE id=? LIMIT 1');$s->execute([$tenantId]);$settings=json_decode((string)$s->fetchColumn(),true);if(!is_array($settings))$settings=[];return preg_replace('/\D+/','',(string)($settings['pix_default_document']??$settings['receipt_document']??''))??'';}
 }
