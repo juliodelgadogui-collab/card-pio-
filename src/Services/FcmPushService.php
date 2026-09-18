@@ -38,7 +38,7 @@ final class FcmPushService
 
     private function sendToToken(string $token,array $notification,string $projectId,string $accessToken):array
     {
-        $type=(string)$notification['type'];$mode=(string)($notification['mode']??'');
+        $type=(string)$notification['type'];$mode=(string)($notification['mode']??'');$ttlSeconds=3600;
         $data=[
             'notification_id'=>(string)$notification['id'],
             'notification_type'=>$type,
@@ -50,13 +50,14 @@ final class FcmPushService
             'message'=>(string)$notification['message'],
         ];
         if($mode!==''){$data['notification_mode']=$mode;$data['mode']=$mode;}
-        foreach(['entity_type','entity_id','expires_at']as$key)if(!empty($notification[$key]))$data[$key]=(string)$notification[$key];
+        foreach(['entity_type','entity_id']as$key)if(!empty($notification[$key]))$data[$key]=(string)$notification[$key];
+        if(!empty($notification['expires_at'])){$expiresAt=(string)$notification['expires_at'];$expiresEpoch=strtotime($expiresAt);$data['expires_at']=$expiresAt;if($expiresEpoch!==false){$data['expires_at_epoch']=(string)$expiresEpoch;$ttlSeconds=max(60,min(3600,$expiresEpoch-time()));}}
         $body=['message'=>[
             'token'=>$token,
             'data'=>$data,
             'android'=>[
                 'priority'=>in_array((string)$notification['priority'],['critical','warning'],true)?'high':'normal',
-                'ttl'=>'3600s',
+                'ttl'=>$ttlSeconds.'s',
             ],
         ]];
         $url='https://fcm.googleapis.com/v1/projects/'.rawurlencode($projectId).'/messages:send';$response=$this->request($url,['Authorization: Bearer '.$accessToken,'Content-Type: application/json'],json_encode($body,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR));$http=$response['http'];
