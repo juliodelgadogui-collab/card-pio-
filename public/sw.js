@@ -1,5 +1,12 @@
-const CACHE_NAME = 'eventmenu-static-v3';
+const CACHE_NAME = 'eventmenu-static-v4';
 const MANIFEST_URL = './manifest.webmanifest';
+const STATIC_SUFFIXES = [
+  '/assets/app.css',
+  '/assets/menu-premium-v5.css',
+  '/assets/menu-premium-v5.js',
+  '/assets/order-premium-v5.css',
+  '/assets/order-premium-v5.js',
+];
 
 self.addEventListener('install', event => {
   event.waitUntil(
@@ -25,11 +32,13 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  const isCss = url.pathname.endsWith('/assets/app.css');
+  const isStatic = STATIC_SUFFIXES.some(suffix => url.pathname.endsWith(suffix));
   const isManifest = url.pathname.endsWith('/manifest.webmanifest');
-  if (!isCss && !isManifest) return;
+  if (!isStatic && !isManifest) return;
 
-  if (isCss) {
+  if (isStatic) {
+    // Network-first prevents an old visual bundle from surviving a deployment,
+    // while still allowing the shell to load during a temporary connection loss.
     event.respondWith(
       fetch(request, { cache: 'no-cache' })
         .then(response => {
