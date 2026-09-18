@@ -25,12 +25,15 @@ public sealed class ProductionPrintProcessor
             if(string.IsNullOrWhiteSpace(payload.PrinterTarget))throw new InvalidOperationException($"A estação {queue.StationName} não possui impressora configurada neste computador.");
             var text=BuildTicket(payload);
             _printer.PrintText(payload.PrinterTarget,text,$"EventMenu #{queue.OrderId} • {queue.StationName}");
-            await _api.CompleteProductionPrintAsync(queue.Id,true,"",ct);
+            // Depois que o papel saiu, a confirmação não pode ser cancelada junto com a tela/worker:
+            // perder esse ACK faria o Server liberar nova tentativa e poderia imprimir o mesmo pedido de novo.
+            await _api.CompleteProductionPrintAsync(queue.Id,true,"",CancellationToken.None);
             return true;
         }
         catch(Exception ex)
         {
-            try{await _api.CompleteProductionPrintAsync(queue.Id,false,Friendly(ex.Message),ct);}catch{ }
+            // Também libera a reserva do Server mesmo se o CancellationToken original já estiver cancelado.
+            try{await _api.CompleteProductionPrintAsync(queue.Id,false,Friendly(ex.Message),CancellationToken.None);}catch{ }
             return false;
         }
     }
