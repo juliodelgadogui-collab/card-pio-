@@ -45,6 +45,9 @@ private val Border = Color(0xFFE5E1EC)
 private val SuccessSoft = Color(0xFFE8F8F0)
 private val SuccessInk = Color(0xFF087750)
 private val WarningSoft = Color(0xFFFFF5E5)
+private val SnackbarSurface = Color(0xFF241F2B)
+private val SnackbarText = Color(0xFFFFFFFF)
+private val SnackbarAction = Color(0xFFD8CAFF)
 
 private val EventMenuShapes = Shapes(
     small = RoundedCornerShape(12.dp),
@@ -101,6 +104,11 @@ fun EventMenuTheme(brand: TenantBrand? = null, content: @Composable () -> Unit) 
         onError = Color.White,
         errorContainer = Color(0xFFFFEDF0),
         onErrorContainer = Color(0xFF8D263A),
+        // Snackbar do Material 3 usa a paleta inversa. Mantemos contraste fixo
+        // para mensagens operacionais continuarem legíveis mesmo com branding.
+        inverseSurface = SnackbarSurface,
+        inverseOnSurface = SnackbarText,
+        inversePrimary = SnackbarAction,
     )
 
     CompositionLocalProvider(LocalTenantBrand provides active) {
