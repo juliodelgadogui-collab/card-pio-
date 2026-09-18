@@ -97,6 +97,7 @@ CREATE TABLE platform_invoice_items (
   invoice_id BIGINT UNSIGNED NOT NULL,
   tenant_id BIGINT UNSIGNED NOT NULL,
   item_type VARCHAR(40) NOT NULL,
+  reference_key VARCHAR(190) NULL,
   order_id BIGINT UNSIGNED NULL,
   marketplace_commission_id BIGINT UNSIGNED NULL,
   description VARCHAR(500) NOT NULL,
@@ -110,6 +111,7 @@ CREATE TABLE platform_invoice_items (
   CONSTRAINT fk_platform_invoice_item_order FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
   CONSTRAINT fk_platform_invoice_item_commission FOREIGN KEY (marketplace_commission_id) REFERENCES marketplace_order_commissions(id) ON DELETE SET NULL,
   UNIQUE KEY uq_platform_invoice_marketplace_commission (marketplace_commission_id),
+  UNIQUE KEY uq_platform_invoice_reference (tenant_id,reference_key),
   INDEX idx_platform_invoice_item_invoice (invoice_id,item_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
