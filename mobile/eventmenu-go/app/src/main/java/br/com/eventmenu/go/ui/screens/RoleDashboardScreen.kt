@@ -82,15 +82,6 @@ fun RoleDashboardScreen(
             }
         }
 
-        shortcuts.chunked(2).forEach { row ->
-            item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    row.forEach { shortcut -> DashboardShortcut(shortcut, Modifier.weight(1f)) { onNavigate(shortcut.screen) } }
-                    if (row.size == 1) Spacer(Modifier.weight(1f))
-                }
-            }
-        }
-
         item {
             Card(
                 onClick = { onNavigate(AppScreen.PROFILE) },
@@ -118,6 +109,15 @@ fun RoleDashboardScreen(
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
+                }
+            }
+        }
+
+        shortcuts.chunked(2).forEach { row ->
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    row.forEach { shortcut -> DashboardShortcut(shortcut, Modifier.weight(1f)) { onNavigate(shortcut.screen) } }
+                    if (row.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
