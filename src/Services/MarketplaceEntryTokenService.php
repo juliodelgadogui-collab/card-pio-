@@ -49,10 +49,9 @@ final class MarketplaceEntryTokenService
         if (strtotime((string)$row['expires_at']) < time()) throw new RuntimeException('Sua sessão de compra expirou. Atualize a loja e tente novamente.');
         if ((string)($row['campaign_code'] ?? '') !== (string)($claims['campaign'] ?? '')) throw new RuntimeException('Sessão do marketplace inválida.');
         (new MarketplaceCommissionService())->assertTenantCanReceive($pdo, (int)$claims['tenant_id'], (int)$claims['unit_id']);
-        $pdo->prepare('UPDATE marketplace_entry_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL')->execute([(int)$row['id']]);
-        if ($pdo->query('SELECT changes()') && Database::isSqlite($pdo)) {
-            // SQLite serializa a transação com BEGIN IMMEDIATE; a verificação acima já está protegida.
-        }
+        $update = $pdo->prepare('UPDATE marketplace_entry_tokens SET used_at=CURRENT_TIMESTAMP WHERE id=? AND used_at IS NULL');
+        $update->execute([(int)$row['id']]);
+        if ($update->rowCount() !== 1) throw new RuntimeException('Esta sessão de compra já foi utilizada. Atualize a loja para continuar.');
         return $claims;
     }
 
