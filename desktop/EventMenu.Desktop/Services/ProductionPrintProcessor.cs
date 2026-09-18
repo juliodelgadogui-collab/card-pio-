@@ -59,13 +59,13 @@ public sealed class ProductionPrintProcessor
             sb.AppendLine(Safe(q.OrderNotes));
         }
         sb.AppendLine("================================");
-        sb.AppendLine($"Fila {q.Id} • tentativa {q.Attempts}");
+        sb.AppendLine("Produção EventMenu");
         return sb.ToString();
     }
 
     private static string Channel(string value)=>value switch
     {
-        "counter"=>"Balcão","pickup"=>"Retirada","delivery"=>"Delivery","table"=>"Mesa","event_bar"=>"Evento",_=>value
+        "counter"=>"Balcão","pickup"=>"Retirada","delivery"=>"Entrega","table"=>"Mesa","event_bar"=>"Evento",_=>"Atendimento"
     };
     private static string Safe(string? value)=>string.Join(' ',(value??"").Replace("\r"," ").Replace("\n"," ").Split(' ',StringSplitOptions.RemoveEmptyEntries)).Trim();
     private static string Friendly(string message)
