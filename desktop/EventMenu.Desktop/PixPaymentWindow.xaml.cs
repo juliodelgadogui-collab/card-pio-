@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using EventMenu.Desktop.Models;
@@ -13,6 +14,8 @@ public partial class PixPaymentWindow : Window
     private readonly int _orderId;
     private readonly DispatcherTimer _pollTimer;
     private bool _polling;
+    private int? _pixPaymentId;
+    private string _pixProvider = "Pix";
 
     public bool PaymentConfirmed { get; private set; }
 
@@ -31,9 +34,9 @@ public partial class PixPaymentWindow : Window
     private async void GenerateButton_Click(object sender, RoutedEventArgs e)
     {
         var taxId = new string(TaxIdBox.Text.Where(char.IsDigit).ToArray());
-        if (taxId.Length is not (11 or 14))
+        if (taxId.Length != 0 && taxId.Length is not (11 or 14))
         {
-            MessageBox.Show("Informe um CPF ou CNPJ válido.", "Pix", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Se informar CPF ou CNPJ, use um documento válido. Você também pode deixar o campo vazio para o servidor usar os dados configurados da empresa.", "Pix", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
         if (!TryMoney(AmountBox.Text, out var amountCents) || amountCents <= 0)
@@ -43,19 +46,25 @@ public partial class PixPaymentWindow : Window
         }
 
         GenerateButton.IsEnabled = false;
-        StatusText.Text = "Preparando Pix...";
+        StatusText.Text = "Preparando Pix no servidor...";
         try
         {
+            // Provider selection belongs to EventMenu Server. Desktop intentionally
+            // sends no provider and only renders the normalized charge returned.
             var response = await _api.PixCreateAsync(_orderId, taxId, amountCents);
             var pix = response.Pix ?? throw new ApiClientException("Não foi possível gerar o Pix.");
             if (string.IsNullOrWhiteSpace(pix.CopyPaste)) throw new ApiClientException("O código Pix não foi recebido.");
 
+            _pixPaymentId = pix.PaymentId;
+            _pixProvider = pix.ProviderDisplay;
             CopyPasteBox.Text = pix.CopyPaste;
             CopyPasteBox.Visibility = Visibility.Visible;
             CopyPasteLabel.Visibility = Visibility.Visible;
             CopyButton.Visibility = Visibility.Visible;
             ExpiresText.Text = string.IsNullOrWhiteSpace(pix.ExpiresAt) ? "" : $"Válido até {ServerTimeDisplay.Local(pix.ExpiresAt)}";
-            StatusText.Text = pix.Reused ? "Pix já existente. Aguardando pagamento..." : "Pix pronto. Aguardando pagamento...";
+            StatusText.Text = pix.Reused
+                ? $"Pix {_pixProvider} já existente. Aguardando pagamento..."
+                : $"Pix {_pixProvider} pronto. Aguardando pagamento...";
 
             try
             {
@@ -66,10 +75,10 @@ public partial class PixPaymentWindow : Window
             {
                 QrImage.Source = null;
                 QrBorder.Visibility = Visibility.Collapsed;
-                StatusText.Text = "Pix pronto. Use o código Copia e Cola abaixo.";
+                StatusText.Text = $"Pix {_pixProvider} pronto. Use o código Copia e Cola abaixo.";
             }
 
-            PollingText.Text = "Verificando pagamento automaticamente...";
+            PollingText.Text = "Verificando confirmação no servidor...";
             _pollTimer.Start();
             await CheckPaymentAsync();
         }
@@ -93,22 +102,43 @@ public partial class PixPaymentWindow : Window
             var remaining = ReadInt(response.Payment, "remaining_cents");
             var paid = ReadInt(response.Payment, "paid_cents");
             var total = ReadInt(response.Payment, "total_cents");
+            var latestPixId = ReadNestedInt(response.Payment, "latest_pix", "payment_id");
+            var latestPixStatus = ReadNestedString(response.Payment, "latest_pix", "status");
+            var latestProvider = ProviderDisplay(ReadNestedString(response.Payment, "latest_pix", "provider"));
+
             if (remaining <= 0 && total > 0)
             {
                 PaymentConfirmed = true;
                 _pollTimer.Stop();
                 StatusText.Text = $"Pagamento confirmado: {Money(total)}.";
-                PollingText.Text = "Pagamento recebido.";
+                PollingText.Text = "Pagamento recebido e confirmado pelo servidor.";
                 GenerateButton.IsEnabled = false;
                 CopyButton.IsEnabled = false;
+                return;
             }
-            else
+
+            if (_pixPaymentId.HasValue && latestPixId == _pixPaymentId.Value)
             {
-                PollingText.Text = $"Pago {Money(paid)} • falta {Money(remaining)}";
+                if (latestPixStatus == "paid")
+                {
+                    StatusText.Text = $"Pix {latestProvider} confirmado. O pedido ainda possui saldo de {Money(remaining)}.";
+                }
+                else if (latestPixStatus is "failed" or "cancelled")
+                {
+                    _pollTimer.Stop();
+                    StatusText.Text = $"A cobrança Pix {latestProvider} não foi concluída. Você pode gerar uma nova cobrança.";
+                    PollingText.Text = "Cobrança encerrada sem confirmação.";
+                    GenerateButton.IsEnabled = true;
+                    return;
+                }
             }
+
+            PollingText.Text = $"Pago {Money(paid)} • falta {Money(remaining)}";
         }
         catch (Exception ex)
         {
+            // A transient status failure must never break the POS. Keep the QR usable
+            // and let the next polling cycle retry automatically.
             PollingText.Text = $"Não foi possível verificar agora: {Friendly(ex.Message)}";
         }
         finally
@@ -123,7 +153,7 @@ public partial class PixPaymentWindow : Window
         try
         {
             Clipboard.SetText(CopyPasteBox.Text);
-            StatusText.Text = "Código Pix copiado.";
+            StatusText.Text = $"Código Pix {_pixProvider} copiado.";
         }
         catch
         {
@@ -150,12 +180,33 @@ public partial class PixPaymentWindow : Window
         return true;
     }
 
-    private static int ReadInt(Dictionary<string, System.Text.Json.JsonElement>? data, string key)
+    private static int ReadInt(Dictionary<string, JsonElement>? data, string key)
     {
         if (data is null || !data.TryGetValue(key, out var value)) return 0;
-        if (value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
         return int.TryParse(value.ToString(), out number) ? number : 0;
     }
+
+    private static int ReadNestedInt(Dictionary<string, JsonElement>? data, string objectKey, string key)
+    {
+        if (data is null || !data.TryGetValue(objectKey, out var obj) || obj.ValueKind != JsonValueKind.Object) return 0;
+        if (!obj.TryGetProperty(key, out var value)) return 0;
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
+        return int.TryParse(value.ToString(), out number) ? number : 0;
+    }
+
+    private static string ReadNestedString(Dictionary<string, JsonElement>? data, string objectKey, string key)
+    {
+        if (data is null || !data.TryGetValue(objectKey, out var obj) || obj.ValueKind != JsonValueKind.Object) return "";
+        return obj.TryGetProperty(key, out var value) && value.ValueKind != JsonValueKind.Null ? value.ToString() : "";
+    }
+
+    private static string ProviderDisplay(string provider) => provider switch
+    {
+        "mercadopago" => "Mercado Pago",
+        "pagbank" => "PagBank",
+        _ => string.IsNullOrWhiteSpace(provider) ? "Pix" : provider
+    };
 
     private static string Money(int cents) => (cents / 100m).ToString("C2", PtBr);
 
