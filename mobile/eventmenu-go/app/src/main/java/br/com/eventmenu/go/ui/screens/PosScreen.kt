@@ -377,16 +377,18 @@ private fun PosPaymentScreen(
 
     if (pixTaxDialog) {
         var taxId by remember { mutableStateOf("") }
+        val taxIdValid = taxId.isEmpty() || taxId.length in setOf(11, 14)
         AlertDialog(
             onDismissRequest = { pixTaxDialog = false },
             title = { Text("PIX · ${posMoney(amount)}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Informe CPF ou CNPJ para gerar o PIX.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true)
+                    Text("CPF/CNPJ é opcional. Se ficar vazio, o EventMenu usa os dados disponíveis ou o documento padrão configurado pela empresa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ (opcional)") }, singleLine = true)
+                    if (taxId.isNotEmpty() && !taxIdValid) Text("Informe 11 dígitos para CPF ou 14 para CNPJ.", color = MaterialTheme.colorScheme.error)
                 }
             },
-            confirmButton = { Button(onClick = { pixTaxDialog = false; onPix(amount, taxId) }, enabled = taxId.length in setOf(11, 14)) { Text("Gerar PIX") } },
+            confirmButton = { Button(onClick = { pixTaxDialog = false; onPix(amount, taxId) }, enabled = taxIdValid) { Text("Gerar PIX") } },
             dismissButton = { TextButton(onClick = { pixTaxDialog = false }) { Text("Cancelar") } },
         )
     }
@@ -394,7 +396,9 @@ private fun PosPaymentScreen(
 
 private fun paymentLabel(provider: String) = when (provider.lowercase()) {
     "manual" -> "Dinheiro"
-    "pagbank", "stripe", "mercadopago" -> "Pagamento eletrônico"
+    "mercadopago" -> "Pix · Mercado Pago"
+    "pagbank" -> "Pix · PagBank"
+    "stripe" -> "Pagamento eletrônico"
     else -> "Pagamento"
 }
 
