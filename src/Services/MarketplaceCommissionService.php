@@ -100,13 +100,7 @@ final class MarketplaceCommissionService
         if ((string)($order['order_source'] ?? '') !== self::ORDER_SOURCE) return null;
         $this->assertTenantCanReceive($pdo, $tenantId, isset($order['unit_id']) && $order['unit_id'] !== null ? (int)$order['unit_id'] : null);
 
-        $items = $pdo->prepare('SELECT COALESCE(SUM(total_cents),0) FROM order_items WHERE order_id=?');
-        $items->execute([$orderId]);
-        $productsGross = max(0, (int)$items->fetchColumn());
-        if ($productsGross === 0) $productsGross = max(0, (int)($order['subtotal_cents'] ?? 0));
-        $discount = min($productsGross, max(0, (int)($order['discount_cents'] ?? 0)));
-        $excluded = 0;
-        $base = max(0, $productsGross - $discount - $excluded);
+        $amounts = $this->currentBase($pdo, $orderId, $order);
         $rule = $this->resolveRule(
             $pdo,
             $tenantId,
@@ -114,7 +108,7 @@ final class MarketplaceCommissionService
             (string)($order['marketplace_campaign_code'] ?? '')
         );
         $rateBps = (int)$rule['rate_bps'];
-        $commission = max(0, (int)round($base * $rateBps / 10000));
+        $commission = max(0, (int)round($amounts['base_cents'] * $rateBps / 10000));
         $snapshot = [
             'rule_id' => (int)$rule['id'],
             'name' => (string)$rule['name'],
@@ -137,10 +131,10 @@ final class MarketplaceCommissionService
             $orderId,
             (int)$rule['id'],
             self::ORDER_SOURCE,
-            $productsGross,
-            $discount,
-            $excluded,
-            $base,
+            $amounts['products_gross_cents'],
+            $amounts['product_discount_cents'],
+            $amounts['excluded_adjustments_cents'],
+            $amounts['base_cents'],
             $rateBps,
             $commission,
             json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
@@ -153,7 +147,14 @@ final class MarketplaceCommissionService
         $row = $this->lockedByOrder($pdo, $tenantId, $orderId);
         if (!$row) return null;
         if ((string)$row['status'] === 'provisioned') {
-            $pdo->prepare('UPDATE marketplace_order_commissions SET status="due",due_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([(int)$row['id']]);
+            $o=$pdo->prepare(Database::portableSql($pdo,'SELECT id,subtotal_cents,discount_cents FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));
+            $o->execute([$orderId,$tenantId]);
+            $order=$o->fetch();
+            if(!$order)throw new RuntimeException('Pedido não encontrado ao concluir cobrança do marketplace.');
+            $amounts=$this->currentBase($pdo,$orderId,$order,(int)$row['excluded_adjustments_cents']);
+            $rateBps=(int)$row['commission_bps'];
+            $commission=max(0,(int)round($amounts['base_cents']*$rateBps/10000));
+            $pdo->prepare('UPDATE marketplace_order_commissions SET products_gross_cents=?,product_discount_cents=?,excluded_adjustments_cents=?,calculation_base_cents=?,commission_cents=?,status="due",due_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status="provisioned"')->execute([$amounts['products_gross_cents'],$amounts['product_discount_cents'],$amounts['excluded_adjustments_cents'],$amounts['base_cents'],$commission,(int)$row['id']]);
         }
         return $this->findByOrder($pdo, $orderId);
     }
@@ -180,6 +181,22 @@ final class MarketplaceCommissionService
         $s->execute([$orderId]);
         $row = $s->fetch();
         return $row ?: null;
+    }
+
+    private function currentBase(PDO $pdo,int $orderId,array $order,int $excludedAdjustmentsCents=0):array
+    {
+        $items=$pdo->prepare('SELECT COALESCE(SUM(total_cents),0) FROM order_items WHERE order_id=?');
+        $items->execute([$orderId]);
+        $gross=max(0,(int)$items->fetchColumn());
+        if($gross===0)$gross=max(0,(int)($order['subtotal_cents']??0));
+        $discount=min($gross,max(0,(int)($order['discount_cents']??0)));
+        $excluded=max(0,min($gross-$discount,$excludedAdjustmentsCents));
+        return[
+            'products_gross_cents'=>$gross,
+            'product_discount_cents'=>$discount,
+            'excluded_adjustments_cents'=>$excluded,
+            'base_cents'=>max(0,$gross-$discount-$excluded),
+        ];
     }
 
     private function lockedByOrder(PDO $pdo, int $tenantId, int $orderId): ?array
