@@ -72,7 +72,6 @@ private fun parsed(hex: String, fallback: Color): Color = runCatching {
 fun EventMenuTheme(brand: TenantBrand? = null, content: @Composable () -> Unit) {
     val active = brand?.takeIf { it.applyApp }
     val primary = active?.let { parsed(it.primaryColor, DefaultPurple) } ?: DefaultPurple
-    val secondary = active?.let { parsed(it.secondaryColor, EventMenuUi.Success) } ?: EventMenuUi.Success
     val background = active?.let { parsed(it.backgroundColor, DefaultCanvas) } ?: DefaultCanvas
     val surface = active?.let { parsed(it.surfaceColor, Color.White) } ?: Color.White
     val ink = active?.let { parsed(it.textColor, DefaultInk) } ?: DefaultInk
@@ -82,7 +81,8 @@ fun EventMenuTheme(brand: TenantBrand? = null, content: @Composable () -> Unit) 
         onPrimary = Color.White,
         primaryContainer = PurpleSoft,
         onPrimaryContainer = PurpleDark,
-        secondary = secondary,
+        // Status semânticos nunca herdam a cor promocional da empresa.
+        secondary = EventMenuUi.Success,
         onSecondary = Color.White,
         secondaryContainer = SuccessSoft,
         onSecondaryContainer = SuccessInk,
