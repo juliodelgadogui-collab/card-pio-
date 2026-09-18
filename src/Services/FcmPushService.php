@@ -20,6 +20,8 @@ final class FcmPushService
     {
         if($notificationId<1)throw new RuntimeException('Notificação push inválida.');
         $pdo=Database::connection();$s=$pdo->prepare('SELECT n.*,u.status user_status FROM app_notifications n JOIN users u ON u.id=n.user_id AND u.tenant_id=n.tenant_id WHERE n.id=? LIMIT 1');$s->execute([$notificationId]);$notification=$s->fetch();if(!$notification)return['sent'=>0,'devices'=>0,'missing'=>true];if((string)$notification['user_status']!=='active')return['sent'=>0,'devices'=>0,'inactive_user'=>true];
+        if(!empty($notification['expires_at'])&&strtotime((string)$notification['expires_at'])<=time())return['sent'=>0,'devices'=>0,'expired'=>true];
+        if(!empty($notification['read_at']))return['sent'=>0,'devices'=>0,'already_read'=>true];
         $d=$pdo->prepare('SELECT id,push_token FROM push_devices WHERE tenant_id=? AND user_id=? AND active=1 ORDER BY id');$d->execute([(int)$notification['tenant_id'],(int)$notification['user_id']]);$devices=$d->fetchAll();if(!$devices)return['sent'=>0,'devices'=>0,'configured'=>$this->configured()];
         if(!$this->configured())return['sent'=>0,'devices'=>count($devices),'configured'=>false];
 
