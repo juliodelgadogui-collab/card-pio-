@@ -4,6 +4,7 @@ namespace EventMenu.Desktop.Models;
 
 public sealed class PixDetails
 {
+    [JsonPropertyName("provider")] public string Provider { get; set; } = "";
     [JsonPropertyName("payment_id")] public int PaymentId { get; set; }
     [JsonPropertyName("order_id")] public int OrderId { get; set; }
     [JsonPropertyName("amount_cents")] public int AmountCents { get; set; }
@@ -11,6 +12,13 @@ public sealed class PixDetails
     [JsonPropertyName("image_url")] public string ImageUrl { get; set; } = "";
     [JsonPropertyName("expires_at")] public string ExpiresAt { get; set; } = "";
     [JsonPropertyName("reused")] public bool Reused { get; set; }
+
+    public string ProviderDisplay => Provider switch
+    {
+        "mercadopago" => "Mercado Pago",
+        "pagbank" => "PagBank",
+        _ => string.IsNullOrWhiteSpace(Provider) ? "Pix" : Provider
+    };
 }
 
 public sealed class PixCreateResponse
