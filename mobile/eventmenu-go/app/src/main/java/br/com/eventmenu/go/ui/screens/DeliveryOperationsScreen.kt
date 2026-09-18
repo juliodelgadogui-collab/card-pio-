@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import br.com.eventmenu.go.CancellationViewModel
 import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.OperationalText
 import br.com.eventmenu.go.OrderOperationsViewModel
 import br.com.eventmenu.go.data.DeliveryProgress
 import br.com.eventmenu.go.data.Order
@@ -121,9 +122,9 @@ fun DeliveryOperationsScreen(
             val pickedUp = step?.pickedUp == true
             val routeStarted = step?.routeStarted == true || order.status == "out_for_delivery"
             val arrived = step?.arrived == true
-            val customer = deliveryUseful(order.customerName)?.takeIf { !it.equals("Consumidor", true) }
-            val address = deliveryUseful(order.deliveryAddress)
-            val phone = deliveryUseful(order.customerPhone)
+            val customer = OperationalText.useful(order.customerName)?.takeIf { !it.equals("Consumidor", true) }
+            val address = OperationalText.useful(order.deliveryAddress)
+            val phone = OperationalText.useful(order.customerPhone)
 
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
@@ -253,7 +254,7 @@ private fun DeliveryPaymentPill(status: String) {
         shape = MaterialTheme.shapes.small,
     ) {
         Text(
-            if (paid) "Pago" else if (status == "pending") "Pagamento em processamento" else "A receber",
+            OperationalText.paymentStatus(status),
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             color = if (paid) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onPrimaryContainer,
             fontWeight = FontWeight.SemiBold,
@@ -308,17 +309,19 @@ private fun CashReceiveDialog(order: Order, onDismiss: () -> Unit, onConfirm: (I
 @Composable
 private fun TaxIdDialog(orderId: Int, amountCents: Int, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var taxId by remember { mutableStateOf("") }
+    val valid = taxId.isBlank() || taxId.length in setOf(11, 14)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("PIX · Pedido #$orderId") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Total: ${moneyDelivery(amountCents)}")
-                Text("Informe CPF ou CNPJ para gerar o PIX.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ") }, singleLine = true)
+                Text("O EventMenu usa os dados cadastrados da empresa ou do cliente. Informe CPF/CNPJ somente quando necessário.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ (opcional)") }, singleLine = true)
+                if (taxId.isNotBlank() && !valid) Text("Digite um CPF ou CNPJ completo.", color = MaterialTheme.colorScheme.error)
             }
         },
-        confirmButton = { Button(onClick = { onConfirm(taxId) }, enabled = taxId.length in setOf(11, 14)) { Text("Gerar PIX") } },
+        confirmButton = { Button(onClick = { onConfirm(taxId) }, enabled = valid) { Text("Gerar PIX") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
     )
 }
@@ -327,7 +330,14 @@ private fun TaxIdDialog(orderId: Int, amountCents: Int, onDismiss: () -> Unit, o
 private fun PixWaitingDialog(charge: PixCharge, onPoll: () -> Unit, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val qr = remember(charge.copyPaste) { qrBitmap(charge.copyPaste) }
-    LaunchedEffect(charge.paymentId) { while (true) { delay(2500); onPoll() } }
+    LaunchedEffect(charge.paymentId) {
+        var interval = 3_000L
+        while (true) {
+            delay(interval)
+            onPoll()
+            interval = (interval + 1_000L).coerceAtMost(10_000L)
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("PIX · ${moneyDelivery(charge.amountCents)}") },
@@ -335,7 +345,7 @@ private fun PixWaitingDialog(charge: PixCharge, onPoll: () -> Unit, onDismiss: (
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 qr?.let { Image(it.asImageBitmap(), contentDescription = "QR Code PIX", modifier = Modifier.fillMaxWidth()) }
                 Text("Aguardando pagamento", fontWeight = FontWeight.SemiBold)
-                deliveryUseful(charge.expiresAt)?.let { Text("Válido até ${deliveryFriendlyDateTime(it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                OperationalText.useful(charge.expiresAt)?.let { Text("Válido até ${deliveryFriendlyDateTime(it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 OutlinedButton(onClick = { copy(context, charge.copyPaste) }, modifier = Modifier.fillMaxWidth()) { Text("Copiar código PIX") }
             }
         },
@@ -350,11 +360,6 @@ internal fun qrBitmap(text: String): Bitmap? = runCatching {
     for (x in 0 until size) for (y in 0 until size) bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
     bitmap
 }.getOrNull()
-
-private fun deliveryUseful(value: String?): String? {
-    val clean = value?.trim().orEmpty()
-    return clean.takeIf { it.isNotBlank() && !it.equals("null", true) && !it.equals("undefined", true) }
-}
 
 private fun deliveryFriendlyDateTime(value: String): String {
     val clean = value.trim().replace('T', ' ')
