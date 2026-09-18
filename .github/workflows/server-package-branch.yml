@@ -22,8 +22,12 @@ jobs:
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-super-admin-smoke.php
+          php scripts/ci-permission-smoke.php
           php scripts/ci-operations-smoke.php
           php scripts/ci-customer-identity-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-production-readiness-smoke.php
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-dev"
       - name: Verify receipt contract
