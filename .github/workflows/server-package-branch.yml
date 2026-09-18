@@ -23,6 +23,7 @@ jobs:
           php scripts/ci-db-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
+          php scripts/ci-customer-identity-smoke.php
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-dev"
       - name: Verify receipt contract
