@@ -65,7 +65,9 @@ try {
         if($tenantId<1||$unitId<1)marketplace_out(['ok'=>false,'message'=>'Escolha uma loja para continuar.'],422);
         $rate->assertAllowed('marketplace.catalog',$rate->requestSubject($tenantId.':'.$unitId),90,60,'Muitas atualizações em pouco tempo. Aguarde alguns segundos.');
         $data=$catalog->catalog($pdo,$tenantId,$unitId);
-        $entry=(new MarketplaceEntryTokenService())->issue($pdo,$tenantId,$unitId,(string)($_GET['campaign']??''));
+        // Campanhas financeiras são resolvidas pelo servidor/ADM Geral. O consumidor não escolhe
+        // campaign_code pela URL, evitando manipulação da taxa de comissão do restaurante.
+        $entry=(new MarketplaceEntryTokenService())->issue($pdo,$tenantId,$unitId,null);
         $data['checkout_session']=$entry;
         marketplace_out(['ok'=>true]+$data);
     }
