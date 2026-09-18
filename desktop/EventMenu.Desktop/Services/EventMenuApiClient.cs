@@ -81,6 +81,23 @@ public sealed class EventMenuApiClient : IDisposable
     public Task<OrderDetailsResponse> OrderDetailsAsync(int orderId, CancellationToken ct = default) =>
         GetAsync<OrderDetailsResponse>("api.php", "order", new Dictionary<string, string> { ["id"] = orderId.ToString() }, ct);
 
+    public async Task<(OrderReceipt Receipt, ReceiptPresentation Presentation)> OfficialReceiptAsync(int orderId, CancellationToken ct = default)
+    {
+        EnsureSession();
+        var json = await SendWithRefreshAsync(
+            HttpMethod.Get,
+            "api-go-receipts.php",
+            "order",
+            new Dictionary<string, string> { ["order_id"] = orderId.ToString() },
+            null,
+            ct);
+        var receipt = Deserialize<ReceiptResponse>(json).Receipt
+                      ?? throw new ApiClientException("O comprovante não foi retornado pelo servidor.");
+        var presentation = Deserialize<ReceiptPresentationEnvelope>(json).Receipt?.Presentation
+                           ?? throw new ApiClientException("O padrão do comprovante não foi retornado pelo servidor.");
+        return (receipt, presentation);
+    }
+
     public Task<OrderCreateResponse> CreateOrderAsync(OrderCreateRequest request, CancellationToken ct = default) =>
         PostAsync<OrderCreateResponse>("api.php", "order-create", request, ct);
 
@@ -298,29 +315,35 @@ public sealed class EventMenuApiClient : IDisposable
         return message;
     }
 
-    private static T Deserialize<T>(string json) =>
-        JsonSerializer.Deserialize<T>(json, JsonOptions)
-        ?? throw new ApiClientException("Não foi possível carregar todos os dados desta tela.");
-
     private void EnsureSession()
     {
+        _session ??= _store.Load();
         if (_session is null || string.IsNullOrWhiteSpace(_session.Token))
             throw new ApiClientException("Faça login novamente.", HttpStatusCode.Unauthorized);
     }
 
+    private static T Deserialize<T>(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<T>(json, JsonOptions)
+                   ?? throw new ApiClientException("Não foi possível carregar os dados desta operação.");
+        }
+        catch (JsonException)
+        {
+            throw new ApiClientException("Não foi possível carregar os dados desta operação.");
+        }
+    }
+
     public void Dispose()
     {
-        _http.Dispose();
         _refreshLock.Dispose();
+        _http.Dispose();
     }
 }
 
 public sealed class ApiClientException : Exception
 {
-    public HttpStatusCode? StatusCode { get; }
-
-    public ApiClientException(string message, HttpStatusCode? statusCode = null) : base(message)
-    {
-        StatusCode = statusCode;
-    }
+    public HttpStatusCode StatusCode { get; }
+    public ApiClientException(string message, HttpStatusCode statusCode = 0) : base(message) => StatusCode = statusCode;
 }
