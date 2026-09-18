@@ -46,11 +46,53 @@ final class TicketService
             $phone = trim((string)($buyer['phone'] ?? ''));
             if ($name === '' || (!filter_var($email, FILTER_VALIDATE_EMAIL) && $phone === '')) throw new RuntimeException('Informe nome e e-mail ou telefone válido.');
 
+            $tenantId = (int)$event['tenant_id'];
             $customerId = null;
-            if ($email !== '') {$s = $pdo->prepare('SELECT id FROM customers WHERE tenant_id=? AND email=? LIMIT 1');$s->execute([$event['tenant_id'], $email]);$customerId = $s->fetchColumn() ?: null;}
-            if (!$customerId && $phone !== '') {$s = $pdo->prepare('SELECT id FROM customers WHERE tenant_id=? AND phone=? LIMIT 1');$s->execute([$event['tenant_id'], $phone]);$customerId = $s->fetchColumn() ?: null;}
-            if (!$customerId) {$s = $pdo->prepare('INSERT INTO customers (tenant_id,name,phone,email) VALUES (?,?,?,?)');$s->execute([$event['tenant_id'], $name, $phone ?: null, $email ?: null]);$customerId = (int)$pdo->lastInsertId();}
-            else {$pdo->prepare('UPDATE customers SET name=?,phone=COALESCE(NULLIF(?,""),phone),email=COALESCE(NULLIF(?,""),email) WHERE id=?')->execute([$name, $phone, $email, $customerId]);}
+            if ($phone !== '') {
+                $identity = new CustomerIdentityService();
+                $customer = $identity->findByPhone($pdo, $tenantId, $phone);
+
+                // O telefone é a identidade operacional principal. Quando o comprador já existia
+                // apenas por e-mail, reaproveitamos o mesmo cadastro e vinculamos o telefone
+                // normalizado em vez de criar um segundo cliente.
+                if (!$customer && $email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $s = $pdo->prepare('SELECT id,name,phone,default_address FROM customers WHERE tenant_id=? AND email=? ORDER BY id ASC LIMIT 1');
+                    $s->execute([$tenantId, $email]);
+                    $emailCustomer = $s->fetch();
+                    if ($emailCustomer) {
+                        try {
+                            $customer = $identity->save($pdo, $tenantId, [
+                                'name' => $name,
+                                'phone' => $phone,
+                                'email' => $email,
+                                'address' => (string)($emailCustomer['default_address'] ?? ''),
+                            ], (int)$emailCustomer['id']);
+                        } catch (RuntimeException $e) {
+                            // Uma compra concorrente pode ter criado a identidade pelo telefone
+                            // entre a busca e a atualização. Nesse caso usamos o cadastro vencedor.
+                            $customer = $identity->findByPhone($pdo, $tenantId, $phone);
+                            if (!$customer) throw $e;
+                        }
+                    }
+                }
+
+                if (!$customer) $customer = $identity->findOrCreate($pdo, $tenantId, $name, $phone);
+                $customerId = (int)$customer['id'];
+                if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $pdo->prepare('UPDATE customers SET email=? WHERE id=? AND tenant_id=?')->execute([$email, $customerId, $tenantId]);
+                }
+            } elseif ($email !== '') {
+                $s = $pdo->prepare('SELECT id FROM customers WHERE tenant_id=? AND email=? ORDER BY id ASC LIMIT 1');
+                $s->execute([$tenantId, $email]);
+                $customerId = $s->fetchColumn() ?: null;
+                if (!$customerId) {
+                    $s = $pdo->prepare('INSERT INTO customers (tenant_id,name,phone,email) VALUES (?,?,NULL,?)');
+                    $s->execute([$tenantId, $name, $email]);
+                    $customerId = (int)$pdo->lastInsertId();
+                } else {
+                    $pdo->prepare('UPDATE customers SET name=? WHERE id=? AND tenant_id=?')->execute([$name, $customerId, $tenantId]);
+                }
+            }
 
             $subtotal = (int)$batch['price_cents'] * $quantity;$discount = 0;$couponId = null;
             if ($couponCode) {
