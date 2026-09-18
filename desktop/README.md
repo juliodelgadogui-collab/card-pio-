@@ -1,102 +1,146 @@
-# EventMenu Desktop 0.2.0
+# EventMenu Desktop 0.3.0
 
-Cliente nativo para Windows conectado ao mesmo servidor do EventMenu Web e do EventMenu GO.
+Programa **Windows nativo** do EventMenu para operação de restaurante, delivery e eventos.
 
-## Arquitetura
+Tecnologia: **.NET 8 + WPF/XAML**, sem WebView e sem navegador embutido.
 
-```text
-EventMenu Desktop (Windows)
-          |
-          | HTTPS / API
-          v
-EventMenu Web / servidor
-          |
-          v
-Banco central da empresa
-```
+O Desktop usa os mesmos dados e regras centrais do EventMenu. O Windows cuida da experiência de operação e dos equipamentos locais; validações sensíveis continuam centralizadas no sistema.
 
-O Desktop **não substitui o servidor Web** e não cria um segundo banco principal. Permissões, estoque, pedidos, pagamentos e consistência continuam sendo validados pelo backend.
+## O que o Desktop cobre
 
-## Funcionalidades implementadas
+### Operação do restaurante
 
-### Segurança e sessão
+- login com renovação de sessão;
+- seleção de unidade e turno;
+- visão geral operacional;
+- nova venda / PDV;
+- pedidos com busca, filtros, detalhes e histórico;
+- aceite e mudança de etapa conforme permissão;
+- desconto e cancelamento com solicitação/aprovação;
+- fidelidade / pontos;
+- mesas e comandas;
+- conta dividida por valor, percentual, pessoas ou produtos;
+- recebimento por Pix ou dinheiro;
+- caixa, suprimento, sangria e fechamento;
+- produção, cozinha e expedição;
+- estoque.
 
-- aplicativo WPF nativo em .NET 8, sem WebView;
-- login usando a API real do EventMenu;
-- `device_id` persistente por computador;
-- access token + refresh token;
-- renovação automática da sessão;
-- tokens protegidos no Windows com DPAPI (`CurrentUser`);
-- logout com revogação no servidor;
-- URL do servidor somente por ambiente de build/execução e obrigatoriamente HTTPS;
-- permissões efetivas fornecidas pelo servidor controlam as funções visíveis.
+### Delivery
 
-### Operação
+- triagem por unidade;
+- atribuição e transferência de entregador;
+- retirada, início de rota, chegada e conclusão;
+- pagamento Pix na entrega após a etapa permitida;
+- recebimento em dinheiro e troco;
+- QR de repasse do dinheiro ao caixa;
+- acompanhamento das entregas em rota;
+- resumo do turno e comissão.
 
-- seleção de unidade operacional;
-- início e encerramento de turno conforme a função do usuário;
-- modos Operação, Delivery, Eventos e Pay conforme permissões;
-- atualização automática de pedidos e mesas;
-- indicador de conexão com o servidor.
+A posição GPS real é enviada pelo celular do entregador. O Windows acompanha essa posição; não cria localização artificial.
 
-### PDV
+### Eventos
 
-- pesquisa de produtos por nome ou SKU;
-- carrinho com quantidade, remoção e total;
-- validação local de estoque para melhor experiência e validação definitiva no servidor;
-- pedidos de balcão, retirada, delivery e mesa;
-- cliente, telefone, endereço e observações;
-- criação do pedido diretamente no servidor;
-- pedidos de mesa exigem comanda aberta;
-- atualização de catálogo e estoque após a venda.
+- eventos disponíveis para o turno;
+- ingressos e convidados;
+- check-in;
+- venda no bar;
+- retirada de pedido do bar por código;
+- acompanhamento operacional conforme permissão.
 
-### Pedidos
+### QR e identificação
 
-- lista operacional conforme usuário, unidade e turno;
-- mudança de status por permissões do servidor;
-- fluxo de preparo, pronto e conclusão;
-- impressão do pedido pela fila de impressoras do Windows.
+O leitor `Ler QR / código` concentra os fluxos compatíveis do EventMenu, incluindo:
 
-### Mesas e comandas
+- pedido;
+- mesa;
+- comanda;
+- ingresso;
+- convidado;
+- funcionário;
+- entregador;
+- cliente;
+- evento;
+- dispositivo autorizado;
+- repasse de dinheiro do Delivery.
 
-- listagem de mesas;
-- abertura de comanda;
-- identificação da comanda;
-- fechamento de comanda somente quando o servidor permitir;
-- totais e valores em aberto.
+A tela `Meu QR` permite ao funcionário/entregador gerar, exibir, copiar, substituir e revogar sua identificação. O payload local é protegido com DPAPI do Windows e separado por empresa/usuário.
 
-### Caixa
+Os QRs exibidos pelo Desktop são renderizados nativamente no WPF a partir da matriz do QRCoder.
 
-- abertura de caixa;
-- valor inicial;
-- suprimento;
-- sangria;
-- ajuste com justificativa;
-- valor esperado calculado no servidor;
-- fechamento com valor contado e diferença apurada pelo backend.
+### Comprovantes e impressão
 
-### Pagamentos
+- impressão operacional do pedido;
+- comprovante não fiscal completo do pedido;
+- comprovante não fiscal de uma divisão da comanda;
+- impressão pelo sistema do Windows;
+- configuração de impressora/equipamentos locais.
 
-- consulta de total pago e saldo restante do pedido;
-- recebimento total ou parcial em dinheiro;
-- chave de idempotência por intenção de recebimento;
-- registro do recebimento no caixa pelo servidor;
-- geração de PIX PagBank usando a integração já configurada pela empresa;
-- PIX copia e cola;
-- QR Code fornecido pelo provedor quando disponível;
-- consulta automática da confirmação do PIX;
-- pedido cancelado ou concluído não recebe nova cobrança;
-- o Desktop nunca considera um pagamento aprovado apenas por informação local.
+Comprovante de venda **não é nota fiscal**. A emissão fiscal fica em módulo separado.
+
+### Nota fiscal
+
+A área `Nota fiscal` foi separada das configurações gerais e pode conter, conforme permissão:
+
+- perfil fiscal por unidade;
+- ambiente de homologação/produção;
+- CNPJ, IE, regime tributário e endereço;
+- séries e numeração;
+- CSC;
+- certificado A1 e referência de certificado local;
+- tributação dos produtos (NCM, CEST, CFOP, CST/CSOSN, PIS, COFINS, IPI etc.);
+- diagnóstico de prontidão;
+- acompanhamento dos documentos fiscais.
+
+A interface estar disponível não significa que a emissão oficial já esteja homologada. Transmissão real depende de credenciamento, certificado e transmissor fiscal válido para o ambiente utilizado.
+
+## Segurança
+
+- tokens locais protegidos pelo Windows;
+- comunicação configurada somente em HTTPS;
+- permissões recebidas da conta controlam o que aparece e o que pode ser executado;
+- pagamentos não são confirmados apenas porque a interface informou sucesso;
+- Pix só é baixado após confirmação do fluxo financeiro;
+- desconto/cancelamento/fidelidade seguem regras da conta;
+- dados de outra empresa não devem ser reutilizados no cache local;
+- QR universal é validado online antes de liberar dados ou ações;
+- mensagens de SQL/stack trace não devem aparecer ao operador.
+
+## Diferenças intencionais para o Android
+
+O objetivo é paridade **operacional**, não copiar recursos físicos do telefone.
+
+Ficam no celular:
+
+- GPS contínuo;
+- câmera para escanear QR/código;
+- biometria Android;
+- push/permissões Android;
+- Tap On/NFC do telefone enquanto esse módulo estiver pausado.
+
+No Windows, códigos podem ser lidos por scanner USB/teclado, colados ou digitados.
+
+## Integrações locais
+
+O projeto possui infraestrutura para:
+
+- impressoras;
+- gaveta;
+- tela do cliente;
+- conexão com celular autorizado;
+- fila de impressão da produção;
+- conectores TEF/PINPad.
+
+A integração física de TEF/PINPad e fiscal depende de SDK, credenciais e homologação do fornecedor. O EventMenu não deve simular aprovação financeira ou fiscal.
 
 ## Servidor
 
-Por padrão:
+Base padrão atual do cliente:
 
 ```text
 https://go.gestao2.store/1/
 ```
 
-Para staging/migração, defina antes de iniciar ou compilar:
+Para outro ambiente:
 
 ```powershell
 $env:EVENTMENU_DESKTOP_API_BASE_URL = "https://staging.exemplo.com/1/"
@@ -104,36 +148,42 @@ $env:EVENTMENU_DESKTOP_API_BASE_URL = "https://staging.exemplo.com/1/"
 
 A URL precisa usar HTTPS.
 
-## Executar em desenvolvimento
+Alguns módulos novos dependem de endpoints mais recentes. Antes de publicar o Desktop em outro ambiente, conferir compatibilidade do servidor com QR universal, eventos, gerência, aprovações, notificações, fidelidade, conta dividida, comprovantes e fluxo financeiro do Delivery.
 
-Requer Windows com .NET 8 SDK:
+## Compilação local
 
-```powershell
-dotnet run --project desktop/EventMenu.Desktop/EventMenu.Desktop.csproj
-```
-
-## Publicação Windows
-
-O GitHub Actions gera duas entregas:
-
-1. `EventMenu-Desktop-win-x64.zip` — versão portátil self-contained contendo `EventMenu.Desktop.exe`;
-2. `EventMenu-Desktop-Setup.exe` — instalador para Windows x64 com menu Iniciar e opção de atalho na área de trabalho.
-
-O executável publicado é self-contained; o computador do restaurante não precisa ter o .NET 8 instalado separadamente.
-
-Também é possível publicar manualmente com:
+Pré-requisito: SDK .NET 8 em Windows.
 
 ```powershell
-./desktop/build-windows.ps1
+dotnet restore desktop/EventMenu.Desktop/EventMenu.Desktop.csproj
+dotnet build desktop/EventMenu.Desktop/EventMenu.Desktop.csproj -c Release
+dotnet publish desktop/EventMenu.Desktop/EventMenu.Desktop.csproj -c Release -r win-x64 --self-contained false
 ```
 
-## Próximas evoluções
+O instalador Windows é produzido pelo fluxo já existente no repositório.
 
-- fluxo específico de cozinha/produção com impressão automática por estação;
-- QR Code universal e check-in de eventos no Desktop;
-- suporte a periféricos adicionais conforme hardware homologado;
-- contingência local segura para leituras e fila controlada apenas das operações que possam ser repetidas com segurança;
-- atualização automática assinada do programa;
-- assinatura digital do executável/instalador para distribuição pública.
+**Regra atual deste desenvolvimento:** não executar build, publish, GitHub Actions ou gerar instalador sem autorização explícita antes da compilação.
 
-Operações financeiras e dados sensíveis continuam sendo confirmados e autorizados pelo servidor EventMenu.
+## Transferência para outra conta/equipe
+
+Consulte também `desktop/HANDOFF_DESKTOP.md`.
+
+Ao transferir o trabalho, informar:
+
+- branch atual;
+- commit de referência;
+- ambiente do servidor usado;
+- recursos ainda dependentes de hardware/homologação;
+- que Android, Desktop e servidor possuem responsabilidades diferentes;
+- que o Desktop é WPF nativo e não WebView.
+
+Se o repositório for público, outra conta pode clonar/forkar e compilar. Secrets não acompanham fork. Em repositório privado, a nova conta precisa receber acesso ou uma cópia/transferência autorizada.
+
+## Antes de considerar uma versão pronta
+
+1. revisão estática de XAML, code-behind, contratos JSON, permissões e estados;
+2. autorização explícita para compilar;
+3. build/publish do Windows;
+4. teste real de instalação e atualização;
+5. teste de login/sessão, turnos, PDV, pedidos, caixa, mesas, divisão de conta, produção, estoque, Delivery, eventos, QR, impressão, notificações, aprovações e fiscal;
+6. somente depois classificar a versão como pronta para produção.

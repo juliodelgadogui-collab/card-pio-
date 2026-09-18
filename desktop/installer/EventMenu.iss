@@ -1,5 +1,5 @@
 #define MyAppName "EventMenu Desktop"
-#define MyAppVersion "0.2.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "EventMenu"
 #define MyAppExeName "EventMenu.Desktop.exe"
 
@@ -8,15 +8,16 @@ AppId={{A3A63490-2B61-4D3B-AEAE-C6637DBBFC9C}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\EventMenu Desktop
+DefaultDirName={localappdata}\Programs\EventMenu Desktop
 DefaultGroupName=EventMenu Desktop
 DisableProgramGroupPage=yes
 OutputDir=..\..\artifacts\EventMenu-Desktop-installer
-OutputBaseFilename=EventMenu-Desktop-Setup
+OutputBaseFilename=EventMenu-Desktop-Setup-v1.0.0
+SetupIconFile=..\EventMenu.Desktop\Assets\EventMenu.ico
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-PrivilegesRequired=admin
+PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}

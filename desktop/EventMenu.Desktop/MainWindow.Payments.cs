@@ -1,7 +1,5 @@
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media;
 using EventMenu.Desktop.Models;
 
 namespace EventMenu.Desktop;
@@ -9,17 +7,15 @@ namespace EventMenu.Desktop;
 public partial class MainWindow
 {
     private StackPanel? _paymentPanel;
-    private TextBlock? _paymentStatusText;
-    private TextBox? _paymentAmountBox;
-    private Button? _paymentRefreshButton;
-    private Button? _paymentCashButton;
-    private Button? _paymentPixButton;
+    private Button? _paymentOpenButton;
+    private Button? _fiscalIssueButton;
+    private Button? _fiscalDocumentsButton;
     private bool _paymentControlsReady;
     private bool _canPayments;
 
-    protected override void OnContentRendered(EventArgs e)
+    protected override void OnActivated(EventArgs e)
     {
-        base.OnContentRendered(e);
+        base.OnActivated(e);
         EnsurePaymentControls();
     }
 
@@ -28,50 +24,47 @@ public partial class MainWindow
         if (_paymentControlsReady) return;
         _paymentControlsReady = true;
 
-        var actions = OrdersView.Children
-            .OfType<StackPanel>()
-            .FirstOrDefault(panel => Grid.GetRow(panel) == 2);
+        StackPanel? actions = null;
+        var rowGrid = OrdersView.Children.OfType<Grid>().FirstOrDefault(x => Grid.GetRow(x) == 2);
+        if (rowGrid is not null)
+            actions = rowGrid.Children.OfType<StackPanel>().FirstOrDefault(x => Grid.GetColumn(x) == 1);
+        actions ??= OrdersView.Children.OfType<StackPanel>().FirstOrDefault(x => Grid.GetRow(x) == 2);
         if (actions is null) return;
 
-        _paymentStatusText = new TextBlock
+        _paymentOpenButton = new Button
         {
-            Text = "Selecione um pedido para consultar o pagamento.",
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = Brushes.DimGray,
-            Margin = new Thickness(0, 0, 10, 8),
-            MaxWidth = 250,
-            TextWrapping = TextWrapping.Wrap
+            Content = "Receber",
+            Height = 40,
+            MinHeight = 40,
+            Padding = new Thickness(16, 8, 16, 8),
+            Visibility = Visibility.Collapsed,
+            ToolTip = "Consultar e receber o pagamento deste pedido"
         };
-        _paymentAmountBox = new TextBox
-        {
-            Width = 105,
-            Height = 36,
-            Margin = new Thickness(0, 0, 8, 8),
-            ToolTip = "Valor a receber"
-        };
-        _paymentRefreshButton = new Button
-        {
-            Content = "Ver saldo",
-            Height = 36,
-            Padding = new Thickness(12, 5, 12, 5)
-        };
-        _paymentRefreshButton.Click += async (_, _) => await RefreshSelectedPaymentAsync(true);
+        _paymentOpenButton.Click += async (_, _) => await OpenSelectedPaymentAsync();
 
-        _paymentCashButton = new Button
+        _fiscalIssueButton = new Button
         {
-            Content = "Receber dinheiro",
-            Height = 36,
-            Padding = new Thickness(12, 5, 12, 5)
+            Content = "Preparar nota",
+            Height = 40,
+            MinHeight = 40,
+            Padding = new Thickness(14, 8, 14, 8),
+            Visibility = Visibility.Collapsed,
+            Style = TryFindResource("SecondaryButton") as Style,
+            ToolTip = "Preparar o documento fiscal do pedido"
         };
-        _paymentCashButton.Click += async (_, _) => await ReceiveSelectedCashAsync();
+        _fiscalIssueButton.Click += async (_, _) => await PrepareSelectedFiscalAsync();
 
-        _paymentPixButton = new Button
+        _fiscalDocumentsButton = new Button
         {
-            Content = "Gerar PIX",
-            Height = 36,
-            Padding = new Thickness(12, 5, 12, 5)
+            Content = "Notas fiscais",
+            Height = 40,
+            MinHeight = 40,
+            Padding = new Thickness(14, 8, 14, 8),
+            Visibility = Visibility.Collapsed,
+            Style = TryFindResource("SecondaryButton") as Style,
+            ToolTip = "Consultar os documentos fiscais"
         };
-        _paymentPixButton.Click += async (_, _) => await OpenPixWindowAsync();
+        _fiscalDocumentsButton.Click += async (_, _) => await OpenFiscalDocumentsAsync();
 
         _paymentPanel = new StackPanel
         {
@@ -79,14 +72,12 @@ public partial class MainWindow
             VerticalAlignment = VerticalAlignment.Center,
             Visibility = Visibility.Collapsed
         };
-        _paymentPanel.Children.Add(_paymentStatusText);
-        _paymentPanel.Children.Add(_paymentAmountBox);
-        _paymentPanel.Children.Add(_paymentRefreshButton);
-        _paymentPanel.Children.Add(_paymentCashButton);
-        _paymentPanel.Children.Add(_paymentPixButton);
+        _paymentPanel.Children.Add(_paymentOpenButton);
+        _paymentPanel.Children.Add(_fiscalIssueButton);
+        _paymentPanel.Children.Add(_fiscalDocumentsButton);
         actions.Children.Insert(0, _paymentPanel);
 
-        OrdersGrid.SelectionChanged += async (_, _) => await RefreshSelectedPaymentAsync(false);
+        OrdersGrid.SelectionChanged += async (_, _) => await RefreshSelectedPaymentActionAsync(false);
         ShellPanel.IsVisibleChanged += async (_, args) =>
         {
             if (args.NewValue is true) await RefreshPaymentPermissionsAsync();
@@ -106,11 +97,13 @@ public partial class MainWindow
                 _permissions[permission.Key] = permission.Value;
 
             _canPayments = context.Permissions.TryGetValue("payments", out var allowed) && allowed;
-            _paymentPanel.Visibility = _canPayments ? Visibility.Visible : Visibility.Collapsed;
-            if (_paymentCashButton is not null)
-                _paymentCashButton.Visibility = _canPayments && Can("cash") ? Visibility.Visible : Visibility.Collapsed;
-            if (_paymentPixButton is not null)
-                _paymentPixButton.Visibility = _canPayments ? Visibility.Visible : Visibility.Collapsed;
+            var canFiscalIssue = context.Permissions.TryGetValue("fiscal_issue", out var fiscalAllowed) && fiscalAllowed;
+            _paymentPanel.Visibility = (_canPayments || canFiscalIssue) ? Visibility.Visible : Visibility.Collapsed;
+            if (_paymentOpenButton is not null) _paymentOpenButton.Visibility = _canPayments ? Visibility.Visible : Visibility.Collapsed;
+            if (_fiscalIssueButton is not null) _fiscalIssueButton.Visibility = canFiscalIssue ? Visibility.Visible : Visibility.Collapsed;
+            if (_fiscalDocumentsButton is not null) _fiscalDocumentsButton.Visibility = canFiscalIssue ? Visibility.Visible : Visibility.Collapsed;
+
+            await RefreshSelectedPaymentActionAsync(false);
         }
         catch
         {
@@ -119,132 +112,138 @@ public partial class MainWindow
         }
     }
 
-    private async Task RefreshSelectedPaymentAsync(bool showError)
+    private async Task RefreshSelectedPaymentActionAsync(bool showError)
     {
-        if (!_canPayments || _api is null || _paymentStatusText is null || _paymentAmountBox is null) return;
+        if (_api is null) return;
         if (OrdersGrid.SelectedItem is not Order order)
         {
-            _paymentStatusText.Text = "Selecione um pedido.";
-            _paymentAmountBox.Clear();
+            if (_paymentOpenButton is not null)
+            {
+                _paymentOpenButton.Content = "Receber";
+                _paymentOpenButton.IsEnabled = false;
+            }
+            if (_fiscalIssueButton is not null) _fiscalIssueButton.IsEnabled = false;
             return;
         }
-        if (!HasShift)
+
+        if (_paymentOpenButton is not null)
         {
-            _paymentStatusText.Text = "Inicie um turno para receber.";
-            _paymentAmountBox.Clear();
-            return;
+            _paymentOpenButton.IsEnabled = _canPayments && HasShift;
+            _paymentOpenButton.Content = order.PaymentStatus == "paid" ? "Ver pagamento" : "Receber";
         }
 
         try
         {
             var response = await _api.PaymentStatusAsync(order.Id);
             var remaining = PaymentInt(response.Payment, "remaining_cents");
-            var paid = PaymentInt(response.Payment, "paid_cents");
-            var total = PaymentInt(response.Payment, "total_cents");
-            _paymentStatusText.Text = remaining <= 0
-                ? $"Pago • {Money(total)}"
-                : $"Pago {Money(paid)} • Falta {Money(remaining)}";
-            _paymentAmountBox.Text = remaining > 0 ? (remaining / 100m).ToString("N2", PtBr) : "";
-
-            var orderClosed = order.Status is "cancelled" or "completed";
-            if (_paymentCashButton is not null)
-                _paymentCashButton.IsEnabled = remaining > 0 && !orderClosed && Can("cash");
-            if (_paymentPixButton is not null)
-                _paymentPixButton.IsEnabled = remaining > 0 && !orderClosed;
+            if (_paymentOpenButton is not null)
+            {
+                _paymentOpenButton.Content = remaining <= 0 ? "Ver pagamento" : "Receber";
+                _paymentOpenButton.IsEnabled = _canPayments && HasShift;
+            }
+            if (_fiscalIssueButton is not null)
+                _fiscalIssueButton.IsEnabled = remaining <= 0 && order.Status != "cancelled" && Can("fiscal_issue");
         }
         catch (Exception ex)
         {
-            _paymentStatusText.Text = "Pagamento indisponível";
-            if (showError) MessageBox.Show(ex.Message, "Pagamento", MessageBoxButton.OK, MessageBoxImage.Warning);
+            if (_fiscalIssueButton is not null) _fiscalIssueButton.IsEnabled = false;
+            if (showError) MessageBox.Show(FriendlyPayment(ex.Message), "Pagamento", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
     }
 
-    private async Task ReceiveSelectedCashAsync()
+    private async Task OpenSelectedPaymentAsync()
     {
-        if (!_canPayments || _api is null || _paymentAmountBox is null || OrdersGrid.SelectedItem is not Order order) return;
+        if (!_canPayments || _api is null || OrdersGrid.SelectedItem is not Order order) return;
         if (!HasShift)
         {
-            MessageBox.Show("Inicie um turno antes de receber pagamento.", "Pagamento", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        if (order.Status is "cancelled" or "completed")
-        {
-            MessageBox.Show("Este pedido está encerrado e não pode receber nova cobrança.", "Pagamento", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-        if (!TryMoney(_paymentAmountBox.Text, out var amountCents, false))
-        {
-            MessageBox.Show("Informe um valor maior que zero.", "Pagamento", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Inicie um turno para consultar ou receber pagamentos.", "Pagamento", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
-        if (_paymentCashButton is not null) _paymentCashButton.IsEnabled = false;
-        try
+        var window = new OrderPaymentWindow(_api, order, Can("cash")) { Owner = this };
+        window.ShowDialog();
+        if (window.PaymentChanged)
         {
-            // Uma chave nova representa uma intenção explícita de recebimento. Repetições da mesma
-            // requisição no servidor continuam protegidas pela idempotência da camada de pagamentos.
-            var key = $"desktop-cash:{order.Id}:{Guid.NewGuid():N}";
-            var response = await _api.PaymentCashAsync(order.Id, amountCents, key);
-            var remaining = PaymentInt(response.Payment, "remaining_cents");
-            var paid = PaymentInt(response.Payment, "paid_cents");
-            var total = PaymentInt(response.Payment, "total_cents");
-
-            if (_paymentStatusText is not null)
-                _paymentStatusText.Text = remaining <= 0
-                    ? $"Pago • {Money(total)}"
-                    : $"Pago {Money(paid)} • Falta {Money(remaining)}";
-            _paymentAmountBox.Text = remaining > 0 ? (remaining / 100m).ToString("N2", PtBr) : "";
-
             await TryLoadOrdersAsync(false);
             await TryLoadCashAsync(false);
             if (Can("tables") && ShiftIs("operation")) await TryLoadTablesAsync(false);
+        }
+        await RefreshSelectedPaymentActionAsync(false);
+    }
 
-            MessageBox.Show(
-                remaining <= 0 ? $"Pedido #{order.Id} pago." : $"Parcela registrada. Ainda faltam {Money(remaining)}.",
-                "Pagamento",
-                MessageBoxButton.OK,
-                MessageBoxImage.Information);
+    private async Task PrepareSelectedFiscalAsync()
+    {
+        if (!Can("fiscal_issue") || OrdersGrid.SelectedItem is not Order order) return;
+        if (!HasShift)
+        {
+            MessageBox.Show("Inicie um turno antes de preparar a nota fiscal.", "Nota fiscal", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        if (order.Status == "cancelled")
+        {
+            MessageBox.Show("Pedido cancelado não pode gerar nota fiscal.", "Nota fiscal", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            EnsureHubRuntime();
+            if (_hubIntegrationApi is null) throw new InvalidOperationException("A emissão fiscal não está disponível neste computador.");
+            if (_fiscalIssueButton is not null) _fiscalIssueButton.IsEnabled = false;
+
+            var response = await _hubIntegrationApi.QueueFiscalAsync(order.Id, "");
+            var document = response.Document ?? throw new InvalidOperationException("Não foi possível preparar a nota fiscal.");
+            var kind = document.Model == "65" ? "NFC-e" : "NF-e";
+            var message = document.Status switch
+            {
+                "authorized" => $"{kind} autorizada. Chave: {document.AccessKey}",
+                "rejected" => $"{kind} rejeitada: {document.RejectionCode} • {document.RejectionMessage}",
+                "error" => $"{kind} preparada, mas não foi possível concluir o envio: {document.RejectionMessage}",
+                "processing" => $"{kind} está sendo processada.",
+                _ => $"{kind} nº {document.DocumentNumber} preparada. A autorização ainda está pendente."
+            };
+            MessageBox.Show(message, "Nota fiscal", MessageBoxButton.OK,
+                document.Status == "authorized" ? MessageBoxImage.Information : MessageBoxImage.Warning);
         }
         catch (Exception ex)
         {
-            MessageBox.Show(ex.Message, "Pagamento", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show(FriendlyPayment(ex.Message), "Nota fiscal", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
         finally
         {
-            if (_paymentCashButton is not null) _paymentCashButton.IsEnabled = true;
+            await RefreshSelectedPaymentActionAsync(false);
         }
     }
 
-    private async Task OpenPixWindowAsync()
+    private async Task OpenFiscalDocumentsAsync()
     {
-        if (!_canPayments || _api is null || _paymentAmountBox is null || OrdersGrid.SelectedItem is not Order order) return;
-        if (!HasShift)
+        if (!Can("fiscal_issue")) return;
+        try
         {
-            MessageBox.Show("Inicie um turno antes de cobrar PIX.", "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            EnsureHubRuntime();
+            if (_hubIntegrationApi is null) throw new InvalidOperationException("A área fiscal não está disponível neste computador.");
+            var window = new FiscalDocumentsWindow(_hubIntegrationApi) { Owner = this };
+            window.ShowDialog();
+            await RefreshSelectedPaymentActionAsync(false);
         }
-        if (order.Status is "cancelled" or "completed")
+        catch (Exception ex)
         {
-            MessageBox.Show("Este pedido está encerrado e não pode receber nova cobrança.", "PIX", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
+            MessageBox.Show(FriendlyPayment(ex.Message), "Notas fiscais", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
-        if (!TryMoney(_paymentAmountBox.Text, out var amountCents, false))
-        {
-            await RefreshSelectedPaymentAsync(true);
-            if (!TryMoney(_paymentAmountBox.Text, out amountCents, false)) return;
-        }
-
-        var window = new PixPaymentWindow(_api, order.Id, amountCents) { Owner = this };
-        window.ShowDialog();
-        await RefreshSelectedPaymentAsync(false);
-        await TryLoadOrdersAsync(false);
-        if (Can("tables") && ShiftIs("operation")) await TryLoadTablesAsync(false);
     }
 
-    private static int PaymentInt(Dictionary<string, JsonElement>? data, string key)
+    private static int PaymentInt(Dictionary<string, System.Text.Json.JsonElement>? data, string key)
     {
         if (data is null || !data.TryGetValue(key, out var value)) return 0;
-        if (value.ValueKind == JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
+        if (value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetInt32(out var number)) return number;
         return int.TryParse(value.ToString(), out number) ? number : 0;
+    }
+
+    private static string FriendlyPayment(string message)
+    {
+        var lower = message.ToLowerInvariant();
+        return lower.Contains("sqlstate") || lower.Contains("exception") || lower.Contains("stack trace")
+            ? "Não foi possível concluir esta operação. Tente novamente."
+            : message;
     }
 }

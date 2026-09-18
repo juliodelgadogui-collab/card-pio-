@@ -1,9 +1,11 @@
 name: EventMenu Server Package
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - server/order-qr-partial-pickup
+      - wip/eventmenu-desktop-hardware-fiscal-code
     paths:
       - '.github/workflows/server-package-branch.yml'
       - 'app/**'
@@ -53,6 +55,8 @@ jobs:
           test -f "$PACKAGE/index.php"
           test -f "$PACKAGE/update.php"
           test -f "$PACKAGE/public/assets/premium-v4.css"
+          test -f "$PACKAGE/public/api-hub.php"
+          test -f "$PACKAGE/public/api-desktop.php"
           test -f "$PACKAGE/app/routes/pickup.php"
           test -f "$PACKAGE/app/routes/production.php"
           test -f "$PACKAGE/app/routes/product-config.php"
@@ -63,6 +67,9 @@ jobs:
           test -f "$PACKAGE/src/Services/ProductCostService.php"
           test -f "$PACKAGE/src/Services/ProductionService.php"
           test -f "$PACKAGE/src/Services/EventProfessionalService.php"
+          test -f "$PACKAGE/src/Services/HubService.php"
+          test -f "$PACKAGE/database/migrations/046_eventmenu_hub.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/046_eventmenu_hub.sql"
           test -f "$PACKAGE/database/sqlite/migrations/034_production_print_queue.sql"
           test -d "$PACKAGE/vendor"
           test -d "$PACKAGE/storage"

@@ -40,6 +40,9 @@ public sealed class Product
     [JsonPropertyName("stock_qty")] public decimal? StockQty { get; set; }
     [JsonPropertyName("track_stock")] public int TrackStock { get; set; }
     public string PriceDisplay => (PriceCents / 100m).ToString("C2", new System.Globalization.CultureInfo("pt-BR"));
+    public string StockDisplay => TrackStock == 1 ? (StockQty ?? 0m).ToString("0.###") : "—";
+    public string StockStatusLabel => TrackStock != 1 ? "Sem controle" : (StockQty ?? 0m) <= 0m ? "ZERADO" : "Disponível";
+    public bool IsOutOfStock => TrackStock == 1 && (StockQty ?? 0m) <= 0m;
 }
 
 public sealed class ProductsResponse
@@ -58,9 +61,16 @@ public sealed class Order
     [JsonPropertyName("total_cents")] public int TotalCents { get; set; }
     [JsonPropertyName("customer_name")] public string? CustomerName { get; set; }
     [JsonPropertyName("customer_phone")] public string? CustomerPhone { get; set; }
+    [JsonPropertyName("delivery_address")] public string? DeliveryAddress { get; set; }
     [JsonPropertyName("delivery_name")] public string? DeliveryName { get; set; }
+    [JsonPropertyName("assigned_delivery_user_id")] public int? AssignedDeliveryUserId { get; set; }
+    [JsonPropertyName("table_name")] public string? TableName { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
     public string TotalDisplay => (TotalCents / 100m).ToString("C2", new System.Globalization.CultureInfo("pt-BR"));
+    public string ChannelDisplay => Channel switch { "counter" => "Balcão", "pickup" => "Retirada", "delivery" => "Delivery", "table" => "Mesa", "bar" or "event_bar" => "Evento / Bar", _ => Channel };
+    public string StatusDisplay => Status switch { "pending" => "Pendente", "confirmed" => "Confirmado", "preparing" => "Em preparo", "ready" => "Pronto", "out_for_delivery" => "Em rota", "served" => "Servido", "completed" => "Concluído", "cancelled" => "Cancelado", _ => Status };
+    public string PaymentStatusDisplay => PaymentStatus switch { "unpaid" => "Não pago", "pending" => "Pendente", "paid" => "Pago", "partially_paid" => "Parcial", "refunded" => "Estornado", "cancelled" => "Cancelado", _ => PaymentStatus };
+    public string CreatedDisplay => ServerTimeDisplay.Local(CreatedAt, "dd/MM HH:mm");
 }
 
 public sealed class OrdersResponse
@@ -78,5 +88,5 @@ public sealed class CashResponse
 public sealed class ApiError
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
-    [JsonPropertyName("error")] public string Error { get; set; } = "Falha na comunicação com o servidor.";
+    [JsonPropertyName("error")] public string Error { get; set; } = "Não foi possível concluir a ação.";
 }

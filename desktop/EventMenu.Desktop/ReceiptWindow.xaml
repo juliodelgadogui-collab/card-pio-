@@ -1,0 +1,102 @@
+<Window x:Class="EventMenu.Desktop.ReceiptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Cupom • EventMenu" Width="760" Height="820" MinWidth="620" MinHeight="620"
+        WindowStartupLocation="CenterOwner" Background="#E9EDF2">
+    <Grid>
+        <Grid.RowDefinitions><RowDefinition Height="62" /><RowDefinition Height="*" /><RowDefinition Height="58" /></Grid.RowDefinitions>
+
+        <Border Background="White" BorderBrush="#D9DEE7" BorderThickness="0,0,0,1" Padding="18,10">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="TitleText" Text="Cupom do pedido" FontSize="19" FontWeight="SemiBold" />
+                    <TextBlock x:Name="SubtitleText" Text="Mesmo padrão do comprovante do site" Foreground="#667085" FontSize="12" Margin="0,2,0,0" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="PrintButton" Content="Imprimir cupom" IsEnabled="False" Click="PrintButton_Click" Margin="0,0,8,0" />
+                    <Button Content="Atualizar" Style="{StaticResource SecondaryButton}" Click="RefreshButton_Click" Margin="0" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="20">
+            <Border x:Name="ReceiptPaper" Width="390" HorizontalAlignment="Center" Background="White" BorderBrush="#D0D5DD" BorderThickness="1" Padding="22,20" CornerRadius="2">
+                <StackPanel TextElement.FontFamily="Arial" TextElement.FontSize="12">
+                    <TextBlock x:Name="BusinessNameText" Text="EventMenu" FontSize="18" FontWeight="Bold" TextAlignment="Center" TextWrapping="Wrap" />
+                    <TextBlock x:Name="BusinessDetailText" Text="" TextAlignment="Center" TextWrapping="Wrap" Margin="0,4,0,0" />
+                    <TextBlock x:Name="IdentityExtraText" Text="" TextAlignment="Center" TextWrapping="Wrap" FontSize="10" Margin="0,2,0,0" />
+
+                    <Border BorderBrush="#111" BorderThickness="0,1,0,0" Margin="0,12,0,10" />
+                    <TextBlock Text="COMPROVANTE NÃO FISCAL" FontWeight="Bold" TextAlignment="Center" />
+                    <TextBlock x:Name="ReceiptNumberText" Text="" FontSize="10" TextAlignment="Center" Margin="0,2,0,0" />
+                    <Border BorderBrush="#111" BorderThickness="0,1,0,0" Margin="0,10,0,10" />
+
+                    <Grid Margin="0,0,0,2">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                        <TextBlock Text="Pedido" /><TextBlock x:Name="OrderText" Grid.Column="1" TextAlignment="Right" FontWeight="Bold" />
+                    </Grid>
+                    <Grid Margin="0,0,0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Data/hora" /><TextBlock x:Name="ReceiptDateText" Grid.Column="1" TextAlignment="Right" /></Grid>
+                    <Grid Margin="0,0,0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Canal" /><TextBlock x:Name="ReceiptChannelText" Grid.Column="1" TextAlignment="Right" /></Grid>
+                    <Grid x:Name="CustomerRow" Margin="0,0,0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Cliente" /><TextBlock x:Name="ReceiptCustomerText" Grid.Column="1" TextAlignment="Right" TextWrapping="Wrap" /></Grid>
+                    <Grid x:Name="PhoneRow" Margin="0,0,0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Telefone" /><TextBlock x:Name="ReceiptPhoneText" Grid.Column="1" TextAlignment="Right" /></Grid>
+                    <Grid x:Name="LocationRow" Margin="0,0,0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Mesa / comanda" /><TextBlock x:Name="ReceiptLocationText" Grid.Column="1" TextAlignment="Right" /></Grid>
+                    <Grid x:Name="OperatorRow" Margin="0,0,0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions><TextBlock Text="Operador" /><TextBlock x:Name="ReceiptOperatorText" Grid.Column="1" TextAlignment="Right" /></Grid>
+
+                    <Border BorderBrush="#111" BorderThickness="0,1,0,0" Margin="0,10,0,8" />
+                    <TextBlock Text="ITENS" FontWeight="Bold" Margin="0,0,0,5" />
+                    <ItemsControl x:Name="ReceiptItemsList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Margin="0,2,0,6">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <TextBlock FontWeight="Bold" TextWrapping="Wrap"><Run Text="{Binding Quantity}" /><Run Text="x " /><Run Text="{Binding Name}" /></TextBlock>
+                                        <TextBlock Grid.Column="1" Text="{Binding TotalDisplay}" FontWeight="Bold" Margin="8,0,0,0" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding UnitPriceDisplay, StringFormat={}{0} un.}" FontSize="10" />
+                                    <TextBlock Text="{Binding Notes}" FontSize="10" FontStyle="Italic" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border BorderBrush="#111" BorderThickness="0,1,0,0" Margin="0,6,0,8" />
+                    <Grid Margin="0,1"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Subtotal" /><TextBlock x:Name="SubtotalText" Grid.Column="1" /></Grid>
+                    <Grid x:Name="DiscountRow" Margin="0,1"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Desconto" /><TextBlock x:Name="DiscountText" Grid.Column="1" /></Grid>
+                    <Grid x:Name="DeliveryFeeRow" Margin="0,1"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Entrega" /><TextBlock x:Name="DeliveryFeeText" Grid.Column="1" /></Grid>
+                    <Grid Margin="0,5,0,1"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="TOTAL" FontWeight="Bold" FontSize="16" /><TextBlock x:Name="TotalText" Grid.Column="1" FontWeight="Bold" FontSize="16" /></Grid>
+
+                    <Border BorderBrush="#111" BorderThickness="0,1,0,0" Margin="0,9,0,8" />
+                    <TextBlock Text="PAGAMENTO" FontWeight="Bold" Margin="0,0,0,4" />
+                    <ItemsControl x:Name="ReceiptPaymentsList">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,1">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <TextBlock><Run Text="{Binding MethodDisplay}" /><Run Text=" · " /><Run Text="{Binding StatusDisplay}" /></TextBlock>
+                                    <TextBlock Grid.Column="1" Text="{Binding AmountDisplay}" />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Grid Margin="0,5,0,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Pago" /><TextBlock x:Name="PaidText" Grid.Column="1" /></Grid>
+                    <Grid x:Name="RemainingRow" Margin="0,1"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><TextBlock Text="Restante" FontWeight="SemiBold" /><TextBlock x:Name="RemainingText" Grid.Column="1" FontWeight="SemiBold" /></Grid>
+
+                    <Border BorderBrush="#111" BorderThickness="0,1,0,0" Margin="0,10,0,10" />
+                    <TextBlock x:Name="FooterMessageText" Text="Obrigado pela preferência!" TextAlignment="Center" TextWrapping="Wrap" FontSize="10" />
+                    <TextBlock Text="Este comprovante não substitui NFC-e, NF-e ou documento fiscal legal quando exigido." TextAlignment="Center" TextWrapping="Wrap" FontSize="9" Margin="0,6,0,0" />
+                    <TextBlock x:Name="PrintedAtText" Text="EventMenu" TextAlignment="Center" FontSize="9" Margin="0,5,0,0" />
+                </StackPanel>
+            </Border>
+        </ScrollViewer>
+
+        <Border Grid.Row="2" Background="White" BorderBrush="#D9DEE7" BorderThickness="0,1,0,0" Padding="18,10">
+            <Grid>
+                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusText" Foreground="#667085" VerticalAlignment="Center" TextWrapping="Wrap" />
+                <Button Content="Fechar" Grid.Column="1" Style="{StaticResource SecondaryButton}" HorizontalAlignment="Right" Click="CloseButton_Click" Margin="0" Padding="18,8" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

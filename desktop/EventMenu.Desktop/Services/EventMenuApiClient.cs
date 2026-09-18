@@ -32,7 +32,7 @@ public sealed class EventMenuApiClient : IDisposable
                        ?? "https://go.gestao2.store/1/").Trim();
         if (!baseUrl.EndsWith('/')) baseUrl += "/";
         if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps)
-            throw new InvalidOperationException("O endereço do servidor EventMenu precisa usar HTTPS.");
+            throw new InvalidOperationException("A configuração de conexão do EventMenu está inválida.");
 
         _http = new HttpClient
         {
@@ -58,7 +58,7 @@ public sealed class EventMenuApiClient : IDisposable
         var response = await SendCoreAsync(HttpMethod.Post, "api.php", "login", null, body, null, ct);
         var login = Deserialize<LoginResponse>(response);
         if (string.IsNullOrWhiteSpace(login.Token) || string.IsNullOrWhiteSpace(login.RefreshToken))
-            throw new ApiClientException("O servidor não retornou uma sessão válida.");
+            throw new ApiClientException("Não foi possível iniciar sua sessão.");
 
         _session = new SessionEnvelope
         {
@@ -101,6 +101,10 @@ public sealed class EventMenuApiClient : IDisposable
 
     public Task<DesktopContextResponse> GoContextAsync(CancellationToken ct = default) => GetAsync<DesktopContextResponse>("api-go.php", "context", null, ct);
     public Task<UnitsResponse> UnitsAsync(CancellationToken ct = default) => GetAsync<UnitsResponse>("api-go-units.php", "list", null, ct);
+    public Task<ShiftSummaryResponse> ShiftSummaryAsync(CancellationToken ct = default) => GetAsync<ShiftSummaryResponse>("api-go.php", "shift-summary", null, ct);
+    public Task<UnassignedDeliveriesResponse> UnassignedDeliveriesAsync(CancellationToken ct = default) => GetAsync<UnassignedDeliveriesResponse>("api-go-units.php", "delivery-unassigned", null, ct);
+    public Task<UnitRoutingMutationResponse> AssignDeliveryUnitAsync(int orderId, int unitId, CancellationToken ct = default) =>
+        PostAsync<UnitRoutingMutationResponse>("api-go-units.php", "delivery-assign-unit", new { order_id = orderId, unit_id = unitId }, ct);
     public Task<ShiftResponse> ShiftOpenAsync(string mode, int? unitId, CancellationToken ct = default) =>
         PostAsync<ShiftResponse>("api-go-units.php", "shift-open", new { mode, unit_id = unitId }, ct);
     public Task<ShiftResponse> ShiftCloseAsync(string notes = "", CancellationToken ct = default) =>
@@ -246,11 +250,11 @@ public sealed class EventMenuApiClient : IDisposable
         }
         catch (TaskCanceledException) when (!ct.IsCancellationRequested)
         {
-            throw new ApiClientException("O servidor demorou para responder. Tente novamente.");
+            throw new ApiClientException("A conexão demorou para responder. Tente novamente.");
         }
         catch (HttpRequestException)
         {
-            throw new ApiClientException("Sem conexão com o servidor. Confira a internet e tente novamente.");
+            throw new ApiClientException("Sem conexão. Confira a internet e tente novamente.");
         }
 
         using (response)
@@ -267,7 +271,7 @@ public sealed class EventMenuApiClient : IDisposable
             }
             catch (JsonException)
             {
-                throw new ApiClientException("O servidor retornou uma resposta inválida.", response.StatusCode);
+                throw new ApiClientException("Não foi possível carregar os dados desta operação.", response.StatusCode);
             }
             return text;
         }
@@ -281,22 +285,22 @@ public sealed class EventMenuApiClient : IDisposable
             if (!string.IsNullOrWhiteSpace(error)) return Friendly(error);
         }
         catch (JsonException) { }
-        return "Não foi possível concluir a operação no servidor.";
+        return "Não foi possível concluir a operação. Tente novamente.";
     }
 
     private static string Friendly(string message)
     {
         var lower = message.ToLowerInvariant();
         if (lower.Contains("sqlstate") || lower.Contains("pdoexception") || lower.Contains("stack trace") || lower.Contains("constraint failed"))
-            return "Não foi possível concluir a operação no servidor. Tente novamente.";
+            return "Não foi possível concluir a operação. Tente novamente.";
         if (lower.Contains("database is locked") || lower.Contains("database table is locked"))
-            return "O servidor está ocupado por alguns segundos. Tente novamente.";
+            return "O sistema está ocupado por alguns segundos. Tente novamente.";
         return message;
     }
 
     private static T Deserialize<T>(string json) =>
         JsonSerializer.Deserialize<T>(json, JsonOptions)
-        ?? throw new ApiClientException("O servidor retornou dados incompletos.");
+        ?? throw new ApiClientException("Não foi possível carregar todos os dados desta tela.");
 
     private void EnsureSession()
     {

@@ -11,11 +11,14 @@ data class DeliveryProgress(
     val routeStartedAt: String = "",
     val arrivedAt: String = "",
     val completedAt: String = "",
+    val trackingUrl: String = "",
+    val trackingExpiresAt: String = "",
 ) {
     val pickedUp: Boolean get() = pickedUpAt.isNotBlank()
     val routeStarted: Boolean get() = routeStartedAt.isNotBlank()
     val arrived: Boolean get() = arrivedAt.isNotBlank()
     val completed: Boolean get() = completedAt.isNotBlank() || orderStatus == "completed"
+    val trackingAllowed: Boolean get() = routeStarted && !arrived && !completed && orderStatus == "out_for_delivery"
 }
 
 class DeliveryProgressRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
@@ -37,6 +40,28 @@ class DeliveryProgressRepository(baseUrl: String, deviceId: String, private val 
         return parse(root.getJSONObject("progress"))
     }
 
+    suspend fun sendLocation(
+        orderId: Int,
+        latitude: Double,
+        longitude: Double,
+        accuracyM: Double?,
+        speedMps: Double?,
+        headingDegrees: Double?,
+        provider: String,
+        recordedAt: String,
+    ) {
+        val body = JSONObject()
+            .put("order_id", orderId)
+            .put("latitude", latitude)
+            .put("longitude", longitude)
+            .put("provider", provider.take(30))
+            .put("recorded_at", recordedAt)
+        accuracyM?.let { body.put("accuracy_m", it) }
+        speedMps?.let { body.put("speed_mps", it) }
+        headingDegrees?.let { body.put("heading_degrees", it) }
+        api.postDelivery("location", requireToken(), body)
+    }
+
     private suspend fun action(action: String, orderId: Int): DeliveryProgress {
         val root = api.postDelivery(action, requireToken(), JSONObject().put("order_id", orderId))
         return parse(root.getJSONObject("progress"))
@@ -49,6 +74,8 @@ class DeliveryProgressRepository(baseUrl: String, deviceId: String, private val 
         routeStartedAt = json.optString("route_started_at"),
         arrivedAt = json.optString("arrived_at"),
         completedAt = json.optString("completed_at"),
+        trackingUrl = json.optString("tracking_url").takeUnless { it == "null" } ?: "",
+        trackingExpiresAt = json.optString("tracking_expires_at").takeUnless { it == "null" } ?: "",
     )
 
     private fun requireToken(): String = sessionStore.token() ?: throw ApiException("Sessão não encontrada.", 401)

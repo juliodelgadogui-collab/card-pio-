@@ -9,6 +9,7 @@ import br.com.eventmenu.go.data.DiscountRepository
 import br.com.eventmenu.go.data.EventBarRepository
 import br.com.eventmenu.go.data.EventMenuRepository
 import br.com.eventmenu.go.data.EventOperationsRepository
+import br.com.eventmenu.go.data.HubRepository
 import br.com.eventmenu.go.data.ManagerOperationsRepository
 import br.com.eventmenu.go.data.NotificationRepository
 import br.com.eventmenu.go.data.OfflineReadCache
@@ -56,6 +57,8 @@ class EventMenuGoApplication : Application() {
         private set
     lateinit var brandRepository: TenantBrandRepository
         private set
+    lateinit var hubRepository: HubRepository
+        private set
     lateinit var pushCoordinator: FirebasePushCoordinator
         private set
 
@@ -81,6 +84,7 @@ class EventMenuGoApplication : Application() {
         discountRepository = DiscountRepository(baseUrl, deviceId, store)
         cancellationRepository = CancellationRepository(baseUrl, deviceId, store)
         brandRepository = TenantBrandRepository(this, baseUrl, deviceId, store)
+        hubRepository = HubRepository(baseUrl, deviceId, store)
         pushCoordinator = FirebasePushCoordinator(this, notificationRepository, store)
         OperationNotificationScheduler.initialize(this)
         pushCoordinator.syncCurrentToken()

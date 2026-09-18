@@ -41,6 +41,13 @@ final class DeliveryProgressService
     {
         [$tenantId,$userId,$shift]=$this->deliveryContext();$pdo=Database::connection();
         $s=$pdo->prepare('SELECT dp.picked_up_at,o.status FROM delivery_progress dp JOIN orders o ON o.id=dp.order_id AND o.tenant_id=dp.tenant_id WHERE dp.tenant_id=? AND dp.order_id=? AND dp.delivery_user_id=? LIMIT 1');$s->execute([$tenantId,$orderId,$userId]);$row=$s->fetch();if(!$row||!$row['picked_up_at'])throw new RuntimeException('Retire o pedido no balcão antes de iniciar a rota.');
+
+        // A versão atual do aplicativo rastreia uma rota por entregador. Impedir duas rotas simultâneas
+        // evita que uma posição seja atribuída ao pedido errado e simplifica a experiência do cliente.
+        $active=$pdo->prepare('SELECT o.id FROM orders o JOIN delivery_progress dp ON dp.tenant_id=o.tenant_id AND dp.order_id=o.id WHERE o.tenant_id=? AND o.assigned_delivery_user_id=? AND o.channel="delivery" AND o.id<>? AND o.status="out_for_delivery" AND dp.route_started_at IS NOT NULL AND dp.arrived_at IS NULL AND dp.completed_at IS NULL LIMIT 1');
+        $active->execute([$tenantId,$userId,$orderId]);$activeOrder=(int)$active->fetchColumn();
+        if($activeOrder>0)throw new RuntimeException('Você já possui o pedido #'.$activeOrder.' em rota. Finalize a chegada antes de iniciar outra entrega.');
+
         if($row['status']==='ready')(new OrderService())->changeStatus($orderId,'out_for_delivery','delivery');elseif($row['status']!=='out_for_delivery')throw new RuntimeException('Pedido não está disponível para iniciar rota.');
         Database::transaction(function(PDO $tx)use($tenantId,$userId,$orderId):void{
             $p=$this->lockedProgress($tx,$tenantId,$orderId);if(!$p)throw new RuntimeException('Progresso da entrega não encontrado.');

@@ -187,8 +187,8 @@ public partial class MainWindow : Window
         {
             ShiftStatusText.Text = "Turno indisponível";
             ShiftButton.IsEnabled = false;
-            ConnectionText.Text = "Servidor conectado parcialmente";
-            AutoRefreshText.Text = ex.Message;
+            ConnectionText.Text = "Conexão parcial";
+            AutoRefreshText.Text = string.IsNullOrWhiteSpace(ex.Message) ? "Alguns dados podem estar indisponíveis." : ex.Message;
         }
     }
 
@@ -225,7 +225,7 @@ public partial class MainWindow : Window
         }
 
         if (Can("cash")) anySuccess |= await TryLoadCashAsync(false);
-        ConnectionText.Text = anySuccess ? "Servidor conectado" : "Acesso limitado";
+        ConnectionText.Text = anySuccess ? "Pronto" : "Acesso limitado";
     }
 
     private async Task<bool> TryLoadOrdersAsync(bool showError = true)
@@ -299,7 +299,7 @@ public partial class MainWindow : Window
             {
                 CashStatusText.Text = "Caixa aberto";
                 var id = Value(response.Session, "id");
-                var opened = Value(response.Session, "opened_at");
+                var opened = ServerTimeDisplay.Local(Value(response.Session, "opened_at"));
                 var unit = Value(response.Session, "unit_name");
                 CashDetailsText.Text = $"Sessão {id}{(string.IsNullOrWhiteSpace(unit) ? "" : $" • {unit}")}{(string.IsNullOrWhiteSpace(opened) ? "" : $" • aberta em {opened}")}";
 
@@ -695,7 +695,7 @@ public partial class MainWindow : Window
             if (Can("orders_create") || Can("orders_manage") || Can("orders_kitchen") || Can("orders_delivery")) await TryLoadOrdersAsync(false);
             if (Can("tables") && ShiftIs("operation")) await TryLoadTablesAsync(false);
             AutoRefreshText.Text = $"Atualizado às {DateTime.Now:HH:mm:ss}";
-            ConnectionText.Text = "Servidor conectado";
+            ConnectionText.Text = "Pronto";
         }
         catch
         {
