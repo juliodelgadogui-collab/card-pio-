@@ -16,6 +16,7 @@ final class DesktopHardwareService
         if(!Auth::can('terminal.collect')&&!Auth::can('hardware.manage'))throw new RuntimeException('Acesso negado ao terminal de pagamento.');
         $tenantId=Auth::tenantId();
         if(!$tenantId||$unitId<1)throw new RuntimeException('Unidade inválida.');
+        $this->assertUnitAccess($unitId);
         $s=Database::connection()->prepare('SELECT id,unit_id,provider,enabled,integration_mode,terminal_label,pinpad_identifier,auto_capture,config_encrypted,created_at,updated_at FROM payment_terminal_configs WHERE tenant_id=? AND unit_id=? ORDER BY enabled DESC,id');
         $s->execute([$tenantId,$unitId]);
         $out=[];
@@ -40,6 +41,7 @@ final class DesktopHardwareService
         if(!$tenantId)throw new RuntimeException('Empresa inválida.');
         $id=(int)($data['id']??0);$unitId=(int)($data['unit_id']??0);
         if($unitId<1)throw new RuntimeException('Escolha a unidade do terminal.');
+        $this->assertUnitAccess($unitId);
         $u=Database::connection()->prepare('SELECT id FROM operating_units WHERE id=? AND tenant_id=? AND active=1 LIMIT 1');$u->execute([$unitId,$tenantId]);if(!$u->fetchColumn())throw new RuntimeException('Unidade inválida ou inativa.');
         $provider=(string)($data['provider']??'generic_tef');
         if(!in_array($provider,['pagbank_tef','stone_tef','sitef','generic_tef'],true))throw new RuntimeException('Provedor TEF inválido.');
@@ -53,9 +55,9 @@ final class DesktopHardwareService
         $encrypted=$config?Crypto::encrypt($config):null;
         $pdo=Database::connection();
         if($id>0){
+            $existing=$pdo->prepare('SELECT unit_id FROM payment_terminal_configs WHERE id=? AND tenant_id=? LIMIT 1');$existing->execute([$id,$tenantId]);$oldUnit=(int)$existing->fetchColumn();if($oldUnit<1)throw new RuntimeException('Terminal TEF não encontrado.');$this->assertUnitAccess($oldUnit);
             $s=$pdo->prepare('UPDATE payment_terminal_configs SET unit_id=?,provider=?,enabled=?,integration_mode=?,terminal_label=?,pinpad_identifier=?,config_encrypted=?,auto_capture=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?');
             $s->execute([$unitId,$provider,$enabled,$mode,$label?:null,$pinpad?:null,$encrypted,$autoCapture,$id,$tenantId]);
-            if($s->rowCount()===0){$q=$pdo->prepare('SELECT id FROM payment_terminal_configs WHERE id=? AND tenant_id=?');$q->execute([$id,$tenantId]);if(!$q->fetchColumn())throw new RuntimeException('Terminal TEF não encontrado.');}
         }else{
             $s=$pdo->prepare('INSERT INTO payment_terminal_configs (tenant_id,unit_id,provider,enabled,integration_mode,terminal_label,pinpad_identifier,config_encrypted,auto_capture) VALUES (?,?,?,?,?,?,?,?,?)');
             $s->execute([$tenantId,$unitId,$provider,$enabled,$mode,$label?:null,$pinpad?:null,$encrypted,$autoCapture]);
@@ -70,27 +72,33 @@ final class DesktopHardwareService
     {
         $tenantId=Auth::tenantId();
         if(!$tenantId||$unitId<1)throw new RuntimeException('Unidade inválida.');
+        $this->assertUnitAccess($unitId);
         $u=Database::connection()->prepare('SELECT id FROM operating_units WHERE id=? AND tenant_id=? AND active=1 LIMIT 1');$u->execute([$unitId,$tenantId]);if(!$u->fetchColumn())throw new RuntimeException('Unidade inválida ou inativa.');
         $deviceId=trim($deviceId);if(strlen($deviceId)<8)throw new RuntimeException('Identificação do computador inválida.');
         $hash=hash('sha256',$deviceId);$label=mb_substr(trim($deviceLabel),0,190);
         $safe=$this->sanitizeHardware($hardware);$json=json_encode($safe,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);
         $pdo=Database::connection();
-        $q=$pdo->prepare('SELECT id,revoked_at FROM desktop_hardware_bindings WHERE tenant_id=? AND device_hash=? LIMIT 1');$q->execute([$tenantId,$hash]);$existing=$q->fetch();
+        $q=$pdo->prepare('SELECT id,unit_id,revoked_at FROM desktop_hardware_bindings WHERE tenant_id=? AND device_hash=? LIMIT 1');$q->execute([$tenantId,$hash]);$existing=$q->fetch();
         if($existing&&!empty($existing['revoked_at']))throw new RuntimeException('Este computador foi revogado pelo administrador.');
-        if($existing){$id=(int)$existing['id'];$pdo->prepare('UPDATE desktop_hardware_bindings SET unit_id=?,device_label=?,hardware_json=?,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$unitId,$label?:null,$json,$id,$tenantId]);}
+        if($existing){$oldUnit=(int)($existing['unit_id']??0);if($oldUnit>0)$this->assertUnitAccess($oldUnit);$id=(int)$existing['id'];$pdo->prepare('UPDATE desktop_hardware_bindings SET unit_id=?,device_label=?,hardware_json=?,last_seen_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$unitId,$label?:null,$json,$id,$tenantId]);}
         else{$s=$pdo->prepare('INSERT INTO desktop_hardware_bindings (tenant_id,unit_id,device_hash,device_label,hardware_json,last_seen_at) VALUES (?,?,?,?,?,CURRENT_TIMESTAMP)');$s->execute([$tenantId,$unitId,$hash,$label?:null,$json]);$id=(int)$pdo->lastInsertId();Auth::audit('desktop.device_registered','desktop_hardware_binding',(string)$id,['unit_id'=>$unitId,'device_label'=>$label]);}
         return ['id'=>$id,'unit_id'=>$unitId,'device_label'=>$label,'hardware'=>$safe,'revoked'=>false];
     }
 
     public function listBindings():array
     {
-        Auth::requirePermission('hardware.manage');$tenantId=Auth::tenantId();if(!$tenantId)return[];
-        $s=Database::connection()->prepare('SELECT dhb.id,dhb.unit_id,dhb.device_label,dhb.hardware_json,dhb.last_seen_at,dhb.revoked_at,dhb.created_at,ou.name unit_name FROM desktop_hardware_bindings dhb LEFT JOIN operating_units ou ON ou.id=dhb.unit_id AND ou.tenant_id=dhb.tenant_id WHERE dhb.tenant_id=? ORDER BY dhb.revoked_at IS NULL DESC,dhb.last_seen_at DESC,dhb.id DESC');$s->execute([$tenantId]);$rows=$s->fetchAll();foreach($rows as &$row){$decoded=json_decode((string)($row['hardware_json']??''),true);$row['hardware']=is_array($decoded)?$decoded:[];unset($row['hardware_json']);}unset($row);return$rows;
+        Auth::requirePermission('hardware.manage');$tenantId=Auth::tenantId();if(!$tenantId)return[];$unitIds=array_map(static fn(array$unit):int=>(int)$unit['id'],(new OperatingUnitService())->availableForCurrentUser());if(!$unitIds)return[];$marks=implode(',',array_fill(0,count($unitIds),'?'));
+        $s=Database::connection()->prepare('SELECT dhb.id,dhb.unit_id,dhb.device_label,dhb.hardware_json,dhb.last_seen_at,dhb.revoked_at,dhb.created_at,ou.name unit_name FROM desktop_hardware_bindings dhb LEFT JOIN operating_units ou ON ou.id=dhb.unit_id AND ou.tenant_id=dhb.tenant_id WHERE dhb.tenant_id=? AND dhb.unit_id IN ('.$marks.') ORDER BY dhb.revoked_at IS NULL DESC,dhb.last_seen_at DESC,dhb.id DESC');$s->execute(array_merge([$tenantId],$unitIds));$rows=$s->fetchAll();foreach($rows as &$row){$decoded=json_decode((string)($row['hardware_json']??''),true);$row['hardware']=is_array($decoded)?$decoded:[];unset($row['hardware_json']);}unset($row);return$rows;
     }
 
     public function revokeBinding(int $id):void
     {
-        Auth::requirePermission('hardware.manage');$tenantId=Auth::tenantId();if(!$tenantId||$id<1)throw new RuntimeException('Dispositivo inválido.');$s=Database::connection()->prepare('UPDATE desktop_hardware_bindings SET revoked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND revoked_at IS NULL');$s->execute([$id,$tenantId]);if($s->rowCount()!==1)throw new RuntimeException('Dispositivo não encontrado ou já revogado.');Auth::audit('desktop.device_revoked','desktop_hardware_binding',(string)$id);
+        Auth::requirePermission('hardware.manage');$tenantId=Auth::tenantId();if(!$tenantId||$id<1)throw new RuntimeException('Dispositivo inválido.');$q=Database::connection()->prepare('SELECT unit_id FROM desktop_hardware_bindings WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$id,$tenantId]);$unitId=(int)$q->fetchColumn();if($unitId<1)throw new RuntimeException('Dispositivo não encontrado.');$this->assertUnitAccess($unitId);$s=Database::connection()->prepare('UPDATE desktop_hardware_bindings SET revoked_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND revoked_at IS NULL');$s->execute([$id,$tenantId]);if($s->rowCount()!==1)throw new RuntimeException('Dispositivo não encontrado ou já revogado.');Auth::audit('desktop.device_revoked','desktop_hardware_binding',(string)$id);
+    }
+
+    private function assertUnitAccess(int $unitId):void
+    {
+        foreach((new OperatingUnitService())->availableForCurrentUser()as$unit)if((int)$unit['id']===$unitId)return;throw new RuntimeException('Você não possui acesso a esta unidade.');
     }
 
     private function sanitizeHardware(array $hardware):array
