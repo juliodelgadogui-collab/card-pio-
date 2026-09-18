@@ -1,3 +1,4 @@
+using System.IO;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -62,5 +63,9 @@ public static class DesktopDiagnostics
         return clean;
     }
 
-    private static string Limit(string value, int max) => (value ?? string.Empty).Trim()[..Math.Min((value ?? string.Empty).Trim().Length, max)];
+    private static string Limit(string value, int max)
+    {
+        var clean = (value ?? string.Empty).Trim();
+        return clean[..Math.Min(clean.Length, max)];
+    }
 }
