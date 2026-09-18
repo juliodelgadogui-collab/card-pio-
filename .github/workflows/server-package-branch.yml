@@ -16,6 +16,8 @@ jobs:
         run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
       - name: PHP syntax validation
         run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Public UX contract
+        run: php scripts/ci-public-ux-smoke.php
       - name: SQLite smoke validation
         env:
           APP_ENV: testing
