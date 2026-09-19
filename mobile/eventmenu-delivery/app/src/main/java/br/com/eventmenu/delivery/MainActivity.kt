@@ -11,7 +11,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import br.com.eventmenu.delivery.ui.EventMenuDeliveryApp
+import br.com.eventmenu.delivery.ui.DeliveryAppRoot
 
 class MainActivity : ComponentActivity() {
     private val viewModel: DeliveryViewModel by viewModels()
@@ -21,7 +21,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         handleIntent(intent)
         requestNotificationPermissionWhenNeeded()
-        setContent { EventMenuDeliveryApp(viewModel) }
+        setContent { DeliveryAppRoot(viewModel) }
     }
 
     override fun onNewIntent(intent: Intent) {
