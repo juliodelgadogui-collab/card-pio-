@@ -24,5 +24,12 @@ class SecureSessionStore(context: Context) {
             else prefs.edit().putString("access_token", value).apply()
         }
 
+    var pushToken: String?
+        get() = prefs.getString("push_token", null)
+        set(value) {
+            if (value.isNullOrBlank()) prefs.edit().remove("push_token").apply()
+            else prefs.edit().putString("push_token", value).apply()
+        }
+
     fun clear() { prefs.edit().clear().apply() }
 }
