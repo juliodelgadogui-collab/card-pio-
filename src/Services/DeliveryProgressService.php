@@ -52,7 +52,6 @@ final class DeliveryProgressService
             if(!$p['route_started_at'])$tx->prepare('UPDATE delivery_progress SET route_started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
         });
         try{(new DeliveryPublicTrackingService())->issue($orderId);}catch(\Throwable$e){error_log('[delivery-tracking-auto] '.$e::class.': '.$e->getMessage());}
-        try{(new DeliveryCustomerPushService())->sendOrderStatus($orderId,'out_for_delivery');}catch(\Throwable$e){error_log('[delivery-customer-route-push] '.$e::class.': '.$e->getMessage());}
         Auth::audit('delivery.route_started','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return $this->progressByOrder(Database::connection(),$tenantId,$orderId);
     }
 
@@ -102,12 +101,12 @@ final class DeliveryProgressService
         return $order;
     }
 
-    private function lockedProgress(PDO $pdo,int $tenantId,int $orderId):?array
+    private function lockedProgress(PDO $pdo,int $tenantId,int$orderId):?array
     {
         $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM delivery_progress WHERE tenant_id=? AND order_id=? FOR UPDATE'));$s->execute([$tenantId,$orderId]);$row=$s->fetch();return $row?:null;
     }
 
-    private function progressByOrder(PDO $pdo,int $tenantId,int $orderId):array
+    private function progressByOrder(PDO $pdo,int$tenantId,int$orderId):array
     {
         $s=$pdo->prepare('SELECT * FROM delivery_progress WHERE tenant_id=? AND order_id=? LIMIT 1');$s->execute([$tenantId,$orderId]);return $s->fetch()?:throw new RuntimeException('Não foi possível carregar o andamento da entrega.');
     }
