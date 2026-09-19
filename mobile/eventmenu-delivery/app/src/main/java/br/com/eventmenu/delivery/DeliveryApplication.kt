@@ -50,12 +50,15 @@ class DeliveryPushCoordinator(
     }
 
     fun registerToken(token: String) {
-        if (!BuildConfig.FIREBASE_ENABLED || token.isBlank() || session.accessToken.isNullOrBlank()) return
+        if (!BuildConfig.FIREBASE_ENABLED || token.isBlank()) return
+        session.pushToken = token
+        if (session.accessToken.isNullOrBlank()) return
         scope.launch { runCatching { api.register(token) } }
     }
 
     fun syncAfterLogin() {
         if (!BuildConfig.FIREBASE_ENABLED || session.accessToken.isNullOrBlank()) return
+        session.pushToken?.takeIf { it.isNotBlank() }?.let(::registerToken)
         runCatching { FirebaseMessaging.getInstance().token.addOnSuccessListener(::registerToken) }
     }
 }
