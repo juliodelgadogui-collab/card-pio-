@@ -165,6 +165,7 @@ fun DeliveryOperationsScreen(
                         Text(moneyDelivery(order.totalCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
                     }
 
+                    if (order.fromEventMenuDelivery) DeliveryOriginPill()
                     address?.let {
                         Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
                             Text(it, modifier = Modifier.padding(11.dp), style = MaterialTheme.typography.bodyMedium)
@@ -319,6 +320,21 @@ private fun deliveryNextAction(order: Order, pickedUp: Boolean, routeStarted: Bo
     order.status == "out_for_delivery" && arrived && order.paymentStatus != "paid" -> "Receber o pagamento"
     order.status == "out_for_delivery" && arrived -> "Confirmar a entrega"
     else -> "Aguardar liberação do pedido"
+}
+
+@Composable
+private fun DeliveryOriginPill() {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            "EventMenu Delivery",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
 }
 
 @Composable
