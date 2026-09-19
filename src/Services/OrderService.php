@@ -43,7 +43,7 @@ final class OrderService
             (new OrderHistoryService())->record($pdo,$tenantId,$orderId,$current,$target,$source,$this->historyNote($target,$source));Auth::audit('order.status','order',(string)$orderId,['from'=>$current,'to'=>$target,'source'=>$source,'unit_id'=>$order['unit_id']??null]);$order['status']=$target;return$order;
         });
         $this->publishOperationalNotification($result,$target);
-        $this->publishCustomerNotification($result,$target);
+        $this->publishCustomerNotification($result,$target,$source);
         return$result;
     }
 
@@ -59,9 +59,10 @@ final class OrderService
         if(!in_array((string)($order['channel']??''),['counter','table','delivery','pickup'],true))return;try{$notifications=new NotificationService();$id=(int)$order['id'];$unitId=!empty($order['unit_id'])?(int)$order['unit_id']:null;$expires=gmdate('Y-m-d H:i:s',time()+86400);if($target==='confirmed')$notifications->publishToPermission('orders.kitchen','operation','order.new','Novo pedido #'.$id,'Um novo pedido confirmado entrou na fila da cozinha.','order',(string)$id,'order:'.$id.':kitchen-confirmed','info',$expires,$unitId);if($target==='ready')$notifications->publishToPermission('orders.dispatch','operation','order.ready','Pedido #'.$id.' pronto','A cozinha marcou o pedido como pronto para despacho.','order',(string)$id,'order:'.$id.':ready-dispatch','success',$expires,$unitId);}catch(\Throwable){}
     }
 
-    private function publishCustomerNotification(array$order,string$target):void
+    private function publishCustomerNotification(array$order,string$target,string$source):void
     {
         if((string)($order['channel']??'')!=='delivery')return;
+        if($target==='out_for_delivery'&&$source==='delivery')return;
         if(!in_array($target,['confirmed','preparing','ready','out_for_delivery','completed','cancelled'],true))return;
         try{(new DeliveryCustomerPushService())->sendOrderStatus((int)$order['id'],$target);}catch(\Throwable$e){error_log('[delivery-customer-push] '.$e::class.': '.$e->getMessage());}
     }
