@@ -15,8 +15,6 @@ final class MarketplaceCatalogService
         $city = mb_strtolower(trim((string)($filters['city'] ?? '')));
         $state = mb_strtoupper(trim((string)($filters['state'] ?? '')));
 
-        // Use SQL-standard string literals. Double-quoted "active" is ambiguous
-        // in SQLite when a joined table also exposes a column named `active`.
         $sql = "SELECT t.id tenant_id,t.name,t.slug,t.settings,ms.city,ms.state,ou.id unit_id,ou.code unit_code,ou.name unit_name,ou.address unit_address
                 FROM marketplace_tenant_settings ms
                 JOIN tenants t ON t.id=ms.tenant_id
@@ -56,6 +54,11 @@ final class MarketplaceCatalogService
                 'cover_url' => $this->publicUrl($settings['menu_cover_url'] ?? ''),
                 'delivery_fee_cents' => max(0, (int)($settings['delivery_fee_cents'] ?? 0)),
                 'minimum_order_cents' => max(0, (int)($settings['min_delivery_order_cents'] ?? 0)),
+                'accepting_orders' => empty($settings['delivery_paused']),
+                'delivery_eta_minutes' => max(5, (int)($settings['delivery_eta_minutes'] ?? 45)),
+                'delivery_radius_km' => max(0, (float)($settings['delivery_radius_km'] ?? 0)),
+                'pickup_enabled' => !empty($settings['delivery_pickup_enabled']),
+                'schedule_note' => (string)($settings['delivery_schedule_note'] ?? ''),
             ];
         }
         return $rows;
@@ -140,6 +143,11 @@ final class MarketplaceCatalogService
                 'cover_url' => $this->publicUrl($settings['menu_cover_url'] ?? ''),
                 'delivery_fee_cents' => max(0, (int)($settings['delivery_fee_cents'] ?? 0)),
                 'minimum_order_cents' => max(0, (int)($settings['min_delivery_order_cents'] ?? 0)),
+                'accepting_orders' => empty($settings['delivery_paused']),
+                'delivery_eta_minutes' => max(5, (int)($settings['delivery_eta_minutes'] ?? 45)),
+                'delivery_radius_km' => max(0, (float)($settings['delivery_radius_km'] ?? 0)),
+                'pickup_enabled' => !empty($settings['delivery_pickup_enabled']),
+                'schedule_note' => (string)($settings['delivery_schedule_note'] ?? ''),
             ],
             'categories' => $categories,
             'products' => $safeProducts,
