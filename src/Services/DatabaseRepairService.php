@@ -42,12 +42,23 @@ final class DatabaseRepairService
         $result['integrity'] = $integrity;
         $this->check($result, 'Integridade SQLite', $integrity === 'ok', $integrity === 'ok' ? 'PRAGMA integrity_check = ok' : $integrity);
 
-        foreach (['021_operating_units.sql','034_production_print_queue.sql','035_operational_hardening.sql','052_production_desktop_print_claim.sql','055_eventmenu_delivery_marketplace.sql','056_marketplace_checkout_sessions.sql','057_marketplace_campaign_assignments.sql'] as $migration) {
+        foreach ([
+            '021_operating_units.sql',
+            '034_production_print_queue.sql',
+            '035_operational_hardening.sql',
+            '052_production_desktop_print_claim.sql',
+            '053_delivery_location_tracking.sql',
+            '054_delivery_public_tracking.sql',
+            '055_eventmenu_delivery_marketplace.sql',
+            '056_marketplace_entry_tokens.sql',
+            '057_marketplace_campaign_assignments.sql',
+        ] as $migration) {
             $result['migrations'][$migration] = $this->migrationApplied($migration);
         }
 
         foreach (['tenants','orders','operating_units','production_stations','production_print_queue'] as $table) {
-            $this->check($result, 'Tabela ' . $table, $this->tableExists($table), $this->tableExists($table) ? 'Existe.' : 'Ausente.');
+            $exists = $this->tableExists($table);
+            $this->check($result, 'Tabela ' . $table, $exists, $exists ? 'Existe.' : 'Ausente.');
         }
 
         $requiredColumns = [
@@ -67,11 +78,29 @@ final class DatabaseRepairService
             }
         }
 
+        $trackingColumns = [
+            'delivery_location_events' => ['tenant_id','delivery_user_id','shift_id','unit_id','order_id','recorded_at'],
+            'delivery_live_locations' => ['tenant_id','delivery_user_id','shift_id','unit_id','order_id','received_at'],
+        ];
+        foreach ($trackingColumns as $table => $columns) {
+            if (!$this->tableExists($table)) continue;
+            foreach ($columns as $column) {
+                $ok = $this->columnExists($table, $column);
+                $this->check($result, $table . '.' . $column, $ok, $ok ? 'Existe.' : 'Coluna ausente na estrutura legada de GPS/Delivery.');
+            }
+        }
+
         if ($this->migrationApplied('035_operational_hardening.sql') && $this->tableExists('production_print_queue') && !$this->columnExists('production_print_queue', 'unit_id')) {
             $this->check($result, 'Consistência da migration 035', false, 'A migration 035 está registrada como aplicada, mas production_print_queue.unit_id não existe.');
         }
         if ($this->migrationApplied('052_production_desktop_print_claim.sql') && $this->tableExists('production_print_queue') && !$this->columnExists('production_print_queue', 'updated_at')) {
             $this->check($result, 'Consistência da migration 052', false, 'A migration 052 está registrada como aplicada, mas production_print_queue.updated_at não existe.');
+        }
+        if ($this->tableExists('delivery_location_events') && !$this->columnExists('delivery_location_events', 'unit_id')) {
+            $this->check($result, 'Compatibilidade da migration 053', false, 'delivery_location_events já existe, mas não possui unit_id. A migration 053 falharia ao criar o índice por unidade.');
+        }
+        if ($this->tableExists('delivery_live_locations') && !$this->columnExists('delivery_live_locations', 'unit_id')) {
+            $this->check($result, 'Compatibilidade da migration 053 (tempo real)', false, 'delivery_live_locations já existe, mas não possui unit_id. A migration 053 falharia ao criar o índice por unidade.');
         }
 
         return $result;
@@ -149,6 +178,8 @@ final class DatabaseRepairService
                 $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS uq_prod_auto_print_order_station ON production_print_queue(tenant_id,station_id,order_id,queue_type) WHERE queue_type='auto'");
             }
 
+            $this->repairDeliveryTrackingUnitScope($actions);
+
             if ($ownsTransaction) $pdo->commit();
         } catch (Throwable $e) {
             if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
@@ -156,6 +187,43 @@ final class DatabaseRepairService
         }
 
         return ['backup' => basename($backup), 'actions' => $actions, 'diagnosis' => $this->diagnose()];
+    }
+
+    private function repairDeliveryTrackingUnitScope(array &$actions): void
+    {
+        $pdo = $this->pdo;
+        $tables = ['delivery_location_events','delivery_live_locations'];
+        foreach ($tables as $table) {
+            if (!$this->tableExists($table)) continue;
+            if (!$this->columnExists($table, 'unit_id')) {
+                $this->addColumn($table, 'unit_id', 'INTEGER NULL');
+                $actions[] = $table . '.unit_id criado.';
+            }
+            if (!$this->columnExists($table, 'tenant_id') || !$this->columnExists($table, 'unit_id')) continue;
+
+            $parts = [];
+            if ($this->columnExists($table, 'order_id') && $this->tableExists('orders') && $this->columnExists('orders', 'unit_id')) {
+                $parts[] = '(SELECT o.unit_id FROM orders o WHERE o.id="' . $table . '".order_id)';
+            }
+            if ($this->columnExists($table, 'shift_id') && $this->tableExists('work_shifts') && $this->columnExists('work_shifts', 'unit_id')) {
+                $parts[] = '(SELECT ws.unit_id FROM work_shifts ws WHERE ws.id="' . $table . '".shift_id)';
+            }
+            $parts[] = '(SELECT MIN(ou.id) FROM operating_units ou WHERE ou.tenant_id="' . $table . '".tenant_id)';
+            $pdo->exec('UPDATE "' . $table . '" SET unit_id=COALESCE(' . implode(',', $parts) . ') WHERE unit_id IS NULL');
+        }
+
+        if ($this->columnsExist('delivery_location_events', ['tenant_id','order_id','recorded_at'])) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_delivery_location_route ON delivery_location_events(tenant_id,order_id,recorded_at)');
+        }
+        if ($this->columnsExist('delivery_location_events', ['tenant_id','unit_id','delivery_user_id','recorded_at'])) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_delivery_location_user ON delivery_location_events(tenant_id,unit_id,delivery_user_id,recorded_at)');
+        }
+        if ($this->columnsExist('delivery_live_locations', ['tenant_id','unit_id','received_at'])) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_delivery_live_unit ON delivery_live_locations(tenant_id,unit_id,received_at)');
+        }
+        if ($this->columnsExist('delivery_live_locations', ['tenant_id','order_id','received_at'])) {
+            $pdo->exec('CREATE INDEX IF NOT EXISTS idx_delivery_live_order ON delivery_live_locations(tenant_id,order_id,received_at)');
+        }
     }
 
     private function backupSqlite(): string
@@ -206,6 +274,13 @@ final class DatabaseRepairService
             if (isset($row['name']) && strcasecmp((string)$row['name'], $column) === 0) return true;
         }
         return false;
+    }
+
+    private function columnsExist(string $table, array $columns): bool
+    {
+        if (!$this->tableExists($table)) return false;
+        foreach ($columns as $column) if (!$this->columnExists($table, (string)$column)) return false;
+        return true;
     }
 
     private function migrationApplied(string $name): bool
