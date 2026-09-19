@@ -57,7 +57,11 @@ final class DeliveryCustomerPaymentService
 
     private function localPayment(PDO $pdo,array $order,string $provider,string $key,int $amount): array
     {
-        $tenantId=(int)$order['tenant_id'];$orderId=(int)$order['id'];$existing=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$existing->execute([$tenantId,$key]);if($row=$existing->fetch())return $row;$open=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1');$open->execute([$tenantId,$orderId]);if($row=$open->fetch())return $row;
+        $tenantId=(int)$order['tenant_id'];$orderId=(int)$order['id'];
+        $existing=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$existing->execute([$tenantId,$key]);if($row=$existing->fetch())return $row;
+        $open=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1');$open->execute([$tenantId,$orderId]);
+        if($row=$open->fetch())throw new RuntimeException('Já existe uma cobrança eletrônica em andamento para este pedido. Aguarde o resultado antes de trocar a forma de pagamento.');
+        try{$pdo->prepare('DELETE FROM delivery_customer_payment_preferences WHERE order_id=?')->execute([$orderId]);}catch(\Throwable){}
         $pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")')->execute([$tenantId,$orderId,$provider,$key,$amount]);$id=(int)$pdo->lastInsertId();$pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status<>"paid"')->execute([$orderId]);try{(new PaymentCollectionService())->register($id,$provider==='mercadopago'?'online':'pix','eventmenu_delivery_app');}catch(\Throwable){}$q=$pdo->prepare('SELECT * FROM payments WHERE id=?');$q->execute([$id]);return $q->fetch();
     }
 
