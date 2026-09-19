@@ -39,6 +39,9 @@ em_header('Configurações','settings');
     <span class="eyebrow">IMPRESSÃO</span><h3>Cupom e impressora</h3><p class="muted">Ajuste o comprovante operacional e a impressão térmica.</p><span class="button secondary compact">Configurar</span>
   </a>
   <?php if(TenantFeatures::menu($tenantId)):?>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('delivery-settings.php')) ?>">
+    <span class="eyebrow">DELIVERY</span><h3>App do cliente</h3><p class="muted">Taxa, pedido mínimo, raio, Pix, cartão, dinheiro e disponibilidade no EventMenu Delivery.</p><span class="button secondary compact">Configurar Delivery</span>
+  </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=gateways')) ?>">
     <span class="eyebrow">PAGAMENTOS</span><h3>Gateways e NFC</h3><p class="muted">Contas recebedoras, Pix, cartão e pagamento por aproximação.</p><span class="button secondary compact">Abrir pagamentos</span>
   </a>
