@@ -31,6 +31,15 @@ public partial class MainWindow
             if (OrdersGrid.Columns[4] is DataGridTextColumn payment) payment.Binding = new Binding(nameof(Order.PaymentStatusDisplay));
             if (OrdersGrid.Columns[6] is DataGridTextColumn created) created.Binding = new Binding(nameof(Order.CreatedDisplay));
         }
+        if (!OrdersGrid.Columns.Any(column => string.Equals(column.Header?.ToString(), "Origem", StringComparison.OrdinalIgnoreCase)))
+        {
+            OrdersGrid.Columns.Add(new DataGridTextColumn
+            {
+                Header = "Origem",
+                Binding = new Binding(nameof(Order.SourceDisplay)),
+                Width = new DataGridLength(145),
+            });
+        }
 
         StackPanel? actionBar = OrdersView.Children.OfType<StackPanel>()
             .FirstOrDefault(x => Grid.GetRow(x) == 2);
@@ -118,6 +127,7 @@ public partial class MainWindow
         _ordersItemsSourceDescriptor = DependencyPropertyDescriptor.FromProperty(ItemsControl.ItemsSourceProperty, typeof(DataGrid));
         _ordersItemsSourceDescriptor?.AddValueChanged(OrdersGrid, OrdersGrid_ItemsSourceChanged);
         ApplyOrdersFilter();
+        _ = LoadOrderSourceMetadataAsync();
     }
 
     private static ComboBox CreateFilter(IEnumerable<(string Label, string Value)> items, double width)
@@ -128,7 +138,31 @@ public partial class MainWindow
         return combo;
     }
 
-    private void OrdersGrid_ItemsSourceChanged(object? sender, EventArgs e) => ApplyOrdersFilter();
+    private async void OrdersGrid_ItemsSourceChanged(object? sender, EventArgs e)
+    {
+        ApplyOrdersFilter();
+        await LoadOrderSourceMetadataAsync();
+    }
+
+    private async Task LoadOrderSourceMetadataAsync()
+    {
+        if (!_ordersUxReady || _api is null || _orders.Count == 0 || !HasShift) return;
+        try
+        {
+            var response = await _api.OrderSourcesAsync(_orders.Select(order => order.Id));
+            var sources = response.Orders.ToDictionary(meta => meta.OrderId, meta => meta.OrderSource);
+            foreach (var order in _orders)
+            {
+                if (sources.TryGetValue(order.Id, out var source)) order.OrderSource = source;
+            }
+            OrdersGrid.Items.Refresh();
+            ApplyOrdersFilter();
+        }
+        catch
+        {
+            // Origem é um metadado visual. Uma falha aqui nunca pode impedir a operação dos pedidos.
+        }
+    }
 
     private void ApplyOrdersFilter()
     {
@@ -149,7 +183,8 @@ public partial class MainWindow
             return order.Id.ToString().Contains(search, StringComparison.OrdinalIgnoreCase)
                 || (order.CustomerName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
                 || (order.DeliveryName ?? "").Contains(search, StringComparison.OrdinalIgnoreCase)
-                || order.ChannelDisplay.Contains(search, StringComparison.OrdinalIgnoreCase);
+                || order.ChannelDisplay.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || order.SourceDisplay.Contains(search, StringComparison.OrdinalIgnoreCase);
         };
         view.Refresh();
         if (_ordersVisibleCount is not null) _ordersVisibleCount.Text = $"{view.Cast<object>().Count()} exibido(s)";
@@ -168,17 +203,17 @@ public partial class MainWindow
         if (order.PaymentStatus is "unpaid" or "pending" && order.Status is not "completed")
         {
             e.Row.Background = new SolidColorBrush(Color.FromRgb(255, 251, 235));
-            e.Row.ToolTip = "Pagamento pendente.";
+            e.Row.ToolTip = order.FromEventMenuDelivery ? "EventMenu Delivery · pagamento pendente." : "Pagamento pendente.";
         }
         else if (order.Status.Equals("ready", StringComparison.OrdinalIgnoreCase))
         {
             e.Row.Background = new SolidColorBrush(Color.FromRgb(236, 253, 245));
-            e.Row.ToolTip = "Pedido pronto para a próxima etapa.";
+            e.Row.ToolTip = order.FromEventMenuDelivery ? "EventMenu Delivery · pedido pronto para a próxima etapa." : "Pedido pronto para a próxima etapa.";
         }
         else
         {
             e.Row.ClearValue(Control.BackgroundProperty);
-            e.Row.ToolTip = null;
+            e.Row.ToolTip = order.FromEventMenuDelivery ? "Pedido recebido pelo EventMenu Delivery." : null;
         }
     }
 
