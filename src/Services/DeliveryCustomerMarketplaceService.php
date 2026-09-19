@@ -37,6 +37,19 @@ final class DeliveryCustomerMarketplaceService
         return ['tenant_id'=>$tenantId,'favorite'=>$favorite];
     }
 
+    public function benefits(PDO $pdo,int $accountId,int $tenantId):array
+    {
+        $this->assertMarketplaceTenant($pdo,$tenantId);
+        return (new DeliveryCustomerBenefitsService())->summary($pdo,$accountId,$tenantId);
+    }
+
+    public function couponQuote(PDO $pdo,int $accountId,int $tenantId,string $code,int $subtotalCents):array
+    {
+        $this->assertMarketplaceTenant($pdo,$tenantId);
+        (new DeliveryCustomerBenefitsService())->summary($pdo,$accountId,$tenantId);
+        return (new DeliveryCustomerBenefitsService())->couponQuote($pdo,$tenantId,$code,$subtotalCents);
+    }
+
     public function createOrder(PDO $pdo,int $accountId,array $payload):array
     {
         $entryToken=trim((string)($payload['entry_token']??''));if($entryToken==='')throw new RuntimeException('Atualize a loja antes de finalizar o pedido.');
@@ -50,13 +63,17 @@ final class DeliveryCustomerMarketplaceService
 
         $c=$pdo->prepare('SELECT name,email,phone FROM delivery_customer_accounts WHERE id=? AND status="active" AND email_verified_at IS NOT NULL');$c->execute([$accountId]);$customer=$c->fetch();if(!$customer)throw new RuntimeException('Confirme sua conta antes de fazer pedidos.');
         $body=$payload;$body['name']=$customer['name'];$body['phone']=$address['phone']?:$customer['phone'];$body['address']=$this->addressText($address);$body['customer_email']=$customer['email'];
-        if(trim((string)$body['phone'])==='')throw new RuntimeException('Adicione um telefone ao seu perfil ou endereço.');
+        if(strlen((new CustomerIdentityService())->normalizePhone((string)$body['phone']))<10)throw new RuntimeException('Adicione um telefone válido ao seu perfil ou endereço.');
 
-        $order=(new MarketplaceConsumerService())->createOrder($pdo,$entryToken,$body);$orderId=(int)$order['order_number'];
+        $created=(new MarketplaceConsumerService())->createOrder($pdo,$entryToken,$body);$orderId=(int)$created['order_number'];
         $o=$pdo->prepare('SELECT tenant_id,subtotal_cents,total_cents FROM orders WHERE id=? LIMIT 1');$o->execute([$orderId]);$stored=$o->fetch();if(!$stored||(int)$stored['tenant_id']!==$tenantId)throw new RuntimeException('Pedido não encontrado.');
         $minimum=max(0,(int)($settings['min_delivery_order_cents']??0));if($minimum>0&&(int)$stored['subtotal_cents']<$minimum)throw new RuntimeException('O pedido mínimo deste restaurante é R$ '.number_format($minimum/100,2,',','.').'.');
         $pdo->prepare('INSERT INTO delivery_customer_order_links (account_id,tenant_id,order_id) VALUES (?,?,?)')->execute([$accountId,$tenantId,$orderId]);
-        return $order;
+
+        $couponCode=trim((string)($payload['coupon_code']??''));$redeemPoints=max(0,(int)($payload['redeem_points']??0));$benefits=null;
+        if($couponCode!==''||$redeemPoints>0)$benefits=(new DeliveryCustomerBenefitsService())->applyToOrder($pdo,$accountId,$tenantId,$orderId,['coupon_code'=>$couponCode,'redeem_points'=>$redeemPoints]);
+
+        $order=$this->order($pdo,$accountId,$orderId);if($benefits!==null)$order['benefits']=$benefits;return$order;
     }
 
     public function orders(PDO $pdo,int $accountId,int $limit=50):array
@@ -117,6 +134,11 @@ final class DeliveryCustomerMarketplaceService
     public function ownedOrder(PDO $pdo,int $accountId,int $orderId):array
     {
         $q=$pdo->prepare('SELECT o.* FROM delivery_customer_order_links l JOIN orders o ON o.id=l.order_id WHERE l.account_id=? AND l.order_id=? LIMIT 1');$q->execute([$accountId,$orderId]);$row=$q->fetch();if(!$row)throw new RuntimeException('Pedido não encontrado.');return $row;
+    }
+
+    private function assertMarketplaceTenant(PDO $pdo,int $tenantId):void
+    {
+        $q=$pdo->prepare("SELECT 1 FROM tenants t JOIN marketplace_tenant_settings ms ON ms.tenant_id=t.id WHERE t.id=? AND t.status='active' AND ms.participates=1 AND ms.status='active' LIMIT 1");$q->execute([$tenantId]);if(!$q->fetchColumn())throw new RuntimeException('Restaurante indisponível.');
     }
 
     private function tenantSettings(PDO $pdo,int $tenantId):array{$q=$pdo->prepare('SELECT settings FROM tenants WHERE id=? LIMIT 1');$q->execute([$tenantId]);$settings=json_decode((string)($q->fetchColumn()?:'{}'),true);return is_array($settings)?$settings:[];}
