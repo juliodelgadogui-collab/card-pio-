@@ -29,6 +29,17 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
     suspend fun forgotPassword(email: String) { requestUnit("api-delivery-customer.php?action=forgot-password", "POST", JSONObject().put("email", email)) }
     suspend fun logout() { requestUnit("api-delivery-customer.php?action=logout", "POST", JSONObject()) }
     suspend fun me(): Customer = request("api-delivery-customer.php?action=me") { customer(it.getJSONObject("customer")) }
+    suspend fun registerPush(pushToken: String, deviceIdHash: String = "") {
+        if (pushToken.isBlank()) return
+        requestUnit(
+            "api-delivery-customer.php?action=push-register",
+            "POST",
+            JSONObject()
+                .put("push_token", pushToken)
+                .put("platform", "android")
+                .put("device_id_hash", deviceIdHash)
+        )
+    }
 
     suspend fun saveProfile(name: String, phone: String): Customer = request(
         "api-delivery-customer.php?action=profile-save", "POST", JSONObject().put("name", name).put("phone", phone)
