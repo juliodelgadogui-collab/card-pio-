@@ -56,7 +56,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun clearMessage() { message = null }
     fun navigate(value: Screen) { screen = value }
-    fun emailConfirmed() { session.accessToken = null; customer = null; screen = Screen.Login; message = "E-mail confirmado. Entre com sua conta." }
+    fun emailConfirmed() { session.accessToken = null; PaymentUiContext.clear(); customer = null; screen = Screen.Login; message = "E-mail confirmado. Entre com sua conta." }
 
     fun login(email: String, password: String) = action {
         val result = api.login(email.trim(), password)
@@ -87,7 +87,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun logout() = action {
         val push = session.pushToken.orEmpty()
         runCatching { api.logout(push) }
-        session.clear(); customer = null; stores = emptyList(); cart.clear(); trackingJob?.cancel(); paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null; screen = Screen.Login
+        session.clear(); PaymentUiContext.clear(); customer = null; stores = emptyList(); cart.clear(); trackingJob?.cancel(); paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null; screen = Screen.Login
     }
 
     fun loadStores(query: String = "") = action(showBusy = false) { stores = api.stores(query) }
@@ -124,6 +124,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         if (subtotal < cat.store.minimumOrderCents) error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
         val order = api.createOrder(cat, addressId, cart.toList())
         selectedOrder = order
+        PaymentUiContext.updateAmount(order.totalCents)
         cart.clear()
         paymentMethods = api.paymentMethods(order.orderNumber)
         pixPayment = null
@@ -142,6 +143,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         val id = selectedOrder?.orderNumber ?: error("Pedido não encontrado.")
         paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null
         api.cash(id, changeForCents)
+        PaymentUiContext.clear()
         message = "Pagamento em dinheiro registrado para a entrega."
         openOrderSuspend(id)
     }
@@ -150,7 +152,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         val id = selectedOrder?.orderNumber ?: error("Pedido não encontrado.")
         val status = api.card(id, token, paymentMethodId, installments, taxId)
         if (status == "paid") {
-            paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null
+            paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null; PaymentUiContext.clear()
             message = "Pagamento aprovado."
             openOrderSuspend(id)
         } else {
@@ -203,7 +205,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun refreshSession() = action(showBusy = false) {
         try { customer = api.me(); loadStoresInternal(); screen = Screen.Home }
-        catch (e: ApiException) { if (e.code == "UNAUTHENTICATED") { session.accessToken = null; screen = Screen.Login } else throw e }
+        catch (e: ApiException) { if (e.code == "UNAUTHENTICATED") { session.accessToken = null; PaymentUiContext.clear(); screen = Screen.Login } else throw e }
     }
 
     private suspend fun loadStoresInternal() { stores = api.stores() }
@@ -216,7 +218,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
                 val result = runCatching { api.paymentStatus(orderId) }.getOrNull() ?: return@repeat
                 when (result.optString("payment_status").lowercase()) {
                     "paid" -> {
-                        paymentWaiting = false; pixPayment = null
+                        paymentWaiting = false; pixPayment = null; PaymentUiContext.clear()
                         message = "Pagamento confirmado."
                         runCatching { openOrderSuspend(orderId) }.onFailure { message = it.message ?: "Pagamento confirmado. Atualize seus pedidos." }
                         return@launch
@@ -250,14 +252,14 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
             if (showBusy) busy = true
             try { block() }
             catch (e: ApiException) {
-                if (e.code == "UNAUTHENTICATED") { session.accessToken = null; customer = null; screen = Screen.Login }
+                if (e.code == "UNAUTHENTICATED") { session.accessToken = null; PaymentUiContext.clear(); customer = null; screen = Screen.Login }
                 message = e.message
             } catch (t: Throwable) { message = t.message ?: "Não foi possível concluir agora." }
             finally { if (showBusy) busy = false }
         }
     }
 
-    override fun onCleared() { trackingJob?.cancel(); paymentPollingJob?.cancel(); super.onCleared() }
+    override fun onCleared() { trackingJob?.cancel(); paymentPollingJob?.cancel(); PaymentUiContext.clear(); super.onCleared() }
 }
 
 fun money(cents: Int): String = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("pt","BR")).format(cents / 100.0)
