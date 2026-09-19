@@ -5,10 +5,11 @@ on:
     branches: [dev/eventmenu-desktop]
     paths: ['desktop/**','.github/workflows/desktop-windows.yml']
 permissions: {contents: read}
+concurrency: {group: 'eventmenu-desktop-${{ github.ref }}', cancel-in-progress: true}
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
