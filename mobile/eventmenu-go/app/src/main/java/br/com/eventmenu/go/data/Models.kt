@@ -28,7 +28,10 @@ data class Order(
     val tableName: String = "",
     val tableId: Int? = null,
     val tabId: Int? = null,
-)
+    val orderSource: String = "",
+) {
+    val fromEventMenuDelivery: Boolean get() = orderSource.equals("EVENTMENU_DELIVERY", ignoreCase = true)
+}
 
 data class DeliveryUser(val id: Int, val name: String, val email: String, val onShift: Boolean, val startedAt: String = "")
 data class KitchenItem(val name: String, val quantity: Double, val notes: String = "")
@@ -221,33 +224,9 @@ data class ManagerDetails(
     val problemOrders: List<ManagerProblemOrder>,
 )
 
-data class QrResult(
-    val type: String,
-    val title: String,
-    val raw: String,
-    val subtitle: String = "",
-    val amountCents: Int? = null,
-    val status: String = "",
-    val orderId: Int? = null,
-    val channel: String = "",
-)
-
-data class PixCharge(
-    val paymentId: Int,
-    val orderId: Int,
-    val amountCents: Int,
-    val copyPaste: String,
-    val expiresAt: String,
-    val provider: String = "",
-    val reused: Boolean = false,
-)
-
-data class DeliveryCashReceipt(val orderId: Int, val paymentId: Int?, val totalCents: Int, val receivedCents: Int, val changeCents: Int)
-data class DeliveryCashBalance(val shiftId: Int, val cashCollectedCents: Int, val confirmedHandoffCents: Int, val outstandingCents: Int)
-data class CashHandoff(val id: Int, val token: String, val qrPayload: String, val amountCents: Int, val status: String, val deliveryName: String = "")
-data class TapOnRequest(val intentToken: String, val orderId: Int, val amountCents: Int, val appKey: String, val appName: String, val appVersion: String, val enableTaxPassThrough: Boolean)
-
-enum class AppMode(val wire: String, val label: String, val emoji: String) {
-    OPERATION("operation", "Operação", "🍽"), DELIVERY("delivery", "Delivery", "🛵"), EVENTS("events", "Eventos", "🎟"), PAY("pay", "Pay", "💳");
-    companion object { fun fromWire(value: String): AppMode? = entries.firstOrNull { it.wire == value } }
-}
+data class PixCharge(val paymentId:Int,val orderId:Int,val amountCents:Int,val copyPaste:String,val expiresAt:String,val provider:String,val reused:Boolean)
+data class TapOnRequest(val intentToken:String,val orderId:Int,val amountCents:Int,val appKey:String,val appName:String,val appVersion:String,val enableTaxPassThrough:Boolean)
+data class DeliveryCashReceipt(val orderId:Int,val paymentId:Int?,val totalCents:Int,val receivedCents:Int,val changeCents:Int)
+data class DeliveryCashBalance(val shiftId:Int,val cashCollectedCents:Int,val confirmedHandoffCents:Int,val outstandingCents:Int)
+data class CashHandoff(val id:Int,val token:String,val qrPayload:String,val amountCents:Int,val status:String,val createdAt:String,val expiresAt:String)
+data class QrResult(val type:String,val title:String,val raw:String,val subtitle:String="",val amountCents:Int=0,val status:String="",val orderId:Int?=null,val channel:String="")
