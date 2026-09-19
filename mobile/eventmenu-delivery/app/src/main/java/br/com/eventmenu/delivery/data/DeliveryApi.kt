@@ -16,9 +16,15 @@ data class RegisterResult(val email: String, val emailSent: Boolean)
 class DeliveryApi(private val tokenProvider: () -> String?) {
     private val base = BuildConfig.API_BASE_URL
 
-    suspend fun register(name: String, email: String, phone: String, password: String): RegisterResult = request(
+    suspend fun register(name: String, email: String, phone: String, password: String, legalAccepted: Boolean): RegisterResult = request(
         "api-delivery-customer.php?action=register", "POST",
-        JSONObject().put("name", name).put("email", email).put("phone", phone).put("password", password)
+        JSONObject()
+            .put("name", name)
+            .put("email", email)
+            .put("phone", phone)
+            .put("password", password)
+            .put("terms_accepted", legalAccepted)
+            .put("privacy_accepted", legalAccepted)
     ) { root -> RegisterResult(root.optString("email"), root.optBoolean("email_sent")) }
 
     suspend fun resend(email: String) { requestUnit("api-delivery-customer.php?action=resend-verification", "POST", JSONObject().put("email", email)) }
