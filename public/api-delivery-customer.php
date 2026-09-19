@@ -35,7 +35,12 @@ try{
 
     $bearer=delivery_customer_bearer();$account=$auth->authenticate($pdo,$bearer);$accountId=(int)$account['id'];$rate->assertAllowed('delivery.customer.auth',$rate->requestSubject('account:'.$accountId),240,60,'Muitas atualizações em pouco tempo.');
 
-    if($action==='logout'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$auth->logout($pdo,$bearer);delivery_customer_out(['ok'=>true]);}
+    if($action==='logout'){
+        if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);
+        $pushToken=trim((string)($body['push_token']??''));
+        if($pushToken!=='')$pdo->prepare('UPDATE delivery_customer_push_devices SET active=0,last_seen_at=CURRENT_TIMESTAMP WHERE account_id=? AND push_token=?')->execute([$accountId,$pushToken]);
+        $auth->logout($pdo,$bearer);delivery_customer_out(['ok'=>true]);
+    }
     if($action==='me'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'customer'=>$auth->me($pdo,$accountId)]);}
     if($action==='profile-save'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'customer'=>$auth->updateProfile($pdo,$accountId,$body)]);}
     if($action==='address-save'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$address=Database::transaction(fn(PDO$tx):array=>$auth->saveAddress($tx,$accountId,$body));delivery_customer_out(['ok'=>true,'address'=>$address]);}
