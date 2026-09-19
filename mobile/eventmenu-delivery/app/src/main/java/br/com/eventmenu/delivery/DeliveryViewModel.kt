@@ -67,8 +67,9 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         loadStoresInternal()
     }
 
-    fun register(name: String, email: String, phone: String, password: String) = action {
-        val result = api.register(name.trim(), email.trim(), phone.trim(), password)
+    fun register(name: String, email: String, phone: String, password: String, legalAccepted: Boolean = false) = action {
+        if (!legalAccepted) error("Aceite os Termos de Uso e a Política de Privacidade para continuar.")
+        val result = api.register(name.trim(), email.trim(), phone.trim(), password, legalAccepted)
         pendingEmail = result.email
         screen = Screen.VerifyEmail
         message = if (result.emailSent) "Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."
