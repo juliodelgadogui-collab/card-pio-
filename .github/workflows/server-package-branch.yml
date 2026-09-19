@@ -31,6 +31,7 @@ jobs:
         run: |
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
+          php scripts/ci-sqlite-legacy-upgrade-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-permission-smoke.php
           php scripts/ci-sensitive-rate-limit-smoke.php
