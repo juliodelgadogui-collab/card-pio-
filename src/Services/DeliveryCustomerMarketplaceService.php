@@ -103,10 +103,15 @@ final class DeliveryCustomerMarketplaceService
 
     public function markCash(PDO $pdo,int $accountId,int $orderId,?int $changeForCents=null):array
     {
-        $order=$this->ownedOrder($pdo,$accountId,$orderId);$methods=$this->paymentMethods($pdo,$accountId,$orderId);if(!$methods['cash'])throw new RuntimeException('Pagamento em dinheiro não está disponível.');if(in_array((string)$order['status'],['cancelled','completed'],true)||(string)$order['payment_status']==='paid')throw new RuntimeException('Este pedido não aceita alteração de pagamento.');$changeForCents=$changeForCents!==null?max(0,$changeForCents):null;if($changeForCents!==null&&$changeForCents<(int)$order['total_cents'])throw new RuntimeException('O valor para troco deve ser maior ou igual ao total.');
-        $raw=json_encode(['method'=>'cash','change_for_cents'=>$changeForCents],JSON_UNESCAPED_UNICODE);$key='delivery-cash:'.(int)$order['tenant_id'].':'.$orderId;
-        try{$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status,raw_payload) VALUES (?,?,"cash",?,?,"BRL","pending",?)')->execute([(int)$order['tenant_id'],$orderId,$key,(int)$order['total_cents'],$raw]);}catch(\PDOException){$pdo->prepare('UPDATE payments SET raw_payload=?,status="pending" WHERE tenant_id=? AND idempotency_key=?')->execute([$raw,(int)$order['tenant_id'],$key]);}
-        $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=?')->execute([$orderId]);return ['method'=>'cash','status'=>'pending','change_for_cents'=>$changeForCents];
+        $order=$this->ownedOrder($pdo,$accountId,$orderId);$methods=$this->paymentMethods($pdo,$accountId,$orderId);if(!$methods['cash'])throw new RuntimeException('Pagamento em dinheiro não está disponível.');
+        if(in_array((string)$order['status'],['cancelled','completed'],true)||(string)$order['payment_status']==='paid')throw new RuntimeException('Este pedido não aceita alteração de pagamento.');
+        $changeForCents=$changeForCents!==null?max(0,$changeForCents):null;if($changeForCents!==null&&$changeForCents<(int)$order['total_cents'])throw new RuntimeException('O valor para troco deve ser maior ou igual ao total.');
+        $active=$pdo->prepare('SELECT id FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") LIMIT 1');$active->execute([(int)$order['tenant_id'],$orderId]);if($active->fetchColumn())throw new RuntimeException('Já existe uma cobrança eletrônica em andamento. Aguarde o resultado antes de trocar para dinheiro.');
+        $existing=$pdo->prepare('SELECT order_id FROM delivery_customer_payment_preferences WHERE order_id=? LIMIT 1');$existing->execute([$orderId]);
+        if($existing->fetchColumn())$pdo->prepare('UPDATE delivery_customer_payment_preferences SET method="cash",change_for_cents=?,updated_at=CURRENT_TIMESTAMP WHERE order_id=? AND account_id=?')->execute([$changeForCents,$orderId,$accountId]);
+        else $pdo->prepare('INSERT INTO delivery_customer_payment_preferences (order_id,account_id,tenant_id,method,change_for_cents) VALUES (?,?,?,"cash",?)')->execute([$orderId,$accountId,(int)$order['tenant_id'],$changeForCents]);
+        if((string)$order['payment_status']==='failed')$pdo->prepare('UPDATE orders SET payment_status="unpaid" WHERE id=? AND tenant_id=?')->execute([$orderId,(int)$order['tenant_id']]);
+        return ['method'=>'cash','status'=>'selected','change_for_cents'=>$changeForCents];
     }
 
     public function ownedOrder(PDO $pdo,int $accountId,int $orderId):array
