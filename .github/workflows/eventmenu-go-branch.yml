@@ -9,6 +9,7 @@ concurrency: {group: 'eventmenu-go-${{ github.ref }}', cancel-in-progress: true}
 jobs:
   android:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     defaults: {run: {working-directory: mobile/eventmenu-go}}
     steps:
       - uses: actions/checkout@v4
