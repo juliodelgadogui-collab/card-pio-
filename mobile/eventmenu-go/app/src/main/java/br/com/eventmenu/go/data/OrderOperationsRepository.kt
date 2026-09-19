@@ -57,7 +57,10 @@ data class OrderOperationalDetail(
     val items: List<OrderDetailItem>,
     val timeline: List<OrderTimelineEntry>,
     val loyalty: LoyaltyOrderSummary? = null,
-)
+    val orderSource: String = "",
+) {
+    val fromEventMenuDelivery: Boolean get() = orderSource.equals("EVENTMENU_DELIVERY", ignoreCase = true)
+}
 
 class OrderOperationsRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
     private val api = ApiClient(baseUrl, deviceId)
@@ -132,6 +135,7 @@ class OrderOperationsRepository(baseUrl: String, deviceId: String, private val s
             items = items,
             timeline = timeline,
             loyalty = parseLoyalty(root.optJSONObject("loyalty")),
+            orderSource = order.optString("order_source"),
         )
     }
 
