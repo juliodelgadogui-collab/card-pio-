@@ -13,19 +13,23 @@ final class MarketplaceEntryTokenService
     private const VERSION = 1;
     private const TTL_SECONDS = 1200;
 
-    public function issue(PDO $pdo, int $tenantId, int $unitId, ?string $campaignCode = null): array
+    /**
+     * $legacyCampaignCode is intentionally ignored. Older internal callers may
+     * still pass a fourth argument, but campaign attribution is server-only.
+     */
+    public function issue(PDO $pdo, int $tenantId, int $unitId, ?string $legacyCampaignCode = null): array
     {
         (new MarketplaceCommissionService())->assertTenantCanReceive($pdo, $tenantId, $unitId);
         $this->purgeExpired($pdo);
         $nonce = bin2hex(random_bytes(24));
         $now = time();
         $expires = $now + self::TTL_SECONDS;
-        $campaignCode = mb_substr(trim((string)$campaignCode), 0, 80);
+        $campaignCode = (new MarketplaceCampaignService())->codeForCheckout($pdo, $tenantId, $unitId, gmdate('Y-m-d H:i:s', $now));
         $payload = [
             'v' => self::VERSION,
             'tenant_id' => $tenantId,
             'unit_id' => $unitId,
-            'campaign' => $campaignCode !== '' ? $campaignCode : null,
+            'campaign' => $campaignCode,
             'iat' => $now,
             'exp' => $expires,
             'nonce' => $nonce,
@@ -34,7 +38,7 @@ final class MarketplaceEntryTokenService
         $signature = $this->b64url(hash_hmac('sha256', $encoded, $this->key(), true));
         $token = $encoded . '.' . $signature;
         $pdo->prepare('INSERT INTO marketplace_entry_tokens (tenant_id,unit_id,nonce_hash,campaign_code,expires_at) VALUES (?,?,?,?,?)')
-            ->execute([$tenantId, $unitId, hash('sha256', $nonce), $payload['campaign'], gmdate('Y-m-d H:i:s', $expires)]);
+            ->execute([$tenantId, $unitId, hash('sha256', $nonce), $campaignCode, gmdate('Y-m-d H:i:s', $expires)]);
         return ['token' => $token, 'expires_at' => gmdate('c', $expires), 'expires_in' => self::TTL_SECONDS];
     }
 
@@ -79,7 +83,7 @@ final class MarketplaceEntryTokenService
 
     private function purgeExpired(PDO $pdo): void
     {
-        // Limpeza oportunista e limitada no momento de emitir novas sessões. Tokens ativos nunca são removidos.
+        // Opportunistic cleanup; active tokens are never removed.
         $cutoff = gmdate('Y-m-d H:i:s', time() - 86400);
         $delete = $pdo->prepare('DELETE FROM marketplace_entry_tokens WHERE (used_at IS NOT NULL OR expires_at<CURRENT_TIMESTAMP) AND created_at<?');
         $delete->execute([$cutoff]);
