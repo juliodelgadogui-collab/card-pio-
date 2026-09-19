@@ -15,9 +15,6 @@ final class DeliveryProgressService
     {
         [$tenantId,$userId,$shift]=$this->deliveryContext();$unitId=$shift['unit_id']!==null?(int)$shift['unit_id']:null;$pdo=Database::connection();
         $sql='SELECT o.id order_id,o.status order_status,dp.picked_up_at,dp.route_started_at,dp.arrived_at,dp.completed_at FROM orders o LEFT JOIN delivery_progress dp ON dp.tenant_id=o.tenant_id AND dp.order_id=o.id WHERE o.tenant_id=? AND o.channel="delivery" AND o.assigned_delivery_user_id=? AND o.status IN ("ready","out_for_delivery","completed")';$args=[$tenantId,$userId];
-        // Um turno de entrega sem unidade representa operação flexível. O pedido já passou pela
-        // validação de atribuição; portanto, não filtre artificialmente por unit_id IS NULL.
-        // Quando o turno possui unidade, a restrição continua obrigatória.
         if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}
         $sql.=' ORDER BY o.id DESC LIMIT 200';$s=$pdo->prepare($sql);$s->execute($args);return $s->fetchAll();
     }
@@ -60,15 +57,18 @@ final class DeliveryProgressService
     public function arrive(int $orderId):array
     {
         [$tenantId,$userId,$shift]=$this->deliveryContext();
-        return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$shift,$orderId):array{
+        $changed=false;
+        $result=Database::transaction(function(PDO $pdo)use($tenantId,$userId,$shift,$orderId,&$changed):array{
             $order=$this->lockedAssignedOrder($pdo,$tenantId,$userId,$shift,$orderId);if($order['status']!=='out_for_delivery')throw new RuntimeException('Inicie a rota antes de marcar chegada.');
             $p=$this->lockedProgress($pdo,$tenantId,$orderId);if(!$p||!$p['route_started_at'])throw new RuntimeException('A rota ainda não foi iniciada.');
             if(!$p['arrived_at']){
                 $pdo->prepare('UPDATE delivery_progress SET arrived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
-                (new OrderHistoryService())->record($pdo,$tenantId,$orderId,'out_for_delivery','out_for_delivery','delivery_arrived','Entregador informou chegada ao endereço do cliente.',$userId);
+                (new OrderHistoryService())->record($pdo,$tenantId,$orderId,'out_for_delivery','out_for_delivery','delivery_arrived','Entregador informou chegada ao endereço do cliente.',$userId);$changed=true;
             }
             Auth::audit('delivery.arrived','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return $this->progressByOrder($pdo,$tenantId,$orderId);
         });
+        if($changed){try{(new DeliveryCustomerPushService())->sendOrderStatus($orderId,'arrived');}catch(\Throwable$e){error_log('[delivery-customer-arrived-push] '.$e::class.': '.$e->getMessage());}}
+        return$result;
     }
 
     public function complete(int $orderId):array
