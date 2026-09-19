@@ -52,6 +52,7 @@ final class DeliveryProgressService
             if(!$p['route_started_at'])$tx->prepare('UPDATE delivery_progress SET route_started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
         });
         try{(new DeliveryPublicTrackingService())->issue($orderId);}catch(\Throwable$e){error_log('[delivery-tracking-auto] '.$e::class.': '.$e->getMessage());}
+        try{(new DeliveryCustomerPushService())->sendOrderStatus($orderId,'out_for_delivery');}catch(\Throwable$e){error_log('[delivery-customer-route-push] '.$e::class.': '.$e->getMessage());}
         Auth::audit('delivery.route_started','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return $this->progressByOrder(Database::connection(),$tenantId,$orderId);
     }
 
