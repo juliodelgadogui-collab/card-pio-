@@ -38,6 +38,11 @@ data class Store(
     val deliveryFeeCents: Int,
     val minimumOrderCents: Int,
     val favorite: Boolean,
+    val acceptingOrders: Boolean = true,
+    val deliveryEtaMinutes: Int = 45,
+    val deliveryRadiusKm: Double = 0.0,
+    val pickupEnabled: Boolean = false,
+    val scheduleNote: String = "",
 )
 
 data class Category(val id: Int, val name: String)
