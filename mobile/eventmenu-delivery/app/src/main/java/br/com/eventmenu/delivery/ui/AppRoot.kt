@@ -18,6 +18,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import br.com.eventmenu.delivery.BuildConfig
 import br.com.eventmenu.delivery.DeliveryViewModel
 import br.com.eventmenu.delivery.Screen
 import br.com.eventmenu.delivery.money
@@ -74,13 +75,21 @@ private fun SecureLoginScreen(vm: DeliveryViewModel) {
 
 @Composable
 private fun SecureRegisterScreen(vm: DeliveryViewModel) {
+    val context = LocalContext.current
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var visible by remember { mutableStateOf(false) }
+    var legalAccepted by remember { mutableStateOf(false) }
     val snack = remember { SnackbarHostState() }
     LaunchedEffect(vm.message) { vm.message?.let { snack.showSnackbar(it); vm.clearMessage() } }
+
+    fun openLegal(path: String) {
+        val uri = Uri.parse(BuildConfig.API_BASE_URL + path)
+        runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, uri)) }
+    }
+
     MaterialTheme {
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -100,7 +109,23 @@ private fun SecureRegisterScreen(vm: DeliveryViewModel) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Button({ vm.register(name, email, phone, password) }, modifier = Modifier.fillMaxWidth(), enabled = name.isNotBlank() && email.isNotBlank() && password.length >= 8) { Text("Cadastrar e confirmar e-mail") }
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = legalAccepted, onCheckedChange = { legalAccepted = it })
+                            Text("Li e aceito os Termos de Uso e a Política de Privacidade.", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            TextButton({ openLegal("delivery-terms.php") }) { Text("Ler Termos") }
+                            TextButton({ openLegal("delivery-privacy.php") }) { Text("Privacidade") }
+                        }
+                    }
+                }
+                Button(
+                    { vm.register(name, email, phone, password, legalAccepted) },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = name.isNotBlank() && email.isNotBlank() && password.length >= 8 && legalAccepted,
+                ) { Text("Cadastrar e confirmar e-mail") }
                 TextButton({ vm.navigate(Screen.Login) }) { Text("Já tenho conta") }
             }
             if (vm.busy) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
