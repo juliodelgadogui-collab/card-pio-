@@ -27,17 +27,14 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
         JSONObject().put("email", email).put("password", password).put("device_name", android.os.Build.MODEL)
     ) { root -> LoginResult(root.getString("access_token"), customer(root.getJSONObject("customer"))) }
     suspend fun forgotPassword(email: String) { requestUnit("api-delivery-customer.php?action=forgot-password", "POST", JSONObject().put("email", email)) }
-    suspend fun logout() { requestUnit("api-delivery-customer.php?action=logout", "POST", JSONObject()) }
+    suspend fun logout(pushToken: String = "") { requestUnit("api-delivery-customer.php?action=logout", "POST", JSONObject().put("push_token", pushToken)) }
     suspend fun me(): Customer = request("api-delivery-customer.php?action=me") { customer(it.getJSONObject("customer")) }
     suspend fun registerPush(pushToken: String, deviceIdHash: String = "") {
         if (pushToken.isBlank()) return
         requestUnit(
             "api-delivery-customer.php?action=push-register",
             "POST",
-            JSONObject()
-                .put("push_token", pushToken)
-                .put("platform", "android")
-                .put("device_id_hash", deviceIdHash)
+            JSONObject().put("push_token", pushToken).put("platform", "android").put("device_id_hash", deviceIdHash)
         )
     }
 
