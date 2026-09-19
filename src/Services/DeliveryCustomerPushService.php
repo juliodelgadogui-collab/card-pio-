@@ -29,6 +29,7 @@ final class DeliveryCustomerPushService
         'preparing'=>['Seu pedido está sendo preparado','A cozinha começou a preparar o pedido #'.$orderId.'.'],
         'ready'=>['Pedido pronto','O pedido #'.$orderId.' está pronto e aguardando a entrega.'],
         'out_for_delivery'=>['Saiu para entrega','O pedido #'.$orderId.' saiu para entrega. Você já pode acompanhar a rota.'],
+        'arrived'=>['O entregador chegou','O entregador do pedido #'.$orderId.' informou que chegou ao seu endereço.'],
         'completed'=>['Pedido entregue','O pedido #'.$orderId.' foi entregue. Bom apetite!'],
         'cancelled'=>['Pedido cancelado','O pedido #'.$orderId.' foi cancelado. Abra o app para ver os detalhes.'],
         default=>['Atualização do pedido #'.$orderId,'O status do seu pedido foi atualizado.'],
