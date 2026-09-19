@@ -114,6 +114,7 @@ fun DispatchScreen(
                             }
                             Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                         }
+                        if (order.fromEventMenuDelivery) DispatchOriginPill()
                         useful(order.deliveryAddress)?.let { Text(it) }
                         DispatchPaymentPill(order.paymentStatus)
                         OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ver pedido") }
@@ -138,6 +139,7 @@ fun DispatchScreen(
                         }
                         Text(dispatchMoney(order.totalCents), fontWeight = FontWeight.Black)
                     }
+                    if (order.fromEventMenuDelivery) DispatchOriginPill()
                     DispatchPaymentPill(order.paymentStatus)
                     OutlinedButton(onClick = { orderViewModel.open(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Ver pedido") }
 
@@ -229,6 +231,21 @@ fun DispatchScreen(
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { assigning = null }) { Text("Fechar") } },
+        )
+    }
+}
+
+@Composable
+private fun DispatchOriginPill() {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            "EventMenu Delivery",
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.SemiBold,
         )
     }
 }
