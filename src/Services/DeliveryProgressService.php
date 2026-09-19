@@ -51,6 +51,8 @@ final class DeliveryProgressService
             $p=$this->lockedProgress($tx,$tenantId,$orderId);if(!$p)throw new RuntimeException('Não foi possível carregar o andamento da entrega.');
             if(!$p['route_started_at'])$tx->prepare('UPDATE delivery_progress SET route_started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
         });
+        try{(new DeliveryPublicTrackingService())->issue($orderId);}catch(\Throwable$e){error_log('[delivery-tracking-auto] '.$e::class.': '.$e->getMessage());}
+        try{(new DeliveryCustomerPushService())->sendOrderStatus($orderId,'out_for_delivery');}catch(\Throwable$e){error_log('[delivery-customer-route-push] '.$e::class.': '.$e->getMessage());}
         Auth::audit('delivery.route_started','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return $this->progressByOrder(Database::connection(),$tenantId,$orderId);
     }
 
@@ -77,6 +79,7 @@ final class DeliveryProgressService
         $p=$pdo->prepare('SELECT arrived_at FROM delivery_progress WHERE tenant_id=? AND order_id=? AND delivery_user_id=? LIMIT 1');$p->execute([$tenantId,$orderId,$userId]);$arrived=$p->fetchColumn();if(!$arrived)throw new RuntimeException('Confirme que chegou ao cliente antes de concluir a entrega.');
         $order=(new OrderService())->changeStatus($orderId,'completed','delivery');
         $pdo->prepare('UPDATE delivery_progress SET completed_at=COALESCE(completed_at,CURRENT_TIMESTAMP),updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND order_id=? AND delivery_user_id=?')->execute([$tenantId,$orderId,$userId]);
+        (new DeliveryPublicTrackingService())->revokeForOrder($tenantId,$orderId);
         Auth::audit('delivery.completed','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return ['order'=>$order,'progress'=>$this->progressByOrder($pdo,$tenantId,$orderId)];
     }
 
