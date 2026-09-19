@@ -1,0 +1,43 @@
+name: EventMenu Delivery Branch
+on:
+  push:
+    branches: [dev/eventmenu-delivery]
+    paths: ['mobile/eventmenu-delivery/**','.github/workflows/eventmenu-delivery-branch.yml']
+  workflow_dispatch:
+permissions: {contents: read}
+concurrency: {group: 'eventmenu-delivery-${{ github.ref }}', cancel-in-progress: true}
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults: {run: {working-directory: mobile/eventmenu-delivery}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - name: Configure Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with: {gradle-version: '9.3.1'}
+      - uses: actions/cache@v4
+        with: {path: ~/.android/debug.keystore, key: eventmenu-delivery-debug-keystore-v1}
+      - name: Ensure stable debug signing key exists
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=EventMenu Delivery Development,O=EventMenu,C=BR" -keyalg RSA -keysize 2048 -validity 10000; fi
+      - name: Unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
+      - name: Android lint
+        run: gradle :app:lintDebug --stacktrace --no-daemon
+      - name: Build fresh APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
+      - uses: actions/upload-artifact@v4
+        with: {name: EventMenu-Delivery-dev-debug-apk, path: mobile/eventmenu-delivery/app/build/outputs/apk/debug/app-debug.apk, if-no-files-found: error, retention-days: 7}
