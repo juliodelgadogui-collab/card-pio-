@@ -86,6 +86,7 @@ function em_nav(): array
     return [
         ['super', 'Plataforma', 'platform.manage'],
         ['marketplace-finance', 'Financeiro Delivery', 'platform.manage'],
+        ['marketplace-campaigns', 'Campanhas Delivery', 'platform.manage'],
         ['system-health', 'Saúde do sistema', 'platform.manage'],
         ['dashboard', 'Visão geral', 'dashboard'],
         ['pos', 'Caixa / PDV', 'orders.create'],
