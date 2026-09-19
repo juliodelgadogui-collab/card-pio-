@@ -14,8 +14,16 @@ final class DeliveryCustomerPaymentService
     {
         $provider=strtolower(trim($provider));if(!in_array($provider,['mercadopago','pagbank'],true))throw new RuntimeException('Forma PIX indisponível.');
         $ctx=$this->context($pdo,$accountId,$orderId,$provider);$this->assertChargeable($ctx['order']);$amount=$this->remaining($pdo,(int)$ctx['order']['tenant_id'],$orderId);if($amount<=0)throw new RuntimeException('Pedido já está pago.');
-        $key='delivery-app:pix:'.$provider.':'.(int)$ctx['order']['tenant_id'].':'.$orderId.':'.$amount;$payment=$this->localPayment($pdo,$ctx['order'],$provider,$key,$amount);
-        $raw=json_decode((string)($payment['raw_payload']??''),true);if(is_array($raw)&&!empty($raw['_eventmenu_pix_text'])&&in_array((string)$payment['status'],['created','pending','authorized'],true))return $this->pixResponse($payment,$raw,true);
+
+        $prefix='delivery-app:pix:'.$provider.':'.(int)$ctx['order']['tenant_id'].':'.$orderId.':'.$amount;
+        $active=$this->activePayment($pdo,(int)$ctx['order']['tenant_id'],$orderId);
+        if($active){
+            if((string)$active['provider']!==$provider||!str_starts_with((string)$active['idempotency_key'],$prefix))throw new RuntimeException('Já existe uma cobrança eletrônica em andamento para este pedido. Aguarde o resultado antes de trocar a forma de pagamento.');
+            $raw=json_decode((string)($active['raw_payload']??''),true);if(is_array($raw)&&!empty($raw['_eventmenu_pix_text']))return $this->pixResponse($active,$raw,true);
+            throw new RuntimeException('A cobrança PIX ainda está sendo criada. Aguarde alguns segundos e atualize.');
+        }
+
+        $attempt=$this->nextAttempt($pdo,(int)$ctx['order']['tenant_id'],$orderId,$prefix);$key=$prefix.':'.$attempt;$payment=$this->localPayment($pdo,$ctx['order'],$provider,$key,$amount);
         (new StockReservationService())->holdForPayment((int)$ctx['order']['tenant_id'],$orderId);
         try{
             $data=$provider==='mercadopago'?$this->mercadoPagoPix($ctx,$payment,$taxId,$key):$this->pagBankPix($ctx,$payment,$taxId,$key);
@@ -27,7 +35,10 @@ final class DeliveryCustomerPaymentService
     {
         $provider=strtolower(trim((string)($payload['provider']??'mercadopago')));if($provider!=='mercadopago')throw new RuntimeException('Cartão dentro do app está disponível pelo Mercado Pago nesta versão.');
         $token=trim((string)($payload['card_token']??''));$method=mb_substr(trim((string)($payload['payment_method_id']??'')),0,60);$installments=max(1,min(12,(int)($payload['installments']??1)));if($token===''||$method==='')throw new RuntimeException('Dados tokenizados do cartão são obrigatórios.');
-        $ctx=$this->context($pdo,$accountId,$orderId,$provider);$this->assertChargeable($ctx['order']);$amount=$this->remaining($pdo,(int)$ctx['order']['tenant_id'],$orderId);if($amount<=0)throw new RuntimeException('Pedido já está pago.');$key='delivery-app:card:mercadopago:'.(int)$ctx['order']['tenant_id'].':'.$orderId.':'.$amount;
+        $ctx=$this->context($pdo,$accountId,$orderId,$provider);$this->assertChargeable($ctx['order']);$amount=$this->remaining($pdo,(int)$ctx['order']['tenant_id'],$orderId);if($amount<=0)throw new RuntimeException('Pedido já está pago.');
+
+        $active=$this->activePayment($pdo,(int)$ctx['order']['tenant_id'],$orderId);if($active)throw new RuntimeException('Já existe uma cobrança eletrônica em andamento para este pedido. Aguarde o resultado antes de tentar outro pagamento.');
+        $tokenFingerprint=substr(hash('sha256',$token),0,20);$key='delivery-app:card:mercadopago:'.(int)$ctx['order']['tenant_id'].':'.$orderId.':'.$amount.':'.$tokenFingerprint;
         $payment=$this->localPayment($pdo,$ctx['order'],$provider,$key,$amount);(new StockReservationService())->holdForPayment((int)$ctx['order']['tenant_id'],$orderId);
         try{
             $config=$ctx['config'];$access=trim((string)($config['access_token']??''));if($access==='')throw new RuntimeException('Mercado Pago não configurado.');
@@ -35,7 +46,7 @@ final class DeliveryCustomerPaymentService
             $body=['transaction_amount'=>$amount/100,'token'=>$token,'description'=>'Pedido EventMenu #'.$orderId,'installments'=>$installments,'payment_method_id'=>$method,'external_reference'=>'eventmenu:'.(int)$ctx['order']['tenant_id'].':'.$orderId,'notification_url'=>\app_absolute_url('webhook.php?provider=mercadopago&tenant='.rawurlencode((string)$ctx['tenant_slug'])),'payer'=>$payer,'metadata'=>['tenant_id'=>(int)$ctx['order']['tenant_id'],'order_id'=>$orderId,'eventmenu_payment_id'=>(int)$payment['id'],'channel'=>'eventmenu_delivery_app']];
             $issuer=trim((string)($payload['issuer_id']??''));if($issuer!=='')$body['issuer_id']=$issuer;
             $data=$this->httpJson('POST','https://api.mercadopago.com/v1/payments',['Authorization: Bearer '.$access,'X-Idempotency-Key: '.$key],$body);$external=(string)($data['id']??'');$providerStatus=strtolower((string)($data['status']??''));
-            $payloadForDb=$data;$payloadForDb['_eventmenu_payment_id']=(int)$payment['id'];$pdo->prepare('UPDATE payments SET provider_payment_id=?,status=?,raw_payload=? WHERE id=?')->execute([$external,in_array($providerStatus,['approved'],true)?'authorized':(in_array($providerStatus,['pending','in_process','in_mediation'],true)?'pending':'failed'),json_encode($payloadForDb,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);
+            $payloadForDb=$data;$payloadForDb['_eventmenu_payment_id']=(int)$payment['id'];$pdo->prepare('UPDATE payments SET provider_payment_id=?,status=?,raw_payload=? WHERE id=?')->execute([$external,$providerStatus==='approved'?'authorized':(in_array($providerStatus,['pending','in_process','in_mediation'],true)?'pending':'failed'),json_encode($payloadForDb,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);
             if($providerStatus==='approved'){
                 (new PaymentService())->confirmVerified(['tenant_id'=>(int)$ctx['order']['tenant_id'],'order_id'=>$orderId,'provider'=>'mercadopago','provider_payment_id'=>$external,'payment_id'=>(int)$payment['id'],'amount_cents'=>$amount,'currency'=>'BRL','account_reference'=>(string)$ctx['gateway']['account_reference'],'source'=>'card','payment_method_type'=>'card']);
                 return ['payment_id'=>(int)$payment['id'],'order_id'=>$orderId,'provider'=>'mercadopago','status'=>'paid','status_detail'=>(string)($data['status_detail']??''),'amount_cents'=>$amount];
@@ -58,11 +69,20 @@ final class DeliveryCustomerPaymentService
     private function localPayment(PDO $pdo,array $order,string $provider,string $key,int $amount): array
     {
         $tenantId=(int)$order['tenant_id'];$orderId=(int)$order['id'];
-        $existing=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$existing->execute([$tenantId,$key]);if($row=$existing->fetch())return $row;
-        $open=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1');$open->execute([$tenantId,$orderId]);
-        if($row=$open->fetch())throw new RuntimeException('Já existe uma cobrança eletrônica em andamento para este pedido. Aguarde o resultado antes de trocar a forma de pagamento.');
+        $existing=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$existing->execute([$tenantId,$key]);if($row=$existing->fetch()){if(in_array((string)$row['status'],['created','pending','authorized','paid'],true))return $row;throw new RuntimeException('Esta tentativa de pagamento já foi encerrada. Tente novamente.');}
+        $open=$this->activePayment($pdo,$tenantId,$orderId);if($open)throw new RuntimeException('Já existe uma cobrança eletrônica em andamento para este pedido. Aguarde o resultado antes de trocar a forma de pagamento.');
         try{$pdo->prepare('DELETE FROM delivery_customer_payment_preferences WHERE order_id=?')->execute([$orderId]);}catch(\Throwable){}
-        $pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")')->execute([$tenantId,$orderId,$provider,$key,$amount]);$id=(int)$pdo->lastInsertId();$pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status<>"paid"')->execute([$orderId]);try{(new PaymentCollectionService())->register($id,$provider==='mercadopago'?'online':'pix','eventmenu_delivery_app');}catch(\Throwable){}$q=$pdo->prepare('SELECT * FROM payments WHERE id=?');$q->execute([$id]);return $q->fetch();
+        $pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")')->execute([$tenantId,$orderId,$provider,$key,$amount]);$id=(int)$pdo->lastInsertId();$pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND payment_status<>"paid"')->execute([$orderId]);$q=$pdo->prepare('SELECT * FROM payments WHERE id=?');$q->execute([$id]);return $q->fetch();
+    }
+
+    private function activePayment(PDO $pdo,int $tenantId,int $orderId): array|false
+    {
+        $q=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1');$q->execute([$tenantId,$orderId]);return $q->fetch();
+    }
+
+    private function nextAttempt(PDO $pdo,int $tenantId,int $orderId,string $prefix): int
+    {
+        $q=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND idempotency_key LIKE ?');$q->execute([$tenantId,$orderId,$prefix.':%']);return max(1,(int)$q->fetchColumn()+1);
     }
 
     private function mercadoPagoPix(array $ctx,array $payment,string $taxId,string $key): array
