@@ -16,7 +16,13 @@ final class DeliveryCustomerMarketplaceService
         $stores=(new MarketplaceCatalogService())->stores($pdo,$filters);
         $q=$pdo->prepare('SELECT tenant_id FROM delivery_customer_favorites WHERE account_id=?');$q->execute([$accountId]);
         $fav=array_fill_keys(array_map('intval',$q->fetchAll(PDO::FETCH_COLUMN)),true);
-        foreach($stores as &$store)$store['favorite']=isset($fav[(int)$store['tenant_id']]);unset($store);
+        $settingsByTenant=[];
+        if($stores){
+            $ids=array_values(array_unique(array_map(static fn(array$s):int=>(int)$s['tenant_id'],$stores)));
+            $ph=implode(',',array_fill(0,count($ids),'?'));$s=$pdo->prepare('SELECT id,settings FROM tenants WHERE id IN ('.$ph.')');$s->execute($ids);
+            foreach($s->fetchAll()as$row){$settings=json_decode((string)($row['settings']??'{}'),true);$settingsByTenant[(int)$row['id']]=is_array($settings)?$settings:[];}
+        }
+        foreach($stores as &$store){$settings=$settingsByTenant[(int)$store['tenant_id']]??[];$store['favorite']=isset($fav[(int)$store['tenant_id']]);$store['accepting_orders']=empty($settings['delivery_paused']);$store['delivery_eta_minutes']=max(5,(int)($settings['delivery_eta_minutes']??45));$store['delivery_radius_km']=max(0,(float)($settings['delivery_radius_km']??0));$store['pickup_enabled']=!empty($settings['delivery_pickup_enabled']);$store['schedule_note']=(string)($settings['delivery_schedule_note']??'');}unset($store);
         return $stores;
     }
 
@@ -34,13 +40,21 @@ final class DeliveryCustomerMarketplaceService
     public function createOrder(PDO $pdo,int $accountId,array $payload):array
     {
         $entryToken=trim((string)($payload['entry_token']??''));if($entryToken==='')throw new RuntimeException('Atualize a loja antes de finalizar o pedido.');
+        $claims=(new MarketplaceEntryTokenService())->decodeAndVerify($entryToken);$tenantId=(int)$claims['tenant_id'];
+        $settings=$this->tenantSettings($pdo,$tenantId);
+        if(!empty($settings['delivery_paused']))throw new RuntimeException('Este restaurante pausou novos pedidos no momento.');
+
         $addressId=(int)($payload['address_id']??0);if($addressId<1)throw new RuntimeException('Escolha um endereço de entrega.');
         $a=$pdo->prepare('SELECT * FROM delivery_customer_addresses WHERE id=? AND account_id=? LIMIT 1');$a->execute([$addressId,$accountId]);$address=$a->fetch();if(!$address)throw new RuntimeException('Endereço de entrega não encontrado.');
+        $this->assertDeliveryArea($settings,$address);
+
         $c=$pdo->prepare('SELECT name,email,phone FROM delivery_customer_accounts WHERE id=? AND status="active" AND email_verified_at IS NOT NULL');$c->execute([$accountId]);$customer=$c->fetch();if(!$customer)throw new RuntimeException('Confirme sua conta antes de fazer pedidos.');
         $body=$payload;$body['name']=$customer['name'];$body['phone']=$address['phone']?:$customer['phone'];$body['address']=$this->addressText($address);$body['customer_email']=$customer['email'];
         if(trim((string)$body['phone'])==='')throw new RuntimeException('Adicione um telefone ao seu perfil ou endereço.');
+
         $order=(new MarketplaceConsumerService())->createOrder($pdo,$entryToken,$body);$orderId=(int)$order['order_number'];
-        $o=$pdo->prepare('SELECT tenant_id FROM orders WHERE id=? LIMIT 1');$o->execute([$orderId]);$tenantId=(int)$o->fetchColumn();if($tenantId<1)throw new RuntimeException('Pedido não encontrado.');
+        $o=$pdo->prepare('SELECT tenant_id,subtotal_cents,total_cents FROM orders WHERE id=? LIMIT 1');$o->execute([$orderId]);$stored=$o->fetch();if(!$stored||(int)$stored['tenant_id']!==$tenantId)throw new RuntimeException('Pedido não encontrado.');
+        $minimum=max(0,(int)($settings['min_delivery_order_cents']??0));if($minimum>0&&(int)$stored['subtotal_cents']<$minimum)throw new RuntimeException('O pedido mínimo deste restaurante é R$ '.number_format($minimum/100,2,',','.').'.');
         $pdo->prepare('INSERT INTO delivery_customer_order_links (account_id,tenant_id,order_id) VALUES (?,?,?)')->execute([$accountId,$tenantId,$orderId]);
         return $order;
     }
@@ -61,6 +75,7 @@ final class DeliveryCustomerMarketplaceService
     public function reorder(PDO $pdo,int $accountId,int $orderId):array
     {
         $q=$pdo->prepare('SELECT o.tenant_id,o.unit_id FROM delivery_customer_order_links l JOIN orders o ON o.id=l.order_id WHERE l.account_id=? AND l.order_id=? LIMIT 1');$q->execute([$accountId,$orderId]);$order=$q->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');
+        $settings=$this->tenantSettings($pdo,(int)$order['tenant_id']);if(!empty($settings['delivery_paused']))throw new RuntimeException('Este restaurante pausou novos pedidos no momento.');
         $items=$pdo->prepare('SELECT product_id,quantity FROM order_items WHERE order_id=? AND product_id IS NOT NULL ORDER BY id');$items->execute([$orderId]);$cart=[];foreach($items->fetchAll()as$item)$cart[]=['product_id'=>(int)$item['product_id'],'quantity'=>(float)$item['quantity'],'option_ids'=>[]];
         $catalog=(new MarketplaceCatalogService())->catalog($pdo,(int)$order['tenant_id'],(int)$order['unit_id']);$available=[];foreach($catalog['products']as$p)if(!empty($p['available']))$available[(int)$p['id']]=true;
         $cart=array_values(array_filter($cart,fn(array$i):bool=>isset($available[(int)$i['product_id']])));if(!$cart)throw new RuntimeException('Os itens deste pedido não estão disponíveis agora.');
@@ -82,7 +97,7 @@ final class DeliveryCustomerMarketplaceService
         foreach($q->fetchAll()as$row){$provider=(string)$row['provider'];$config=Crypto::decryptJson((string)$row['config_encrypted']);$pixEnabled=!array_key_exists('pix_enabled',$config)||filter_var($config['pix_enabled'],FILTER_VALIDATE_BOOL);if(in_array($provider,['mercadopago','pagbank'],true)&&$pixEnabled)$pix[]=['provider'=>$provider];
             if($provider==='mercadopago'&&filter_var($config['card_enabled']??false,FILTER_VALIDATE_BOOL)){ $publicKey=trim((string)($config['public_key']??''));if($publicKey!=='')$card[]=['provider'=>'mercadopago','public_key'=>$publicKey,'max_installments'=>max(1,min(12,(int)($config['max_installments']??12)))]; }
         }
-        $t=$pdo->prepare('SELECT settings FROM tenants WHERE id=?');$t->execute([$tenantId]);$settings=json_decode((string)$t->fetchColumn(),true);if(!is_array($settings))$settings=[];
+        $settings=$this->tenantSettings($pdo,$tenantId);
         return ['pix'=>$pix,'card'=>$card,'cash'=>!empty($settings['delivery_cash_enabled']),'currency'=>'BRL'];
     }
 
@@ -99,6 +114,16 @@ final class DeliveryCustomerMarketplaceService
         $q=$pdo->prepare('SELECT o.* FROM delivery_customer_order_links l JOIN orders o ON o.id=l.order_id WHERE l.account_id=? AND l.order_id=? LIMIT 1');$q->execute([$accountId,$orderId]);$row=$q->fetch();if(!$row)throw new RuntimeException('Pedido não encontrado.');return $row;
     }
 
+    private function tenantSettings(PDO $pdo,int $tenantId):array{$q=$pdo->prepare('SELECT settings FROM tenants WHERE id=? LIMIT 1');$q->execute([$tenantId]);$settings=json_decode((string)($q->fetchColumn()?:'{}'),true);return is_array($settings)?$settings:[];}
+    private function assertDeliveryArea(array$settings,array$address):void
+    {
+        $radius=max(0,(float)($settings['delivery_radius_km']??0));if($radius<=0)return;
+        $fromLat=$settings['delivery_origin_latitude']??null;$fromLng=$settings['delivery_origin_longitude']??null;$toLat=$address['latitude']??null;$toLng=$address['longitude']??null;
+        if(!is_numeric($fromLat)||!is_numeric($fromLng))throw new RuntimeException('O restaurante ainda não configurou a origem da área de entrega.');
+        if(!is_numeric($toLat)||!is_numeric($toLng))throw new RuntimeException('Use sua localização no endereço para confirmar se a entrega atende sua região.');
+        $distance=$this->distanceKm((float)$fromLat,(float)$fromLng,(float)$toLat,(float)$toLng);if($distance>$radius)throw new RuntimeException('Este endereço fica fora da área de entrega do restaurante.');
+    }
+    private function distanceKm(float$lat1,float$lng1,float$lat2,float$lng2):float{$earth=6371.0088;$dLat=deg2rad($lat2-$lat1);$dLng=deg2rad($lng2-$lng1);$a=sin($dLat/2)**2+cos(deg2rad($lat1))*cos(deg2rad($lat2))*sin($dLng/2)**2;return$earth*2*atan2(sqrt($a),sqrt(max(0,1-$a)));}
     private function addressText(array $a):string{$parts=[trim((string)$a['street']).', '.trim((string)$a['number'])];if(!empty($a['complement']))$parts[]=(string)$a['complement'];if(!empty($a['neighborhood']))$parts[]=(string)$a['neighborhood'];$parts[]=trim((string)$a['city']).'/'.trim((string)$a['state']);if(!empty($a['postal_code']))$parts[]='CEP '.(string)$a['postal_code'];if(!empty($a['reference']))$parts[]='Referência: '.(string)$a['reference'];return implode(' · ',$parts);}
     private function statusLabel(string $status):string{return match(strtolower($status)){'pending'=>'Pedido recebido','confirmed'=>'Confirmado','preparing'=>'Em preparo','ready'=>'Pronto','out_for_delivery'=>'Saiu para entrega','completed'=>'Entregue','cancelled'=>'Cancelado',default=>'Em andamento'};}
 }
