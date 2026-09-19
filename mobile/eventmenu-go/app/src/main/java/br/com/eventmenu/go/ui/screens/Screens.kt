@@ -295,7 +295,7 @@ fun OrdersScreen(orders: List<Order>, onRefresh: () -> Unit, onStatus: (Int, Str
             else -> true
         }
         val q = query.trim().lowercase()
-        val byQuery = q.isBlank() || order.id.toString().contains(q) || safeText(order.customerName).lowercase().contains(q) || order.channel.lowercase().contains(q)
+        val byQuery = q.isBlank() || order.id.toString().contains(q) || safeText(order.customerName).lowercase().contains(q) || order.channel.lowercase().contains(q) || (order.fromEventMenuDelivery && "eventmenu delivery".contains(q))
         byStatus && byQuery
     }
     LazyColumn(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -331,6 +331,7 @@ private fun OrderCard(order: Order, onStatus: (Int, String) -> Unit, onOpen: (In
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (order.fromEventMenuDelivery) SmallPill("EventMenu Delivery", false)
                 SmallPill(channelLabel(order.channel), false)
                 SmallPill(paymentStatusLabel(order.paymentStatus), order.paymentStatus == "paid")
             }
