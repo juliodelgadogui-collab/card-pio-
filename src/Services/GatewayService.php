@@ -66,8 +66,9 @@ final class GatewayService
                 $pdo->prepare('UPDATE webhook_events SET status="processed",processed_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
                 return ['ok'=>true,'processed'=>true];
             }
-            $pdo->prepare('UPDATE webhook_events SET status="ignored",processed_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
-            return ['ok'=>true,'processed'=>false];
+            $terminal=$this->synchronizeTerminalUnpaid($verified);
+            $pdo->prepare('UPDATE webhook_events SET status=?,processed_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$terminal?'processed':'ignored',$tenantId,$provider,$eventId]);
+            return ['ok'=>true,'processed'=>$terminal,'paid'=>false];
         }catch(\Throwable $e){
             $pdo->prepare('UPDATE webhook_events SET status="failed" WHERE tenant_id=? AND provider=? AND external_event_id=?')->execute([$tenantId,$provider,$eventId]);
             throw $e;
@@ -112,9 +113,10 @@ final class GatewayService
         $order=$this->httpJson('GET',$base.'/orders/'.rawurlencode($orderExternal),['Authorization: Bearer '.$token]);
         [$tenantId,$orderId]=$this->parseReference((string)($order['reference_id']??''));
         if($tenantId!==(int)$gateway['tenant_id']) throw new RuntimeException('Empresa PagBank divergente.');
-        $paidCharge=null;
-        foreach(($order['charges']??[]) as $charge){if(($charge['status']??'')==='PAID'){$paidCharge=$charge;break;}}
-        return ['external_event_id'=>$orderExternal.':'.hash('sha256',$raw),'paid'=>$paidCharge!==null,'tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'pagbank','provider_payment_id'=>(string)($paidCharge['id']??$orderExternal),'amount_cents'=>$paidCharge?(int)($paidCharge['amount']['value']??0):0,'currency'=>'BRL','account_reference'=>(string)$gateway['account_reference'],'raw_status'=>(string)($paidCharge['status']??'')];
+        $charges=is_array($order['charges']??null)?$order['charges']:[];$paidCharge=null;$latestCharge=$charges[0]??null;
+        foreach($charges as $charge){if(($charge['status']??'')==='PAID'){$paidCharge=$charge;break;}}
+        $statusSource=$paidCharge??$latestCharge;
+        return ['external_event_id'=>$orderExternal.':'.hash('sha256',$raw),'paid'=>$paidCharge!==null,'tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'pagbank','provider_payment_id'=>(string)($paidCharge['id']??$orderExternal),'amount_cents'=>is_array($statusSource)?(int)($statusSource['amount']['value']??0):0,'currency'=>'BRL','account_reference'=>(string)$gateway['account_reference'],'raw_status'=>is_array($statusSource)?(string)($statusSource['status']??''):''];
     }
 
     private function verifyMercadoPago(array $gateway,array $config,string $secret,string $raw,array $headers,array $query):array
@@ -134,6 +136,33 @@ final class GatewayService
         $collector=(string)($payment['collector_id']??'');
         if($collector===''||$collector!==(string)$gateway['account_reference']) throw new RuntimeException('Conta Mercado Pago divergente.');
         return ['external_event_id'=>(string)($payload['id']??$requestId.':'.$dataId.':'.($payload['action']??'')),'paid'=>(($payment['status']??'')==='approved'),'tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'mercadopago','provider_payment_id'=>(string)$payment['id'],'amount_cents'=>(int)round(((float)($payment['transaction_amount']??0))*100),'currency'=>(string)($payment['currency_id']??'BRL'),'account_reference'=>$collector,'raw_status'=>(string)($payment['status']??'')];
+    }
+
+    private function synchronizeTerminalUnpaid(array $verified):bool
+    {
+        $provider=strtolower((string)($verified['provider']??''));$rawStatus=strtolower(trim((string)($verified['raw_status']??'')));
+        $target=match($provider){
+            'mercadopago'=>match($rawStatus){'rejected','refunded','charged_back'=>'failed','cancelled'=>'cancelled',default=>null},
+            'pagbank'=>match($rawStatus){'declined','expired'=>'failed','canceled','cancelled'=>'cancelled',default=>null},
+            'stripe'=>match($rawStatus){'canceled'=>'cancelled','requires_payment_method'=>'failed',default=>null},
+            default=>null,
+        };
+        if($target===null)return false;
+        $tenantId=(int)($verified['tenant_id']??0);$orderId=(int)($verified['order_id']??0);if($tenantId<1||$orderId<1)return false;
+
+        Database::transaction(function(\PDO $tx)use($verified,$provider,$rawStatus,$target,$tenantId,$orderId):void{
+            $q=$tx->prepare(Database::portableSql($tx,'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND provider=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE'));
+            $q->execute([$tenantId,$orderId,$provider]);$payment=$q->fetch();if(!$payment)return;
+            $providerId=trim((string)($verified['provider_payment_id']??''));$localProviderId=trim((string)($payment['provider_payment_id']??''));
+            if($providerId!==''&&$localProviderId!==''&&$providerId!==$localProviderId)throw new RuntimeException('Transação terminal não corresponde à cobrança local.');
+            $currency=strtoupper(trim((string)($verified['currency']??'BRL')));if($currency!==''&&$currency!=='BRL')throw new RuntimeException('Moeda terminal divergente.');
+            $amount=(int)($verified['amount_cents']??0);if($amount>0&&$amount!==(int)$payment['amount_cents'])throw new RuntimeException('Valor terminal divergente.');
+            $raw=json_decode((string)($payment['raw_payload']??''),true);if(!is_array($raw))$raw=[];$raw['_eventmenu_terminal_status']=$rawStatus;$raw['_eventmenu_terminal_at']=gmdate('c');
+            $tx->prepare('UPDATE payments SET status=?,provider_payment_id=COALESCE(NULLIF(?,""),provider_payment_id),raw_payload=? WHERE id=? AND status IN ("created","pending","authorized")')->execute([$target,$providerId,json_encode($raw,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);
+            $tx->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$orderId,$tenantId]);
+            try{(new StockReservationService())->rearmAfterPaymentFailure($tenantId,$orderId,30);}catch(\Throwable){}
+        });
+        return true;
     }
 
     private function parseReference(string $reference):array
