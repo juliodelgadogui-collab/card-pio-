@@ -2,19 +2,17 @@
 
 declare(strict_types=1);
 
-require dirname(__DIR__) . '/vendor/autoload.php';
-require dirname(__DIR__) . '/app/helpers.php';
+require dirname(__DIR__) . '/app/bootstrap.php';
 
 use EventMenu\Services\DatabaseRepairService;
-use PDO;
 
 function fail_repair(string $message): never { fwrite(STDERR, "CI FAIL: {$message}\n"); exit(1); }
 function assert_repair(bool $condition, string $message): void { if (!$condition) fail_repair($message); }
-function has_column(PDO $pdo,string $table,string $column):bool { foreach($pdo->query('PRAGMA table_info("'.$table.'")')->fetchAll(PDO::FETCH_ASSOC) as $row) if(strcasecmp((string)$row['name'],$column)===0)return true; return false; }
+function has_column(\PDO $pdo,string $table,string $column):bool { foreach($pdo->query('PRAGMA table_info("'.$table.'")')->fetchAll(\PDO::FETCH_ASSOC) as $row) if(strcasecmp((string)$row['name'],$column)===0)return true; return false; }
 
 $path = sys_get_temp_dir() . '/eventmenu-db-repair-' . bin2hex(random_bytes(4)) . '.sqlite';
 @unlink($path);
-$pdo = new PDO('sqlite:' . $path, null, null, [PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION,PDO::ATTR_DEFAULT_FETCH_MODE=>PDO::FETCH_ASSOC]);
+$pdo = new \PDO('sqlite:' . $path, null, null, [\PDO::ATTR_ERRMODE=>\PDO::ERRMODE_EXCEPTION,\PDO::ATTR_DEFAULT_FETCH_MODE=>\PDO::FETCH_ASSOC]);
 $pdo->exec('PRAGMA foreign_keys=ON');
 $pdo->exec('CREATE TABLE tenants(id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT,slug TEXT,status TEXT)');
 $pdo->exec('CREATE TABLE users(id INTEGER PRIMARY KEY AUTOINCREMENT,tenant_id INTEGER,name TEXT,email TEXT,password_hash TEXT,role TEXT,status TEXT)');
