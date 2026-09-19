@@ -11,6 +11,9 @@ final class DeliveryCustomerAuthService
 {
     public function register(PDO $pdo, array $payload): array
     {
+        $consent=new DeliveryCustomerConsentService();
+        $consent->assertAccepted($payload);
+
         $name=mb_substr(trim((string)($payload['name']??'')),0,160);
         $email=mb_strtolower(trim((string)($payload['email']??'')));
         $phone=mb_substr(trim((string)($payload['phone']??'')),0,40);
@@ -29,8 +32,9 @@ final class DeliveryCustomerAuthService
             $pdo->prepare('INSERT INTO delivery_customer_accounts (name,email,phone,password_hash,status,marketing_opt_in) VALUES (?,?,?,?,"pending_verification",?)')->execute([$name,$email,$phone?:null,password_hash($password,PASSWORD_DEFAULT),!empty($payload['marketing_opt_in'])?1:0]);
             $accountId=(int)$pdo->lastInsertId();
         }
+        $consent->record($pdo,$accountId);
         $sent=$this->sendVerification($pdo,$accountId);
-        return ['account_id'=>$accountId,'email'=>$email,'email_verification_required'=>true,'email_sent'=>$sent];
+        return ['account_id'=>$accountId,'email'=>$email,'email_verification_required'=>true,'email_sent'=>$sent,'terms_version'=>$consent->termsVersion(),'privacy_version'=>$consent->privacyVersion()];
     }
 
     public function verifyEmail(PDO $pdo,string $token): array
@@ -146,7 +150,7 @@ final class DeliveryCustomerAuthService
     }
 
     private function accountById(PDO $pdo,int $id): array{$q=$pdo->prepare('SELECT * FROM delivery_customer_accounts WHERE id=? LIMIT 1');$q->execute([$id]);$row=$q->fetch();if(!$row)throw new RuntimeException('Conta não encontrada.');return $this->safeAccount($row);}
-    private function safeAccount(array $row): array{return ['id'=>(int)$row['id'],'name'=>(string)$row['name'],'email'=>(string)$row['email'],'phone'=>(string)($row['phone']??''),'email_verified'=>!empty($row['email_verified_at']),'email_verified_at'=>$row['email_verified_at']??null,'status'=>(string)$row['status'],'marketing_opt_in'=>(bool)($row['marketing_opt_in']??0)];}
+    private function safeAccount(array $row): array{return ['id'=>(int)$row['id'],'name'=>(string)$row['name'],'email'=>(string)$row['email'],'phone'=>(string)($row['phone']??''),'email_verified'=>!empty($row['email_verified_at']),'email_verified_at'=>$row['email_verified_at']??null,'status'=>(string)$row['status'],'marketing_opt_in'=>(bool)($row['marketing_opt_in']??0),'terms_version'=>(string)($row['terms_version']??''),'privacy_version'=>(string)($row['privacy_version']??'')];}
     private function safeAddress(array $row): array{return ['id'=>(int)($row['id']??0),'label'=>(string)($row['label']??''),'recipient_name'=>(string)($row['recipient_name']??''),'phone'=>(string)($row['phone']??''),'postal_code'=>(string)($row['postal_code']??''),'street'=>(string)($row['street']??''),'number'=>(string)($row['number']??''),'complement'=>(string)($row['complement']??''),'neighborhood'=>(string)($row['neighborhood']??''),'city'=>(string)($row['city']??''),'state'=>(string)($row['state']??''),'reference'=>(string)($row['reference']??''),'latitude'=>$row['latitude']!==null?(float)$row['latitude']:null,'longitude'=>$row['longitude']!==null?(float)$row['longitude']:null,'is_default'=>(bool)($row['is_default']??0)];}
     private function coordinate(mixed $value,float $min,float $max): ?float{if($value===null||$value==='')return null;if(!is_numeric($value))throw new RuntimeException('Localização inválida.');$v=(float)$value;if(!is_finite($v)||$v<$min||$v>$max)throw new RuntimeException('Localização inválida.');return $v;}
     private function randomToken(): string{return bin2hex(random_bytes(32));}
