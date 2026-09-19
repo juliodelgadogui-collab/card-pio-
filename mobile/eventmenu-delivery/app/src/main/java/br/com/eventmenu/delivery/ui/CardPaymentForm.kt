@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import com.mercadopago.sdk.android.coremethods.domain.model.BuyerIdentification
@@ -37,29 +38,74 @@ fun CardPaymentForm(
     var holder by remember { mutableStateOf(customerName) }
     var taxId by remember { mutableStateOf("") }
     var installments by remember { mutableIntStateOf(1) }
+    var cvvLength by remember { mutableIntStateOf(3) }
+    var sdkReady by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(publicKey) {
-        if (publicKey.isNotBlank()) {
-            MercadoPagoSDK.initialize(context.applicationContext, publicKey, CountryCode.BRA)
+        sdkReady = false
+        error = null
+        if (publicKey.isBlank()) {
+            error = "Cartão não configurado pelo restaurante."
+            return@LaunchedEffect
         }
+        runCatching {
+            if (MercadoPagoSDK.isInitialized) MercadoPagoSDK.setNewConfiguration(publicKey, CountryCode.BRA)
+            else MercadoPagoSDK.initialize(context.applicationContext, publicKey, CountryCode.BRA)
+        }.onSuccess { sdkReady = true }
+            .onFailure { error = "Não foi possível iniciar o pagamento por cartão." }
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Cartão", style = MaterialTheme.typography.titleLarge)
-        Text("Os dados sensíveis são tokenizados pelo SDK PCI do Mercado Pago e não são enviados em texto ao EventMenu.", style = MaterialTheme.typography.bodySmall)
+        Text("Os dados sensíveis são tokenizados pelos campos PCI oficiais do Mercado Pago e não são enviados em texto ao EventMenu.", style = MaterialTheme.typography.bodySmall)
+        if (!sdkReady) {
+            if (error == null) LinearProgressIndicator(Modifier.fillMaxWidth())
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            return@Column
+        }
         SecureBox("Número do cartão") {
             CardNumberTextField(
                 state = number,
-                onEvent = { event -> if (event is CardNumberTextFieldEvent.OnBinChanged) bin = event.cardBin.orEmpty() },
+                onEvent = { event ->
+                    if (event is CardNumberTextFieldEvent.OnBinChanged) {
+                        bin = event.cardBin.orEmpty()
+                        if (bin.isNotBlank()) {
+                            scope.launch {
+                                val methods = MercadoPagoSDK.getInstance().coreMethods.getPaymentMethods(bin)
+                                if (methods is Result.Success) cvvLength = methods.data.firstOrNull()?.card?.securityCode?.length?.coerceIn(3,4) ?: 3
+                            }
+                        } else cvvLength = 3
+                    }
+                },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Box(Modifier.weight(1f)) { SecureBox("Validade") { ExpirationDateTextField(Modifier.fillMaxWidth(), expiration, onEvent = {}, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)) } }
-            Box(Modifier.weight(1f)) { SecureBox("CVV") { SecurityCodeTextField(Modifier.fillMaxWidth(), cvv, onEvent = {}, securityCodeSize = 4, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword)) } }
+            Box(Modifier.weight(1f)) {
+                SecureBox("Validade") {
+                    ExpirationDateTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        state = expiration,
+                        onEvent = {},
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+            }
+            Box(Modifier.weight(1f)) {
+                SecureBox("CVV") {
+                    SecurityCodeTextField(
+                        modifier = Modifier.fillMaxWidth(),
+                        state = cvv,
+                        onEvent = {},
+                        securityCodeSize = cvvLength,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+            }
         }
         OutlinedTextField(holder, { holder = it }, label = { Text("Nome no cartão") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF/CNPJ") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -74,8 +120,7 @@ fun CardPaymentForm(
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(
             onClick = {
-                if (publicKey.isBlank()) { error = "Cartão não configurado pelo restaurante."; return@Button }
-                if (holder.isBlank() || taxId.length !in listOf(11,14) || bin.length < 6) { error = "Preencha cartão, nome e CPF/CNPJ."; return@Button }
+                if (holder.isBlank() || taxId.length !in listOf(11,14) || bin.length < 8) { error = "Preencha cartão, nome e CPF/CNPJ."; return@Button }
                 busy = true; error = null
                 scope.launch {
                     try {
