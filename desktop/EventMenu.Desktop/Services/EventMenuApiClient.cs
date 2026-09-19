@@ -75,6 +75,13 @@ public sealed class EventMenuApiClient : IDisposable
     public Task<MeResponse> MeAsync(CancellationToken ct = default) => GetAsync<MeResponse>("api.php", "me", null, ct);
     public Task<OrdersResponse> OrdersAsync(CancellationToken ct = default) => GetAsync<OrdersResponse>("api.php", "orders", null, ct);
     public Task<OrdersResponse> OperationalOrdersAsync(CancellationToken ct = default) => GetAsync<OrdersResponse>("api-go.php", "orders", null, ct);
+    public Task<OrderSourceMetaResponse> OrderSourcesAsync(IEnumerable<int> orderIds, CancellationToken ct = default)
+    {
+        var ids = string.Join(',', orderIds.Where(id => id > 0).Distinct().Take(200));
+        if (string.IsNullOrWhiteSpace(ids))
+            return Task.FromResult(new OrderSourceMetaResponse { Ok = true });
+        return GetAsync<OrderSourceMetaResponse>("api-go-orders.php", "source-meta", new Dictionary<string, string> { ["ids"] = ids }, ct);
+    }
     public Task<ProductsResponse> ProductsAsync(CancellationToken ct = default) => GetAsync<ProductsResponse>("api.php", "products", null, ct);
     public Task<CashResponse> CashCurrentAsync(CancellationToken ct = default) => GetAsync<CashResponse>("api.php", "cash-current", null, ct);
     public Task<CashSummaryResponse> CashSummaryAsync(CancellationToken ct = default) => GetAsync<CashSummaryResponse>("api.php", "cash-summary", null, ct);
