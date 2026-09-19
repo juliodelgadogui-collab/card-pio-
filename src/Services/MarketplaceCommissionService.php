@@ -45,9 +45,17 @@ final class MarketplaceCommissionService
         $campaignCode = trim((string)$campaignCode);
         $at = $at ?: gmdate('Y-m-d H:i:s');
 
-        $plan = $pdo->prepare('SELECT COALESCE(p.code,t.plan) plan_code FROM tenants t LEFT JOIN tenant_subscriptions ts ON ts.tenant_id=t.id AND ts.status IN ("trial","active","past_due") LEFT JOIN saas_plans p ON p.id=ts.plan_id WHERE t.id=? LIMIT 1');
-        $plan->execute([$tenantId]);
-        $planCode = trim((string)($plan->fetchColumn() ?: ''));
+        // Resolve the commercial plan with portable, deterministic queries.
+        // Keeping this separate avoids SQLite JOIN-order restrictions while
+        // preserving the subscription plan as the preferred source of truth.
+        $legacyPlan = $pdo->prepare('SELECT plan FROM tenants WHERE id=? LIMIT 1');
+        $legacyPlan->execute([$tenantId]);
+        $planCode = trim((string)($legacyPlan->fetchColumn() ?: ''));
+        $subscriptionPlan = $pdo->prepare('SELECT p.code FROM tenant_subscriptions ts INNER JOIN saas_plans p ON p.id=ts.plan_id WHERE ts.tenant_id=? AND ts.status IN ("trial","active","past_due") ORDER BY CASE ts.status WHEN "active" THEN 0 WHEN "trial" THEN 1 WHEN "past_due" THEN 2 ELSE 9 END, ts.id DESC LIMIT 1');
+        $subscriptionPlan->execute([$tenantId]);
+        $resolvedPlan = trim((string)($subscriptionPlan->fetchColumn() ?: ''));
+        if ($resolvedPlan !== '') $planCode = $resolvedPlan;
+
         $city = mb_strtolower(trim((string)($settings['city'] ?? '')));
         $state = mb_strtoupper(trim((string)($settings['state'] ?? '')));
 
@@ -90,9 +98,6 @@ final class MarketplaceCommissionService
 
     public function provision(PDO $pdo, int $tenantId, int $orderId): ?array
     {
-        // Lock the canonical order first. Every lifecycle operation uses the same
-        // lock order (order -> commission), which avoids cross-path deadlocks and
-        // prevents an order id from another tenant leaking an existing commission.
         $order = $this->lockOrder($pdo, $tenantId, $orderId);
         if ((string)($order['order_source'] ?? '') !== self::ORDER_SOURCE) return null;
 
@@ -146,10 +151,6 @@ final class MarketplaceCommissionService
                 json_encode($snapshot, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
         } catch (PDOException $e) {
-            // FOR UPDATE is removed by the SQLite portability layer and callers may
-            // also invoke this service outside an explicit transaction. The unique
-            // order constraint remains the final concurrency guard; if another
-            // request won the race, return its tenant-scoped row idempotently.
             if ($this->isUniqueOrderConstraintViolation($e)) {
                 $winner = $this->findByOrder($pdo, $orderId, $tenantId);
                 if ($winner) {
@@ -205,9 +206,6 @@ final class MarketplaceCommissionService
         return $this->findByOrder($pdo, $orderId, $tenantId);
     }
 
-    /**
-     * Backward-compatible lookup. Tenant-aware callers must pass $tenantId.
-     */
     public function findByOrder(PDO $pdo, int $orderId, ?int $tenantId = null): ?array
     {
         if ($tenantId !== null) {
