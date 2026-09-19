@@ -26,9 +26,23 @@ final class MarketplaceCampaignService
         $settings = (new MarketplaceCommissionService())->assertTenantCanReceive($pdo, $tenantId, $unitId);
         $at = $at ?: gmdate('Y-m-d H:i:s');
 
-        $plan = $pdo->prepare('SELECT COALESCE(p.code,t.plan) plan_code FROM tenants t LEFT JOIN tenant_subscriptions ts ON ts.tenant_id=t.id AND ts.status IN ("trial","active","past_due") LEFT JOIN saas_plans p ON p.id=ts.plan_id WHERE t.id=? LIMIT 1');
-        $plan->execute([$tenantId]);
-        $planCode = trim((string)($plan->fetchColumn() ?: ''));
+        // Resolve the commercial plan in portable queries. Keeping this logic
+        // separate avoids SQLite rejecting JOIN ON clauses that reference a
+        // table introduced later while preserving subscription precedence.
+        $legacyPlan = $pdo->prepare('SELECT plan FROM tenants WHERE id=? LIMIT 1');
+        $legacyPlan->execute([$tenantId]);
+        $planCode = trim((string)($legacyPlan->fetchColumn() ?: ''));
+
+        $subscriptionPlan = $pdo->prepare("SELECT p.code
+            FROM tenant_subscriptions ts
+            INNER JOIN saas_plans p ON p.id=ts.plan_id
+            WHERE ts.tenant_id=? AND ts.status IN ('trial','active','past_due')
+            ORDER BY CASE ts.status WHEN 'active' THEN 0 WHEN 'trial' THEN 1 WHEN 'past_due' THEN 2 ELSE 9 END, ts.id DESC
+            LIMIT 1");
+        $subscriptionPlan->execute([$tenantId]);
+        $resolvedPlan = trim((string)($subscriptionPlan->fetchColumn() ?: ''));
+        if ($resolvedPlan !== '') $planCode = $resolvedPlan;
+
         $city = mb_strtolower(trim((string)($settings['city'] ?? '')));
         $state = mb_strtoupper(trim((string)($settings['state'] ?? '')));
 
