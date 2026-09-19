@@ -150,19 +150,20 @@ final class GatewayService
         if($target===null)return false;
         $tenantId=(int)($verified['tenant_id']??0);$orderId=(int)($verified['order_id']??0);if($tenantId<1||$orderId<1)return false;
 
-        Database::transaction(function(\PDO $tx)use($verified,$provider,$rawStatus,$target,$tenantId,$orderId):void{
+        return Database::transaction(function(\PDO $tx)use($verified,$provider,$rawStatus,$target,$tenantId,$orderId):bool{
             $q=$tx->prepare(Database::portableSql($tx,'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND provider=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE'));
-            $q->execute([$tenantId,$orderId,$provider]);$payment=$q->fetch();if(!$payment)return;
+            $q->execute([$tenantId,$orderId,$provider]);$payment=$q->fetch();if(!$payment)return false;
             $providerId=trim((string)($verified['provider_payment_id']??''));$localProviderId=trim((string)($payment['provider_payment_id']??''));
             if($providerId!==''&&$localProviderId!==''&&$providerId!==$localProviderId)throw new RuntimeException('Transação terminal não corresponde à cobrança local.');
             $currency=strtoupper(trim((string)($verified['currency']??'BRL')));if($currency!==''&&$currency!=='BRL')throw new RuntimeException('Moeda terminal divergente.');
             $amount=(int)($verified['amount_cents']??0);if($amount>0&&$amount!==(int)$payment['amount_cents'])throw new RuntimeException('Valor terminal divergente.');
             $raw=json_decode((string)($payment['raw_payload']??''),true);if(!is_array($raw))$raw=[];$raw['_eventmenu_terminal_status']=$rawStatus;$raw['_eventmenu_terminal_at']=gmdate('c');
-            $tx->prepare('UPDATE payments SET status=?,provider_payment_id=COALESCE(NULLIF(?,""),provider_payment_id),raw_payload=? WHERE id=? AND status IN ("created","pending","authorized")')->execute([$target,$providerId,json_encode($raw,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);
+            $storedProviderId=$providerId!==''?$providerId:$localProviderId;
+            $tx->prepare('UPDATE payments SET status=?,provider_payment_id=?,raw_payload=? WHERE id=? AND status IN ("created","pending","authorized")')->execute([$target,$storedProviderId!==''?$storedProviderId:null,json_encode($raw,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);
             $tx->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$orderId,$tenantId]);
             try{(new StockReservationService())->rearmAfterPaymentFailure($tenantId,$orderId,30);}catch(\Throwable){}
+            return true;
         });
-        return true;
     }
 
     private function parseReference(string $reference):array
