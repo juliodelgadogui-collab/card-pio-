@@ -52,6 +52,24 @@ try{
     $user=$auth->authenticate($token,$deviceId);$tenantId=(int)$user['tenant_id'];$action=(string)($_GET['action']??'detail');$shift=(new WorkShiftService())->current();
     if(!$shift)throw new RuntimeException('Inicie seu turno antes de consultar pedidos.');
 
+    if($action==='source-meta'){
+        goo_method('GET');
+        $allowed=Auth::can('orders.view')||Auth::can('orders.create')||Auth::can('orders.kitchen')||Auth::can('orders.dispatch')||Auth::can('orders.delivery')||Auth::can('payments.manage');
+        if(!$allowed)throw new RuntimeException('Acesso negado aos pedidos.');
+        $raw=trim((string)($_GET['ids']??''));
+        $ids=array_values(array_unique(array_filter(array_map('intval',preg_split('/[^0-9]+/',$raw)?:[]),static fn(int$id):bool=>$id>0)));
+        if(!$ids)goo_out(['ok'=>true,'orders'=>[]]);
+        if(count($ids)>200)throw new RuntimeException('Limite de pedidos excedido.');
+        $marks=implode(',',array_fill(0,count($ids),'?'));
+        $sql='SELECT id,order_source FROM orders WHERE tenant_id=? AND id IN ('.$marks.')';
+        $args=array_merge([$tenantId],$ids);
+        $unitId=goo_unit($shift);if($unitId!==null){$sql.=' AND unit_id=?';$args[]=$unitId;}
+        if((string)$shift['mode']==='delivery'){$sql.=' AND channel="delivery" AND assigned_delivery_user_id=?';$args[]=(int)$user['id'];}
+        $sql.=' ORDER BY id DESC';$s=Database::connection()->prepare($sql);$s->execute($args);$meta=[];
+        foreach($s->fetchAll()as$row){$source=strtoupper(trim((string)($row['order_source']??'EVENTMENU_OWN')));$meta[]=['order_id'=>(int)$row['id'],'order_source'=>$source==='EVENTMENU_DELIVERY'?'EVENTMENU_DELIVERY':'EVENTMENU_OWN'];}
+        goo_out(['ok'=>true,'orders'=>$meta]);
+    }
+
     if($action==='accept'){
         goo_method('POST');if($shift['mode']!=='operation')throw new RuntimeException('Aceitação de pedido é feita no turno de Operação.');if(!Auth::can('orders.dispatch')&&!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode aceitar pedidos.');
         $body=goo_body();$orderId=(int)($body['order_id']??0);$order=goo_assert_unit($tenantId,$orderId,$shift);if($order['status']!=='pending')throw new RuntimeException('Somente pedido novo pendente pode ser aceito.');
