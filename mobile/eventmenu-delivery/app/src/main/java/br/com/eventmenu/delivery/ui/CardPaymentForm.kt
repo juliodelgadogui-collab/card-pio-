@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import br.com.eventmenu.delivery.data.PaymentUiContext
 import br.com.eventmenu.delivery.money
 import com.mercadopago.sdk.android.coremethods.domain.model.BuyerIdentification
 import com.mercadopago.sdk.android.coremethods.domain.utils.Result
@@ -36,6 +37,22 @@ private data class InstallmentChoice(
 
 @Composable
 fun CardPaymentForm(
+    publicKey: String,
+    maxInstallments: Int,
+    customerName: String,
+    onTokenized: suspend (token: String, paymentMethodId: String, installments: Int, taxId: String) -> Unit,
+) {
+    CardPaymentFormWithAmount(
+        publicKey = publicKey,
+        maxInstallments = maxInstallments,
+        amountCents = PaymentUiContext.amountCents,
+        customerName = customerName,
+        onTokenized = onTokenized,
+    )
+}
+
+@Composable
+private fun CardPaymentFormWithAmount(
     publicKey: String,
     maxInstallments: Int,
     amountCents: Int,
@@ -141,6 +158,10 @@ fun CardPaymentForm(
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Cartão", style = MaterialTheme.typography.titleLarge)
         Text("Os dados sensíveis são tokenizados pelos campos PCI oficiais do Mercado Pago e não são enviados em texto ao EventMenu.", style = MaterialTheme.typography.bodySmall)
+        if (amountCents <= 0) {
+            Text("Não foi possível carregar o valor deste pedido. Volte ao carrinho e tente novamente.", color = MaterialTheme.colorScheme.error)
+            return@Column
+        }
         if (!sdkReady) {
             if (error == null) LinearProgressIndicator(Modifier.fillMaxWidth())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
