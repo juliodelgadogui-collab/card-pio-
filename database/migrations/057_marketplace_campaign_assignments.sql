@@ -1,0 +1,21 @@
+CREATE TABLE marketplace_campaign_assignments (
+  id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  campaign_code VARCHAR(80) NOT NULL,
+  name VARCHAR(160) NOT NULL,
+  scope_type VARCHAR(24) NOT NULL,
+  tenant_id BIGINT UNSIGNED NULL,
+  city VARCHAR(120) NULL,
+  state CHAR(2) NULL,
+  plan_code VARCHAR(60) NULL,
+  priority INT NOT NULL DEFAULT 0,
+  starts_at DATETIME NULL,
+  ends_at DATETIME NULL,
+  active TINYINT(1) NOT NULL DEFAULT 1,
+  created_by BIGINT UNSIGNED NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  CONSTRAINT fk_marketplace_campaign_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  CONSTRAINT fk_marketplace_campaign_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  INDEX idx_marketplace_campaign_match (active,scope_type,tenant_id,city,state,plan_code,starts_at,ends_at,priority),
+  INDEX idx_marketplace_campaign_code (campaign_code,active,starts_at,ends_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
