@@ -39,11 +39,13 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     var paymentMethods by mutableStateOf<PaymentMethods?>(null); private set
     var pixPayment by mutableStateOf<PixPayment?>(null); private set
     var tracking by mutableStateOf<TrackingStatus?>(null); private set
+    var paymentWaiting by mutableStateOf(false); private set
     var busy by mutableStateOf(false); private set
     var message by mutableStateOf<String?>(null); private set
     var pendingEmail by mutableStateOf(""); private set
     var editingAddress by mutableStateOf<Address?>(null); private set
     private var trackingJob: Job? = null
+    private var paymentPollingJob: Job? = null
 
     init {
         if (!session.accessToken.isNullOrBlank()) {
@@ -84,7 +86,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() = action {
         runCatching { api.logout() }
-        session.clear(); customer = null; stores = emptyList(); cart.clear(); trackingJob?.cancel(); screen = Screen.Login
+        session.clear(); customer = null; stores = emptyList(); cart.clear(); trackingJob?.cancel(); paymentPollingJob?.cancel(); paymentWaiting = false; screen = Screen.Login
     }
 
     fun loadStores(query: String = "") = action(showBusy = false) { stores = api.stores(query) }
@@ -92,6 +94,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun openStore(store: Store) = action {
         catalog = api.catalog(store.tenantId, store.unitId)
         cart.clear(); screen = Screen.Catalog
+        if (!store.acceptingOrders) message = "Este restaurante está pausado no momento. Você pode ver o cardápio, mas novos pedidos estão temporariamente indisponíveis."
     }
 
     fun toggleFavorite(store: Store) = action(showBusy = false) {
@@ -114,6 +117,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun checkoutCart(addressId: Int) = action {
         val cat = catalog ?: error("Loja não carregada.")
+        if (!cat.store.acceptingOrders) error("Este restaurante pausou novos pedidos no momento.")
         if (cart.isEmpty()) error("Seu carrinho está vazio.")
         val subtotal = cart.sumOf { it.totalCents() }
         if (subtotal < cat.store.minimumOrderCents) error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
@@ -122,27 +126,36 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         cart.clear()
         paymentMethods = api.paymentMethods(order.orderNumber)
         pixPayment = null
+        paymentWaiting = false
         screen = Screen.Checkout
     }
 
     fun payPix(provider: String, taxId: String) = action {
         val id = selectedOrder?.orderNumber ?: error("Pedido não encontrado.")
         pixPayment = api.pix(id, provider, taxId)
-        message = "PIX gerado. O pedido será confirmado automaticamente após o pagamento."
+        message = "PIX gerado. Assim que o provedor confirmar, o pedido será atualizado automaticamente."
+        startPaymentPolling(id)
     }
 
     fun payCash(changeForCents: Int?) = action {
         val id = selectedOrder?.orderNumber ?: error("Pedido não encontrado.")
+        paymentPollingJob?.cancel(); paymentWaiting = false
         api.cash(id, changeForCents)
-        message = "Pagamento em dinheiro registrado."
+        message = "Pagamento em dinheiro registrado para a entrega."
         openOrderSuspend(id)
     }
 
     suspend fun payCardToken(token: String, paymentMethodId: String, installments: Int, taxId: String) {
         val id = selectedOrder?.orderNumber ?: error("Pedido não encontrado.")
         val status = api.card(id, token, paymentMethodId, installments, taxId)
-        message = if(status == "paid") "Pagamento aprovado." else "Pagamento em processamento."
-        openOrderSuspend(id)
+        if (status == "paid") {
+            paymentPollingJob?.cancel(); paymentWaiting = false
+            message = "Pagamento aprovado."
+            openOrderSuspend(id)
+        } else {
+            message = "Pagamento enviado. Aguardando confirmação do Mercado Pago."
+            startPaymentPolling(id)
+        }
     }
 
     fun loadOrders() = action { orders = api.orders(); screen = Screen.Orders }
@@ -156,6 +169,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         val r = api.reorder(id)
         val s = r.getJSONObject("store")
         catalog = api.catalog(s.getInt("tenant_id"), s.getInt("unit_id"))
+        if (catalog?.store?.acceptingOrders == false) error("Este restaurante pausou novos pedidos no momento.")
         cart.clear()
         val items = r.optJSONArray("items")
         if (items != null) for(i in 0 until items.length()) {
@@ -192,6 +206,31 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     private suspend fun loadStoresInternal() { stores = api.stores() }
 
+    private fun startPaymentPolling(orderId: Int) {
+        paymentPollingJob?.cancel(); paymentWaiting = true
+        paymentPollingJob = viewModelScope.launch {
+            repeat(90) {
+                delay(if (it == 0) 2_500 else 5_000)
+                val result = runCatching { api.paymentStatus(orderId) }.getOrNull() ?: return@repeat
+                when (result.optString("payment_status").lowercase()) {
+                    "paid" -> {
+                        paymentWaiting = false
+                        message = "Pagamento confirmado."
+                        runCatching { openOrderSuspend(orderId) }.onFailure { message = it.message ?: "Pagamento confirmado. Atualize seus pedidos." }
+                        return@launch
+                    }
+                    "failed", "cancelled" -> {
+                        paymentWaiting = false
+                        message = "O pagamento não foi concluído. Você pode tentar novamente ou escolher outra forma."
+                        return@launch
+                    }
+                }
+            }
+            paymentWaiting = false
+            message = "A confirmação ainda não chegou. O pedido continuará sendo atualizado pelo servidor."
+        }
+    }
+
     private fun startTracking() {
         trackingJob?.cancel(); tracking = null
         val token = selectedOrder?.trackingToken ?: return
@@ -216,7 +255,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    override fun onCleared() { trackingJob?.cancel(); super.onCleared() }
+    override fun onCleared() { trackingJob?.cancel(); paymentPollingJob?.cancel(); super.onCleared() }
 }
 
 fun money(cents: Int): String = java.text.NumberFormat.getCurrencyInstance(java.util.Locale("pt","BR")).format(cents / 100.0)
