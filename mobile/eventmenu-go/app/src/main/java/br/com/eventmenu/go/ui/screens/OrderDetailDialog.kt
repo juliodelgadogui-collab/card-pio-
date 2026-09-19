@@ -58,6 +58,19 @@ fun OrderDetailDialog(
             ) {
                 item {
                     Text("${orderChannelLabel(detail.channel)} · ${orderStatusLabel(detail.status)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    if (detail.fromEventMenuDelivery) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                "EventMenu Delivery",
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                     PaymentStatePill(detail.paymentStatus)
                     usefulOrderText(detail.customerName)?.let { Text(it, fontWeight = FontWeight.SemiBold) }
                     usefulOrderText(detail.customerPhone)?.let { Text(it) }
