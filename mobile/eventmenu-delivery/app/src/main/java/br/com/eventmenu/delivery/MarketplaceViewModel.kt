@@ -25,13 +25,13 @@ data class MarketplaceUiState(
 class MarketplaceViewModel(application: Application) : AndroidViewModel(application) {
     private val api = MarketplaceApi()
     private val prefs = application.getSharedPreferences("eventmenu_delivery", 0)
+    private val cartDraftStore = CartDraftStore(prefs)
     private val _state = MutableStateFlow(MarketplaceUiState())
     val state: StateFlow<MarketplaceUiState> = _state.asStateFlow()
     private var pollJob: Job? = null
 
     init {
-        loadStores()
-        restoreOrder()
+        loadStartup()
     }
 
     fun search(value: String) {
@@ -49,7 +49,24 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
 
     fun openStore(store: Store) = launchBusy {
         val catalog = api.catalog(store)
-        _state.value = _state.value.copy(catalog = catalog, cart = emptyList(), screen = Screen.Menu(catalog), tracking = null)
+        val saved = cartDraftStore.load()
+        val restored = if (saved != null && saved.tenantId == store.tenantId && saved.unitId == store.unitId) {
+            cartDraftStore.revalidate(catalog, saved)
+        } else {
+            RevalidatedCart(emptyList(), changed = false)
+        }
+        if (restored.lines.isEmpty() && saved != null && saved.tenantId == store.tenantId && saved.unitId == store.unitId) {
+            cartDraftStore.clear()
+        } else if (restored.lines.isNotEmpty()) {
+            cartDraftStore.save(catalog.store, restored.lines)
+        }
+        _state.value = _state.value.copy(
+            catalog = catalog,
+            cart = restored.lines,
+            screen = Screen.Menu(catalog),
+            tracking = null,
+            message = if (restored.changed) "Atualizamos seu carrinho com o cardápio disponível agora." else null,
+        )
     }
 
     fun openActiveOrder() {
@@ -73,6 +90,7 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
         if (index >= 0) current[index] = current[index].copy(quantity = (current[index].quantity + qty).coerceAtMost(99))
         else current += CartLine(product, qty, normalized)
         _state.value = _state.value.copy(cart = current, message = "${product.name} adicionado ao carrinho.")
+        persistCart(current)
         return null
     }
 
@@ -82,6 +100,7 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
         val next = current[index].quantity + delta
         if (next <= 0) current.removeAt(index) else current[index] = current[index].copy(quantity = next.coerceAtMost(99))
         _state.value = _state.value.copy(cart = current)
+        persistCart(current)
     }
 
     fun checkout() {
@@ -103,11 +122,31 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
         val catalog = current.catalog ?: throw MarketplaceException("Escolha uma loja para continuar.")
         if (current.cart.isEmpty()) throw MarketplaceException("Seu carrinho está vazio.")
         if (customer.name.isBlank() || customer.phone.isBlank() || customer.address.isBlank()) throw MarketplaceException("Informe nome, telefone e endereço para a entrega.")
-        // Renova a sessão curta antes de criar o pedido; catálogo/preço/estoque continuam validados pelo Server.
+
+        // Renova a sessão curta e revalida o carrinho com o catálogo atual antes de criar o pedido.
         val freshCatalog = api.catalog(catalog.store)
-        val order = api.createOrder(freshCatalog, current.cart, customer)
+        val revalidated = cartDraftStore.revalidate(freshCatalog, current.cart)
+        if (revalidated.lines.isEmpty()) {
+            cartDraftStore.clear()
+            _state.value = _state.value.copy(catalog = freshCatalog, cart = emptyList(), screen = Screen.Menu(freshCatalog))
+            throw MarketplaceException("Os itens do seu carrinho não estão mais disponíveis. Escolha novamente.")
+        }
+        if (revalidated.changed) {
+            cartDraftStore.save(freshCatalog.store, revalidated.lines)
+            _state.value = _state.value.copy(catalog = freshCatalog, cart = revalidated.lines, screen = Screen.Menu(freshCatalog))
+            throw MarketplaceException("O cardápio mudou desde sua escolha. Atualizamos o carrinho para você revisar antes de finalizar.")
+        }
+
+        val order = api.createOrder(freshCatalog, revalidated.lines, customer)
         prefs.edit().putString("active_order_token", order.publicToken).apply()
-        _state.value = _state.value.copy(catalog = freshCatalog, cart = emptyList(), order = order, screen = Screen.Order(order), message = "Pedido recebido com sucesso.")
+        cartDraftStore.clear()
+        _state.value = _state.value.copy(
+            catalog = freshCatalog,
+            cart = emptyList(),
+            order = order,
+            screen = Screen.Order(order),
+            message = "Pedido recebido com sucesso.",
+        )
         startPolling(order.publicToken)
     }
 
@@ -129,17 +168,72 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
-    private fun restoreOrder() {
-        val token = prefs.getString("active_order_token", null)?.trim().orEmpty()
-        if (token.isBlank()) return
+    private fun loadStartup() {
         viewModelScope.launch {
-            runCatching { api.orderStatus(token) }
-                .onSuccess { order ->
-                    _state.value = _state.value.copy(order = order, screen = Screen.Order(order), loading = false)
-                    if (order.status !in setOf("completed", "cancelled")) startPolling(token)
-                }
-                .onFailure { prefs.edit().remove("active_order_token").apply() }
+            _state.value = _state.value.copy(loading = true, message = null)
+            var activeOrderShown = false
+            val activeToken = prefs.getString("active_order_token", null)?.trim().orEmpty()
+            if (activeToken.isNotBlank()) {
+                runCatching { api.orderStatus(activeToken) }
+                    .onSuccess { order ->
+                        activeOrderShown = true
+                        _state.value = _state.value.copy(order = order, screen = Screen.Order(order))
+                        if (order.status in setOf("completed", "cancelled")) {
+                            prefs.edit().remove("active_order_token").apply()
+                        } else {
+                            startPolling(activeToken)
+                        }
+                    }
+                    .onFailure { error ->
+                        val invalid = error is MarketplaceException && error.statusCode in setOf(404, 409, 422)
+                        if (invalid) prefs.edit().remove("active_order_token").apply()
+                        else _state.value = _state.value.copy(message = "Não foi possível atualizar seu pedido agora. Tentaremos novamente quando a conexão voltar.")
+                    }
+            }
+
+            val storesResult = runCatching { api.stores() }
+            storesResult.onSuccess { stores ->
+                _state.value = _state.value.copy(stores = stores)
+                if (!activeOrderShown) restoreSavedCart(stores)
+            }.onFailure { error ->
+                if (!activeOrderShown) _state.value = _state.value.copy(message = friendly(error))
+            }
+            _state.value = _state.value.copy(loading = false)
         }
+    }
+
+    private suspend fun restoreSavedCart(stores: List<Store>) {
+        val draft = cartDraftStore.load() ?: return
+        val store = stores.firstOrNull { it.tenantId == draft.tenantId && it.unitId == draft.unitId }
+        if (store == null) {
+            cartDraftStore.clear()
+            _state.value = _state.value.copy(message = "A loja do seu carrinho salvo não está disponível agora.")
+            return
+        }
+        runCatching { api.catalog(store) }
+            .onSuccess { catalog ->
+                val restored = cartDraftStore.revalidate(catalog, draft)
+                if (restored.lines.isEmpty()) {
+                    cartDraftStore.clear()
+                    _state.value = _state.value.copy(message = "Os itens do seu carrinho salvo não estão mais disponíveis.")
+                    return@onSuccess
+                }
+                cartDraftStore.save(catalog.store, restored.lines)
+                _state.value = _state.value.copy(
+                    catalog = catalog,
+                    cart = restored.lines,
+                    screen = Screen.Menu(catalog),
+                    message = if (restored.changed) "Seu carrinho foi atualizado com o cardápio disponível agora." else "Seu carrinho foi restaurado.",
+                )
+            }
+            .onFailure { error ->
+                _state.value = _state.value.copy(message = friendly(error))
+            }
+    }
+
+    private fun persistCart(cart: List<CartLine>) {
+        val store = _state.value.catalog?.store ?: return
+        if (cart.isEmpty()) cartDraftStore.clear() else cartDraftStore.save(store, cart)
     }
 
     private fun startPolling(publicToken: String) {
@@ -181,9 +275,13 @@ class MarketplaceViewModel(application: Application) : AndroidViewModel(applicat
     private fun launchBusy(block: suspend () -> Unit) {
         viewModelScope.launch {
             _state.value = _state.value.copy(loading = true, message = null)
-            try { block() }
-            catch (error: Throwable) { _state.value = _state.value.copy(message = friendly(error)) }
-            finally { _state.value = _state.value.copy(loading = false) }
+            try {
+                block()
+            } catch (error: Throwable) {
+                _state.value = _state.value.copy(message = friendly(error))
+            } finally {
+                _state.value = _state.value.copy(loading = false)
+            }
         }
     }
 
