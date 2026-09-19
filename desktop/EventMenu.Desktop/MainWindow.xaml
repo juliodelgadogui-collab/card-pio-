@@ -1,0 +1,274 @@
+<Window x:Class="EventMenu.Desktop.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="EventMenu Desktop"
+        Width="1440" Height="860"
+        MinWidth="1100" MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Loaded="Window_Loaded">
+    <Grid>
+        <Grid x:Name="LoginPanel" Background="#F4F7FB">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.1*" />
+                <ColumnDefinition Width="0.9*" />
+            </Grid.ColumnDefinitions>
+            <Border Grid.Column="0" Background="#111827" Padding="64">
+                <StackPanel VerticalAlignment="Center" MaxWidth="560">
+                    <TextBlock Text="EVENTMENU DESKTOP" Foreground="#C4B5FD" FontWeight="Bold" FontSize="15" />
+                    <TextBlock Text="Seu restaurante operando no computador, conectado ao mesmo servidor."
+                               Foreground="White" FontWeight="SemiBold" FontSize="36" TextWrapping="Wrap" Margin="0,18,0,18" />
+                    <TextBlock Foreground="#CBD5E1" FontSize="17" TextWrapping="Wrap"
+                               Text="PDV, pedidos, mesas, comandas, caixa e impressão em uma interface própria para Windows." />
+                </StackPanel>
+            </Border>
+            <Grid Grid.Column="1" Margin="72">
+                <Border Background="White" CornerRadius="18" Padding="38" MaxWidth="430" VerticalAlignment="Center">
+                    <Border.Effect><DropShadowEffect BlurRadius="24" ShadowDepth="4" Opacity="0.12" /></Border.Effect>
+                    <StackPanel>
+                        <TextBlock Text="Entrar" FontSize="30" FontWeight="SemiBold" />
+                        <TextBlock Text="Use o mesmo acesso da sua empresa no EventMenu." Foreground="#667085" Margin="0,8,0,28" TextWrapping="Wrap" />
+                        <TextBlock Text="E-mail" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <TextBox x:Name="EmailBox" Height="42" Margin="0,0,0,18" />
+                        <TextBlock Text="Senha" FontWeight="SemiBold" Margin="0,0,0,6" />
+                        <PasswordBox x:Name="PasswordBox" Height="42" Margin="0,0,0,22" KeyDown="PasswordBox_KeyDown" />
+                        <Button x:Name="LoginButton" Content="Entrar no EventMenu" Height="44" Click="LoginButton_Click" />
+                        <TextBlock x:Name="LoginStatus" Foreground="#B42318" Margin="0,10,0,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <Grid x:Name="ShellPanel" Visibility="Collapsed" Background="#F4F7FB">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="72" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <Border Grid.Row="0" Background="White" BorderBrush="#E4E7EC" BorderThickness="0,0,0,1" Padding="20,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="EventMenu" FontWeight="Bold" FontSize="20" />
+                        <Border Background="#F2F4F7" CornerRadius="8" Padding="10,5" Margin="14,0,0,0">
+                            <TextBlock x:Name="TenantNameText" FontWeight="SemiBold" Foreground="#475467" />
+                        </Border>
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock Text="Unidade" VerticalAlignment="Center" Foreground="#667085" Margin="0,0,6,0" />
+                        <ComboBox x:Name="UnitSelector" Width="170" Height="34" DisplayMemberPath="Name" Margin="0,0,14,0" />
+                        <TextBlock Text="Turno" VerticalAlignment="Center" Foreground="#667085" Margin="0,0,6,0" />
+                        <ComboBox x:Name="ModeSelector" Width="130" Height="34" DisplayMemberPath="Label" Margin="0,0,10,0" />
+                        <TextBlock x:Name="ShiftStatusText" Text="Sem turno" VerticalAlignment="Center" FontWeight="SemiBold" Margin="4,0,10,0" />
+                        <Button x:Name="ShiftButton" Content="Iniciar turno" Height="34" Padding="12,5" Margin="0" Click="ShiftButton_Click" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <StackPanel Margin="0,0,18,0">
+                            <TextBlock x:Name="UserNameText" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                            <TextBlock x:Name="RoleText" Foreground="#667085" FontSize="12" HorizontalAlignment="Right" />
+                        </StackPanel>
+                        <Button Content="Sair" Style="{StaticResource SecondaryButton}" Click="LogoutButton_Click" Margin="0" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="220" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <Border Grid.Column="0" Background="#111827" Padding="16,22">
+                    <StackPanel>
+                        <TextBlock Text="OPERAÇÃO" Foreground="#98A2B3" FontWeight="Bold" FontSize="11" Margin="10,0,0,14" />
+                        <Button Content="Visão geral" HorizontalContentAlignment="Left" Click="DashboardButton_Click" />
+                        <Button x:Name="PosNavButton" Content="PDV / Nova venda" HorizontalContentAlignment="Left" Click="PosButton_Click" />
+                        <Button Content="Pedidos" HorizontalContentAlignment="Left" Click="OrdersButton_Click" />
+                        <Button x:Name="TablesNavButton" Content="Mesas e comandas" HorizontalContentAlignment="Left" Click="TablesButton_Click" />
+                        <Button x:Name="CashNavButton" Content="Caixa" HorizontalContentAlignment="Left" Click="CashButton_Click" />
+                        <Border Height="1" Background="#344054" Margin="8,16" />
+                        <TextBlock x:Name="AutoRefreshText" Text="Atualização automática ativa" Foreground="#98A2B3" FontSize="11" Margin="10,0" TextWrapping="Wrap" />
+                    </StackPanel>
+                </Border>
+
+                <Grid Grid.Column="1" Margin="26">
+                    <Grid x:Name="DashboardView">
+                        <StackPanel>
+                            <DockPanel Margin="0,0,0,22">
+                                <StackPanel DockPanel.Dock="Left">
+                                    <TextBlock Text="Visão geral" FontSize="28" FontWeight="SemiBold" />
+                                    <TextBlock Text="Resumo da operação deste computador." Foreground="#667085" Margin="0,6,0,0" />
+                                </StackPanel>
+                                <Button Content="Atualizar agora" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshButton_Click" />
+                            </DockPanel>
+                            <UniformGrid Columns="4" Margin="0,0,0,20">
+                                <Border Background="White" CornerRadius="14" Padding="20" Margin="0,0,12,0"><StackPanel><TextBlock Text="Pedidos" Foreground="#667085" /><TextBlock x:Name="OrdersCountText" Text="0" FontSize="30" FontWeight="Bold" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Background="White" CornerRadius="14" Padding="20" Margin="0,0,12,0"><StackPanel><TextBlock Text="Produtos" Foreground="#667085" /><TextBlock x:Name="ProductsCountText" Text="0" FontSize="30" FontWeight="Bold" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Background="White" CornerRadius="14" Padding="20" Margin="0,0,12,0"><StackPanel><TextBlock Text="Mesas" Foreground="#667085" /><TextBlock x:Name="TablesCountText" Text="0" FontSize="30" FontWeight="Bold" Margin="0,8,0,0" /></StackPanel></Border>
+                                <Border Background="White" CornerRadius="14" Padding="20"><StackPanel><TextBlock Text="Conexão" Foreground="#667085" /><TextBlock x:Name="ConnectionText" Text="Conectando..." FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0" /></StackPanel></Border>
+                            </UniformGrid>
+                            <Border Background="White" CornerRadius="14" Padding="22">
+                                <StackPanel>
+                                    <TextBlock Text="Operação centralizada" FontSize="18" FontWeight="SemiBold" />
+                                    <TextBlock Margin="0,10,0,0" Foreground="#667085" TextWrapping="Wrap"
+                                               Text="Tudo que este computador faz é gravado no servidor EventMenu. Permissões, estoque, pagamentos e dados da empresa continuam sendo validados pelo backend." />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid x:Name="PosView" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,16">
+                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="PDV / Nova venda" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Monte o carrinho e envie o pedido para o servidor." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
+                            <Button Content="Atualizar catálogo" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshProductsButton_Click" />
+                        </DockPanel>
+                        <Grid Grid.Row="1">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="1.2*" /><ColumnDefinition Width="16" /><ColumnDefinition Width="0.9*" /></Grid.ColumnDefinitions>
+                            <Border Background="White" CornerRadius="14" Padding="14">
+                                <Grid>
+                                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                    <TextBox x:Name="ProductSearchBox" Height="38" Margin="0,0,0,10" TextChanged="ProductSearchBox_TextChanged" ToolTip="Pesquisar produto ou SKU" />
+                                    <DataGrid x:Name="ProductsGrid" Grid.Row="1" IsReadOnly="True" SelectionMode="Single" MouseDoubleClick="ProductsGrid_MouseDoubleClick">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Produto" Binding="{Binding Name}" Width="*" />
+                                            <DataGridTextColumn Header="SKU" Binding="{Binding Sku}" Width="120" />
+                                            <DataGridTextColumn Header="Preço" Binding="{Binding PriceDisplay}" Width="105" />
+                                            <DataGridTextColumn Header="Estoque" Binding="{Binding StockQty}" Width="90" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                    <Button Grid.Row="2" Content="Adicionar selecionado" HorizontalAlignment="Right" Margin="0,10,0,0" Click="AddProductButton_Click" />
+                                </Grid>
+                            </Border>
+                            <Border Grid.Column="2" Background="White" CornerRadius="14" Padding="16">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                    <StackPanel>
+                                        <TextBlock Text="Pedido" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,12" />
+                                        <TextBlock Text="Canal" FontWeight="SemiBold" /><ComboBox x:Name="ChannelSelector" Height="36" Margin="0,5,0,10" DisplayMemberPath="Label" SelectionChanged="ChannelSelector_SelectionChanged" />
+                                        <StackPanel x:Name="TableOrderPanel" Visibility="Collapsed">
+                                            <TextBlock Text="Mesa" FontWeight="SemiBold" /><ComboBox x:Name="TableSelector" Height="36" Margin="0,5,0,10" DisplayMemberPath="Name" />
+                                        </StackPanel>
+                                        <TextBlock Text="Cliente" FontWeight="SemiBold" /><TextBox x:Name="CustomerNameBox" Margin="0,5,0,8" />
+                                        <TextBlock Text="Telefone" FontWeight="SemiBold" /><TextBox x:Name="CustomerPhoneBox" Margin="0,5,0,8" />
+                                        <StackPanel x:Name="DeliveryPanel" Visibility="Collapsed">
+                                            <TextBlock Text="Endereço de entrega" FontWeight="SemiBold" /><TextBox x:Name="DeliveryAddressBox" Margin="0,5,0,8" Height="58" TextWrapping="Wrap" AcceptsReturn="True" />
+                                        </StackPanel>
+                                        <TextBlock Text="Observações" FontWeight="SemiBold" /><TextBox x:Name="OrderNotesBox" Margin="0,5,0,10" Height="50" TextWrapping="Wrap" AcceptsReturn="True" />
+                                        <TextBlock Text="Carrinho" FontWeight="SemiBold" Margin="0,4,0,6" />
+                                        <DataGrid x:Name="CartGrid" Height="190" IsReadOnly="True" SelectionMode="Single">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Item" Binding="{Binding Name}" Width="*" />
+                                                <DataGridTextColumn Header="Qtd." Binding="{Binding Quantity}" Width="62" />
+                                                <DataGridTextColumn Header="Total" Binding="{Binding TotalDisplay}" Width="95" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                            <Button Content="- Qtd." Style="{StaticResource SecondaryButton}" Click="DecreaseCartButton_Click" />
+                                            <Button Content="+ Qtd." Style="{StaticResource SecondaryButton}" Click="IncreaseCartButton_Click" />
+                                            <Button Content="Remover" Style="{StaticResource SecondaryButton}" Click="RemoveCartButton_Click" />
+                                        </StackPanel>
+                                        <DockPanel Margin="0,8,0,12"><TextBlock Text="TOTAL" FontSize="17" FontWeight="Bold" /><TextBlock x:Name="CartTotalText" Text="R$ 0,00" FontSize="21" FontWeight="Bold" DockPanel.Dock="Right" HorizontalAlignment="Right" /></DockPanel>
+                                        <Button x:Name="CreateOrderButton" Content="Enviar pedido" Height="44" Margin="0" Click="CreateOrderButton_Click" />
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+                        </Grid>
+                    </Grid>
+
+                    <Grid x:Name="OrdersView" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,18">
+                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="Pedidos" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Pedidos liberados para a função deste usuário." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
+                            <Button Content="Atualizar pedidos" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshOrdersButton_Click" />
+                        </DockPanel>
+                        <Border Grid.Row="1" Background="White" CornerRadius="14" Padding="12">
+                            <DataGrid x:Name="OrdersGrid" IsReadOnly="True" SelectionMode="Single">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="#" Binding="{Binding Id}" Width="70" />
+                                    <DataGridTextColumn Header="Cliente" Binding="{Binding CustomerName}" Width="*" />
+                                    <DataGridTextColumn Header="Canal" Binding="{Binding Channel}" Width="110" />
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="140" />
+                                    <DataGridTextColumn Header="Pagamento" Binding="{Binding PaymentStatus}" Width="130" />
+                                    <DataGridTextColumn Header="Total" Binding="{Binding TotalDisplay}" Width="115" />
+                                    <DataGridTextColumn Header="Criado em" Binding="{Binding CreatedAt}" Width="165" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+                            <Button Content="Imprimir pedido" Style="{StaticResource SecondaryButton}" Click="PrintSelectedOrderButton_Click" />
+                            <Button x:Name="PreparingButton" Content="Em preparo" Click="PreparingButton_Click" />
+                            <Button x:Name="ReadyButton" Content="Pronto" Click="ReadyButton_Click" />
+                            <Button x:Name="CompleteButton" Content="Concluir" Click="CompleteButton_Click" Margin="0" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Grid x:Name="TablesView" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,18">
+                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="Mesas e comandas" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Abra uma comanda antes de lançar pedidos para mesa." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
+                            <Button Content="Atualizar mesas" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshTablesButton_Click" />
+                        </DockPanel>
+                        <Border Grid.Row="1" Background="White" CornerRadius="14" Padding="12">
+                            <DataGrid x:Name="TablesGrid" IsReadOnly="True" SelectionMode="Single">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Mesa" Binding="{Binding Name}" Width="*" />
+                                    <DataGridTextColumn Header="Lugares" Binding="{Binding Seats}" Width="90" />
+                                    <DataGridTextColumn Header="Status" Binding="{Binding StatusDisplay}" Width="120" />
+                                    <DataGridTextColumn Header="Comanda" Binding="{Binding TabLabel}" Width="160" />
+                                    <DataGridTextColumn Header="Total" Binding="{Binding TotalDisplay}" Width="120" />
+                                    <DataGridTextColumn Header="Em aberto" Binding="{Binding UnpaidDisplay}" Width="120" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Border>
+                        <DockPanel Grid.Row="2" Margin="0,12,0,0">
+                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                                <TextBlock Text="Identificação da comanda" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBox x:Name="OpenTabLabelBox" Width="210" Height="36" Margin="0,0,8,0" />
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                                <Button Content="Abrir comanda" Click="OpenTabButton_Click" />
+                                <Button Content="Fechar comanda" Style="{StaticResource SecondaryButton}" Click="CloseTabButton_Click" Margin="0" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Grid>
+
+                    <Grid x:Name="CashView" Visibility="Collapsed">
+                        <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                        <DockPanel Margin="0,0,0,18">
+                            <StackPanel DockPanel.Dock="Left"><TextBlock Text="Caixa" FontSize="28" FontWeight="SemiBold" /><TextBlock Text="Abertura, suprimento, sangria e fechamento do caixa." Foreground="#667085" Margin="0,6,0,0" /></StackPanel>
+                            <Button Content="Atualizar caixa" DockPanel.Dock="Right" HorizontalAlignment="Right" Click="RefreshCashButton_Click" />
+                        </DockPanel>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <Border Background="White" CornerRadius="14" Padding="22" Margin="0,0,0,14">
+                                    <StackPanel>
+                                        <TextBlock Text="Sessão atual" Foreground="#667085" />
+                                        <TextBlock x:Name="CashStatusText" Text="Carregando..." FontSize="24" FontWeight="SemiBold" Margin="0,8,0,0" />
+                                        <TextBlock x:Name="CashDetailsText" Foreground="#667085" Margin="0,8,0,0" TextWrapping="Wrap" />
+                                        <TextBlock x:Name="CashExpectedText" FontSize="17" FontWeight="SemiBold" Margin="0,8,0,0" />
+                                    </StackPanel>
+                                </Border>
+                                <UniformGrid Columns="3">
+                                    <Border Background="White" CornerRadius="14" Padding="18" Margin="0,0,12,0">
+                                        <StackPanel><TextBlock Text="Abrir caixa" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" /><TextBlock Text="Valor inicial" /><TextBox x:Name="CashOpenAmountBox" Margin="0,5,0,8" /><TextBlock Text="Observação" /><TextBox x:Name="CashOpenNotesBox" Margin="0,5,0,10" /><Button Content="Abrir caixa" Click="CashOpenButton_Click" Margin="0" /></StackPanel>
+                                    </Border>
+                                    <Border Background="White" CornerRadius="14" Padding="18" Margin="0,0,12,0">
+                                        <StackPanel><TextBlock Text="Movimento" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" /><TextBlock Text="Tipo" /><ComboBox x:Name="CashMovementType" Margin="0,5,0,8" Height="34"><ComboBoxItem Content="Suprimento" Tag="supply" /><ComboBoxItem Content="Sangria" Tag="withdrawal" /><ComboBoxItem Content="Ajuste" Tag="adjustment" /></ComboBox><TextBlock Text="Valor" /><TextBox x:Name="CashMovementAmountBox" Margin="0,5,0,8" /><TextBlock Text="Motivo" /><TextBox x:Name="CashMovementNotesBox" Margin="0,5,0,10" /><Button Content="Registrar movimento" Click="CashMovementButton_Click" Margin="0" /></StackPanel>
+                                    </Border>
+                                    <Border Background="White" CornerRadius="14" Padding="18">
+                                        <StackPanel><TextBlock Text="Fechar caixa" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,10" /><TextBlock Text="Dinheiro contado" /><TextBox x:Name="CashCountedBox" Margin="0,5,0,8" /><TextBlock Text="Observação" /><TextBox x:Name="CashCloseNotesBox" Margin="0,5,0,10" /><Button Content="Fechar caixa" Click="CashCloseButton_Click" Margin="0" /></StackPanel>
+                                    </Border>
+                                </UniformGrid>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
+                </Grid>
+            </Grid>
+        </Grid>
+    </Grid>
+</Window>
