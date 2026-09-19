@@ -1,7 +1,7 @@
 package br.com.eventmenu.delivery
 
 import android.app.Application
-import br.com.eventmenu.delivery.data.DeliveryApi
+import br.com.eventmenu.delivery.data.PushApi
 import br.com.eventmenu.delivery.data.SecureSessionStore
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
@@ -31,7 +31,7 @@ class DeliveryPushCoordinator(
     private val session: SecureSessionStore,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val api by lazy { DeliveryApi { session.accessToken } }
+    private val api by lazy { PushApi { session.accessToken } }
 
     fun initialize() {
         if (!BuildConfig.FIREBASE_ENABLED) return
@@ -51,11 +51,7 @@ class DeliveryPushCoordinator(
 
     fun registerToken(token: String) {
         if (!BuildConfig.FIREBASE_ENABLED || token.isBlank() || session.accessToken.isNullOrBlank()) return
-        scope.launch {
-            runCatching {
-                api.registerPush(token)
-            }
-        }
+        scope.launch { runCatching { api.register(token) } }
     }
 
     fun syncAfterLogin() {
