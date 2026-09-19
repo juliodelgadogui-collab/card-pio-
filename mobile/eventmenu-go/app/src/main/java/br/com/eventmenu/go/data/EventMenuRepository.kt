@@ -74,13 +74,22 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
     }
 
     suspend fun orders():List<Order>{
-        val a=api.getGo("orders",requireToken()).optJSONArray("orders")?:JSONArray()
-        return buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(
+        val token=requireToken()
+        val a=api.getGo("orders",token).optJSONArray("orders")?:JSONArray()
+        val base=buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(
             id=o.getInt("id"),channel=o.optString("channel"),status=o.optString("status"),paymentStatus=o.optString("payment_status"),totalCents=o.optInt("total_cents"),
             customerName=o.optString("customer_name","Consumidor"),customerPhone=o.optString("customer_phone"),deliveryAddress=o.optString("delivery_address"),
             assignedDeliveryUserId=if(o.isNull("assigned_delivery_user_id"))null else o.optInt("assigned_delivery_user_id"),deliveryName=o.optString("delivery_name"),createdAt=o.optString("created_at"),tableName=o.optString("table_name"),
-            tableId=if(o.isNull("table_id"))null else o.optInt("table_id"),tabId=if(o.isNull("tab_id"))null else o.optInt("tab_id")
+            tableId=if(o.isNull("table_id"))null else o.optInt("table_id"),tabId=if(o.isNull("tab_id"))null else o.optInt("tab_id"),orderSource=o.optString("order_source")
         ))}}
+        if(base.isEmpty())return base
+        val sources=runCatching{
+            val ids=base.joinToString(","){it.id.toString()}
+            val meta=api.getOrderOps("source-meta",token,mapOf("ids" to ids)).optJSONArray("orders")?:JSONArray()
+            buildMap<Int,String>{for(i in 0 until meta.length()){val row=meta.getJSONObject(i);put(row.optInt("order_id"),row.optString("order_source"))}}
+        }.getOrDefault(emptyMap())
+        if(sources.isEmpty())return base
+        return base.map{order->order.copy(orderSource=sources[order.id]?:order.orderSource)}
     }
     suspend fun changeOrderStatus(orderId:Int,status:String)=api.postGo("order-status",requireToken(),JSONObject().put("order_id",orderId).put("status",status))
 
