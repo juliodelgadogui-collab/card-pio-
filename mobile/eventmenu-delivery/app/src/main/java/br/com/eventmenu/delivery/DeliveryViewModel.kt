@@ -24,7 +24,8 @@ sealed interface Screen {
 }
 
 class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
-    private val session = SecureSessionStore(app)
+    private val deliveryApp = app as? DeliveryApplication
+    private val session = deliveryApp?.sessionStore ?: SecureSessionStore(app)
     private val api = DeliveryApi { session.accessToken }
 
     var screen by mutableStateOf<Screen>(if (session.accessToken.isNullOrBlank()) Screen.Login else Screen.Home)
@@ -44,7 +45,12 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     var editingAddress by mutableStateOf<Address?>(null); private set
     private var trackingJob: Job? = null
 
-    init { if (!session.accessToken.isNullOrBlank()) refreshSession() }
+    init {
+        if (!session.accessToken.isNullOrBlank()) {
+            deliveryApp?.pushCoordinator?.syncAfterLogin()
+            refreshSession()
+        }
+    }
 
     fun clearMessage() { message = null }
     fun navigate(value: Screen) { screen = value }
@@ -54,6 +60,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         val result = api.login(email.trim(), password)
         session.accessToken = result.token
         customer = result.customer
+        deliveryApp?.pushCoordinator?.syncAfterLogin()
         screen = Screen.Home
         loadStoresInternal()
     }
@@ -77,7 +84,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun logout() = action {
         runCatching { api.logout() }
-        session.clear(); customer = null; stores = emptyList(); cart.clear(); screen = Screen.Login
+        session.clear(); customer = null; stores = emptyList(); cart.clear(); trackingJob?.cancel(); screen = Screen.Login
     }
 
     fun loadStores(query: String = "") = action(showBusy = false) { stores = api.stores(query) }
@@ -114,6 +121,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         selectedOrder = order
         cart.clear()
         paymentMethods = api.paymentMethods(order.orderNumber)
+        pixPayment = null
         screen = Screen.Checkout
     }
 
@@ -125,7 +133,9 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     fun payCash(changeForCents: Int?) = action {
         val id = selectedOrder?.orderNumber ?: error("Pedido não encontrado.")
-        api.cash(id, changeForCents); message = "Pagamento em dinheiro registrado."; openOrder(id)
+        api.cash(id, changeForCents)
+        message = "Pagamento em dinheiro registrado."
+        openOrderSuspend(id)
     }
 
     suspend fun payCardToken(token: String, paymentMethodId: String, installments: Int, taxId: String) {
