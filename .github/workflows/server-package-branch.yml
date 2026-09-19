@@ -32,6 +32,7 @@ jobs:
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-sqlite-legacy-upgrade-smoke.php
+          php scripts/ci-db-repair-page-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-permission-smoke.php
           php scripts/ci-sensitive-rate-limit-smoke.php
@@ -55,6 +56,8 @@ jobs:
           test -f "$PACKAGE/src/Services/ReceiptPresentationService.php"
           test -f "$PACKAGE/app/routes/receipt-settings.php"
           test -f "$PACKAGE/app/routes/receipt-ads.php"
+          test -f "$PACKAGE/public/db-repair.php"
+          test -f "$PACKAGE/src/Services/DatabaseRepairService.php"
       - name: Generate checksums
         run: |
           cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-dev"
