@@ -31,7 +31,8 @@ final class MarketplaceConsumerService
                 static fn(int $id): bool => $id > 0
             )));
             if (count($optionIds) > 60) throw new RuntimeException('Há opções demais em um item do pedido.');
-            $cart[] = ['product_id' => $productId, 'qty' => $qty, 'option_ids' => $optionIds];
+            $notes = mb_substr(trim((string)($row['notes'] ?? '')), 0, 500);
+            $cart[] = ['product_id' => $productId, 'qty' => $qty, 'option_ids' => $optionIds, 'notes' => $notes];
         }
         if (!$cart) throw new RuntimeException('Adicione pelo menos um item disponível ao pedido.');
 
@@ -77,7 +78,7 @@ final class MarketplaceConsumerService
         $order = $s->fetch();
         if (!$order) throw new RuntimeException('Pedido não encontrado.');
 
-        $itemsQ = $pdo->prepare('SELECT oi.id,oi.name_snapshot,oi.unit_price_cents,oi.quantity,oi.total_cents FROM order_items oi WHERE oi.order_id=? ORDER BY oi.id');
+        $itemsQ = $pdo->prepare('SELECT oi.id,oi.name_snapshot,oi.unit_price_cents,oi.quantity,oi.total_cents,oi.notes FROM order_items oi WHERE oi.order_id=? ORDER BY oi.id');
         $itemsQ->execute([(int)$order['id']]);
         $items = $itemsQ->fetchAll();
 
@@ -100,6 +101,7 @@ final class MarketplaceConsumerService
             $item['unit_price_cents'] = (int)$item['unit_price_cents'];
             $item['quantity'] = (float)$item['quantity'];
             $item['total_cents'] = (int)$item['total_cents'];
+            $item['notes'] = (string)($item['notes'] ?? '');
             $item['modifiers'] = $modifierMap[(int)$item['id']] ?? [];
         }
         unset($item);
