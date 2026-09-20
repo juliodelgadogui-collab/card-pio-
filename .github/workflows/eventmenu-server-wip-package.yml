@@ -61,12 +61,12 @@ jobs:
           php scripts/ci-backup-smoke.php
           php scripts/ci-operational-resilience-smoke.php
           php scripts/ci-production-readiness-smoke.php
-      - name: Verify latest payment migrations
+      - name: Verify latest delivery migrations
         run: |
           set -euo pipefail
-          test -f database/migrations/058_customer_auth_email_verification.sql
-          test -f database/migrations/059_payment_refunds.sql
-          test -f database/migrations/060_card_payment_settings.sql
+          test -f database/migrations/058_delivery_customer_accounts.sql
+          test -f database/migrations/059_delivery_customer_payment_preferences.sql
+          test -f database/migrations/060_delivery_customer_legal_consents.sql
           test -f database/migrations/061_bank_pix_payment_providers.sql
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
@@ -76,8 +76,8 @@ jobs:
           test -f "$PACKAGE/src/Services/BankPixProviderService.php"
           test -f "$PACKAGE/src/Services/BankPixRefundService.php"
           test -f "$PACKAGE/src/Services/ProviderRefundService.php"
+          test -f "$PACKAGE/src/Services/DeliveryCustomerPaymentService.php"
           test -f "$PACKAGE/public/api-delivery-payment-methods.php"
-          test -f "$PACKAGE/public/api-delivery-card-payment.php"
       - name: Generate checksums
         run: |
           cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
