@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace EventMenu\Services;
 
-use EventMenu\Core\Database;
 use PDO;
 use RuntimeException;
 
@@ -40,16 +39,17 @@ final class MarketplaceDeliveryCouponService
                 continue;
             }
 
-            $collision=$pdo->prepare('SELECT c.id,t.name FROM coupons c JOIN tenants t ON t.id=c.tenant_id WHERE c.tenant_id=? AND UPPER(c.code)=UPPER(?) LIMIT 1');
+            $collision=$pdo->prepare('SELECT c.id,c.active,t.name FROM coupons c JOIN tenants t ON t.id=c.tenant_id WHERE c.tenant_id=? AND UPPER(c.code)=UPPER(?) LIMIT 1');
             $collision->execute([$tenantId,(string)$definition['code']]);
             if($row=$collision->fetch()){
-                $conflicts[]=(string)$row['name'];
+                $conflicts[]=['tenant_id'=>$tenantId,'tenant_name'=>(string)$row['name'],'coupon_id'=>(int)$row['id'],'active'=>(bool)$row['active']];
                 continue;
             }
 
-            $insert=$pdo->prepare('INSERT INTO coupons (tenant_id,code,type,value,min_order_cents,max_uses,starts_at,ends_at,active) VALUES (?,?,?,?,?,?,?,?,?)');
+            $insert=$pdo->prepare('INSERT INTO coupons (tenant_id,code,type,value,max_discount_cents,min_order_cents,max_uses,starts_at,ends_at,active) VALUES (?,?,?,?,?,?,?,?,?,?)');
             $insert->execute([
-                $tenantId,(string)$definition['code'],(string)$definition['type'],(int)$definition['value'],(int)$definition['min_order_cents'],
+                $tenantId,(string)$definition['code'],(string)$definition['type'],(int)$definition['value'],
+                $definition['max_discount_cents']!==null?(int)$definition['max_discount_cents']:null,(int)$definition['min_order_cents'],
                 $definition['max_uses_per_tenant']!==null?(int)$definition['max_uses_per_tenant']:null,$definition['starts_at']?:null,$definition['ends_at']?:null,1,
             ]);
             $couponId=(int)$pdo->lastInsertId();
@@ -90,9 +90,10 @@ final class MarketplaceDeliveryCouponService
 
     private function updateTenantCoupon(PDO $pdo,int $couponId,int $tenantId,array $definition):void
     {
-        $q=$pdo->prepare('UPDATE coupons SET code=?,type=?,value=?,min_order_cents=?,max_uses=?,starts_at=?,ends_at=?,active=? WHERE id=? AND tenant_id=?');
+        $q=$pdo->prepare('UPDATE coupons SET code=?,type=?,value=?,max_discount_cents=?,min_order_cents=?,max_uses=?,starts_at=?,ends_at=?,active=? WHERE id=? AND tenant_id=?');
         $q->execute([
-            (string)$definition['code'],(string)$definition['type'],(int)$definition['value'],(int)$definition['min_order_cents'],
+            (string)$definition['code'],(string)$definition['type'],(int)$definition['value'],
+            $definition['max_discount_cents']!==null?(int)$definition['max_discount_cents']:null,(int)$definition['min_order_cents'],
             $definition['max_uses_per_tenant']!==null?(int)$definition['max_uses_per_tenant']:null,$definition['starts_at']?:null,$definition['ends_at']?:null,(int)$definition['active'],
             $couponId,$tenantId,
         ]);

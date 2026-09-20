@@ -34,13 +34,14 @@ final class DeliveryCustomerBenefitsService
     {
         if($subtotalCents<0)throw new RuntimeException('Subtotal inválido.');
         $coupon=$this->coupon($pdo,$tenantId,$code,false);$this->assertCouponUsable($coupon,$subtotalCents);
-        $discount=$this->couponDiscount($coupon,$subtotalCents);
+        $discount=(new CouponPricingService())->discount($coupon,$subtotalCents);
         return [
             'id'=>(int)$coupon['id'],
             'code'=>(string)$coupon['code'],
             'type'=>(string)$coupon['type'],
             'discount_cents'=>$discount,
             'min_order_cents'=>(int)$coupon['min_order_cents'],
+            'max_discount_cents'=>$coupon['max_discount_cents']!==null?(int)$coupon['max_discount_cents']:null,
         ];
     }
 
@@ -58,7 +59,7 @@ final class DeliveryCustomerBenefitsService
 
         if($couponCode!==''){
             if(!empty($order['coupon_id']))throw new RuntimeException('Este pedido já possui cupom.');
-            $coupon=$this->coupon($pdo,$tenantId,$couponCode,true);$subtotal=(int)$order['subtotal_cents'];$this->assertCouponUsable($coupon,$subtotal);$discount=$this->couponDiscount($coupon,$subtotal);
+            $coupon=$this->coupon($pdo,$tenantId,$couponCode,true);$subtotal=(int)$order['subtotal_cents'];$this->assertCouponUsable($coupon,$subtotal);$discount=(new CouponPricingService())->discount($coupon,$subtotal);
             $currentTotal=(int)$order['total_cents'];if($discount<=0)throw new RuntimeException('Este cupom não gera desconto para o pedido.');if($discount>=$currentTotal)throw new RuntimeException('Este cupom quitaria integralmente o pedido. Escolha outro benefício para esta compra.');
             $expires=gmdate('Y-m-d H:i:s',time()+86400);
             $pdo->prepare('INSERT INTO coupon_reservations (tenant_id,coupon_id,order_id,discount_cents,status,expires_at) VALUES (?,?,?,?,"reserved",?)')->execute([$tenantId,(int)$coupon['id'],$orderId,$discount,$expires]);
@@ -109,11 +110,5 @@ final class DeliveryCustomerBenefitsService
         if($ends!==''&&($ts=strtotime($ends))!==false&&$now>$ts)throw new RuntimeException('Cupom expirado.');
         if($coupon['max_uses']!==null&&((int)$coupon['uses_count']+(int)($coupon['reserved_count']??0))>=(int)$coupon['max_uses'])throw new RuntimeException('Limite do cupom atingido.');
         if($subtotalCents<(int)$coupon['min_order_cents'])throw new RuntimeException('Valor mínimo do cupom não atingido.');
-    }
-
-    private function couponDiscount(array $coupon,int $subtotalCents):int
-    {
-        if((string)$coupon['type']==='percent')return max(0,(int)round($subtotalCents*min(100,max(0,(int)$coupon['value']))/100));
-        return max(0,min($subtotalCents,(int)$coupon['value']));
     }
 }
