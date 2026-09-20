@@ -35,6 +35,8 @@ jobs:
         run: php scripts/ci-coupon-pricing-smoke.php
       - name: Order payment preference contract
         run: php scripts/ci-order-payment-preference-smoke.php
+      - name: Native payment route contract
+        run: php scripts/ci-native-payment-route-smoke.php
       - name: SQLite smoke validation
         env:
           APP_ENV: testing
