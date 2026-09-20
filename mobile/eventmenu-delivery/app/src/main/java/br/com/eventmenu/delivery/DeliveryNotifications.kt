@@ -1,13 +1,16 @@
 package br.com.eventmenu.delivery
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
@@ -26,6 +29,17 @@ object DeliveryNotifications {
 
     fun show(context: Context, orderId: Int, title: String, message: String) {
         if (title.isBlank() || message.isBlank()) return
+
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return
+        }
+
+        val notificationManager = NotificationManagerCompat.from(context)
+        if (!notificationManager.areNotificationsEnabled()) return
+
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("order_id", orderId)
@@ -45,7 +59,12 @@ object DeliveryNotifications {
             .setAutoCancel(true)
             .setContentIntent(pending)
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(50_000 + orderId.coerceAtLeast(1), notification) }
+
+        try {
+            notificationManager.notify(50_000 + orderId.coerceAtLeast(1), notification)
+        } catch (_: SecurityException) {
+            // The permission may be revoked between the explicit check above and notify().
+        }
     }
 }
 
