@@ -23,6 +23,7 @@ final class ProviderRefundService
             'stripe' => $this->refundStripe($gateway, $config, $payment, $idempotencyKey),
             'pagbank' => $this->refundPagBank($gateway, $config, $payment, $idempotencyKey),
             'mercadopago' => $this->refundMercadoPago($gateway, $config, $payment, $idempotencyKey),
+            'efi','inter' => (new BankPixRefundService())->request($provider,$config,$payment,$idempotencyKey),
             default => throw new RuntimeException('Provedor não suporta estorno.'),
         };
     }
@@ -37,6 +38,7 @@ final class ProviderRefundService
             'stripe' => $this->checkStripe($gateway, $config, $refund, $payment),
             'pagbank' => $this->checkPagBank($config, $refund, $payment),
             'mercadopago' => $this->checkMercadoPago($config, $refund, $payment),
+            'efi','inter' => (new BankPixRefundService())->check($provider,$config,$refund,$payment),
             default => throw new RuntimeException('Provedor não suporta consulta de estorno.'),
         };
     }
