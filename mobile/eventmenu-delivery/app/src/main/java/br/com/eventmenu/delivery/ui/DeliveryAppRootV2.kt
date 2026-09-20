@@ -307,7 +307,7 @@ private fun NativeCheckoutScreen(vm: DeliveryViewModel) {
                     }
                 }
             } else {
-                if (methods.pixProviders.isNotEmpty()) {
+                methods.pixProviders.firstOrNull()?.let { provider ->
                     item {
                         Card {
                             Column(
@@ -322,17 +322,15 @@ private fun NativeCheckoutScreen(vm: DeliveryViewModel) {
                                     Text("PIX", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
                                 }
                                 Text(
-                                    "O QR Code e o Copia e Cola ficam dentro do EventMenu.",
+                                    "O QR Code e o Copia e Cola ficam dentro do EventMenu. O provedor é escolhido automaticamente conforme a configuração do restaurante.",
                                     style = MaterialTheme.typography.bodySmall,
                                 )
-                                methods.pixProviders.forEach { provider ->
-                                    Button(
-                                        onClick = { vm.payPix(provider, "") },
-                                        modifier = Modifier.fillMaxWidth(),
-                                        enabled = customer?.cpfConfigured == true && !vm.paymentWaiting,
-                                    ) {
-                                        Text("Gerar PIX · ${v2Provider(provider)}")
-                                    }
+                                Button(
+                                    onClick = { vm.payPix(provider, "") },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    enabled = customer?.cpfConfigured == true && !vm.paymentWaiting,
+                                ) {
+                                    Text("Gerar PIX")
                                 }
                             }
                         }
@@ -347,7 +345,7 @@ private fun NativeCheckoutScreen(vm: DeliveryViewModel) {
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(10.dp),
                             ) {
-                                Text("PIX ${v2Provider(pix.provider)}", fontWeight = FontWeight.Bold)
+                                Text("PIX gerado", fontWeight = FontWeight.Bold)
                                 rememberQr(pix.copyPaste)?.let { image ->
                                     Image(
                                         bitmap = image,
@@ -606,14 +604,6 @@ private fun CpfProfileScreen(vm: DeliveryViewModel) {
             }
         }
     }
-}
-
-private fun v2Provider(provider: String): String = when (provider.lowercase()) {
-    "mercadopago" -> "Mercado Pago"
-    "pagbank" -> "PagBank"
-    "efi" -> "Efí"
-    "inter" -> "Banco Inter"
-    else -> provider
 }
 
 @Composable
