@@ -254,7 +254,8 @@ function em_platform_nav(): array
         ],
         'EventMenu Delivery' => [
             ['marketplace-finance','Financeiro e empresas','platform.manage','$'],
-            ['marketplace-campaigns','Campanhas','platform.manage','★'],
+            ['marketplace-coupons','Cupons Delivery','platform.manage','%'],
+            ['marketplace-campaigns','Campanhas Delivery','platform.manage','★'],
         ],
         'Sistema' => [
             ['system-health','Saúde e alertas','platform.manage','◉'],
@@ -361,7 +362,7 @@ function em_footer(): void
     ?>
 <script>
 (()=>{const sidebar=document.querySelector('.sidebar'),toggle=document.querySelector('.nav-toggle');const closeMenu=()=>{sidebar?.classList.remove('nav-open');toggle?.setAttribute('aria-expanded','false');document.body.classList.remove('menu-open')};toggle?.addEventListener('click',()=>{const open=!sidebar?.classList.contains('nav-open');sidebar?.classList.toggle('nav-open',open);toggle.setAttribute('aria-expanded',open?'true':'false');document.body.classList.toggle('menu-open',open)});document.querySelectorAll('.nav a').forEach(a=>a.addEventListener('click',closeMenu));window.addEventListener('resize',()=>{if(innerWidth>950)closeMenu()});
-const params=new URLSearchParams(location.search),route=params.get('route')||'dashboard';if(route==='orders'&&/^\d+$/.test(params.get('view')||'')){const id=params.get('view'),host=document.querySelector('.page-hero .hero-actions');if(host&&!host.querySelector('[data-receipt-action]')){const a=document.createElement('a');a.className='button primary';a.target='_blank';a.rel='noopener';a.dataset.receiptAction='1';a.href=<?=$receiptBase?>+encodeURIComponent(id);a.textContent='Imprimir cupom #'+id;host.prepend(a)}}if(route==='settings'){const host=document.querySelector('.page-hero .hero-actions');if(host&&!host.querySelector('[data-receipt-settings]')){const a=document.createElement('a');a.className='button secondary';a.dataset.receiptSettings='1';a.href=<?=$receiptSettings?>;a.textContent='Impressão térmica';host.append(a)}}if('serviceWorker'in navigator)navigator.serviceWorker.register(<?=$sw?>).catch(()=>{});})();
+const params=new URLSearchParams(location.search),route=params.get('route')||'dashboard';if(route==='orders'&&/^\d+$/.test(params.get('view')||'')){const id=params.get('view'),host=document.querySelector('.page-hero .hero-actions');if(host&&!host.querySelector('[data-receipt-action]')){const a=document.createElement('a');a.className='button primary';a.target='_blank';a.rel='noopener';a.dataset.receiptAction='1';a.href=<?=$receiptBase?>+encodeURIComponent(id);a.textContent='Imprimir cupom #'+id;host.prepend(a)}}if(route==='settings'){const host=document.querySelector('.page-hero .hero-actions');if(host&&!host.querySelector('[data-receipt-settings]')){const a=document.createElement('a');a.className='button secondary';a.dataset.receiptSettings='1';a.href=<?=$receiptSettings?>;a.textContent='Impressão térmica';host.append(a)}}if('serviceWorker'in navigator)navigator.serviceWorker.register(<?=$sw?>,{updateViaCache:'none'}).catch(()=>{});})();
 </script>
 </main></div></body></html>
 <?php
