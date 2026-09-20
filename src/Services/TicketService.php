@@ -103,7 +103,7 @@ final class TicketService
                 if ($coupon['ends_at'] && $now > new \DateTimeImmutable($coupon['ends_at'])) throw new RuntimeException('Cupom expirado.');
                 if ($coupon['max_uses'] !== null && ((int)$coupon['uses_count'] + (int)$coupon['reserved_count']) >= (int)$coupon['max_uses']) throw new RuntimeException('Limite do cupom atingido.');
                 if ($subtotal < (int)$coupon['min_order_cents']) throw new RuntimeException('Valor mínimo do cupom não atingido.');
-                $couponId = (int)$coupon['id'];$discount = $coupon['type'] === 'percent' ? (int)round($subtotal * min(100, (int)$coupon['value']) / 100) : min($subtotal, (int)$coupon['value']);
+                $couponId = (int)$coupon['id'];$discount = (new CouponPricingService())->discount($coupon,$subtotal);
             }
 
             $promoterId = null;
