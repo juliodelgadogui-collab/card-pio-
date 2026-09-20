@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use EventMenu\Core\Auth;
 use EventMenu\Core\Security;
+use EventMenu\Services\EventCheckinPolicyService;
 use EventMenu\Services\TicketService;
 use EventMenu\Support\OperationalDiagnostics;
 use EventMenu\Support\UiVocabulary;
@@ -12,7 +13,7 @@ Auth::requirePermission('tickets.manage');
 $tenantId=em_require_tenant();
 $checkResult=null;
 $eventId=(int)($_GET['event_id']??$_POST['event_id']??0);
-$eventsStmt=$pdo->prepare('SELECT id,name,starts_at,status FROM events WHERE tenant_id=? ORDER BY starts_at DESC');
+$eventsStmt=$pdo->prepare('SELECT id,name,starts_at,ends_at,status FROM events WHERE tenant_id=? ORDER BY starts_at DESC');
 $eventsStmt->execute([$tenantId]);
 $events=$eventsStmt->fetchAll();
 $selectedEvent=null;
@@ -22,6 +23,14 @@ if($eventId>0&&!$selectedEvent)$eventId=0;
 if($_SERVER['REQUEST_METHOD']==='POST'){
     em_post_csrf();
     $action=(string)($_POST['action']??'');
+    if($action==='checkin-settings'){
+        try{
+            if(!$selectedEvent)throw new RuntimeException('Selecione o evento antes de configurar o check-in.');
+            (new EventCheckinPolicyService())->save($eventId,$_POST);
+            em_flash('ok','Janela de check-in atualizada.');
+        }catch(Throwable $e){em_flash('error',$e->getMessage());}
+        em_go('tickets',$eventId>0?['event_id'=>$eventId]:[]);
+    }
     if($action==='checkin'){
         $token=trim((string)($_POST['token']??''));
         try{
@@ -46,6 +55,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     }
 }
 
+$checkinSettings=$selectedEvent?(new EventCheckinPolicyService())->settings($pdo,$tenantId,$eventId,$selectedEvent):null;
 $q=trim((string)($_GET['q']??''));
 $sql='SELECT t.*,e.name event_name,b.name batch_name,c.name customer_name FROM tickets t JOIN events e ON e.id=t.event_id JOIN ticket_batches b ON b.id=t.batch_id LEFT JOIN customers c ON c.id=t.customer_id WHERE t.tenant_id=?';
 $args=[$tenantId];
@@ -56,11 +66,12 @@ $s=$pdo->prepare($sql);$s->execute($args);$tickets=$s->fetchAll();
 $stats=['paid'=>0,'checked'=>0,'reserved'=>0];
 foreach(['paid'=>'paid','checked'=>'checked_in','reserved'=>'reserved']as$k=>$status){$sqls='SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND status=?';$a=[$tenantId,$status];if($eventId>0){$sqls.=' AND event_id=?';$a[]=$eventId;}$x=$pdo->prepare($sqls);$x->execute($a);$stats[$k]=(int)$x->fetchColumn();}
 $statusLabels=['draft'=>'Rascunho','published'=>'Publicado','closed'=>'Encerrado','cancelled'=>'Cancelado'];
+$dtValue=static fn(?string $v):string=>$v?date('Y-m-d\TH:i',strtotime($v)):'';
 
 em_header('Ingressos e entrada','tickets');
 ?>
-<style>@media(max-width:760px){.ticket-layout{grid-template-columns:1fr!important}.ticket-event-selector{width:100%}.ticket-event-selector select{width:100%}}</style>
+<style>.checkin-settings{display:grid;grid-template-columns:1fr 1fr;gap:10px}.checkin-settings label{display:grid;gap:5px}.checkin-settings .wide{grid-column:1/-1}@media(max-width:760px){.ticket-layout{grid-template-columns:1fr!important}.ticket-event-selector{width:100%}.ticket-event-selector select{width:100%}.checkin-settings{grid-template-columns:1fr}.checkin-settings .wide{grid-column:auto}.table-wrap{max-width:100%;overflow-x:auto}}</style>
 <section class="card" style="margin-bottom:16px"><div class="section-head"><div><span class="eyebrow">PORTARIA</span><h2>Selecione o evento</h2><p class="muted">O QR só é aceito se pertencer ao evento selecionado e estiver dentro da janela de check-in.</p></div></div><form method="get" class="actions ticket-event-selector"><input type="hidden" name="route" value="tickets"><select name="event_id" required onchange="this.form.submit()"><option value="0">Selecione um evento</option><?php foreach($events as$e):?><option value="<?= (int)$e['id'] ?>"<?= em_selected((string)$eventId,(string)$e['id']) ?>><?= Security::e($e['name'].' · '.($statusLabels[$e['status']]??$e['status']).' · '.date('d/m/Y H:i',strtotime((string)$e['starts_at']))) ?></option><?php endforeach;?></select><button class="secondary">Abrir evento</button></form></section>
 <section class="grid"><div class="card metric"><span class="muted">Aguardando entrada</span><strong><?= $stats['paid'] ?></strong></div><div class="card metric"><span class="muted">Entradas realizadas</span><strong><?= $stats['checked'] ?></strong></div><div class="card metric"><span class="muted">Aguardando pagamento</span><strong><?= $stats['reserved'] ?></strong></div></section>
-<div class="grid ticket-layout" style="grid-template-columns:minmax(280px,1fr) minmax(0,2fr);margin-top:18px"><section class="card"><h2><?= $selectedEvent?'Validar em '.Security::e($selectedEvent['name']):'Validação de entrada' ?></h2><?php if(!$selectedEvent):?><div class="alert">Selecione o evento acima antes de escanear ingressos.</div><?php else:?><p class="muted">Leia o QR Code ou digite o código. Ingressos de outro evento serão recusados.</p><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="checkin"><input type="hidden" name="event_id" value="<?= $eventId ?>"><label>Código / QR<input name="token" required autofocus autocomplete="off"></label><button class="primary" style="margin-top:10px">Confirmar entrada</button></form><?php endif;?><hr style="border-color:var(--line);margin:24px 0"><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="release-expired"><input type="hidden" name="event_id" value="<?= $eventId ?>"><button class="secondary">Liberar reservas vencidas</button></form></section><section class="card"><form method="get" class="actions"><input type="hidden" name="route" value="tickets"><input type="hidden" name="event_id" value="<?= $eventId ?>"><input name="q" value="<?= Security::e($q) ?>" placeholder="Código ou cliente"><button class="secondary">Buscar</button></form><div class="table-wrap"><table class="table"><thead><tr><th>Ingresso</th><th>Evento / lote</th><th>Cliente</th><th>Situação</th><th>Entrada</th><th></th></tr></thead><tbody><?php foreach($tickets as$t):?><tr><td><strong><?= Security::e($t['code']) ?></strong></td><td><?= Security::e($t['event_name']) ?><br><span class="muted"><?= Security::e($t['batch_name']) ?></span></td><td><?= Security::e($t['customer_name']??'—') ?></td><td><span class="badge"><?= Security::e(UiVocabulary::ticketStatus((string)$t['status'])) ?></span><?php if($t['reserved_until']):?><br><span class="muted">reserva até <?= Security::e($t['reserved_until']) ?></span><?php endif;?></td><td><?= Security::e($t['checked_in_at']??'—') ?></td><td><?php if($t['qr_token']):?><a class="button secondary" target="_blank" rel="noopener" href="<?= Security::e(app_url('ingresso.php?t='.rawurlencode((string)$t['qr_token']))) ?>">Ver ingresso</a><?php endif;?></td></tr><?php endforeach;?></tbody></table></div></section></div>
+<div class="grid ticket-layout" style="grid-template-columns:minmax(280px,1fr) minmax(0,2fr);margin-top:18px"><section class="card"><h2><?= $selectedEvent?'Validar em '.Security::e($selectedEvent['name']):'Validação de entrada' ?></h2><?php if(!$selectedEvent):?><div class="alert">Selecione o evento acima antes de escanear ingressos.</div><?php else:?><p class="muted">Leia o QR Code ou digite o código. Ingressos de outro evento serão recusados.</p><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="checkin"><input type="hidden" name="event_id" value="<?= $eventId ?>"><label>Código / QR<input name="token" required autofocus autocomplete="off"></label><button class="primary" style="margin-top:10px">Confirmar entrada</button></form><hr style="border-color:var(--line);margin:24px 0"><span class="eyebrow">JANELA DE CHECK-IN</span><h2 style="font-size:20px">Horário da portaria</h2><p class="muted">Se os horários ficarem vazios, o sistema usa automaticamente 6h antes do início até 6h depois do término do evento; sem término definido, encerra 18h após o início.</p><form method="post" class="checkin-settings"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="checkin-settings"><input type="hidden" name="event_id" value="<?= $eventId ?>"><label class="wide checkbox"><input type="checkbox" name="checkin_enabled" value="1"<?= em_checked($checkinSettings['enabled']??true) ?>> Check-in habilitado</label><label>Início<input type="datetime-local" name="checkin_starts_at" value="<?= Security::e(($checkinSettings['custom']??false)?$dtValue($checkinSettings['starts_at']??null):'') ?>"></label><label>Fim<input type="datetime-local" name="checkin_ends_at" value="<?= Security::e(($checkinSettings['custom']??false)?$dtValue($checkinSettings['ends_at']??null):'') ?>"></label><div class="wide muted" style="font-size:12px">Janela efetiva atual: <?= Security::e(($checkinSettings['starts_at']??'sem início').' → '.($checkinSettings['ends_at']??'sem fim')) ?></div><button class="secondary wide">Salvar janela de check-in</button></form><?php endif;?><hr style="border-color:var(--line);margin:24px 0"><form method="post"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="release-expired"><input type="hidden" name="event_id" value="<?= $eventId ?>"><button class="secondary">Liberar reservas vencidas</button></form></section><section class="card"><form method="get" class="actions"><input type="hidden" name="route" value="tickets"><input type="hidden" name="event_id" value="<?= $eventId ?>"><input name="q" value="<?= Security::e($q) ?>" placeholder="Código ou cliente"><button class="secondary">Buscar</button></form><div class="table-wrap"><table class="table"><thead><tr><th>Ingresso</th><th>Evento / lote</th><th>Cliente</th><th>Situação</th><th>Entrada</th><th></th></tr></thead><tbody><?php foreach($tickets as$t):?><tr><td><strong><?= Security::e($t['code']) ?></strong></td><td><?= Security::e($t['event_name']) ?><br><span class="muted"><?= Security::e($t['batch_name']) ?></span></td><td><?= Security::e($t['customer_name']??'—') ?></td><td><span class="badge"><?= Security::e(UiVocabulary::ticketStatus((string)$t['status'])) ?></span><?php if($t['reserved_until']):?><br><span class="muted">reserva até <?= Security::e($t['reserved_until']) ?></span><?php endif;?></td><td><?= Security::e($t['checked_in_at']??'—') ?></td><td><?php if($t['qr_token']):?><a class="button secondary" target="_blank" rel="noopener" href="<?= Security::e(app_url('ingresso.php?t='.rawurlencode((string)$t['qr_token']))) ?>">Ver ingresso</a><?php endif;?></td></tr><?php endforeach;?></tbody></table></div></section></div>
 <?php em_footer();
