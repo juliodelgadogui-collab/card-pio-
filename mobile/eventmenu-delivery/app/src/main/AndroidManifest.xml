@@ -11,8 +11,16 @@
         android:allowBackup="false"
         tools:replace="android:allowBackup"
         android:label="EventMenu Delivery"
+        android:icon="@mipmap/ic_delivery"
+        android:roundIcon="@mipmap/ic_delivery_round"
         android:usesCleartextTraffic="false"
         android:theme="@style/Theme.EventMenuDelivery">
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_delivery_notification" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/delivery_icon_background" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

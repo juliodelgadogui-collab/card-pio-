@@ -15,6 +15,13 @@ val firebaseAppId = envValue("EVENTMENU_DELIVERY_FIREBASE_APP_ID", "EVENTMENU_FI
 val firebaseApiKey = envValue("EVENTMENU_FIREBASE_API_KEY")
 val firebaseSenderId = envValue("EVENTMENU_FIREBASE_SENDER_ID")
 val firebaseConfigured = listOf(firebaseProjectId,firebaseAppId,firebaseApiKey,firebaseSenderId).all { it.isNotBlank() }
+val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val allowReleaseWithoutFirebase = envValue("EVENTMENU_DELIVERY_ALLOW_NO_FCM_RELEASE").equals("true", ignoreCase = true)
+if (releaseRequested && !firebaseConfigured && !allowReleaseWithoutFirebase) {
+    throw GradleException("Release do EventMenu Delivery exige configuração completa do Firebase/FCM.")
+}
+val ciRunNumber = envValue("GITHUB_RUN_NUMBER").toIntOrNull()
+val buildNumber = (ciRunNumber ?: 2).coerceAtLeast(2)
 
 android {
     namespace = "br.com.eventmenu.delivery"
@@ -23,8 +30,8 @@ android {
         applicationId = "br.com.eventmenu.delivery"
         minSdk = 23
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = buildNumber
+        versionName = "0.2.$buildNumber"
         buildConfigField("String", "API_BASE_URL", configString(apiBase))
         buildConfigField("boolean", "FIREBASE_ENABLED", firebaseConfigured.toString())
         buildConfigField("String", "FIREBASE_PROJECT_ID", configString(firebaseProjectId))
