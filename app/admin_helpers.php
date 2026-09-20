@@ -296,6 +296,7 @@ function em_header(string $title, string $active): void
     $manifest=Security::e(app_url('manifest.webmanifest?v='.em_asset_version('manifest.webmanifest')));
     $css=Security::e(app_url('assets/app.css?v='.em_asset_version('assets/app.css')));
     $premiumCss=Security::e(app_url('assets/premium-v4.css?v='.em_asset_version('assets/premium-v4.css')));
+    $premiumJs=Security::e(app_url('assets/premium-v4.js?v='.em_asset_version('assets/premium-v4.js')));
     $currentTenantId=Auth::tenantId();
     $platformMode=Auth::isSuperAdmin()&&!$currentTenantId;
     $context=em_context_tenant_name();
@@ -319,6 +320,7 @@ function em_header(string $title, string $active): void
     <link rel="manifest" href="<?= $manifest ?>">
     <!-- app.css permanece como camada estrutural/compatibilidade; Premium v4 é o padrão visual canônico. -->
     <link rel="stylesheet" href="<?= $css ?>"><link rel="stylesheet" href="<?= $premiumCss ?>">
+    <script defer src="<?= $premiumJs ?>"></script>
     <?php if($brandActive):?><style>
     :root{--em-primary:<?=Security::e($brand['primary_color'])?>;--em-primary-2:<?=Security::e($brand['primary_color'])?>;--em-primary-ink:<?=Security::e($primaryInk)?>;--em-bg:<?=Security::e($brand['background_color'])?>;--em-bg-soft:<?=Security::e($brand['background_color'])?>;--em-surface:<?=Security::e($brand['surface_color'])?>;--em-surface-2:<?=Security::e($brand['surface_color'])?>;--em-text:<?=Security::e($brand['text_color'])?>;--em-success:<?=Security::e($brand['secondary_color'])?>;--accent:<?=Security::e($brand['primary_color'])?>;--accent2:<?=Security::e($brand['primary_color'])?>;--bg:<?=Security::e($brand['background_color'])?>;--panel:<?=Security::e($brand['surface_color'])?>;--text:<?=Security::e($brand['text_color'])?>;--ok:<?=Security::e($brand['secondary_color'])?>}
     .sidebar{background:linear-gradient(180deg,<?=Security::e($brand['primary_color'])?>,color-mix(in srgb,<?=Security::e($brand['primary_color'])?> 76%,#111),color-mix(in srgb,<?=Security::e($brand['primary_color'])?> 62%,#080808))}.nav a.active,.primary{background:<?=Security::e($brand['primary_color'])?>;color:var(--em-primary-ink)}
@@ -346,6 +348,7 @@ function em_header(string $title, string $active): void
 <main class="content">
     <header class="topbar"><div><span class="top-eyebrow"><?=$platformMode?'PLATAFORMA':($brandActive?Security::e(mb_strtoupper($brandName)):'PAINEL')?></span><h1><?=Security::e($title)?></h1><div class="muted top-subtitle"><?php if($brandActive&&!empty($brand['tagline'])):?><?=Security::e($brand['tagline'])?><?php else:?><?=$platformMode?'Administração geral do EventMenu':($context?Security::e($context).' · ':'').($type?Security::e($type):'Gestão da empresa')?><?php endif;?><?php if($currentUnit):?> · <strong><?=Security::e($currentUnit['name'])?></strong><?php endif;?></div></div>
     <div class="topbar-actions"><?php if(count($units)>1):?><form method="post" action="<?=Security::e(app_url('?route=unit-context'))?>" class="unit-switcher"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="back_route" value="<?=Security::e($active)?>"><label><span>Unidade</span><select name="unit_id" onchange="this.form.submit()"><option value="0"<?=$currentUnit?'':' selected'?>>Escolher unidade</option><?php foreach($units as$unit):?><option value="<?=(int)$unit['id']?>"<?=$currentUnit&&(int)$currentUnit['id']===(int)$unit['id']?' selected':''?>><?=Security::e($unit['name'])?></option><?php endforeach;?></select></label></form><?php elseif($currentUnit):?><span class="context-pill"><?=Security::e($currentUnit['name'])?></span><?php elseif($platformMode):?><span class="context-pill">Super ADM</span><?php elseif($brandActive):?><span class="context-pill"><?=Security::e($brandName)?></span><?php elseif($context):?><span class="context-pill"><?=Security::e($context)?></span><?php endif;?></div></header>
+    <?php if($brandActive&&!empty($brand['contrast_adjusted'])):?><div class="alert info" role="status">A cor de texto da empresa foi ajustada automaticamente nesta tela para manter a leitura e o contraste.</div><?php endif;?>
     <?php if($flash):?><div class="alert <?=Security::e($flash[0])?>" role="status"><?=Security::e($flash[1])?></div><?php endif;?>
 <?php
 }
