@@ -16,7 +16,7 @@ final class DeliveryCustomerConsentService
 
     public function privacyVersion(): string
     {
-        return mb_substr(trim((string)env('DELIVERY_PRIVACY_VERSION','2026-09-19')),0,40) ?: '2026-09-19';
+        return mb_substr(trim((string)env('DELIVERY_PRIVACY_VERSION','2026-09-20')),0,40) ?: '2026-09-20';
     }
 
     public function assertAccepted(array $payload): void
