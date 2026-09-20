@@ -24,10 +24,11 @@ object EventMenuUi {
     val SpaceSm: Dp = 10.dp
     val SpaceMd: Dp = 16.dp
     val SpaceLg: Dp = 22.dp
+    val SpaceXl: Dp = 28.dp
     val TouchTarget: Dp = 48.dp
-    val ActionHeight: Dp = 52.dp
-    val CardRadius: Dp = 18.dp
-    val SheetRadius: Dp = 26.dp
+    val ActionHeight: Dp = 56.dp
+    val CardRadius: Dp = 20.dp
+    val SheetRadius: Dp = 28.dp
 
     val Success = Color(0xFF0F9F6E)
     val Warning = Color(0xFFC27B08)
@@ -38,10 +39,11 @@ object EventMenuUi {
 private val DefaultPurple = Color(0xFF5B34D6)
 private val PurpleDark = Color(0xFF3F1CA6)
 private val PurpleSoft = Color(0xFFF1ECFF)
-private val DefaultInk = Color(0xFF1E1B2B)
-private val Muted = Color(0xFF716B80)
-private val DefaultCanvas = Color(0xFFF6F7FB)
-private val Border = Color(0xFFE5E1EC)
+private val DefaultInk = Color(0xFF1D1A27)
+private val Muted = Color(0xFF6F6A79)
+private val DefaultCanvas = Color(0xFFF5F6FA)
+private val Border = Color(0xFFE2DFE8)
+private val SurfaceSoft = Color(0xFFF0F1F6)
 private val SuccessSoft = Color(0xFFE8F8F0)
 private val SuccessInk = Color(0xFF087750)
 private val WarningSoft = Color(0xFFFFF5E5)
@@ -57,7 +59,7 @@ private val EventMenuShapes = Shapes(
 )
 
 private fun typography(ink: Color) = Typography(
-    headlineLarge = TextStyle(fontSize = 31.sp, lineHeight = 35.sp, fontWeight = FontWeight.ExtraBold, color = ink),
+    headlineLarge = TextStyle(fontSize = 31.sp, lineHeight = 36.sp, fontWeight = FontWeight.ExtraBold, color = ink),
     headlineMedium = TextStyle(fontSize = 25.sp, lineHeight = 30.sp, fontWeight = FontWeight.ExtraBold, color = ink),
     headlineSmall = TextStyle(fontSize = 20.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold, color = ink),
     titleLarge = TextStyle(fontSize = 18.sp, lineHeight = 23.sp, fontWeight = FontWeight.Bold, color = ink),
@@ -84,7 +86,6 @@ fun EventMenuTheme(brand: TenantBrand? = null, content: @Composable () -> Unit) 
         onPrimary = Color.White,
         primaryContainer = PurpleSoft,
         onPrimaryContainer = PurpleDark,
-        // Status semânticos nunca herdam a cor promocional da empresa.
         secondary = EventMenuUi.Success,
         onSecondary = Color.White,
         secondaryContainer = SuccessSoft,
@@ -97,15 +98,14 @@ fun EventMenuTheme(brand: TenantBrand? = null, content: @Composable () -> Unit) 
         onBackground = ink,
         surface = surface,
         onSurface = ink,
-        surfaceVariant = surface,
+        surfaceVariant = SurfaceSoft,
         onSurfaceVariant = Muted,
         outline = Border,
+        outlineVariant = Border,
         error = EventMenuUi.Danger,
         onError = Color.White,
         errorContainer = Color(0xFFFFEDF0),
         onErrorContainer = Color(0xFF8D263A),
-        // Snackbar do Material 3 usa a paleta inversa. Mantemos contraste fixo
-        // para mensagens operacionais continuarem legíveis mesmo com branding.
         inverseSurface = SnackbarSurface,
         inverseOnSurface = SnackbarText,
         inversePrimary = SnackbarAction,
