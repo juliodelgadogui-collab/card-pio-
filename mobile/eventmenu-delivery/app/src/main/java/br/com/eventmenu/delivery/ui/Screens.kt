@@ -3,7 +3,9 @@ package br.com.eventmenu.delivery.ui
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color as AndroidColor
 import android.location.LocationManager
 import android.util.Base64
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -36,6 +38,8 @@ import br.com.eventmenu.delivery.Screen
 import br.com.eventmenu.delivery.data.*
 import br.com.eventmenu.delivery.money
 import coil3.compose.AsyncImage
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 
 private val DeliveryRed = Color(0xFFD62828)
 private val DeliveryCream = Color(0xFFFFF8F1)
@@ -112,6 +116,7 @@ private fun RegisterScreen(vm: DeliveryViewModel) {
     var email by remember { mutableStateOf("") }
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var legalAccepted by remember { mutableStateOf(false) }
     AuthShell("Criar conta", "Você precisará confirmar o e-mail antes de entrar e fazer pedidos.") {
         OutlinedTextField(name, { name = it }, label = { Text("Nome") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(email, { email = it }, label = { Text("E-mail") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email), singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -120,10 +125,17 @@ private fun RegisterScreen(vm: DeliveryViewModel) {
             password, { password = it }, label = { Text("Senha · mínimo 8 caracteres") },
             visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth(),
         )
+        Row(
+            Modifier.fillMaxWidth().clickable { legalAccepted = !legalAccepted },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(legalAccepted, { legalAccepted = it })
+            Text("Li e aceito os Termos de Uso e a Política de Privacidade.", style = MaterialTheme.typography.bodySmall)
+        }
         Button(
-            { vm.register(name, email, phone, password) },
+            { vm.register(name, email, phone, password, legalAccepted) },
             modifier = Modifier.fillMaxWidth(),
-            enabled = name.isNotBlank() && email.isNotBlank() && password.length >= 8,
+            enabled = name.isNotBlank() && email.isNotBlank() && password.length >= 8 && legalAccepted,
         ) { Text("Cadastrar e enviar confirmação") }
         TextButton({ vm.navigate(Screen.Login) }) { Text("Já tenho conta") }
     }
@@ -480,7 +492,7 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
                         Card {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text("PIX", fontWeight = FontWeight.Bold)
-                                Text("O pagamento é confirmado automaticamente pelo provedor.", style = MaterialTheme.typography.bodySmall)
+                                Text("O QR Code e o Copia e Cola ficam dentro do EventMenu. A confirmação é feita diretamente pelo provedor configurado.", style = MaterialTheme.typography.bodySmall)
                                 OutlinedTextField(
                                     taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF/CNPJ") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -498,12 +510,12 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
                         Card {
                             Column(Modifier.padding(16.dp)) {
                                 Row(Modifier.fillMaxWidth().clickable { showCard = !showCard }, verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.CreditCard, null); Spacer(Modifier.width(10.dp)); Text("Cartão de crédito", Modifier.weight(1f), fontWeight = FontWeight.Bold); Icon(if (showCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+                                    Icon(Icons.Default.CreditCard, null); Spacer(Modifier.width(10.dp)); Text("Cartão de crédito ou débito", Modifier.weight(1f), fontWeight = FontWeight.Bold); Icon(if (showCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
                                 }
                                 if (showCard) {
                                     Spacer(Modifier.height(14.dp))
-                                    CardPaymentForm(card.publicKey, card.maxInstallments, vm.customer?.name.orEmpty()) { token, methodId, installments, doc ->
-                                        vm.payCardToken(token, methodId, installments, doc)
+                                    CardPaymentForm(card.publicKey, card.maxInstallments, vm.customer?.name.orEmpty(), card.paymentTypes) { token, methodId, paymentTypeId, installments, doc ->
+                                        vm.payCardToken(token, methodId, paymentTypeId, installments, doc)
                                     }
                                 }
                             }
@@ -536,8 +548,8 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
 private fun PixPayloadCard(pix: PixPayment, onCopy: () -> Unit) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("PIX gerado", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            PixQrImage(pix.imageUrl)
+            Text("PIX gerado · ${providerLabel(pix.provider)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            PixQrImage(pix.imageUrl, pix.copyPaste)
             Text("PIX copia e cola", fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
             SelectionContainer { Text(pix.copyPaste, maxLines = 5, style = MaterialTheme.typography.bodySmall) }
             OutlinedButton(onCopy, Modifier.fillMaxWidth()) { Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(8.dp)); Text("Copiar código PIX") }
@@ -547,21 +559,33 @@ private fun PixPayloadCard(pix: PixPayment, onCopy: () -> Unit) {
 }
 
 @Composable
-private fun PixQrImage(source: String) {
-    if (source.isBlank()) return
-    if (source.startsWith("data:image", ignoreCase = true)) {
-        val bitmap = remember(source) {
-            runCatching {
-                val encoded = source.substringAfter("base64,", "")
-                val bytes = Base64.decode(encoded, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
-            }.getOrNull()
+private fun PixQrImage(source: String, copyPaste: String) {
+    when {
+        source.startsWith("data:image", ignoreCase = true) -> {
+            val bitmap = remember(source) {
+                runCatching {
+                    val encoded = source.substringAfter("base64,", "")
+                    val bytes = Base64.decode(encoded, Base64.DEFAULT)
+                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                }.getOrNull()
+            }
+            bitmap?.let { Image(it, "QR Code PIX", Modifier.size(220.dp)) }
         }
-        bitmap?.let { Image(it, "QR Code PIX", Modifier.size(220.dp)) }
-    } else if (source.startsWith("https://", ignoreCase = true)) {
-        AsyncImage(source, "QR Code PIX", Modifier.size(220.dp), contentScale = ContentScale.Fit)
+        source.startsWith("https://", ignoreCase = true) -> AsyncImage(source, "QR Code PIX", Modifier.size(220.dp), contentScale = ContentScale.Fit)
+        copyPaste.isNotBlank() -> {
+            val bitmap = remember(copyPaste) { localPixQr(copyPaste) }
+            bitmap?.let { Image(it.asImageBitmap(), "QR Code PIX", Modifier.size(220.dp)) }
+        }
     }
 }
+
+private fun localPixQr(payload: String): Bitmap? = runCatching {
+    val size = 720
+    val matrix = QRCodeWriter().encode(payload, BarcodeFormat.QR_CODE, size, size)
+    val pixels = IntArray(size * size)
+    for (y in 0 until size) for (x in 0 until size) pixels[y * size + x] = if (matrix[x, y]) AndroidColor.BLACK else AndroidColor.WHITE
+    Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).apply { setPixels(pixels, 0, size, 0, 0, size, size) }
+}.getOrNull()
 
 @Composable
 private fun OrdersScreen(vm: DeliveryViewModel) {
@@ -765,5 +789,11 @@ private fun EmptyCard(text: String) {
     Card(Modifier.fillMaxWidth()) { Text(text, Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
-private fun providerLabel(p: String) = when (p) { "mercadopago" -> "Mercado Pago"; "pagbank" -> "PagBank"; else -> p }
+private fun providerLabel(p: String) = when (p) {
+    "mercadopago" -> "Mercado Pago"
+    "pagbank" -> "PagBank"
+    "efi" -> "Efí"
+    "inter" -> "Banco Inter"
+    else -> p
+}
 private fun paymentLabel(s: String) = when (s) { "paid" -> "Pagamento confirmado"; "pending", "created", "processing" -> "Aguardando pagamento"; "failed" -> "Pagamento não concluído"; else -> s }
