@@ -40,6 +40,11 @@ function enhanceTables(root=d){
 }
 function money(cents){return new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format((Number(cents)||0)/100)}
 function link(routeName,tab=''){const u=new URL(location.href);u.search='';u.searchParams.set('route',routeName);if(tab)u.searchParams.set('tab',tab);return u.toString()}
+function ensurePlatformCouponNav(){
+ if(!d.body.classList.contains('em-platform')||d.querySelector('.nav [data-route="marketplace-coupons"]'))return;
+ const group=[...d.querySelectorAll('.nav-group')].find(g=>normalizeText(g.querySelector('.nav-group-title')?.textContent)==='eventmenu delivery');if(!group)return;
+ const a=d.createElement('a');a.dataset.route='marketplace-coupons';a.href=link('marketplace-coupons');a.className=route==='marketplace-coupons'?'active':'';a.innerHTML='<span class="nav-icon" aria-hidden="true">%</span><span>Cupons Delivery</span>';group.appendChild(a);
+}
 function cockpitCard(label,value,detail,tone,href){const a=d.createElement('a');a.className='cockpit-card';a.href=href;const s=d.createElement('span');s.textContent=label;const strong=d.createElement('strong');strong.textContent=value;const small=d.createElement('small');small.textContent=detail;const badge=d.createElement('span');badge.className='badge status-'+tone;badge.textContent=tone==='danger'?'Atenção':tone==='warning'?'Revisar':tone==='success'?'Normal':'Abrir';a.append(s,strong,small,badge);return a}
 async function enhancePlatformCockpit(){
  if(!d.body.classList.contains('em-platform')||route!=='super')return;
@@ -61,6 +66,7 @@ async function enhancePlatformCockpit(){
      cockpitCard('EventMenu Delivery',String(x.delivery_active||0),'Empresas ativas no marketplace',(x.delivery_active||0)>0?'success':'muted',link('marketplace-finance','companies')),
      cockpitCard('Comissões',money(x.commissions_due_cents),'A receber / faturadas',(x.commissions_due_cents||0)>0?'warning':'success',link('marketplace-finance')),
      cockpitCard('Campanhas',String(x.campaigns_active||0),'Campanhas ativas no Delivery',(x.campaigns_active||0)>0?'info':'muted',link('marketplace-campaigns')),
+     cockpitCard('Cupons Delivery','%', 'Criar descontos para clientes do app','info',link('marketplace-coupons')),
      cockpitCard('Impulsiona',money(x.impulsiona_balance_cents),`${x.impulsiona_companies||0} empresa(s) participante(s)`,(x.impulsiona_companies||0)>0?'info':'muted',link('marketplace-finance')),
      cockpitCard('Faturas em aberto',String(x.invoices_open||0),`${x.invoices_overdue||0} vencida(s)`,(x.invoices_overdue||0)>0?'danger':(x.invoices_open||0)>0?'warning':'success',link('marketplace-finance','invoices')),
      cockpitCard('Saúde do sistema',String(x.health_warnings||0),'Alertas que precisam de revisão',x.health==='error'?'danger':x.health==='warning'?'warning':'success',link('system-health'))
@@ -71,6 +77,6 @@ async function enhancePlatformCockpit(){
    const oldMetrics=host.nextElementSibling;if(oldMetrics?.classList.contains('metric-grid'))oldMetrics.hidden=true;
  }catch(e){console.warn('Cockpit indisponível no momento.',e)}
 }
-enhanceStatuses();enhanceTables();enhancePlatformCockpit();
+ensurePlatformCouponNav();enhanceStatuses();enhanceTables();enhancePlatformCockpit();
 const observer=new MutationObserver(mutations=>{for(const m of mutations)for(const n of m.addedNodes)if(n.nodeType===1){enhanceStatuses(n);enhanceTables(n)}});observer.observe(d.body,{childList:true,subtree:true});
 })();
