@@ -2,7 +2,10 @@ package br.com.eventmenu.delivery.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -28,6 +31,7 @@ fun DeliveryAppRoot(vm: DeliveryViewModel) {
     when (vm.screen) {
         Screen.Login -> SecureLoginScreen(vm)
         Screen.Register -> SecureRegisterScreen(vm)
+        Screen.Cart -> EnhancedCartScreen(vm)
         Screen.OrderDetail -> EnhancedOrderDetailScreen(vm)
         else -> EventMenuDeliveryApp(vm)
     }
@@ -132,6 +136,157 @@ private fun SecureRegisterScreen(vm: DeliveryViewModel) {
             SnackbarHost(snack, Modifier.align(Alignment.BottomCenter).padding(16.dp))
         }
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun EnhancedCartScreen(vm: DeliveryViewModel) {
+    val customer = vm.customer
+    val store = vm.catalog?.store
+    val subtotal = vm.cart.sumOf { it.totalCents() }
+    val fee = store?.deliveryFeeCents ?: 0
+    val discount = vm.couponQuote?.discountCents ?: 0
+    val estimate = (subtotal + fee - discount).coerceAtLeast(0)
+    val minimum = store?.minimumOrderCents ?: 0
+    val storeOpen = store?.acceptingOrders != false
+    var couponInput by remember(vm.couponCode) { mutableStateOf(vm.couponCode) }
+    var selectedAddress by remember(customer) { mutableIntStateOf(customer?.addresses?.firstOrNull { it.isDefault }?.id ?: customer?.addresses?.firstOrNull()?.id ?: 0) }
+    val snack = remember { SnackbarHostState() }
+    LaunchedEffect(vm.message) { vm.message?.let { snack.showSnackbar(it); vm.clearMessage() } }
+
+    MaterialTheme {
+        Box(Modifier.fillMaxSize()) {
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = { Text("Seu carrinho", fontWeight = FontWeight.Bold) },
+                        navigationIcon = { IconButton({ vm.navigate(Screen.Catalog) }) { Icon(Icons.Default.ArrowBack, null) } },
+                    )
+                },
+                snackbarHost = { SnackbarHost(snack) },
+            ) { pad ->
+                LazyColumn(
+                    Modifier.fillMaxSize().padding(pad),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    items(vm.cart.size) { i ->
+                        val item = vm.cart[i]
+                        Card(Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(item.product.name, fontWeight = FontWeight.Bold)
+                                    if (item.optionIds.isNotEmpty()) Text("Com ${item.optionIds.size} adicional(is)", style = MaterialTheme.typography.bodySmall)
+                                    if (item.notes.isNotBlank()) Text("Obs.: ${item.notes}", style = MaterialTheme.typography.bodySmall)
+                                    Text(money(item.totalCents()), fontWeight = FontWeight.SemiBold)
+                                }
+                                IconButton({ vm.updateCart(i, item.quantity - 1) }) { Icon(Icons.Default.Remove, null) }
+                                Text(item.quantity.toString(), fontWeight = FontWeight.Bold)
+                                IconButton({ vm.updateCart(i, item.quantity + 1) }) { Icon(Icons.Default.Add, null) }
+                            }
+                        }
+                    }
+
+                    item {
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("Cupom", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text("Digite um cupom do EventMenu Delivery ou do próprio restaurante.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    OutlinedTextField(
+                                        value = couponInput,
+                                        onValueChange = { couponInput = it.uppercase().filter { c -> c.isLetterOrDigit() || c == '-' || c == '_' }.take(80) },
+                                        label = { Text("Código do cupom") },
+                                        singleLine = true,
+                                        enabled = vm.couponQuote == null,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    if (vm.couponQuote == null) {
+                                        Button({ vm.validateCoupon(couponInput) }, enabled = couponInput.isNotBlank() && vm.cart.isNotEmpty()) { Text("Aplicar") }
+                                    } else {
+                                        OutlinedButton({ vm.clearCoupon(); couponInput = "" }) { Text("Remover") }
+                                    }
+                                }
+                                vm.couponQuote?.let { quote ->
+                                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium) {
+                                        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                            Column {
+                                                Text("Cupom ${quote.code}", fontWeight = FontWeight.Bold)
+                                                Text("Desconto aplicado", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            Text("- ${money(quote.discountCents)}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CartSummaryRow("Subtotal", money(subtotal))
+                                CartSummaryRow("Taxa de entrega", if (fee == 0) "Grátis" else money(fee))
+                                if (discount > 0) CartSummaryRow("Cupom", "- ${money(discount)}")
+                                HorizontalDivider()
+                                CartSummaryRow("Total estimado", money(estimate), strong = true)
+                                Text("O servidor valida novamente o cupom e confirma o total antes do pagamento.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+
+                    if (!storeOpen) item { CartInfoCard("Este restaurante pausou novos pedidos. O carrinho ficará salvo enquanto você estiver nesta sessão.") }
+                    if (subtotal < minimum) item { CartInfoCard("Faltam ${money(minimum - subtotal)} para atingir o pedido mínimo de ${money(minimum)}.") }
+
+                    item { Text("Endereço de entrega", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+                    if (customer?.addresses.isNullOrEmpty()) {
+                        item {
+                            CartInfoCard("Cadastre um endereço antes de finalizar.")
+                            Spacer(Modifier.height(8.dp))
+                            Button({ vm.editAddress() }, Modifier.fillMaxWidth()) { Text("Cadastrar endereço") }
+                        }
+                    } else {
+                        items(customer!!.addresses, key = { it.id }) { a ->
+                            Card(
+                                Modifier.fillMaxWidth().clickable { selectedAddress = a.id },
+                                colors = CardDefaults.cardColors(containerColor = if (selectedAddress == a.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
+                            ) {
+                                Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    RadioButton(selectedAddress == a.id, { selectedAddress = a.id })
+                                    Column {
+                                        Text(a.label, fontWeight = FontWeight.Bold)
+                                        Text("${a.street}, ${a.number} · ${a.city}/${a.state}")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Button(
+                            { vm.checkoutCart(selectedAddress) },
+                            enabled = vm.cart.isNotEmpty() && selectedAddress > 0 && subtotal >= minimum && storeOpen,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Confirmar pedido · ${money(estimate)}") }
+                    }
+                }
+            }
+            if (vm.busy) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        }
+    }
+}
+
+@Composable
+private fun CartSummaryRow(label: String, value: String, strong: Boolean = false) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, fontWeight = if (strong) FontWeight.Bold else FontWeight.Normal)
+        Text(value, fontWeight = if (strong) FontWeight.Bold else FontWeight.Normal)
+    }
+}
+
+@Composable
+private fun CartInfoCard(text: String) {
+    Card(Modifier.fillMaxWidth()) { Text(text, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
