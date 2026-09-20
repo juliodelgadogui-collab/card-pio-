@@ -37,7 +37,7 @@ if($openTenant>0&&$openUnit>0){
         'entered_at'=>time(),
         'expires_at'=>time()+7200,
     ];
-    header('Location: '.app_url('menu.php?empresa='.rawurlencode((string)$store['slug']).'&unidade='.rawurlencode((string)$store['unit_code'])),true,302);
+    header('Location: '.app_url('menu.php?empresa='.rawurlencode((string)$store['slug']).'&unidade='.rawurlencode((string)$store['unit_code']).'&source=delyvre'),true,302);
     exit;
 }
 
