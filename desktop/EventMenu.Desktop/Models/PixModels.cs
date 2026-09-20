@@ -13,10 +13,12 @@ public sealed class PixDetails
     [JsonPropertyName("expires_at")] public string ExpiresAt { get; set; } = "";
     [JsonPropertyName("reused")] public bool Reused { get; set; }
 
-    public string ProviderDisplay => Provider switch
+    public string ProviderDisplay => Provider.ToLowerInvariant() switch
     {
         "mercadopago" => "Mercado Pago",
         "pagbank" => "PagBank",
+        "efi" => "Efí",
+        "inter" => "Banco Inter",
         _ => string.IsNullOrWhiteSpace(Provider) ? "Pix" : Provider
     };
 }

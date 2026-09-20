@@ -305,8 +305,18 @@ public sealed class EventMenuApiClient : IDisposable
     {
         try
         {
-            var error = JsonSerializer.Deserialize<ApiError>(text, JsonOptions)?.Error;
-            if (!string.IsNullOrWhiteSpace(error)) return Friendly(error);
+            using var doc = JsonDocument.Parse(text);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("message", out var messageNode) && messageNode.ValueKind == JsonValueKind.String)
+            {
+                var message = messageNode.GetString();
+                if (!string.IsNullOrWhiteSpace(message)) return Friendly(message);
+            }
+            if (root.TryGetProperty("error", out var errorNode) && errorNode.ValueKind == JsonValueKind.String)
+            {
+                var error = errorNode.GetString();
+                if (!string.IsNullOrWhiteSpace(error)) return Friendly(error);
+            }
         }
         catch (JsonException) { }
         return "Não foi possível concluir a operação. Tente novamente.";
