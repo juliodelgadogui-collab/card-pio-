@@ -12,6 +12,7 @@ use EventMenu\Services\DeliveryCustomerDocumentService;
 use EventMenu\Services\DeliveryCustomerMarketplaceService;
 use EventMenu\Services\DeliveryCustomerPaymentService;
 use EventMenu\Services\MarketplaceCatalogService;
+use EventMenu\Services\OrderPaymentPreferenceService;
 
 header('Content-Type: application/json; charset=utf-8');header('Cache-Control: no-store, private, max-age=0');header('X-Content-Type-Options: nosniff');header('Referrer-Policy: no-referrer');if($_SERVER['REQUEST_METHOD']==='OPTIONS'){header('Allow: GET, POST, DELETE, OPTIONS');http_response_code(204);exit;}
 function delivery_customer_out(array $data,int $status=200): never{http_response_code($status);echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
@@ -43,8 +44,22 @@ if($action==='order'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_ou
 if($action==='reorder'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'reorder'=>$market->reorder($pdo,$accountId,(int)($body['order_id']??0))]);}
 if($action==='review'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$review=Database::transaction(fn(PDO$tx):array=>$market->review($tx,$accountId,(int)($body['order_id']??0),(int)($body['rating']??0),(string)($body['comment']??'')));delivery_customer_out(['ok'=>true,'review'=>$review]);}
 if($action==='payment-methods'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'methods'=>$market->paymentMethods($pdo,$accountId,(int)($_GET['order_id']??0))]);}
-if($action==='payment-pix'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');$cpf=(new DeliveryCustomerDocumentService())->cpfFromAccount($account);if($cpf==='')throw new RuntimeException('Informe seu CPF no perfil para continuar com o pagamento.');delivery_customer_out(['ok'=>true,'payment'=>$payments->pix($pdo,$accountId,(int)($body['order_id']??0),(string)($body['provider']??''),$cpf)],201);}
-if($action==='payment-card'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');$cpf=(new DeliveryCustomerDocumentService())->cpfFromAccount($account);if($cpf==='')throw new RuntimeException('Informe seu CPF no perfil para continuar com o pagamento.');$cardPayload=$body;$cardPayload['tax_id']=$cpf;delivery_customer_out(['ok'=>true,'payment'=>$payments->card($pdo,$accountId,(int)($body['order_id']??0),$cardPayload)],201);}
+if($action==='payment-pix'){
+    if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);
+    $rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');
+    $cpf=(new DeliveryCustomerDocumentService())->cpfFromAccount($account);if($cpf==='')throw new RuntimeException('Informe seu CPF no perfil para continuar com o pagamento.');
+    $orderId=(int)($body['order_id']??0);$payment=$payments->pix($pdo,$accountId,$orderId,(string)($body['provider']??''),$cpf);$owned=$market->ownedOrder($pdo,$accountId,$orderId);
+    (new OrderPaymentPreferenceService())->set($pdo,(int)$owned['tenant_id'],$orderId,'pix',(string)($payment['provider']??''),null,'delivery_app');
+    delivery_customer_out(['ok'=>true,'payment'=>$payment],201);
+}
+if($action==='payment-card'){
+    if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);
+    $rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');
+    $cpf=(new DeliveryCustomerDocumentService())->cpfFromAccount($account);if($cpf==='')throw new RuntimeException('Informe seu CPF no perfil para continuar com o pagamento.');
+    $orderId=(int)($body['order_id']??0);$cardPayload=$body;$cardPayload['tax_id']=$cpf;$payment=$payments->card($pdo,$accountId,$orderId,$cardPayload);$owned=$market->ownedOrder($pdo,$accountId,$orderId);$paymentType=strtolower(trim((string)($payment['payment_type_id']??$cardPayload['payment_type_id']??'')));$method=$paymentType==='debit_card'?'card_debit':'card_credit';
+    (new OrderPaymentPreferenceService())->set($pdo,(int)$owned['tenant_id'],$orderId,$method,(string)($payment['provider']??'mercadopago'),null,'delivery_app');
+    delivery_customer_out(['ok'=>true,'payment'=>$payment],201);
+}
 if($action==='payment-cash'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$change=array_key_exists('change_for_cents',$body)&&$body['change_for_cents']!==null?(int)$body['change_for_cents']:null;delivery_customer_out(['ok'=>true,'payment'=>$market->markCash($pdo,$accountId,(int)($body['order_id']??0),$change)]);}
 if($action==='payment-status'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'payment'=>$payments->status($pdo,$accountId,(int)($_GET['order_id']??0))]);}
 delivery_customer_out(['ok'=>false,'code'=>'NOT_FOUND','message'=>'Ação não encontrada.'],404);
