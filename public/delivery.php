@@ -123,12 +123,16 @@ function delivery_store_card(array $store,string $campaign=''):void
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-    <meta name="theme-color" content="#fffaf7">
+    <meta name="theme-color" content="#ff4f3d">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="DELYVRE">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="description" content="DELYVRE — escolha restaurantes, faça seu pedido e acompanhe a entrega.">
     <title>DELYVRE · Escolha. Peça. Receba.</title>
+    <link rel="manifest" href="<?=Security::e(app_url('delyvre-pwa.php?asset=manifest'))?>">
+    <link rel="apple-touch-icon" sizes="192x192" href="<?=Security::e(app_url('delyvre-pwa.php?asset=icon-192'))?>">
+    <link rel="icon" type="image/png" sizes="192x192" href="<?=Security::e(app_url('delyvre-pwa.php?asset=icon-192'))?>">
     <link rel="stylesheet" href="<?=Security::e(app_url('assets/delivery-marketplace.css'))?>">
 </head>
 <body>
@@ -173,6 +177,16 @@ function delivery_store_card(array $store,string $campaign=''):void
             </div>
         </div>
     </section>
+
+    <aside class="install-card" id="delyvre-install" aria-live="polite" aria-label="Adicionar DELYVRE à Tela de Início">
+        <div class="install-card-icon" aria-hidden="true">D</div>
+        <div class="install-card-copy">
+            <strong>Adicione o DELYVRE à Tela de Início.</strong>
+            <span data-install-copy>Tenha acesso rápido aos restaurantes e aos seus pedidos direto pela Tela de Início.</span>
+        </div>
+        <button type="button" data-install-action hidden>Adicionar</button>
+        <button type="button" data-install-dismiss aria-label="Não mostrar novamente">Agora não</button>
+    </aside>
 
     <nav class="filter-row" id="regioes" aria-label="Filtrar restaurantes por região">
         <a class="chip <?=$city===''&&$state===''?'active':''?>" href="<?=Security::e(delivery_home_url($q))?>">Todos</a>
@@ -244,5 +258,72 @@ function delivery_store_card(array $store,string $campaign=''):void
     <a href="#beneficios"><span class="nav-icon" aria-hidden="true">◇</span><span>Benefícios</span></a>
     <a href="#conta"><span class="nav-icon" aria-hidden="true">○</span><span>Perfil</span></a>
 </nav>
+<script>
+(()=>{
+    const card=document.getElementById('delyvre-install');
+    const copy=card?.querySelector('[data-install-copy]');
+    const installButton=card?.querySelector('[data-install-action]');
+    const dismissButton=card?.querySelector('[data-install-dismiss]');
+    const keyDismissed='delyvre:install-dismissed:v1';
+    const keyInstalled='delyvre:installed:v1';
+    const storage={
+        get(key){try{return localStorage.getItem(key);}catch(_){return null;}},
+        set(key,value){try{localStorage.setItem(key,value);}catch(_){}},
+    };
+    const ua=navigator.userAgent||'';
+    const iOS=/iPhone|iPad|iPod/i.test(ua)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
+    const android=/Android/i.test(ua);
+    const standalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+    let deferredInstall=null;
+
+    const hide=()=>card?.classList.remove('visible');
+    const canOffer=()=>!standalone&&storage.get(keyInstalled)!=='1'&&storage.get(keyDismissed)!=='1';
+    const showIos=()=>{
+        if(!card||!copy||!canOffer())return;
+        copy.textContent='No iPhone: Compartilhar > Adicionar à Tela de Início > Adicionar.';
+        if(installButton)installButton.hidden=true;
+        card.classList.add('visible');
+    };
+
+    if(standalone){storage.set(keyInstalled,'1');hide();}
+    else if(iOS)showIos();
+
+    window.addEventListener('beforeinstallprompt',event=>{
+        if(!android||!canOffer())return;
+        event.preventDefault();
+        deferredInstall=event;
+        if(copy)copy.textContent='Tenha acesso rápido aos restaurantes e aos seus pedidos direto pela Tela de Início.';
+        if(installButton)installButton.hidden=false;
+        card?.classList.add('visible');
+    });
+
+    installButton?.addEventListener('click',async()=>{
+        if(!deferredInstall)return;
+        const prompt=deferredInstall;
+        deferredInstall=null;
+        await prompt.prompt();
+        const choice=await prompt.userChoice.catch(()=>null);
+        if(choice?.outcome==='accepted')storage.set(keyInstalled,'1');
+        else storage.set(keyDismissed,'1');
+        hide();
+    });
+
+    dismissButton?.addEventListener('click',()=>{
+        storage.set(keyDismissed,'1');
+        hide();
+    });
+
+    window.addEventListener('appinstalled',()=>{
+        storage.set(keyInstalled,'1');
+        hide();
+    });
+
+    if('serviceWorker' in navigator&&window.isSecureContext){
+        window.addEventListener('load',()=>{
+            navigator.serviceWorker.register(<?=json_encode(app_url('delyvre-pwa.php?asset=sw'),JSON_UNESCAPED_SLASHES)?>).catch(()=>{});
+        },{once:true});
+    }
+})();
+</script>
 </body>
 </html>
