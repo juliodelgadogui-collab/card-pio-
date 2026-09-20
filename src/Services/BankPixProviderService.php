@@ -63,7 +63,7 @@ final class BankPixProviderService
     private function createEfi(array $ctx,array $payment,string $taxId,string $key):array
     {
         $config=$ctx['config'];$base=rtrim((string)($config['api_base']??'https://pix.api.efipay.com.br'),'/');$pixKey=trim((string)($config['pix_key']??''));if($pixKey==='')throw new RuntimeException('Chave Pix Efí não configurada.');
-        $token=$this->efiToken($config,$base);$txid=substr(hash('sha256',$key),0,32);$doc=$this->document($taxId);$debtor=['nome'=>mb_substr((string)$ctx['account']['name'],0,200)];$debtor[strlen($doc)===11?'cpf':'cnpj']=$doc;
+        $token=$this->efiToken($config,$base);$txid=$this->txid($key);$doc=$this->document($taxId);$debtor=['nome'=>mb_substr((string)$ctx['account']['name'],0,200)];$debtor[strlen($doc)===11?'cpf':'cnpj']=$doc;
         $body=['calendario'=>['expiracao'=>900],'devedor'=>$debtor,'valor'=>['original'=>number_format(((int)$payment['amount_cents'])/100,2,'.','')],'chave'=>$pixKey,'solicitacaoPagador'=>'Pedido EventMenu #'.(int)$ctx['order']['id']];
         $data=$this->mtlsJson('PUT',$base.'/v2/cob/'.rawurlencode($txid),['Authorization: Bearer '.$token],$body,$config);
         $copy=trim((string)($data['pixCopiaECola']??''));if($copy==='')throw new RuntimeException('Efí não retornou o Pix Copia e Cola.');$image='';$locId=(int)($data['loc']['id']??0);if($locId>0){try{$qr=$this->mtlsJson('GET',$base.'/v2/loc/'.$locId.'/qrcode',['Authorization: Bearer '.$token],null,$config);$image=(string)($qr['imagemQrcode']??'');}catch(\Throwable){}}
@@ -72,10 +72,10 @@ final class BankPixProviderService
 
     private function createInter(array $ctx,array $payment,string $taxId,string $key):array
     {
-        $config=$ctx['config'];$base=rtrim((string)($config['api_base']??'https://cdpj.partners.bancointer.com.br'),'/');$pixKey=trim((string)($config['pix_key']??''));if($pixKey==='')throw new RuntimeException('Chave Pix Banco Inter não configurada.');$token=$this->interToken($config,$base);$doc=$this->document($taxId);$debtor=['nome'=>mb_substr((string)$ctx['account']['name'],0,200)];$debtor[strlen($doc)===11?'cpf':'cnpj']=$doc;
+        $config=$ctx['config'];$base=rtrim((string)($config['api_base']??'https://cdpj.partners.bancointer.com.br'),'/');$pixKey=trim((string)($config['pix_key']??''));if($pixKey==='')throw new RuntimeException('Chave Pix Banco Inter não configurada.');$token=$this->interToken($config,$base);$txid=$this->txid($key);$doc=$this->document($taxId);$debtor=['nome'=>mb_substr((string)$ctx['account']['name'],0,200)];$debtor[strlen($doc)===11?'cpf':'cnpj']=$doc;
         $body=['calendario'=>['expiracao'=>900],'devedor'=>$debtor,'valor'=>['original'=>number_format(((int)$payment['amount_cents'])/100,2,'.',''),'modalidadeAlteracao'=>0],'chave'=>$pixKey,'solicitacaoPagador'=>'Pedido EventMenu #'.(int)$ctx['order']['id']];
         $headers=['Authorization: Bearer '.$token];$account=trim((string)($config['account_number']??''));if($account!=='')$headers[]='x-conta-corrente: '.$account;
-        $data=$this->mtlsJson('POST',$base.'/pix/v2/cob',$headers,$body,$config);$copy=trim((string)($data['pixCopiaECola']??''));$txid=trim((string)($data['txid']??''));if($copy===''||$txid==='')throw new RuntimeException('Banco Inter não retornou os dados completos da cobrança Pix.');
+        $data=$this->mtlsJson('PUT',$base.'/pix/v2/cob/'.rawurlencode($txid),$headers,$body,$config);$copy=trim((string)($data['pixCopiaECola']??''));if($copy==='')throw new RuntimeException('Banco Inter não retornou o Pix Copia e Cola.');
         $data['_eventmenu_pix_text']=$copy;$data['_eventmenu_pix_image_url']='';$data['_eventmenu_pix_expires_at']=(new \DateTimeImmutable('+15 minutes'))->format(DATE_ATOM);$data['_provider_id']=$txid;return$data;
     }
 
@@ -114,5 +114,6 @@ final class BankPixProviderService
         $certs=new PaymentCertificateService();$cert=$certs->resolve((string)($config['certificate_path']??''));$keyPath=trim((string)($config['private_key_path']??''));$password=(string)($config['certificate_password']??'');$ext=strtolower(pathinfo($cert,PATHINFO_EXTENSION));$ch=curl_init($url);if($ch===false)throw new RuntimeException('Falha ao iniciar comunicação bancária.');$opts=[CURLOPT_RETURNTRANSFER=>true,CURLOPT_CUSTOMREQUEST=>$method,CURLOPT_HTTPHEADER=>$headers,CURLOPT_CONNECTTIMEOUT=>8,CURLOPT_TIMEOUT=>25,CURLOPT_FOLLOWLOCATION=>false,CURLOPT_SSL_VERIFYPEER=>true,CURLOPT_SSL_VERIFYHOST=>2,CURLOPT_SSLCERT=>$cert];if(in_array($ext,['p12','pfx'],true)){$opts[CURLOPT_SSLCERTTYPE]='P12';if($password!=='')$opts[CURLOPT_SSLCERTPASSWD]=$password;}else{if($keyPath!=='')$opts[CURLOPT_SSLKEY]=$certs->resolve($keyPath);if($password!=='')$opts[CURLOPT_KEYPASSWD]=$password;}if($body!==null)$opts[CURLOPT_POSTFIELDS]=$body;curl_setopt_array($ch,$opts);$raw=curl_exec($ch);$status=(int)curl_getinfo($ch,CURLINFO_RESPONSE_CODE);$error=curl_error($ch);curl_close($ch);if($raw===false||$status<200||$status>=300)throw new RuntimeException('O banco recusou a operação Pix (HTTP '.$status.').'.($error?' '.$error:''));$data=json_decode((string)$raw,true,512,JSON_THROW_ON_ERROR);if(!is_array($data))throw new RuntimeException('Resposta inválida da API bancária.');return$data;
     }
 
+    private function txid(string $key):string{return substr(hash('sha256',$key),0,32);}
     private function document(string $value):string{$doc=preg_replace('/\D+/','',$value)??'';if(!in_array(strlen($doc),[11,14],true))throw new RuntimeException('Informe CPF ou CNPJ para gerar o Pix.');return$doc;}
 }
