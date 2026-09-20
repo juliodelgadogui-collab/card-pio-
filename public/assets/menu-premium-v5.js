@@ -3,6 +3,15 @@
 const d=document,$=(s,r=d)=>r.querySelector(s),$$=(s,r=d)=>[...r.querySelectorAll(s)];
 d.documentElement.classList.add('js-enhanced');
 const root=$('[data-menu-root]');if(!root)return;
+
+/* Preserve tenant personalization, but never allow unreadable Web palettes. */
+function rgb(hex){const m=String(hex||'').trim().match(/^#([0-9a-f]{6})$/i);if(!m)return null;const n=parseInt(m[1],16);return[(n>>16)&255,(n>>8)&255,n&255]}
+function luminance(hex){const c=rgb(hex);if(!c)return null;const f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};return .2126*f(c[0])+.7152*f(c[1])+.0722*f(c[2])}
+function contrast(a,b){const x=luminance(a),y=luminance(b);if(x===null||y===null)return 21;return(Math.max(x,y)+.05)/(Math.min(x,y)+.05)}
+function bestInk(bg){return contrast('#17131f',bg)>=contrast('#ffffff',bg)?'#17131f':'#ffffff'}
+function applyAccessiblePalette(){const style=getComputedStyle(d.documentElement);const primary=style.getPropertyValue('--em-primary').trim(),background=style.getPropertyValue('--em-bg').trim(),surface=style.getPropertyValue('--em-surface').trim(),text=style.getPropertyValue('--em-text').trim();if(rgb(primary))d.documentElement.style.setProperty('--em-primary-ink',bestInk(primary));if(rgb(text)&&rgb(background)&&rgb(surface)&&Math.min(contrast(text,background),contrast(text,surface))<4.5){const candidates=['#17131f','#ffffff'];candidates.sort((a,b)=>Math.min(contrast(b,background),contrast(b,surface))-Math.min(contrast(a,background),contrast(a,surface)));d.documentElement.style.setProperty('--em-text',candidates[0])}}
+applyAccessiblePalette();
+
 const storageKey=root.dataset.storageKey||'eventmenu-menu';
 const cartStateEl=$('#menu-cart-state');
 const serverCart=(()=>{try{return JSON.parse(cartStateEl?.textContent||'[]')}catch{return[]}})();
@@ -25,27 +34,11 @@ const catLinks=$$('[data-category-link]'),sections=$$('.catalog-section');
 if('IntersectionObserver'in window&&sections.length){const io=new IntersectionObserver(entries=>{const visible=entries.filter(e=>e.isIntersecting).sort((a,b)=>b.intersectionRatio-a.intersectionRatio)[0];if(!visible)return;catLinks.forEach(a=>a.classList.toggle('active',a.getAttribute('href')==='#'+visible.target.id));const active=catLinks.find(a=>a.classList.contains('active'));active?.scrollIntoView({behavior:'smooth',inline:'center',block:'nearest'})},{rootMargin:'-145px 0px -55% 0px',threshold:[0,.15,.5]});sections.forEach(s=>io.observe(s))}
 catLinks.forEach(a=>a.addEventListener('click',()=>catLinks.forEach(x=>x.classList.toggle('active',x===a))));
 
-/*
- * Mobile scroll lock: native <dialog> + body overflow:hidden leaves some iOS/WebView
- * versions stuck after closing. Freeze the page at its actual Y and always restore it.
- */
+/* Native <dialog> + body overflow:hidden can leave iOS/WebView scroll locked. */
 const dialog=$('#product-dialog');
 let lockedScrollY=0,scrollLocked=false;
-function lockPageScroll(){
-    if(scrollLocked)return;
-    lockedScrollY=Math.max(0,window.scrollY||d.documentElement.scrollTop||0);
-    scrollLocked=true;
-    d.body.classList.add('menu-modal-open');
-    d.body.style.position='fixed';d.body.style.top=`-${lockedScrollY}px`;d.body.style.left='0';d.body.style.right='0';d.body.style.width='100%';
-}
-function unlockPageScroll(restore=true){
-    if(!scrollLocked&&!d.body.classList.contains('menu-modal-open'))return;
-    const y=lockedScrollY;
-    d.body.classList.remove('menu-modal-open');
-    for(const prop of['position','top','left','right','width'])d.body.style.removeProperty(prop);
-    scrollLocked=false;lockedScrollY=0;
-    if(restore)requestAnimationFrame(()=>window.scrollTo({top:y,left:0,behavior:'auto'}));
-}
+function lockPageScroll(){if(scrollLocked)return;lockedScrollY=Math.max(0,window.scrollY||d.documentElement.scrollTop||0);scrollLocked=true;d.body.classList.add('menu-modal-open');d.body.style.position='fixed';d.body.style.top=`-${lockedScrollY}px`;d.body.style.left='0';d.body.style.right='0';d.body.style.width='100%'}
+function unlockPageScroll(restore=true){if(!scrollLocked&&!d.body.classList.contains('menu-modal-open'))return;const y=lockedScrollY;d.body.classList.remove('menu-modal-open');for(const prop of['position','top','left','right','width'])d.body.style.removeProperty(prop);scrollLocked=false;lockedScrollY=0;if(restore)requestAnimationFrame(()=>window.scrollTo({top:y,left:0,behavior:'auto'}))}
 const closeDialog=()=>{if(dialog?.open)dialog.close();else unlockPageScroll()};
 $('.dialog-close',dialog||d)?.addEventListener('click',closeDialog);
 dialog?.addEventListener('click',e=>{if(e.target===dialog)closeDialog()});
