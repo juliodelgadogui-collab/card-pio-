@@ -45,6 +45,12 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Run EventMenu Delivery unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Run EventMenu Delivery Android lint
+        run: gradle :app:lintDebug --stacktrace --no-daemon
+
       - name: Build EventMenu Delivery debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
