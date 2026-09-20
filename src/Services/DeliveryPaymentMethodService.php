@@ -20,7 +20,11 @@ final class DeliveryPaymentMethodService
                 $pix[]=['provider'=>$provider,'default'=>!empty($config['pix_default']),'priority'=>max(1,min(999,(int)($config['pix_priority']??100)))];
             }
             if($provider==='mercadopago'&&filter_var($config['card_enabled']??false,FILTER_VALIDATE_BOOL)){
-                $publicKey=trim((string)($config['public_key']??''));if($publicKey!=='')$cards[]=['provider'=>'mercadopago','public_key'=>$publicKey,'max_installments'=>max(1,min(12,(int)($config['max_installments']??12))),'payment_types'=>['credit_card','debit_card']];
+                $types=[];
+                $credit=!array_key_exists('credit_enabled',$config)||filter_var($config['credit_enabled'],FILTER_VALIDATE_BOOL);
+                $debit=!array_key_exists('debit_enabled',$config)||filter_var($config['debit_enabled'],FILTER_VALIDATE_BOOL);
+                if($credit)$types[]='credit_card';if($debit)$types[]='debit_card';
+                $publicKey=trim((string)($config['public_key']??''));if($publicKey!==''&&$types)$cards[]=['provider'=>'mercadopago','public_key'=>$publicKey,'max_installments'=>max(1,min(12,(int)($config['max_installments']??12))),'payment_types'=>$types];
             }
         }
         usort($pix,static fn(array$a,array$b):int=>($b['default']<=>$a['default'])?:($a['priority']<=>$b['priority'])?:strcmp($a['provider'],$b['provider']));
