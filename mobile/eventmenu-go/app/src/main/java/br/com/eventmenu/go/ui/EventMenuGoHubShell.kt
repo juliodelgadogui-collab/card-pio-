@@ -1,9 +1,11 @@
 package br.com.eventmenu.go.ui
 
+import android.content.Intent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ConfirmationNumber
 import androidx.compose.material.icons.filled.PointOfSale
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
@@ -23,6 +25,8 @@ import br.com.eventmenu.go.AppScreen
 import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.HubViewModel
 import br.com.eventmenu.go.MainViewModel
+import br.com.eventmenu.go.TicketSalesActivity
+import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.HubDialog
 
@@ -60,16 +64,20 @@ fun EventMenuGoHubShell(
             onTapOn = onTapOn,
         )
 
-        val canShowHub = state.session != null &&
-            state.workShift?.status == "open" &&
-            state.screen == AppScreen.PROFILE
+        val canShowHub = state.session != null && state.workShift?.status == "open" && state.screen == AppScreen.PROFILE
+        val canSellTickets = state.session != null && state.workShift?.status == "open" && state.mode == AppMode.EVENTS && state.screen in setOf(AppScreen.HOME, AppScreen.EVENTS) && state.session?.permissions.orEmpty().any { it in setOf("tickets", "tickets.manage", "events.manage") }
 
-        if (canShowHub && !showHub) {
+        if (canSellTickets) {
+            ExtendedFloatingActionButton(
+                onClick = { context.startActivity(Intent(context, TicketSalesActivity::class.java)) },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 96.dp),
+                icon = { Icon(Icons.Default.ConfirmationNumber, contentDescription = null) },
+                text = { Text("Vender ingresso") },
+            )
+        } else if (canShowHub && !showHub) {
             ExtendedFloatingActionButton(
                 onClick = { showHub = true },
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 16.dp, bottom = 96.dp),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 96.dp),
                 icon = { Icon(Icons.Default.PointOfSale, contentDescription = null) },
                 text = { Text("Hub") },
             )
