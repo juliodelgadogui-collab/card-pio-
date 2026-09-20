@@ -26,7 +26,6 @@ import br.com.eventmenu.go.EventMenuGoApplication
 import br.com.eventmenu.go.HubViewModel
 import br.com.eventmenu.go.MainViewModel
 import br.com.eventmenu.go.TicketSalesActivity
-import br.com.eventmenu.go.data.AppMode
 import br.com.eventmenu.go.data.TapOnRequest
 import br.com.eventmenu.go.ui.screens.HubDialog
 
@@ -64,8 +63,14 @@ fun EventMenuGoHubShell(
             onTapOn = onTapOn,
         )
 
+        val permissions = state.session?.permissions.orEmpty()
         val canShowHub = state.session != null && state.workShift?.status == "open" && state.screen == AppScreen.PROFILE
-        val canSellTickets = state.session != null && state.workShift?.status == "open" && state.mode == AppMode.EVENTS && state.screen in setOf(AppScreen.HOME, AppScreen.EVENTS) && state.session?.permissions.orEmpty().any { it in setOf("tickets", "tickets.manage", "events.manage") }
+        // Ticket sales are an operator capability, not a visual-mode capability. An authorized
+        // operator must be able to sell from Home even when the current shift is Operation/Pay.
+        val canSellTickets = state.session != null &&
+            state.workShift?.status == "open" &&
+            state.screen in setOf(AppScreen.HOME, AppScreen.EVENTS) &&
+            "tickets" in permissions
 
         if (canSellTickets) {
             ExtendedFloatingActionButton(
