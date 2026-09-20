@@ -34,6 +34,8 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     var stores by mutableStateOf<List<Store>>(emptyList()); private set
     var catalog by mutableStateOf<Catalog?>(null); private set
     val cart = mutableStateListOf<CartItem>()
+    var couponQuote by mutableStateOf<CouponQuote?>(null); private set
+    var couponCode by mutableStateOf(""); private set
     var orders by mutableStateOf<List<OrderSummary>>(emptyList()); private set
     var selectedOrder by mutableStateOf<OrderSummary?>(null); private set
     var paymentMethods by mutableStateOf<PaymentMethods?>(null); private set
@@ -88,14 +90,14 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun logout() = action {
         val push = session.pushToken.orEmpty()
         runCatching { api.logout(push) }
-        session.clear(); PaymentUiContext.clear(); customer = null; stores = emptyList(); cart.clear(); trackingJob?.cancel(); paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null; screen = Screen.Login
+        session.clear(); PaymentUiContext.clear(); customer = null; stores = emptyList(); cart.clear(); clearCoupon(false); trackingJob?.cancel(); paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null; screen = Screen.Login
     }
 
     fun loadStores(query: String = "") = action(showBusy = false) { stores = api.stores(query) }
 
     fun openStore(store: Store) = action {
         catalog = api.catalog(store.tenantId, store.unitId)
-        cart.clear(); screen = Screen.Catalog
+        cart.clear(); clearCoupon(false); screen = Screen.Catalog
         if (!store.acceptingOrders) message = "Este restaurante está pausado no momento. Você pode ver o cardápio, mas novos pedidos estão temporariamente indisponíveis."
     }
 
@@ -109,12 +111,41 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         val index = cart.indexOfFirst { it.product.id == product.id && it.optionIds == optionIds && it.notes == notes }
         if (index >= 0) cart[index] = cart[index].copy(quantity = (cart[index].quantity + quantity).coerceAtMost(99))
         else cart += CartItem(product, quantity.coerceIn(1,99), optionIds, notes)
+        invalidateCouponForCartChange()
         message = "${product.name} adicionado."
     }
 
     fun updateCart(index: Int, quantity: Int) {
         if (index !in cart.indices) return
         if (quantity <= 0) cart.removeAt(index) else cart[index] = cart[index].copy(quantity = quantity.coerceAtMost(99))
+        invalidateCouponForCartChange()
+    }
+
+    fun validateCoupon(code: String) = action {
+        val cat = catalog ?: error("Loja não carregada.")
+        val normalized = code.trim().uppercase()
+        if (normalized.isBlank()) error("Digite o código do cupom.")
+        val subtotal = cart.sumOf { it.totalCents() }
+        if (subtotal <= 0) error("Adicione itens ao carrinho antes de aplicar o cupom.")
+        val quote = api.couponQuote(cat.store.tenantId, normalized, subtotal)
+        couponCode = quote.code
+        couponQuote = quote
+        message = "Cupom ${quote.code} aplicado: ${money(quote.discountCents)} de desconto."
+    }
+
+    fun clearCoupon(showMessage: Boolean = true) {
+        val hadCoupon = couponQuote != null || couponCode.isNotBlank()
+        couponQuote = null
+        couponCode = ""
+        if (showMessage && hadCoupon) message = "Cupom removido."
+    }
+
+    private fun invalidateCouponForCartChange() {
+        if (couponQuote != null || couponCode.isNotBlank()) {
+            couponQuote = null
+            couponCode = ""
+            message = "O carrinho mudou. Aplique o cupom novamente."
+        }
     }
 
     fun checkoutCart(addressId: Int) = action {
@@ -123,10 +154,15 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         if (cart.isEmpty()) error("Seu carrinho está vazio.")
         val subtotal = cart.sumOf { it.totalCents() }
         if (subtotal < cat.store.minimumOrderCents) error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
-        val order = api.createOrder(cat, addressId, cart.toList())
+        val appliedCoupon = couponCode
+        if (appliedCoupon.isNotBlank()) {
+            val fresh = api.couponQuote(cat.store.tenantId, appliedCoupon, subtotal)
+            couponQuote = fresh
+        }
+        val order = api.createOrder(cat, addressId, cart.toList(), appliedCoupon)
         selectedOrder = order
         PaymentUiContext.updateAmount(order.totalCents)
-        cart.clear()
+        cart.clear(); clearCoupon(false)
         paymentMethods = api.paymentMethods(order.orderNumber)
         pixPayment = null
         paymentWaiting = false
@@ -175,7 +211,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         val s = r.getJSONObject("store")
         catalog = api.catalog(s.getInt("tenant_id"), s.getInt("unit_id"))
         if (catalog?.store?.acceptingOrders == false) error("Este restaurante pausou novos pedidos no momento.")
-        cart.clear()
+        cart.clear(); clearCoupon(false)
         val items = r.optJSONArray("items")
         if (items != null) for(i in 0 until items.length()) {
             val row = items.getJSONObject(i); val product = catalog?.products?.firstOrNull { it.id == row.optInt("product_id") } ?: continue
