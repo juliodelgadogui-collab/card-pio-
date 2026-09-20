@@ -69,10 +69,19 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
 
     suspend fun favorite(tenantId: Int, value: Boolean) { requestUnit("api-delivery-customer.php?action=favorite", "POST", JSONObject().put("tenant_id", tenantId).put("favorite", value)) }
 
-    suspend fun createOrder(catalog: Catalog, addressId: Int, items: List<CartItem>): OrderSummary {
+    suspend fun couponQuote(tenantId: Int, code: String, subtotalCents: Int): CouponQuote = request(
+        "api-delivery-customer.php?action=coupon-quote", "POST",
+        JSONObject().put("tenant_id", tenantId).put("code", code.trim().uppercase()).put("subtotal_cents", subtotalCents)
+    ) { root ->
+        val c = root.getJSONObject("coupon")
+        CouponQuote(c.optString("code"), c.optInt("discount_cents"), c.optInt("min_order_cents"))
+    }
+
+    suspend fun createOrder(catalog: Catalog, addressId: Int, items: List<CartItem>, couponCode: String = ""): OrderSummary {
         val lines = JSONArray()
         items.forEach { item -> lines.put(JSONObject().put("product_id", item.product.id).put("quantity", item.quantity).put("option_ids", JSONArray(item.optionIds.toList())).put("notes", item.notes)) }
         val body = JSONObject().put("entry_token", catalog.entryToken).put("address_id", addressId).put("items", lines)
+        if (couponCode.isNotBlank()) body.put("coupon_code", couponCode.trim().uppercase())
         return request("api-delivery-customer.php?action=order-create", "POST", body) { order(it.getJSONObject("order")) }
     }
 
