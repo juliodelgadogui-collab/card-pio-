@@ -33,13 +33,17 @@ final class PublicOrderPaymentService
     public function pix(PDO $pdo,string $publicToken,string $provider):array
     {
         $ctx=$this->context($pdo,$publicToken,$provider);$doc=$this->validTaxId((string)($ctx['order']['customer_document']??''));$email=trim((string)($ctx['account']['email']??''));if(!filter_var($email,FILTER_VALIDATE_EMAIL))throw new RuntimeException('Informe e salve seu e-mail antes de gerar o PIX.');
-        return (new DeliveryCustomerPaymentService())->pixForContext($pdo,$ctx,(int)$ctx['order']['id'],$provider,$doc);
+        $result=(new DeliveryCustomerPaymentService())->pixForContext($pdo,$ctx,(int)$ctx['order']['id'],$provider,$doc);
+        (new OrderPaymentPreferenceService())->set($pdo,(int)$ctx['order']['tenant_id'],(int)$ctx['order']['id'],'pix',$provider,null,'web');
+        return $result;
     }
 
     public function card(PDO $pdo,string $publicToken,array $payload):array
     {
         $ctx=$this->context($pdo,$publicToken,'mercadopago');$doc=$this->validTaxId((string)($ctx['order']['customer_document']??''));$email=trim((string)($ctx['account']['email']??''));if(!filter_var($email,FILTER_VALIDATE_EMAIL))throw new RuntimeException('Informe e salve seu e-mail antes de pagar com cartão.');$payload['provider']='mercadopago';$payload['tax_id']=$doc;
-        return (new DeliveryCustomerPaymentService())->cardForContext($pdo,$ctx,(int)$ctx['order']['id'],$payload);
+        $result=(new DeliveryCustomerPaymentService())->cardForContext($pdo,$ctx,(int)$ctx['order']['id'],$payload);$type=strtolower(trim((string)($result['payment_type_id']??$payload['payment_type_id']??'')));$method=$type==='debit_card'?'card_debit':'card_credit';
+        (new OrderPaymentPreferenceService())->set($pdo,(int)$ctx['order']['tenant_id'],(int)$ctx['order']['id'],$method,'mercadopago',null,'web');
+        return $result;
     }
 
     public function cash(PDO $pdo,string $publicToken,?int $changeForCents=null):array
@@ -49,6 +53,7 @@ final class PublicOrderPaymentService
         $active=$pdo->prepare('SELECT id FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") LIMIT 1');$active->execute([(int)$order['tenant_id'],(int)$order['id']]);if($active->fetchColumn())throw new RuntimeException('Já existe uma cobrança eletrônica em andamento. Aguarde o resultado antes de trocar para dinheiro.');
         $changeForCents=$changeForCents!==null?max(0,$changeForCents):null;if($changeForCents!==null&&$changeForCents<(int)$order['total_cents'])throw new RuntimeException('O valor para troco deve ser maior ou igual ao total do pedido.');
         if((string)$order['payment_status']==='failed')$pdo->prepare('UPDATE orders SET payment_status="unpaid" WHERE id=? AND tenant_id=?')->execute([(int)$order['id'],(int)$order['tenant_id']]);
+        (new OrderPaymentPreferenceService())->set($pdo,(int)$order['tenant_id'],(int)$order['id'],'cash',null,$changeForCents,'web');
         $message=$changeForCents===null?'Cliente selecionou pagamento em dinheiro.':'Cliente selecionou dinheiro e informou troco para R$ '.number_format($changeForCents/100,2,',','.').'.';
         try{(new OrderHistoryService())->record($pdo,(int)$order['tenant_id'],(int)$order['id'],(string)$order['status'],(string)$order['status'],'public',$message,null);}catch(\Throwable){}
         return ['method'=>'cash','status'=>'selected','change_for_cents'=>$changeForCents];
@@ -56,8 +61,7 @@ final class PublicOrderPaymentService
 
     public function status(PDO $pdo,string $publicToken):array
     {
-        $order=$this->order($pdo,$publicToken);
-        return (new DeliveryCustomerPaymentService())->statusForOrder($pdo,(int)$order['tenant_id'],(int)$order['id']);
+        $order=$this->order($pdo,$publicToken);$tenantId=(int)$order['tenant_id'];$orderId=(int)$order['id'];$result=(new DeliveryCustomerPaymentService())->statusForOrder($pdo,$tenantId,$orderId);$result['preference']=(new OrderPaymentPreferenceService())->get($pdo,$tenantId,$orderId);return $result;
     }
 
     public function order(PDO $pdo,string $publicToken):array
