@@ -133,7 +133,8 @@ class ApiClient(
             val json = runCatching { JSONObject(text) }
                 .getOrElse { JSONObject().put("ok", false).put("error", "Não foi possível interpretar a resposta do servidor.") }
             if (status !in 200..299 || !json.optBoolean("ok", false)) {
-                val serverMessage = json.optString("error", "Não foi possível concluir esta operação.")
+                val serverMessage = json.optString("message").takeIf { it.isNotBlank() }
+                    ?: json.optString("error", "Não foi possível concluir esta operação.")
                 throw ApiException(OperationalText.friendlyApiMessage(serverMessage, status), status)
             }
             return json
