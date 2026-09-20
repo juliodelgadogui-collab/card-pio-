@@ -89,6 +89,12 @@ data class CartItem(
     fun totalCents(): Int = unitTotalCents() * quantity
 }
 
+data class CouponQuote(
+    val code: String,
+    val discountCents: Int,
+    val minOrderCents: Int,
+)
+
 data class OrderSummary(
     val orderNumber: Int,
     val publicToken: String,
