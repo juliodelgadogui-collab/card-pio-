@@ -10,24 +10,12 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -84,10 +72,15 @@ fun DeliveryOperationsScreen(
     var cancelOrder by remember { mutableStateOf<Order?>(null) }
     var pendingRouteOrderId by remember { mutableStateOf<Int?>(null) }
     var locationDenied by remember { mutableStateOf(false) }
-    val deliveries = orders.filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
+    val deliveries = orders
+        .filter { it.channel == "delivery" && it.status !in setOf("completed", "cancelled") }
+        .sortedWith(compareBy<Order> { deliveryPriority(it, progress[it.id]) }.thenBy { it.id })
     val activeTrackingOrderId = deliveries.firstOrNull { order ->
         order.status == "out_for_delivery" && progress[order.id]?.arrived != true
     }?.id
+    val toPickup = deliveries.count { it.status == "ready" && progress[it.id]?.pickedUp != true }
+    val inRoute = deliveries.count { it.status == "out_for_delivery" && progress[it.id]?.arrived != true }
+    val toReceive = deliveries.count { it.status == "out_for_delivery" && progress[it.id]?.arrived == true && it.paymentStatus != "paid" }
 
     val locationPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val orderId = pendingRouteOrderId
@@ -109,38 +102,18 @@ fun DeliveryOperationsScreen(
     }
 
     LazyColumn(
-        Modifier.fillMaxSize().padding(EventMenuUi.SpaceMd),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(EventMenuUi.SpaceMd),
         verticalArrangement = Arrangement.spacedBy(EventMenuUi.SpaceMd),
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(EventMenuUi.SpaceXs)) {
+            Column(verticalArrangement = Arrangement.spacedBy(EventMenuUi.SpaceSm)) {
                 Text("Minhas entregas", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-                Text("Veja o que fazer agora em cada pedido, sem precisar decorar etapas.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (activeTrackingOrderId != null && DeliveryLocationService.hasLocationPermission(context)) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.secondaryContainer,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            "✓ Localização compartilhada durante a rota do pedido #$activeTrackingOrderId.",
-                            modifier = Modifier.padding(12.dp),
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                    }
-                } else if (locationDenied) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = MaterialTheme.shapes.medium,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            "A rota foi iniciada, mas a localização não está liberada. Abra as permissões do aplicativo para compartilhar o trajeto.",
-                            modifier = Modifier.padding(12.dp),
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
+                Text("A tela prioriza automaticamente o que precisa da sua ação agora.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                DeliveryOverviewCard(deliveries.size, toPickup, inRoute, toReceive)
+                when {
+                    activeTrackingOrderId != null && DeliveryLocationService.hasLocationPermission(context) -> DeliveryTrackingBanner(activeTrackingOrderId, true)
+                    locationDenied -> DeliveryTrackingBanner(null, false)
                 }
             }
         }
@@ -154,30 +127,48 @@ fun DeliveryOperationsScreen(
             val address = OperationalText.useful(order.deliveryAddress)
             val phone = OperationalText.useful(order.customerPhone)
             val nextAction = deliveryNextAction(order, pickedUp, routeStarted, arrived)
+            val stage = deliveryStage(order, pickedUp, routeStarted, arrived)
 
-            Card(Modifier.fillMaxWidth()) {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column(Modifier.weight(1f)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text("Pedido #${order.id}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
                             customer?.let { Text(it, fontWeight = FontWeight.SemiBold) }
                         }
-                        Text(moneyDelivery(order.totalCents), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                        Text(moneyDelivery(order.totalCents), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
                     }
 
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        DeliveryStagePill(stage, urgent = arrived && order.paymentStatus != "paid")
+                        DeliveryPaymentPill(order.paymentStatus)
+                    }
                     if (order.fromEventMenuDelivery) DeliveryOriginPill()
+
                     address?.let {
-                        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
-                            Text(it, modifier = Modifier.padding(11.dp), style = MaterialTheme.typography.bodyMedium)
+                        Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.Top) {
+                                Icon(Icons.Default.LocationOn, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                                Text(it, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                            }
                         }
                     }
-                    DeliveryPaymentPill(order.paymentStatus)
 
                     if (phone != null) {
-                        Text(phone, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { openDialer(context, phone) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Ligar") }
-                            OutlinedButton(onClick = { openMessage(context, phone, order.id) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Mensagem") }
+                            OutlinedButton(onClick = { openDialer(context, phone) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) {
+                                Icon(Icons.Default.Phone, contentDescription = null)
+                                Spacer(Modifier.width(7.dp))
+                                Text("Ligar")
+                            }
+                            OutlinedButton(onClick = { openMessage(context, phone, order.id) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) {
+                                Icon(Icons.Default.ChatBubbleOutline, contentDescription = null)
+                                Spacer(Modifier.width(7.dp))
+                                Text("Mensagem")
+                            }
                         }
                     }
 
@@ -188,14 +179,21 @@ fun DeliveryOperationsScreen(
                         shape = MaterialTheme.shapes.medium,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Column(Modifier.padding(13.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("Próxima etapa", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                            Text(nextAction, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Bolt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text("Faça agora", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                Text(nextAction, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            }
                         }
                     }
 
                     if (order.status == "ready" && !pickedUp) {
-                        Button(onClick = { onPickup(order.id) }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("Retirar pedido") }
+                        Button(onClick = { onPickup(order.id) }, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight)) {
+                            Icon(Icons.Default.Inventory2, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Retirar pedido")
+                        }
                     }
                     if (order.status == "ready" && pickedUp) {
                         Button(
@@ -207,52 +205,66 @@ fun DeliveryOperationsScreen(
                                     locationPermissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                                 }
                             },
-                            modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight),
-                        ) { Text("Iniciar rota") }
+                            modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight),
+                        ) {
+                            Icon(Icons.Default.Navigation, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Iniciar rota")
+                        }
                     }
 
                     if (order.status == "out_for_delivery") {
                         if (!arrived && address != null) {
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { openGoogleMaps(context, address) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Maps") }
-                                OutlinedButton(onClick = { openWaze(context, address) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Waze") }
+                                OutlinedButton(onClick = { openGoogleMaps(context, address) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) { Text("Google Maps") }
+                                OutlinedButton(onClick = { openWaze(context, address) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) { Text("Waze") }
                             }
                         }
 
                         if (!arrived) {
                             Button(
                                 onClick = { DeliveryLocationService.stop(context); onArrive(order.id) },
-                                modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight),
-                            ) { Text("Cheguei ao cliente") }
-                            Text("Depois da chegada, o recebimento é liberado quando necessário.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight),
+                            ) {
+                                Icon(Icons.Default.Flag, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Cheguei ao cliente")
+                            }
+                            Text("Ao chegar, o recebimento será liberado somente se ainda houver valor pendente.", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         } else if (order.paymentStatus != "paid") {
                             Text("Receber pagamento", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                            Text("Escolha como o cliente vai pagar.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Button(onClick = { pixOrder = order }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("PIX") }
-                            Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("Cartão por aproximação") }
-                            OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("Dinheiro") }
+                            Text("Escolha a forma que o cliente vai usar agora.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Button(onClick = { pixOrder = order }, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight)) { Text("PIX") }
+                            Button(onClick = { onNfc(order.id) }, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight)) { Text("Cartão por aproximação") }
+                            OutlinedButton(onClick = { cashOrder = order }, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight)) { Text("Dinheiro") }
                         } else {
                             Button(
                                 onClick = { DeliveryLocationService.stop(context); onComplete(order.id) },
                                 enabled = arrived,
-                                modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight),
-                            ) { Text("Confirmar entrega") }
+                                modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight),
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Confirmar entrega")
+                            }
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Enviar recibo") }
-                                OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f).height(EventMenuUi.TouchTarget)) { Text("Imprimir") }
+                                OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) { Text("Enviar recibo") }
+                                OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) { Text("Imprimir") }
                             }
                         }
 
                         step?.trackingUrl?.takeIf { it.isNotBlank() }?.let { trackingUrl ->
                             TextButton(onClick = { shareTracking(context, trackingUrl, order.id) }, modifier = Modifier.fillMaxWidth()) {
-                                Text("Compartilhar acompanhamento com o cliente")
+                                Icon(Icons.Default.Share, contentDescription = null)
+                                Spacer(Modifier.width(7.dp))
+                                Text("Compartilhar acompanhamento")
                             }
                         }
                     }
 
                     OutlinedButton(
                         onClick = { detailViewModel.open(order.id) },
-                        modifier = Modifier.fillMaxWidth().height(EventMenuUi.TouchTarget),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.TouchTarget),
                     ) { Text("Ver detalhes do pedido") }
                     if (order.paymentStatus != "paid") {
                         TextButton(onClick = { cancelOrder = order }, modifier = Modifier.align(Alignment.End)) { Text("Solicitar cancelamento") }
@@ -264,18 +276,25 @@ fun DeliveryOperationsScreen(
         if (deliveries.isEmpty()) item {
             Card(Modifier.fillMaxWidth()) {
                 Column(
-                    Modifier.padding(24.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    Modifier.fillMaxWidth().padding(28.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(36.dp))
                     Text("Tudo em dia por aqui", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Quando uma entrega for atribuída a você, ela aparecerá nesta tela com a próxima ação destacada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Quando uma entrega for atribuída a você, ela aparecerá aqui com a próxima ação destacada.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
         cancellationState.message?.let { msg -> item { Text(msg, color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.SemiBold) } }
         cancellationState.error?.let { item { Text("Não foi possível atualizar o cancelamento. Tente novamente.", color = MaterialTheme.colorScheme.error) } }
-        item { OutlinedButton(onClick = onRefreshProgress, modifier = Modifier.fillMaxWidth().height(EventMenuUi.TouchTarget)) { Text("Atualizar entregas") } }
+        item {
+            OutlinedButton(onClick = onRefreshProgress, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.TouchTarget)) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Atualizar entregas")
+            }
+        }
     }
 
     detailState.detail?.let { detail ->
@@ -313,6 +332,70 @@ fun DeliveryOperationsScreen(
     pixCharge?.let { PixWaitingDialog(it, onPollPix, onDismissPix) }
 }
 
+@Composable
+private fun DeliveryOverviewCard(total: Int, toPickup: Int, inRoute: Int, toReceive: Int) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Text("Turno agora", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("$total ativa(s)", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DeliveryMetric("Retirar", toPickup, Modifier.weight(1f))
+                DeliveryMetric("Em rota", inRoute, Modifier.weight(1f))
+                DeliveryMetric("Receber", toReceive, Modifier.weight(1f), warn = toReceive > 0)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeliveryMetric(label: String, value: Int, modifier: Modifier = Modifier, warn: Boolean = false) {
+    Surface(modifier = modifier, color = if (warn) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant, shape = MaterialTheme.shapes.small) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 9.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(value.toString(), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, color = if (warn) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface)
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = if (warn) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+@Composable
+private fun DeliveryTrackingBanner(orderId: Int?, active: Boolean) {
+    Surface(
+        color = if (active) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.errorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (active) Icons.Default.MyLocation else Icons.Default.LocationOff, contentDescription = null, tint = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer)
+            Text(
+                if (active) "Localização compartilhada na rota do pedido #$orderId." else "A rota foi iniciada, mas a localização não está liberada. Ative a permissão do aplicativo.",
+                modifier = Modifier.weight(1f),
+                color = if (active) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onErrorContainer,
+                fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+private fun deliveryPriority(order: Order, progress: DeliveryProgress?): Int = when {
+    order.status == "out_for_delivery" && progress?.arrived == true && order.paymentStatus != "paid" -> 0
+    order.status == "out_for_delivery" && progress?.arrived == true -> 1
+    order.status == "out_for_delivery" -> 2
+    order.status == "ready" && progress?.pickedUp == true -> 3
+    order.status == "ready" -> 4
+    else -> 5
+}
+
+private fun deliveryStage(order: Order, pickedUp: Boolean, routeStarted: Boolean, arrived: Boolean): String = when {
+    order.status == "ready" && !pickedUp -> "Aguardando retirada"
+    order.status == "ready" && pickedUp && !routeStarted -> "Pronto para sair"
+    order.status == "out_for_delivery" && !arrived -> "Em rota"
+    order.status == "out_for_delivery" && arrived && order.paymentStatus != "paid" -> "Receber agora"
+    order.status == "out_for_delivery" && arrived -> "Concluir entrega"
+    else -> OperationalText.orderStatus(order.status)
+}
+
 private fun deliveryNextAction(order: Order, pickedUp: Boolean, routeStarted: Boolean, arrived: Boolean): String = when {
     order.status == "ready" && !pickedUp -> "Retirar o pedido"
     order.status == "ready" && pickedUp && !routeStarted -> "Iniciar a rota"
@@ -329,10 +412,26 @@ private fun DeliveryOriginPill() {
         shape = MaterialTheme.shapes.small,
     ) {
         Text(
-            "EventMenu Delivery",
+            "DELYVRE",
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             color = MaterialTheme.colorScheme.onPrimaryContainer,
             fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun DeliveryStagePill(label: String, urgent: Boolean) {
+    Surface(
+        color = if (urgent) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            color = if (urgent) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.bodyMedium,
         )
     }
 }
@@ -349,6 +448,7 @@ private fun DeliveryPaymentPill(status: String) {
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             color = if (paid) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onTertiaryContainer,
             fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodyMedium,
         )
     }
 }
@@ -466,7 +566,7 @@ private fun PixWaitingDialog(charge: PixCharge, onPoll: () -> Unit, onDismiss: (
                     )
                 }
                 OperationalText.useful(charge.expiresAt)?.let { Text("Válido até ${deliveryFriendlyDateTime(it)}", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                OutlinedButton(onClick = { copy(context, charge.copyPaste) }, modifier = Modifier.fillMaxWidth().height(EventMenuUi.ActionHeight)) { Text("Copiar código PIX") }
+                OutlinedButton(onClick = { copy(context, charge.copyPaste) }, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight)) { Text("Copiar código PIX") }
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Fechar") } },
