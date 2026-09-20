@@ -149,12 +149,12 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         openOrderSuspend(id)
     }
 
-    suspend fun payCardToken(token: String, paymentMethodId: String, installments: Int, taxId: String) {
+    suspend fun payCardToken(token: String, paymentMethodId: String, paymentTypeId: String, installments: Int, taxId: String) {
         val id = selectedOrder?.orderNumber ?: error("Pedido não encontrado.")
-        val status = api.card(id, token, paymentMethodId, installments, taxId)
+        val status = api.card(id, token, paymentMethodId, paymentTypeId, installments, taxId)
         if (status == "paid") {
             paymentPollingJob?.cancel(); paymentWaiting = false; pixPayment = null; PaymentUiContext.clear()
-            message = "Pagamento aprovado."
+            message = if (paymentTypeId == "debit_card") "Pagamento no débito aprovado." else "Pagamento no crédito aprovado."
             openOrderSuspend(id)
         } else {
             pixPayment = null
