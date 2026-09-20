@@ -32,6 +32,7 @@ final class PublicOrderPaymentService
 
     public function pix(PDO $pdo,string $publicToken,string $provider):array
     {
+        $order=$this->order($pdo,$publicToken);$methods=(new DeliveryPaymentMethodService())->forTenant($pdo,(int)$order['tenant_id']);$pix=(array)($methods['pix']??[]);if(!$pix)throw new RuntimeException('Pagamento PIX não está disponível.');$provider=strtolower(trim((string)($pix[0]['provider']??'')));if($provider==='')throw new RuntimeException('Nenhum provedor PIX principal está disponível.');
         $ctx=$this->context($pdo,$publicToken,$provider);$doc=$this->validTaxId((string)($ctx['order']['customer_document']??''));$email=trim((string)($ctx['account']['email']??''));if(!filter_var($email,FILTER_VALIDATE_EMAIL))throw new RuntimeException('Informe e salve seu e-mail antes de gerar o PIX.');
         $result=(new DeliveryCustomerPaymentService())->pixForContext($pdo,$ctx,(int)$ctx['order']['id'],$provider,$doc);
         (new OrderPaymentPreferenceService())->set($pdo,(int)$ctx['order']['tenant_id'],(int)$ctx['order']['id'],'pix',$provider,null,'web');
