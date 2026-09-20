@@ -52,6 +52,13 @@ function authorized(req) {
   return received.length === expected.length && crypto.timingSafeEqual(received, expected);
 }
 
+function normalizePathname(pathname) {
+  if (pathname === '/health' || pathname.endsWith('/health')) return '/health';
+  const marker = '/v1/sessions/';
+  const index = pathname.indexOf(marker);
+  return index >= 0 ? pathname.slice(index) : pathname;
+}
+
 function sessionDir(key) {
   return path.join(SESSION_ROOT, key);
 }
@@ -346,8 +353,9 @@ const server = http.createServer(async (req, res) => {
     if (!authorized(req)) return json(res, 401, { ok: false, error: 'Não autorizado.' });
 
     const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
+    const pathname = normalizePathname(url.pathname);
 
-    if (req.method === 'GET' && url.pathname === '/health') {
+    if (req.method === 'GET' && pathname === '/health') {
       const saved = await listSavedSessionKeys();
       return json(res, 200, {
         ok: true,
@@ -358,7 +366,7 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    const match = url.pathname.match(/^\/v1\/sessions\/([a-f0-9]{64})(?:\/(start|logout|send))?$/);
+    const match = pathname.match(/^\/v1\/sessions\/([a-f0-9]{64})(?:\/(start|logout|send))?$/);
     if (!match) return json(res, 404, { ok: false, error: 'Rota não encontrada.' });
 
     const key = match[1];
