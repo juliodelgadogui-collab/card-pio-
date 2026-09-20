@@ -61,6 +61,7 @@ dependencies {
     implementation("io.coil-kt.coil3:coil-compose:3.3.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
     implementation("com.google.firebase:firebase-messaging:25.0.1")
+    implementation("com.google.zxing:core:3.5.3")
 
     implementation(platform("com.mercadopago.android.sdk:sdk-android-bom:1.0.0"))
     implementation("com.mercadopago.android.sdk:sdk-android")
