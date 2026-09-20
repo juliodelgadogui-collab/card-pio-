@@ -3,6 +3,8 @@ package br.com.eventmenu.go.data
 import br.com.eventmenu.go.security.SecureSessionStore
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.NumberFormat
+import java.util.Locale
 
 data class OrderDetailItem(
     val id: Int,
@@ -42,6 +44,37 @@ data class LoyaltyOrderSummary(
     val orderReservation: LoyaltyOrderReservation?,
 )
 
+data class OrderPaymentPreference(
+    val method: String,
+    val provider: String?,
+    val changeForCents: Int?,
+) {
+    val display: String
+        get() {
+            val methodLabel = when (method.lowercase()) {
+                "pix" -> "PIX"
+                "card_credit" -> "Crédito"
+                "card_debit" -> "Débito"
+                "cash" -> "Dinheiro"
+                else -> method.ifBlank { "Não informada" }
+            }
+            val providerLabel = when (provider?.lowercase()) {
+                "mercadopago" -> "Mercado Pago"
+                "pagbank" -> "PagBank"
+                "efi" -> "Efí"
+                "inter" -> "Banco Inter"
+                null, "" -> ""
+                else -> provider
+            }
+            val base = if (providerLabel.isBlank()) methodLabel else "$methodLabel · $providerLabel"
+            if (method.equals("cash", ignoreCase = true) && changeForCents != null) {
+                val money = NumberFormat.getCurrencyInstance(Locale("pt", "BR")).format(changeForCents / 100.0)
+                return "$base · troco para $money"
+            }
+            return base
+        }
+}
+
 data class OrderOperationalDetail(
     val orderId: Int,
     val channel: String,
@@ -58,6 +91,7 @@ data class OrderOperationalDetail(
     val timeline: List<OrderTimelineEntry>,
     val loyalty: LoyaltyOrderSummary? = null,
     val orderSource: String = "",
+    val paymentPreference: OrderPaymentPreference? = null,
 ) {
     val fromEventMenuDelivery: Boolean get() = orderSource.equals("EVENTMENU_DELIVERY", ignoreCase = true)
 }
@@ -120,6 +154,13 @@ class OrderOperationsRepository(baseUrl: String, deviceId: String, private val s
                 )
             }
         }
+        val preference = root.optJSONObject("payment_preference")?.let {
+            OrderPaymentPreference(
+                method = it.optString("method"),
+                provider = it.optString("provider").takeIf(String::isNotBlank),
+                changeForCents = if (it.isNull("change_for_cents")) null else it.optInt("change_for_cents"),
+            )
+        }?.takeIf { it.method.isNotBlank() }
         return OrderOperationalDetail(
             orderId = order.optInt("id"),
             channel = order.optString("channel"),
@@ -136,6 +177,7 @@ class OrderOperationsRepository(baseUrl: String, deviceId: String, private val s
             timeline = timeline,
             loyalty = parseLoyalty(root.optJSONObject("loyalty")),
             orderSource = order.optString("order_source"),
+            paymentPreference = preference,
         )
     }
 
