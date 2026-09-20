@@ -31,6 +31,8 @@ jobs:
         run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Public UX contract
         run: php scripts/ci-public-ux-smoke.php
+      - name: Coupon pricing contract
+        run: php scripts/ci-coupon-pricing-smoke.php
       - name: SQLite smoke validation
         env:
           APP_ENV: testing
@@ -68,6 +70,10 @@ jobs:
           test -f database/migrations/059_delivery_customer_payment_preferences.sql
           test -f database/migrations/060_delivery_customer_legal_consents.sql
           test -f database/migrations/061_bank_pix_payment_providers.sql
+          test -f database/migrations/062_marketplace_delivery_coupons.sql
+          test -f database/migrations/063_delivery_coupon_customer_payment_hardening.sql
+          test -f database/sqlite/migrations/062_marketplace_delivery_coupons.sql
+          test -f database/sqlite/migrations/063_delivery_coupon_customer_payment_hardening.sql
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
       - name: Verify WIP payment files
@@ -77,7 +83,9 @@ jobs:
           test -f "$PACKAGE/src/Services/BankPixRefundService.php"
           test -f "$PACKAGE/src/Services/ProviderRefundService.php"
           test -f "$PACKAGE/src/Services/DeliveryCustomerPaymentService.php"
+          test -f "$PACKAGE/src/Services/PublicOrderPaymentService.php"
           test -f "$PACKAGE/public/api-delivery-payment-methods.php"
+          test -f "$PACKAGE/public/api-order-payment.php"
       - name: Generate checksums
         run: |
           cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
