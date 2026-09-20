@@ -104,6 +104,7 @@ data class CardMethod(
     val provider: String,
     val publicKey: String,
     val maxInstallments: Int,
+    val paymentTypes: Set<String> = setOf("credit_card", "debit_card"),
 )
 
 data class PaymentMethods(
