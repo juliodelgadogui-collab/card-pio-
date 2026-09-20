@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EventMenu\Services;
 
+use EventMenu\Core\Database;
 use RuntimeException;
 
 final class BankPixRefundService
@@ -18,13 +19,18 @@ final class BankPixRefundService
         $configuredKey=$this->normalizePixKey((string)($config['pix_key']??''));$receivedKey=$this->normalizePixKey((string)($received['chave']??''));if($configuredKey!==''&&$receivedKey!==''&&!hash_equals($configuredKey,$receivedKey))throw new RuntimeException('O Pix recebido pertence a outra chave recebedora.');
 
         $refundId=substr(hash('sha256',$idempotencyKey),0,32);$response=$this->requestApi($provider,$config,'PUT','/pix/'.rawurlencode($e2e).'/devolucao/'.rawurlencode($refundId),['valor'=>number_format($amount/100,2,'.','')]);
-        return $this->normalizeRefund($response,$refundId,$amount);
+        $normalized=$this->normalizeRefund($response,$refundId,$amount);if(!empty($normalized['failed']))throw new RuntimeException((string)$normalized['error']);return$normalized;
     }
 
     public function check(string $provider,array $config,array $refund,array $payment):array
     {
         $provider=$this->provider($provider);$e2e=trim((string)($payment['provider_payment_id']??''));$this->assertE2E($e2e);$refundId=trim((string)($refund['provider_refund_id']??''));if(!preg_match('/^[A-Za-z0-9]{1,35}$/',$refundId))throw new RuntimeException('Identificador da devolução Pix inválido.');
-        $response=$this->requestApi($provider,$config,'GET','/pix/'.rawurlencode($e2e).'/devolucao/'.rawurlencode($refundId));return$this->normalizeRefund($response,$refundId,(int)$refund['amount_cents']);
+        $response=$this->requestApi($provider,$config,'GET','/pix/'.rawurlencode($e2e).'/devolucao/'.rawurlencode($refundId));$normalized=$this->normalizeRefund($response,$refundId,(int)$refund['amount_cents']);
+        if(!empty($normalized['failed'])){
+            $message=mb_substr((string)$normalized['error'],0,1000);try{Database::connection()->prepare('UPDATE refunds SET status="failed",provider_payload=?,error_message=? WHERE id=? AND tenant_id=? AND status="provider_pending"')->execute([json_encode($response,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$message,(int)$refund['id'],(int)$payment['tenant_id']]);}catch(\Throwable){}
+            throw new RuntimeException($message);
+        }
+        return$normalized;
     }
 
     private function normalizeRefund(array $response,string $refundId,int $expectedAmount):array
