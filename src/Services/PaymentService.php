@@ -48,9 +48,9 @@ final class PaymentService
     public function confirmVerified(array $verified):void
     {
         foreach(['tenant_id','order_id','provider','provider_payment_id','amount_cents','currency','account_reference'] as $key)if(!array_key_exists($key,$verified))throw new RuntimeException("Campo ausente: {$key}");
-        $verified['provider']=strtolower((string)$verified['provider']);
+        $verified['provider']=strtolower((string)$verified['provider']);$customerConfirmed=false;
 
-        Database::transaction(function(PDO $pdo)use($verified):void{
+        Database::transaction(function(PDO $pdo)use($verified,&$customerConfirmed):void{
             $tenantId=(int)$verified['tenant_id'];$orderId=(int)$verified['order_id'];$provider=(string)$verified['provider'];
             if(!in_array($provider,self::PROVIDERS,true))throw new RuntimeException('Provedor inválido.');
             $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$stmt->execute([$orderId,$tenantId]);$order=$stmt->fetch();if(!$order)throw new RuntimeException('Pedido inválido.');
@@ -76,14 +76,15 @@ final class PaymentService
 
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="paid",verified_at=CURRENT_TIMESTAMP,raw_payload=? WHERE id=?')->execute([(string)$verified['provider_payment_id'],json_encode($verified,JSON_UNESCAPED_UNICODE),$payment['id']]);
             if($paidAfter<$total){$pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=?')->execute([$orderId,$tenantId]);Auth::audit('payment.partial_confirmed','payment',(string)$payment['id'],['order_id'=>$orderId,'paid_cents'=>$paidAfter,'remaining_cents'=>$total-$paidAfter]);return;}
-            $pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=?')->execute([$orderId]);
-            $order['payment_status']='paid';if($order['status']==='pending')$order['status']='confirmed';
+            $becameConfirmed=(string)$order['status']==='pending';$pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=?')->execute([$orderId]);
+            $order['payment_status']='paid';if($becameConfirmed)$order['status']='confirmed';$customerConfirmed=$becameConfirmed&&(string)($order['channel']??'')==='delivery';
             $this->settleOrderEffects($pdo,$tenantId,$order,$orderId);
             (new ProductionService())->ensureOrderJobs($pdo,$tenantId,$orderId,null);
             Auth::audit('payment.order_settled','order',(string)$orderId,['final_payment_id'=>(int)$payment['id'],'total_cents'=>$total]);
         });
 
         $this->publishVerifiedNotification($verified);
+        if($customerConfirmed){try{(new DeliveryCustomerPushService())->sendOrderStatus((int)$verified['order_id'],'confirmed');}catch(\Throwable$e){error_log('[delivery-customer-payment-push] '.$e::class.': '.$e->getMessage());}}
     }
 
     private function publishVerifiedNotification(array $verified):void
