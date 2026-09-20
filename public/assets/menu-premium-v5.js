@@ -4,6 +4,44 @@ const d=document,$=(s,r=d)=>r.querySelector(s),$$=(s,r=d)=>[...r.querySelectorAl
 d.documentElement.classList.add('js-enhanced');
 const root=$('[data-menu-root]');if(!root)return;
 
+/* DELYVRE is a consumer-facing context layered over the same restaurant/cart business logic. */
+const contextParams=new URLSearchParams(location.search);
+const contextSlug=contextParams.get('empresa')||'';
+const contextUnit=contextParams.get('unidade')||'';
+const contextKey='delyvre:menu-context:v1';
+const sessionGet=key=>{try{return sessionStorage.getItem(key)}catch{return null}};
+const sessionSet=(key,value)=>{try{sessionStorage.setItem(key,value)}catch{}};
+const sessionRemove=key=>{try{sessionStorage.removeItem(key)}catch{}};
+let delyvreContext=false;
+const sourceDelyvre=contextParams.get('source')==='delyvre';
+if(sourceDelyvre){
+    delyvreContext=true;
+    sessionSet(contextKey,JSON.stringify({slug:contextSlug,unit:contextUnit,expiresAt:Date.now()+1000*60*60*2}));
+}else{
+    let stored=null;
+    try{stored=JSON.parse(sessionGet(contextKey)||'null')}catch{stored=null}
+    let referrerSameMenu=false;
+    try{const ref=document.referrer?new URL(document.referrer):null;referrerSameMenu=!!ref&&ref.origin===location.origin&&/\/menu\.php$/i.test(ref.pathname)}catch{}
+    const navType=performance.getEntriesByType?.('navigation')?.[0]?.type||'';
+    const continuing=referrerSameMenu||navType==='reload'||navType==='back_forward';
+    const matches=stored&&stored.slug===contextSlug&&stored.unit===contextUnit&&Number(stored.expiresAt)>Date.now();
+    if(matches&&continuing)delyvreContext=true;
+    else if(stored&&!matches)sessionRemove(contextKey);
+}
+if(delyvreContext){
+    d.body.classList.add('delyvre-context');
+    if(!$('link[data-delyvre-store-style]')){
+        const link=d.createElement('link');link.rel='stylesheet';link.dataset.delyvreStoreStyle='1';link.href=new URL('assets/delyvre-store.css',location.href).href;d.head.append(link);
+    }
+    const homeUrl=new URL('delivery.php',location.href).href;
+    const bar=d.createElement('div');
+    bar.className='delyvre-store-bar';
+    bar.innerHTML=`<div class="delyvre-store-bar-inner"><a class="delyvre-back" href="${homeUrl}" aria-label="Voltar ao DELYVRE">‹</a><a class="delyvre-wordmark" href="${homeUrl}" aria-label="DELYVRE — início"><span class="delyvre-wordmark-mark" aria-hidden="true">D</span><span class="delyvre-wordmark-copy">DELYVRE<small>Escolha. Peça. Receba.</small></span></a><span class="delyvre-store-spacer"></span><a class="delyvre-store-cart-link" href="#cart">Pedido</a></div>`;
+    root.prepend(bar);
+    const powered=$('.powered');
+    if(powered){powered.className='delyvre-store-footer';powered.innerHTML='<b>DELYVRE</b> · Escolha. Peça. Receba.'}
+}
+
 /* Preserve tenant personalization, but never allow unreadable Web palettes. */
 function rgb(hex){const m=String(hex||'').trim().match(/^#([0-9a-f]{6})$/i);if(!m)return null;const n=parseInt(m[1],16);return[(n>>16)&255,(n>>8)&255,n&255]}
 function luminance(hex){const c=rgb(hex);if(!c)return null;const f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};return .2126*f(c[0])+.7152*f(c[1])+.0722*f(c[2])}
@@ -15,6 +53,11 @@ applyAccessiblePalette();
 const storageKey=root.dataset.storageKey||'eventmenu-menu';
 const cartStateEl=$('#menu-cart-state');
 const serverCart=(()=>{try{return JSON.parse(cartStateEl?.textContent||'[]')}catch{return[]}})();
+if(delyvreContext){
+    const cartLink=$('.delyvre-store-cart-link');
+    const itemCount=serverCart.reduce((sum,line)=>sum+Math.max(1,Number(line?.qty||1)),0);
+    if(cartLink&&itemCount>0)cartLink.textContent=`Pedido · ${itemCount}`;
+}
 const safeGet=k=>{try{return localStorage.getItem(k)}catch{return null}},safeSet=(k,v)=>{try{localStorage.setItem(k,v)}catch{}},safeRemove=k=>{try{localStorage.removeItem(k)}catch{}};
 const money=cents=>new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL'}).format((Number(cents)||0)/100);
 const toastRegion=$('.toast-region')||(()=>{const x=d.createElement('div');x.className='toast-region';x.setAttribute('aria-live','polite');d.body.append(x);return x})();
