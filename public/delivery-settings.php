@@ -70,7 +70,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
     }catch(Throwable$e){em_flash('error',$e->getMessage());app_redirect('delivery-settings.php');}
 }
 
-$creditChecked=!empty($mp['credit_enabled']);$debitChecked=!empty($mp['debit_enabled']);$connectedAccount=trim((string)($gateway['account_reference']??''));
+$creditChecked=!array_key_exists('credit_enabled',$mp)||!empty($mp['credit_enabled']);$debitChecked=!array_key_exists('debit_enabled',$mp)||!empty($mp['debit_enabled']);$connectedAccount=trim((string)($gateway['account_reference']??''));
 em_header('Configurações do Delivery','delivery');
 ?>
 <section class="page-hero"><div><span class="eyebrow">EVENTMENU DELIVERY</span><h2>Loja, entrega e pagamento</h2><p>Controle o que o cliente vê no app e quais pagamentos pode usar sem sair do EventMenu.</p></div><div class="hero-actions"><a class="button secondary" href="<?=Security::e(app_url('?route=delivery'))?>">Voltar ao Delivery</a><a class="button secondary" href="<?=Security::e(app_url('bank-pix-settings.php'))?>">Pix Efí / Inter</a></div></section>
