@@ -16,18 +16,21 @@ const statusMap=new Map([
  ['active',['Ativo','success']],['ativa',['Ativa','success']],['inactive',['Inativo','muted']],['suspended',['Suspenso','warning']],['suspensa',['Suspensa','warning']],
  ['overdue',['Vencida','danger']],['open',['Em aberto','warning']],['draft',['Rascunho','muted']],['ok',['Normal','success']],['healthy',['Normal','success']]
 ]);
+function nodesIncludingRoot(root,selector){const out=[];if(root?.matches?.(selector))out.push(root);if(root?.querySelectorAll)out.push(...root.querySelectorAll(selector));return out}
 function enhanceStatuses(root=d){
- root.querySelectorAll('.badge,.status-pill').forEach(el=>{
+ nodesIncludingRoot(root,'.badge,.status-pill').forEach(el=>{
    if([...el.classList].some(c=>c.startsWith('status-')))return;
-   const key=normalizeText(el.textContent);
-   const hit=statusMap.get(key);
-   if(!hit)return;
+   const hit=statusMap.get(normalizeText(el.textContent));if(!hit)return;
+   el.textContent=hit[0];el.classList.add('status-'+hit[1]);
+ });
+ nodesIncludingRoot(root,'.content td').forEach(el=>{
+   if(el.children.length)return;
+   const hit=statusMap.get(normalizeText(el.textContent));if(!hit)return;
    el.textContent=hit[0];
-   el.classList.add('status-'+hit[1]);
  });
 }
 function enhanceTables(root=d){
- root.querySelectorAll('.table-wrap').forEach(wrap=>{
+ nodesIncludingRoot(root,'.table-wrap').forEach(wrap=>{
    if(wrap.classList.contains('no-mobile-cards')||wrap.classList.contains('responsive-table'))return;
    const table=wrap.querySelector('table');if(!table)return;
    const headers=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());if(!headers.length)return;
@@ -62,8 +65,7 @@ async function enhancePlatformCockpit(){
      cockpitCard('Faturas em aberto',String(x.invoices_open||0),`${x.invoices_overdue||0} vencida(s)`,(x.invoices_overdue||0)>0?'danger':(x.invoices_open||0)>0?'warning':'success',link('marketplace-finance','invoices')),
      cockpitCard('Saúde do sistema',String(x.health_warnings||0),'Alertas que precisam de revisão',x.health==='error'?'danger':x.health==='warning'?'warning':'success',link('system-health'))
    );
-   host.append(metrics,title,grid);
-   hero.insertAdjacentElement('afterend',host);
+   host.append(metrics,title,grid);hero.insertAdjacentElement('afterend',host);
    const warnings=[];if((x.invoices_overdue||0)>0)warnings.push(`${x.invoices_overdue} fatura(s) vencida(s)`);if((x.companies_suspended||0)>0)warnings.push(`${x.companies_suspended} empresa(s) suspensa(s)`);if((x.health_warnings||0)>0)warnings.push(`${x.health_warnings} alerta(s) de infraestrutura`);
    if(warnings.length){const alert=d.createElement('div');alert.className='alert warning';alert.textContent='Atenção: '+warnings.join(' · ')+'.';host.insertAdjacentElement('afterbegin',alert)}
    const oldMetrics=host.nextElementSibling;if(oldMetrics?.classList.contains('metric-grid'))oldMetrics.hidden=true;
