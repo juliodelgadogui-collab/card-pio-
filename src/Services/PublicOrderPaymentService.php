@@ -13,7 +13,9 @@ final class PublicOrderPaymentService
     public function methods(PDO $pdo,string $publicToken):array
     {
         $order=$this->order($pdo,$publicToken);
-        return (new DeliveryPaymentMethodService())->forTenant($pdo,(int)$order['tenant_id']);
+        $methods=(new DeliveryPaymentMethodService())->forTenant($pdo,(int)$order['tenant_id']);
+        if((string)($order['channel']??'')==='event')$methods['cash']=false;
+        return $methods;
     }
 
     public function profile(PDO $pdo,string $publicToken,string $email,string $document):array
@@ -49,7 +51,9 @@ final class PublicOrderPaymentService
 
     public function cash(PDO $pdo,string $publicToken,?int $changeForCents=null):array
     {
-        $order=$this->order($pdo,$publicToken);$methods=(new DeliveryPaymentMethodService())->forTenant($pdo,(int)$order['tenant_id']);if(empty($methods['cash']))throw new RuntimeException('Pagamento em dinheiro não está disponível.');
+        $order=$this->order($pdo,$publicToken);
+        if((string)($order['channel']??'')==='event')throw new RuntimeException('Ingressos online não aceitam pagamento em dinheiro. Use PIX ou cartão.');
+        $methods=(new DeliveryPaymentMethodService())->forTenant($pdo,(int)$order['tenant_id']);if(empty($methods['cash']))throw new RuntimeException('Pagamento em dinheiro não está disponível.');
         if(in_array((string)$order['status'],['cancelled','completed'],true)||(string)$order['payment_status']==='paid')throw new RuntimeException('Este pedido não aceita alteração de pagamento.');
         $active=$pdo->prepare('SELECT id FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") LIMIT 1');$active->execute([(int)$order['tenant_id'],(int)$order['id']]);if($active->fetchColumn())throw new RuntimeException('Já existe uma cobrança eletrônica em andamento. Aguarde o resultado antes de trocar para dinheiro.');
         $changeForCents=$changeForCents!==null?max(0,$changeForCents):null;if($changeForCents!==null&&$changeForCents<(int)$order['total_cents'])throw new RuntimeException('O valor para troco deve ser maior ou igual ao total do pedido.');
