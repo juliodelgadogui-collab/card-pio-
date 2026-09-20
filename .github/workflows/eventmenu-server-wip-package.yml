@@ -1,0 +1,91 @@
+name: EventMenu Server WIP Package
+on:
+  push:
+    branches: [wip/eventmenu-delivery-customer-auth-payments]
+    paths:
+      - '.github/workflows/eventmenu-server-wip-package.yml'
+      - 'app/**'
+      - 'public/**'
+      - 'src/**'
+      - 'database/**'
+      - 'scripts/**'
+      - 'composer.json'
+      - 'composer.lock'
+      - '.env.example'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  server-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: 'curl, mbstring, openssl, pdo_sqlite'
+          coverage: none
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: PHP syntax validation
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Public UX contract
+        run: php scripts/ci-public-ux-smoke.php
+      - name: SQLite smoke validation
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          APP_URL: https://example.test/1
+          APP_BASE_PATH: /1
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-package.sqlite
+          SESSION_NAME: eventmenu_package_sqlite
+        run: |
+          set -euo pipefail
+          rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
+          php scripts/ci-db-smoke.php
+          php scripts/ci-sqlite-legacy-upgrade-smoke.php
+          php scripts/ci-db-repair-page-smoke.php
+          php scripts/ci-super-admin-smoke.php
+          php scripts/ci-permission-smoke.php
+          php scripts/ci-sensitive-rate-limit-smoke.php
+          php scripts/ci-operations-smoke.php
+          php scripts/ci-customer-identity-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-marketplace-finance-smoke.php
+          php scripts/ci-marketplace-native-contract-smoke.php
+          php scripts/ci-auth-mail-smoke.php
+          php scripts/ci-url-smoke.php
+          php scripts/ci-backup-smoke.php
+          php scripts/ci-operational-resilience-smoke.php
+          php scripts/ci-production-readiness-smoke.php
+      - name: Verify latest payment migrations
+        run: |
+          set -euo pipefail
+          test -f database/migrations/058_customer_auth_email_verification.sql
+          test -f database/migrations/059_payment_refunds.sql
+          test -f database/migrations/060_card_payment_settings.sql
+          test -f database/migrations/061_bank_pix_payment_providers.sql
+      - name: Build SQLite server package
+        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
+      - name: Verify WIP payment files
+        run: |
+          PACKAGE="$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
+          test -f "$PACKAGE/src/Services/BankPixProviderService.php"
+          test -f "$PACKAGE/src/Services/BankPixRefundService.php"
+          test -f "$PACKAGE/src/Services/ProviderRefundService.php"
+          test -f "$PACKAGE/public/api-delivery-payment-methods.php"
+          test -f "$PACKAGE/public/api-delivery-card-payment.php"
+      - name: Generate checksums
+        run: |
+          cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-Servidor-WIP
+          path: '${{ runner.temp }}/EventMenu-Premium-Servidor-WIP'
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
