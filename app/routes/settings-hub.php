@@ -29,6 +29,9 @@ em_header('Configurações','settings');
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=media-settings')) ?>">
     <span class="eyebrow">IMAGENS</span><h3>Logo e capa</h3><p class="muted">Envie arquivos direto do celular ou computador, sem precisar colar URL.</p><span class="button secondary compact">Gerenciar imagens</span>
   </a>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('whatsapp.php')) ?>">
+    <span class="eyebrow">WHATSAPP · BETA</span><h3>Conexão e mensagens</h3><p class="muted">Conecte o WhatsApp por QR Code e configure avisos automáticos de pedido, pagamento, preparo e entrega.</p><span class="button secondary compact">Configurar WhatsApp</span>
+  </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=email-settings')) ?>">
     <span class="eyebrow">E-MAIL</span><h3>Servidor SMTP</h3><p class="muted"><?= !empty($mail['enabled']) ? 'Envio de e-mail está configurado e ativo.' : 'Configure remetente, servidor, usuário, senha e teste de envio.' ?></p><span class="status-pill <?= !empty($mail['enabled']) ? 'active' : '' ?>"><?= !empty($mail['enabled']) ? 'Ativo' : 'Configurar' ?></span>
   </a>

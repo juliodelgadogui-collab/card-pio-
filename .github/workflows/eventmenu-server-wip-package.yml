@@ -9,6 +9,7 @@ on:
       - 'src/**'
       - 'database/**'
       - 'scripts/**'
+      - 'integrations/**'
       - 'composer.json'
       - 'composer.lock'
       - '.env.example'
@@ -29,6 +30,8 @@ jobs:
         run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
       - name: PHP syntax validation
         run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: WhatsApp bridge syntax validation
+        run: node --check integrations/whatsapp-worker/server.js
       - name: Public UX contract
         run: php scripts/ci-public-ux-smoke.php
       - name: Coupon pricing contract
@@ -37,6 +40,8 @@ jobs:
         run: php scripts/ci-order-payment-preference-smoke.php
       - name: Native payment route contract
         run: php scripts/ci-native-payment-route-smoke.php
+      - name: WhatsApp isolation and outbox contract
+        run: php scripts/ci-whatsapp-smoke.php
       - name: SQLite smoke validation
         env:
           APP_ENV: testing
@@ -67,7 +72,7 @@ jobs:
           php scripts/ci-backup-smoke.php
           php scripts/ci-operational-resilience-smoke.php
           php scripts/ci-production-readiness-smoke.php
-      - name: Verify latest delivery migrations
+      - name: Verify latest delivery and WhatsApp migrations
         run: |
           set -euo pipefail
           test -f database/migrations/058_delivery_customer_accounts.sql
@@ -77,12 +82,14 @@ jobs:
           test -f database/migrations/062_marketplace_delivery_coupons.sql
           test -f database/migrations/063_delivery_coupon_customer_payment_hardening.sql
           test -f database/migrations/064_order_payment_preferences.sql
+          test -f database/migrations/065_whatsapp_integration.sql
           test -f database/sqlite/migrations/062_marketplace_delivery_coupons.sql
           test -f database/sqlite/migrations/063_delivery_coupon_customer_payment_hardening.sql
           test -f database/sqlite/migrations/064_order_payment_preferences.sql
+          test -f database/sqlite/migrations/065_whatsapp_integration.sql
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
-      - name: Verify WIP payment files
+      - name: Verify WIP payment and WhatsApp files
         run: |
           PACKAGE="$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
           test -f "$PACKAGE/src/Services/BankPixProviderService.php"
@@ -91,8 +98,12 @@ jobs:
           test -f "$PACKAGE/src/Services/DeliveryCustomerPaymentService.php"
           test -f "$PACKAGE/src/Services/PublicOrderPaymentService.php"
           test -f "$PACKAGE/src/Services/OrderPaymentPreferenceService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppIntegrationService.php"
           test -f "$PACKAGE/public/api-delivery-payment-methods.php"
           test -f "$PACKAGE/public/api-order-payment.php"
+          test -f "$PACKAGE/public/whatsapp.php"
+          test -f "$PACKAGE/integrations/whatsapp-worker/server.js"
+          test -f "$PACKAGE/integrations/whatsapp-worker/package.json"
       - name: Generate checksums
         run: |
           cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
