@@ -35,6 +35,12 @@ private data class InstallmentChoice(
     val hasInterest: Boolean,
 )
 
+private data class PaymentMethodChoice(
+    val id: String,
+    val paymentTypeId: String,
+    val cvvLength: Int,
+)
+
 @Composable
 fun CardPaymentForm(
     publicKey: String,
@@ -72,6 +78,8 @@ private fun CardPaymentFormWithAmount(
     var taxId by remember { mutableStateOf("") }
     var installments by remember { mutableIntStateOf(0) }
     var installmentOptions by remember { mutableStateOf<List<InstallmentChoice>>(emptyList()) }
+    var methodChoices by remember { mutableStateOf<List<PaymentMethodChoice>>(emptyList()) }
+    var methodsLoading by remember { mutableStateOf(false) }
     var installmentsLoading by remember { mutableStateOf(false) }
     var paymentMethodId by remember { mutableStateOf("") }
     var paymentTypeId by remember { mutableStateOf("") }
@@ -83,6 +91,7 @@ private fun CardPaymentFormWithAmount(
     LaunchedEffect(publicKey) {
         sdkReady = false
         error = null
+        methodChoices = emptyList()
         installmentOptions = emptyList()
         installments = 0
         paymentMethodId = ""
@@ -98,51 +107,68 @@ private fun CardPaymentFormWithAmount(
             .onFailure { error = "Não foi possível iniciar o pagamento por cartão." }
     }
 
-    LaunchedEffect(bin, amountCents, maxInstallments, sdkReady, paymentTypes) {
+    LaunchedEffect(bin, sdkReady, paymentTypes) {
+        methodChoices = emptyList()
         installmentOptions = emptyList()
         installments = 0
         paymentMethodId = ""
         paymentTypeId = ""
         cvvLength = 3
-        if (!sdkReady || bin.length < 8 || amountCents <= 0) return@LaunchedEffect
+        if (!sdkReady || bin.length < 8) return@LaunchedEffect
 
-        installmentsLoading = true
+        methodsLoading = true
         error = null
         try {
-            val core = MercadoPagoSDK.getInstance().coreMethods
-            val methodsResult = core.getPaymentMethods(bin)
+            val methodsResult = MercadoPagoSDK.getInstance().coreMethods.getPaymentMethods(bin)
             if (methodsResult !is Result.Success) {
                 error = "Não foi possível identificar o cartão. Revise o número."
                 return@LaunchedEffect
             }
-            val method = methodsResult.data.firstOrNull { candidate ->
-                candidate.paymentTypeId in paymentTypes && candidate.id?.isNotBlank() == true
-            } ?: methodsResult.data.firstOrNull()
-            paymentMethodId = method?.id.orEmpty()
-            paymentTypeId = method?.paymentTypeId.orEmpty()
-            cvvLength = method?.card?.securityCode?.length?.coerceIn(3, 4) ?: 3
-            if (paymentMethodId.isBlank() || paymentTypeId !in setOf("credit_card", "debit_card")) {
+            val choices = methodsResult.data
+                .mapNotNull { method ->
+                    val id = method.id.orEmpty()
+                    val type = method.paymentTypeId.orEmpty()
+                    if (id.isBlank() || type !in paymentTypes || type !in setOf("credit_card", "debit_card")) null
+                    else PaymentMethodChoice(id, type, method.card?.securityCode?.length?.coerceIn(3, 4) ?: 3)
+                }
+                .distinctBy { it.paymentTypeId }
+                .sortedBy { if (it.paymentTypeId == "credit_card") 0 else 1 }
+            if (choices.isEmpty()) {
                 error = "Este cartão não está disponível para crédito ou débito nesta conta."
                 return@LaunchedEffect
             }
-            if (paymentTypeId !in paymentTypes) {
-                error = "Este restaurante não habilitou ${if (paymentTypeId == "debit_card") "cartão de débito" else "cartão de crédito"} no app."
-                return@LaunchedEffect
-            }
+            methodChoices = choices
+            val selected = choices.first()
+            paymentMethodId = selected.id
+            paymentTypeId = selected.paymentTypeId
+            cvvLength = selected.cvvLength
+        } catch (_: Throwable) {
+            error = "Não foi possível identificar as funções disponíveis deste cartão."
+        } finally {
+            methodsLoading = false
+        }
+    }
 
-            if (paymentTypeId == "debit_card") {
-                installmentOptions = listOf(InstallmentChoice(1, amountCents, amountCents, false))
-                installments = 1
-                return@LaunchedEffect
-            }
+    LaunchedEffect(paymentTypeId, paymentMethodId, bin, amountCents, maxInstallments, sdkReady) {
+        installmentOptions = emptyList()
+        installments = 0
+        if (!sdkReady || bin.length < 8 || amountCents <= 0 || paymentMethodId.isBlank()) return@LaunchedEffect
+        if (paymentTypeId == "debit_card") {
+            installmentOptions = listOf(InstallmentChoice(1, amountCents, amountCents, false))
+            installments = 1
+            return@LaunchedEffect
+        }
+        if (paymentTypeId != "credit_card") return@LaunchedEffect
 
+        installmentsLoading = true
+        error = null
+        try {
             val amount = BigDecimal.valueOf(amountCents.toLong(), 2)
-            val installmentResult = core.getInstallments(bin = bin, amount = amount)
+            val installmentResult = MercadoPagoSDK.getInstance().coreMethods.getInstallments(bin = bin, amount = amount)
             if (installmentResult !is Result.Success) {
                 error = "Não foi possível consultar as parcelas disponíveis."
                 return@LaunchedEffect
             }
-
             val allowed = installmentResult.data
                 .filter { it.paymentMethodId.isNullOrBlank() || it.paymentMethodId == paymentMethodId }
                 .flatMap { it.payerCost.orEmpty() }
@@ -160,7 +186,6 @@ private fun CardPaymentFormWithAmount(
                 }
                 .distinctBy { it.count }
                 .sortedBy { it.count }
-
             if (allowed.isEmpty()) {
                 error = "Nenhuma condição de parcelamento está disponível para este cartão de crédito."
                 return@LaunchedEffect
@@ -174,11 +199,19 @@ private fun CardPaymentFormWithAmount(
         }
     }
 
+    fun selectMethod(choice: PaymentMethodChoice) {
+        paymentMethodId = choice.id
+        paymentTypeId = choice.paymentTypeId
+        cvvLength = choice.cvvLength
+        error = null
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(
-            when (paymentTypeId) {
-                "debit_card" -> "Cartão de débito"
-                "credit_card" -> "Cartão de crédito"
+            when {
+                methodChoices.size > 1 -> "Cartão de crédito ou débito"
+                paymentTypeId == "debit_card" -> "Cartão de débito"
+                paymentTypeId == "credit_card" -> "Cartão de crédito"
                 else -> "Cartão de crédito ou débito"
             },
             style = MaterialTheme.typography.titleLarge,
@@ -201,6 +234,23 @@ private fun CardPaymentFormWithAmount(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
         }
+
+        if (methodsLoading) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("Identificando crédito/débito…", style = MaterialTheme.typography.bodySmall)
+        } else if (methodChoices.size > 1) {
+            Text("Como deseja pagar?", style = MaterialTheme.typography.labelLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                methodChoices.forEach { choice ->
+                    FilterChip(
+                        selected = paymentTypeId == choice.paymentTypeId,
+                        onClick = { selectMethod(choice) },
+                        label = { Text(if (choice.paymentTypeId == "debit_card") "Débito" else "Crédito") },
+                    )
+                }
+            }
+        }
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Box(Modifier.weight(1f)) {
                 SecureBox("Validade") {
@@ -254,8 +304,7 @@ private fun CardPaymentFormWithAmount(
                 busy = true; error = null
                 scope.launch {
                     try {
-                        val core = MercadoPagoSDK.getInstance().coreMethods
-                        val tokenResult = core.generateCardToken(
+                        val tokenResult = MercadoPagoSDK.getInstance().coreMethods.generateCardToken(
                             cardNumberState = number,
                             expirationDateState = expiration,
                             securityCodeState = cvv,
@@ -270,7 +319,7 @@ private fun CardPaymentFormWithAmount(
                     finally { busy = false }
                 }
             },
-            enabled = !busy && !installmentsLoading && installmentOptions.isNotEmpty(),
+            enabled = !busy && !methodsLoading && !installmentsLoading && installmentOptions.isNotEmpty(),
             modifier = Modifier.fillMaxWidth(),
         ) { Text(if (busy) "Processando…" else if (paymentTypeId == "debit_card") "Pagar no débito" else "Pagar no crédito") }
     }
