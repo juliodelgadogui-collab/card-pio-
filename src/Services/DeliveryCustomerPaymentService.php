@@ -53,7 +53,11 @@ final class DeliveryCustomerPaymentService
         if($requestedType==='')throw new RuntimeException('Nenhum tipo de cartão está habilitado para este restaurante.');
         $access=trim((string)($config['access_token']??''));if($access==='')throw new RuntimeException('Mercado Pago não configurado.');
         $serverType=$this->mercadoPagoPaymentType($access,$method);if($serverType!==$requestedType)throw new RuntimeException('O meio de pagamento selecionado não corresponde ao tipo de cartão permitido.');
-        $installments=max(1,min(12,(int)($payload['installments']??1)));if($serverType==='debit_card')$installments=1;
+        $requestedInstallments=(int)($payload['installments']??1);if($requestedInstallments<1||$requestedInstallments>12)throw new RuntimeException('Quantidade de parcelas inválida.');
+        $maxInstallments=max(1,min(12,(int)($config['max_installments']??12)));
+        if($serverType==='debit_card'&&$requestedInstallments!==1)throw new RuntimeException('Cartão de débito aceita somente pagamento à vista.');
+        if($serverType==='credit_card'&&$requestedInstallments>$maxInstallments)throw new RuntimeException('A quantidade de parcelas ultrapassa o limite configurado pelo restaurante.');
+        $installments=$serverType==='debit_card'?1:$requestedInstallments;
         $amount=$this->remaining($pdo,(int)$ctx['order']['tenant_id'],$orderId);if($amount<=0)throw new RuntimeException('Pedido já está pago.');
 
         $active=$this->activePayment($pdo,(int)$ctx['order']['tenant_id'],$orderId);if($active)throw new RuntimeException('Já existe uma cobrança eletrônica em andamento para este pedido. Aguarde o resultado antes de tentar outro pagamento.');
@@ -63,10 +67,11 @@ final class DeliveryCustomerPaymentService
             $payer=['email'=>(string)$ctx['account']['email']];$taxId=preg_replace('/\D+/','',(string)($payload['tax_id']??''))??'';if(in_array(strlen($taxId),[11,14],true))$payer['identification']=['type'=>strlen($taxId)===11?'CPF':'CNPJ','number'=>$taxId];
             $body=['transaction_amount'=>$amount/100,'token'=>$token,'description'=>'Pedido EventMenu #'.$orderId,'installments'=>$installments,'payment_method_id'=>$method,'external_reference'=>'eventmenu:'.(int)$ctx['order']['tenant_id'].':'.$orderId,'notification_url'=>\app_absolute_url('webhook.php?provider=mercadopago&tenant='.rawurlencode((string)$ctx['tenant_slug'])),'payer'=>$payer,'metadata'=>['tenant_id'=>(int)$ctx['order']['tenant_id'],'order_id'=>$orderId,'eventmenu_payment_id'=>(int)$payment['id'],'channel'=>'eventmenu_delivery_app','requested_payment_type'=>$serverType]];
             $issuer=trim((string)($payload['issuer_id']??''));if($issuer!=='')$body['issuer_id']=$issuer;
-            $data=$this->httpJson('POST','https://api.mercadopago.com/v1/payments',['Authorization: Bearer '.$access,'X-Idempotency-Key: '.$key],$body);$external=(string)($data['id']??'');$providerStatus=strtolower((string)($data['status']??''));$actualType=strtolower(trim((string)($data['payment_type_id']??'')));if(!in_array($actualType,['credit_card','debit_card'],true))$actualType=$serverType;if($actualType!==$serverType){error_log('[delivery-card-type] Mercado Pago retornou '.$actualType.' para método validado como '.$serverType.'.');$actualType=$serverType;}
-            $payloadForDb=$data;$payloadForDb['_eventmenu_payment_id']=(int)$payment['id'];$payloadForDb['_eventmenu_requested_payment_type']=$serverType;$pdo->prepare('UPDATE payments SET provider_payment_id=?,status=?,raw_payload=? WHERE id=?')->execute([$external,$providerStatus==='approved'?'authorized':(in_array($providerStatus,['pending','in_process','in_mediation'],true)?'pending':'failed'),json_encode($payloadForDb,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);
+            $data=$this->httpJson('POST','https://api.mercadopago.com/v1/payments',['Authorization: Bearer '.$access,'X-Idempotency-Key: '.$key],$body);$external=trim((string)($data['id']??''));if($external==='')throw new RuntimeException('Mercado Pago não retornou o identificador do pagamento.');$providerStatus=strtolower((string)($data['status']??''));$actualType=strtolower(trim((string)($data['payment_type_id']??'')));
+            $payloadForDb=$data;$payloadForDb['_eventmenu_payment_id']=(int)$payment['id'];$payloadForDb['_eventmenu_requested_payment_type']=$serverType;$pdo->prepare('UPDATE payments SET provider_payment_id=?,status=?,raw_payload=? WHERE id=?')->execute([$external,$providerStatus==='approved'?'authorized':(in_array($providerStatus,['pending','in_process','in_mediation'],true)?'pending':'failed'),json_encode($payloadForDb,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);$payment['provider_payment_id']=$external;
+            $verified=$this->assertMercadoPagoPayment($data,$payment,(int)$ctx['order']['tenant_id'],$orderId,(string)$ctx['gateway']['account_reference'],$serverType);
             if($providerStatus==='approved'){
-                (new PaymentService())->confirmVerified(['tenant_id'=>(int)$ctx['order']['tenant_id'],'order_id'=>$orderId,'provider'=>'mercadopago','provider_payment_id'=>$external,'payment_id'=>(int)$payment['id'],'amount_cents'=>$amount,'currency'=>'BRL','account_reference'=>(string)$ctx['gateway']['account_reference'],'source'=>$actualType==='debit_card'?'card_debit':'card_credit','payment_method_type'=>$actualType]);
+                (new PaymentService())->confirmVerified(['tenant_id'=>(int)$ctx['order']['tenant_id'],'order_id'=>$orderId,'provider'=>'mercadopago','provider_payment_id'=>$verified['provider_payment_id'],'payment_id'=>(int)$payment['id'],'amount_cents'=>$verified['amount_cents'],'currency'=>$verified['currency'],'account_reference'=>$verified['account_reference'],'source'=>$actualType==='debit_card'?'card_debit':'card_credit','payment_method_type'=>$actualType]);
                 return ['payment_id'=>(int)$payment['id'],'order_id'=>$orderId,'provider'=>'mercadopago','status'=>'paid','status_detail'=>(string)($data['status_detail']??''),'payment_type_id'=>$actualType,'amount_cents'=>$amount];
             }
             if(in_array($providerStatus,['pending','in_process','in_mediation'],true))return ['payment_id'=>(int)$payment['id'],'order_id'=>$orderId,'provider'=>'mercadopago','status'=>'pending','status_detail'=>(string)($data['status_detail']??''),'payment_type_id'=>$actualType,'amount_cents'=>$amount];
@@ -77,8 +82,37 @@ final class DeliveryCustomerPaymentService
     public function status(PDO $pdo,int $accountId,int $orderId): array
     {
         $ctx=(new DeliveryCustomerMarketplaceService())->ownedOrder($pdo,$accountId,$orderId);$tenantId=(int)$ctx['tenant_id'];
-        try{(new BankPixProviderService())->reconcileForOrder($pdo,$tenantId,$orderId);$ctx=(new DeliveryCustomerMarketplaceService())->ownedOrder($pdo,$accountId,$orderId);}catch(\Throwable$e){error_log('[delivery-bank-pix-status] '.$e::class.': '.$e->getMessage());}
+        try{(new BankPixProviderService())->reconcileForOrder($pdo,$tenantId,$orderId);}catch(\Throwable$e){error_log('[delivery-bank-pix-status] '.$e::class.': '.$e->getMessage());}
+        try{$this->reconcileMercadoPagoForOrder($pdo,$tenantId,$orderId);}catch(\Throwable$e){error_log('[delivery-mercadopago-status] '.$e::class.': '.$e->getMessage());}
+        $ctx=(new DeliveryCustomerMarketplaceService())->ownedOrder($pdo,$accountId,$orderId);
         $q=$pdo->prepare('SELECT id,provider,amount_cents,currency,status,verified_at,created_at FROM payments WHERE tenant_id=? AND order_id=? ORDER BY id DESC LIMIT 10');$q->execute([$tenantId,$orderId]);$payments=[];foreach($q->fetchAll() as$p)$payments[]=['id'=>(int)$p['id'],'provider'=>(string)$p['provider'],'amount_cents'=>(int)$p['amount_cents'],'currency'=>(string)$p['currency'],'status'=>(string)$p['status'],'verified_at'=>$p['verified_at'],'created_at'=>$p['created_at']];return ['order_id'=>$orderId,'payment_status'=>(string)$ctx['payment_status'],'payments'=>$payments];
+    }
+
+    private function reconcileMercadoPagoForOrder(PDO $pdo,int $tenantId,int $orderId): void
+    {
+        $g=$pdo->prepare('SELECT * FROM payment_gateways WHERE tenant_id=? AND provider="mercadopago" AND active=1 LIMIT 1');$g->execute([$tenantId]);$gateway=$g->fetch();if(!$gateway)return;
+        $config=Crypto::decryptJson((string)$gateway['config_encrypted']);$access=trim((string)($config['access_token']??''));$accountReference=trim((string)($gateway['account_reference']??''));if($access===''||$accountReference==='')return;
+        $q=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND provider="mercadopago" AND status IN ("created","pending","authorized") AND provider_payment_id IS NOT NULL AND provider_payment_id<>"" AND idempotency_key LIKE "delivery-app:%" ORDER BY id DESC LIMIT 1');$q->execute([$tenantId,$orderId]);$payment=$q->fetch();if(!$payment)return;
+        $providerId=trim((string)$payment['provider_payment_id']);$data=$this->httpJson('GET','https://api.mercadopago.com/v1/payments/'.rawurlencode($providerId),['Authorization: Bearer '.$access],null);$verified=$this->assertMercadoPagoPayment($data,$payment,$tenantId,$orderId,$accountReference,null);$status=strtolower(trim((string)($data['status']??'')));
+        if($status==='approved'){
+            $method=strtolower(trim((string)($data['payment_method_id']??'')));$type=strtolower(trim((string)($data['payment_type_id']??'')));$source=$method==='pix'?'pix':($type==='debit_card'?'card_debit':($type==='credit_card'?'card_credit':'mercadopago'));
+            (new PaymentService())->confirmVerified(['tenant_id'=>$tenantId,'order_id'=>$orderId,'provider'=>'mercadopago','provider_payment_id'=>$verified['provider_payment_id'],'payment_id'=>(int)$payment['id'],'amount_cents'=>$verified['amount_cents'],'currency'=>$verified['currency'],'account_reference'=>$verified['account_reference'],'source'=>$source,'payment_method_type'=>$type]);return;
+        }
+        if(in_array($status,['rejected','cancelled','canceled'],true)){
+            $target=in_array($status,['cancelled','canceled'],true)?'cancelled':'failed';$pdo->prepare('UPDATE payments SET status=? WHERE id=? AND tenant_id=? AND status IN ("created","pending","authorized")')->execute([$target,(int)$payment['id'],$tenantId]);$pdo->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$orderId,$tenantId]);try{(new StockReservationService())->rearmAfterPaymentFailure($tenantId,$orderId,30);}catch(\Throwable){}
+        }
+    }
+
+    private function assertMercadoPagoPayment(array $data,array $payment,int $tenantId,int $orderId,string $accountReference,?string $expectedType): array
+    {
+        $providerId=trim((string)($data['id']??''));$localProviderId=trim((string)($payment['provider_payment_id']??''));if($providerId===''||($localProviderId!==''&&$providerId!==$localProviderId))throw new RuntimeException('Pagamento Mercado Pago não corresponde à cobrança local.');
+        $reference=trim((string)($data['external_reference']??''));if($reference!=='eventmenu:'.$tenantId.':'.$orderId)throw new RuntimeException('Referência Mercado Pago divergente.');
+        $metadata=is_array($data['metadata']??null)?$data['metadata']:[];if((int)($metadata['tenant_id']??0)!==$tenantId||(int)($metadata['order_id']??0)!==$orderId)throw new RuntimeException('Metadados Mercado Pago divergentes.');if(isset($metadata['eventmenu_payment_id'])&&(int)$metadata['eventmenu_payment_id']!==(int)$payment['id'])throw new RuntimeException('Identificador local Mercado Pago divergente.');
+        $collector=trim((string)($data['collector_id']??''));if($collector===''||$accountReference===''||$collector!==$accountReference)throw new RuntimeException('Conta recebedora Mercado Pago divergente.');
+        $currency=strtoupper(trim((string)($data['currency_id']??'')));if($currency!=='BRL')throw new RuntimeException('Moeda Mercado Pago divergente.');
+        $amount=(int)round(((float)($data['transaction_amount']??0))*100);if($amount<1||$amount!==(int)$payment['amount_cents'])throw new RuntimeException('Valor Mercado Pago divergente.');
+        $type=strtolower(trim((string)($data['payment_type_id']??'')));if($expectedType!==null&&$type!==$expectedType)throw new RuntimeException('Tipo de cartão retornado pelo Mercado Pago diverge do meio validado pelo servidor.');
+        return ['provider_payment_id'=>$providerId,'amount_cents'=>$amount,'currency'=>$currency,'account_reference'=>$collector,'payment_type_id'=>$type];
     }
 
     private function context(PDO $pdo,int $accountId,int $orderId,string $provider): array
