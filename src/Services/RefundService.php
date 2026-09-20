@@ -12,287 +12,171 @@ use Throwable;
 
 final class RefundService
 {
-    public function requestFull(int $paymentId, string $reason): array
+    public function requestFull(int $paymentId,string $reason):array
     {
         Auth::requirePermission('refunds.manage');
-        $tenantId = Auth::tenantId();
-        $userId = Auth::id();
-        if (!$tenantId || !$userId) throw new RuntimeException('Empresa ou usuário inválido.');
-        $reason = mb_substr(trim($reason), 0, 500);
-        if (mb_strlen($reason) < 5) throw new RuntimeException('Informe o motivo do estorno.');
+        $tenantId=Auth::tenantId();
+        $userId=Auth::id();
+        if(!$tenantId||!$userId)throw new RuntimeException('Empresa ou usuário inválido.');
+        $reason=mb_substr(trim($reason),0,500);
+        if(mb_strlen($reason)<5)throw new RuntimeException('Informe o motivo do estorno.');
 
-        $payment = $this->loadPayment($tenantId, $paymentId);
+        $payment=$this->loadPayment($tenantId,$paymentId);
         $this->assertCurrentUnit($payment);
-        $this->preflight($payment, $userId);
-        $key = 'full-refund:' . $tenantId . ':' . $paymentId;
+        $this->preflight($payment,$userId);
+        $key='full-refund:'.$tenantId.':'.$paymentId;
 
-        $refund = Database::transaction(function (PDO $pdo) use ($tenantId, $userId, $payment, $reason, $key): array {
-            $find = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM refunds WHERE tenant_id=? AND payment_id=? FOR UPDATE'));
-            $find->execute([$tenantId, $payment['id']]);
-            if ($existing = $find->fetch()) return $existing;
-
-            $stmt = $pdo->prepare('INSERT INTO refunds (tenant_id,payment_id,order_id,requested_by,provider,amount_cents,currency,status,reason,idempotency_key) VALUES (?,?,?,?,?,?,?,"requested",?,?)');
+        $refund=Database::transaction(function(PDO $pdo)use($tenantId,$userId,$payment,$reason,$key):array{
+            $find=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM refunds WHERE tenant_id=? AND payment_id=? FOR UPDATE'));
+            $find->execute([$tenantId,$payment['id']]);
+            if($existing=$find->fetch())return $existing;
+            $stmt=$pdo->prepare('INSERT INTO refunds (tenant_id,payment_id,order_id,requested_by,provider,amount_cents,currency,status,reason,idempotency_key) VALUES (?,?,?,?,?,?,?,"requested",?,?)');
             $stmt->execute([$tenantId,$payment['id'],$payment['order_id'],$userId,$payment['provider'],$payment['amount_cents'],$payment['currency'],$reason,$key]);
-            $id = (int)$pdo->lastInsertId();
-            Auth::audit('refund.requested','refund',(string)$id,[
-                'payment_id' => (int)$payment['id'],
-                'order_id' => (int)$payment['order_id'],
-                'unit_id' => $payment['unit_id'] ?? null,
-                'duplicate_payment' => $payment['status'] === 'duplicate_paid',
-            ]);
-            $s = $pdo->prepare('SELECT * FROM refunds WHERE id=?');
-            $s->execute([$id]);
-            return $s->fetch() ?: throw new RuntimeException('Falha ao criar solicitação de estorno.');
+            $id=(int)$pdo->lastInsertId();
+            Auth::audit('refund.requested','refund',(string)$id,['payment_id'=>(int)$payment['id'],'order_id'=>(int)$payment['order_id'],'unit_id'=>$payment['unit_id']??null,'duplicate_payment'=>$payment['status']==='duplicate_paid','late_event_payment'=>$this->isLateEventPayment($payment)]);
+            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$id]);
+            return $s->fetch()?:throw new RuntimeException('Falha ao criar solicitação de estorno.');
         });
 
-        if ($refund['status'] === 'completed') return $refund;
-        if ($refund['status'] === 'provider_succeeded') return $this->finalize((int)$refund['id']);
-        if ($refund['status'] === 'provider_pending') return $this->reconcile((int)$refund['id']);
+        if($refund['status']==='completed')return $refund;
+        if($refund['status']==='provider_succeeded')return $this->finalize((int)$refund['id']);
+        if($refund['status']==='provider_pending')return $this->reconcile((int)$refund['id']);
 
-        try {
-            $result = (new ProviderRefundService())->refund($payment, $key);
-            $status = $result['completed'] ? 'provider_succeeded' : 'provider_pending';
-            $pdo = Database::connection();
-            $stmt = $pdo->prepare('UPDATE refunds SET provider_refund_id=?,status=?,provider_payload=?,error_message=NULL,provider_succeeded_at=CASE WHEN ?="provider_succeeded" THEN CURRENT_TIMESTAMP ELSE provider_succeeded_at END WHERE id=? AND tenant_id=?');
-            $stmt->execute([(string)($result['provider_refund_id'] ?? ''),$status,json_encode($result['payload'] ?? [],JSON_UNESCAPED_UNICODE),$status,$refund['id'],$tenantId]);
-            if ($status === 'provider_succeeded') return $this->finalize((int)$refund['id']);
-            $s = $pdo->prepare('SELECT * FROM refunds WHERE id=?');
-            $s->execute([$refund['id']]);
-            return $s->fetch();
-        } catch (Throwable $e) {
-            Database::connection()->prepare('UPDATE refunds SET status="failed",error_message=? WHERE id=? AND tenant_id=?')
-                ->execute([mb_substr($e->getMessage(),0,1000),$refund['id'],$tenantId]);
-            Auth::audit('refund.failed','refund',(string)$refund['id'],['error'=>$e->getMessage(),'unit_id'=>$payment['unit_id'] ?? null]);
+        try{
+            $result=(new ProviderRefundService())->refund($payment,$key);
+            $status=$result['completed']?'provider_succeeded':'provider_pending';
+            $pdo=Database::connection();
+            $stmt=$pdo->prepare('UPDATE refunds SET provider_refund_id=?,status=?,provider_payload=?,error_message=NULL,provider_succeeded_at=CASE WHEN ?="provider_succeeded" THEN CURRENT_TIMESTAMP ELSE provider_succeeded_at END WHERE id=? AND tenant_id=?');
+            $stmt->execute([(string)($result['provider_refund_id']??''),$status,json_encode($result['payload']??[],JSON_UNESCAPED_UNICODE),$status,$refund['id'],$tenantId]);
+            if($status==='provider_succeeded')return $this->finalize((int)$refund['id']);
+            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$refund['id']]);return $s->fetch();
+        }catch(Throwable $e){
+            Database::connection()->prepare('UPDATE refunds SET status="failed",error_message=? WHERE id=? AND tenant_id=?')->execute([mb_substr($e->getMessage(),0,1000),$refund['id'],$tenantId]);
+            Auth::audit('refund.failed','refund',(string)$refund['id'],['error'=>$e->getMessage(),'unit_id'=>$payment['unit_id']??null]);
             throw $e;
         }
     }
 
-    public function reconcile(int $refundId): array
+    public function reconcile(int $refundId):array
     {
         Auth::requirePermission('refunds.manage');
-        $tenantId = Auth::tenantId();
-        if (!$tenantId) throw new RuntimeException('Empresa inválida.');
-
-        $pdo = Database::connection();
-        $s = $pdo->prepare('SELECT * FROM refunds WHERE id=? AND tenant_id=?');
-        $s->execute([$refundId,$tenantId]);
-        $refund = $s->fetch();
-        if (!$refund) throw new RuntimeException('Estorno não encontrado.');
-
-        $payment = $this->loadPayment($tenantId, (int)$refund['payment_id']);
+        $tenantId=Auth::tenantId();
+        if(!$tenantId)throw new RuntimeException('Empresa inválida.');
+        $pdo=Database::connection();
+        $s=$pdo->prepare('SELECT * FROM refunds WHERE id=? AND tenant_id=?');$s->execute([$refundId,$tenantId]);$refund=$s->fetch();
+        if(!$refund)throw new RuntimeException('Estorno não encontrado.');
+        $payment=$this->loadPayment($tenantId,(int)$refund['payment_id']);
         $this->assertCurrentUnit($payment);
-        if ($refund['status'] === 'completed') return $refund;
-        if ($refund['status'] === 'provider_succeeded') return $this->finalize($refundId);
-        if ($refund['status'] !== 'provider_pending') throw new RuntimeException('Este estorno não está aguardando confirmação do provedor.');
-
-        $result = (new ProviderRefundService())->check($refund, $payment);
-        $pdo->prepare('UPDATE refunds SET provider_payload=?,status=?,provider_succeeded_at=CASE WHEN ?="provider_succeeded" THEN CURRENT_TIMESTAMP ELSE provider_succeeded_at END WHERE id=? AND tenant_id=?')
-            ->execute([json_encode($result['payload'] ?? [],JSON_UNESCAPED_UNICODE),$result['completed'] ? 'provider_succeeded' : 'provider_pending',$result['completed'] ? 'provider_succeeded' : 'provider_pending',$refundId,$tenantId]);
-        return $result['completed'] ? $this->finalize($refundId) : $refund;
+        if($refund['status']==='completed')return $refund;
+        if($refund['status']==='provider_succeeded')return $this->finalize($refundId);
+        if($refund['status']!=='provider_pending')throw new RuntimeException('Este estorno não está aguardando confirmação do provedor.');
+        $result=(new ProviderRefundService())->check($refund,$payment);
+        $pdo->prepare('UPDATE refunds SET provider_payload=?,status=?,provider_succeeded_at=CASE WHEN ?="provider_succeeded" THEN CURRENT_TIMESTAMP ELSE provider_succeeded_at END WHERE id=? AND tenant_id=?')->execute([json_encode($result['payload']??[],JSON_UNESCAPED_UNICODE),$result['completed']?'provider_succeeded':'provider_pending',$result['completed']?'provider_succeeded':'provider_pending',$refundId,$tenantId]);
+        return $result['completed']?$this->finalize($refundId):$refund;
     }
 
-    private function loadPayment(int $tenantId, int $paymentId): array
+    private function loadPayment(int $tenantId,int $paymentId):array
     {
-        $stmt = Database::connection()->prepare('SELECT p.*,o.status order_status,o.payment_status order_payment_status,o.customer_id,o.coupon_id,o.promoter_id,o.unit_id FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.id=? AND p.tenant_id=? LIMIT 1');
-        $stmt->execute([$paymentId,$tenantId]);
-        $payment = $stmt->fetch();
-        if (!$payment) throw new RuntimeException('Pagamento não encontrado.');
+        $stmt=Database::connection()->prepare('SELECT p.*,o.status order_status,o.payment_status order_payment_status,o.channel order_channel,o.customer_id,o.coupon_id,o.promoter_id,o.unit_id FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.id=? AND p.tenant_id=? LIMIT 1');
+        $stmt->execute([$paymentId,$tenantId]);$payment=$stmt->fetch();
+        if(!$payment)throw new RuntimeException('Pagamento não encontrado.');
         return $payment;
     }
 
-    private function assertCurrentUnit(array $payment): void
+    private function assertCurrentUnit(array $payment):void
     {
-        $unitId = (new OperatingUnitService())->currentId();
-        if ($unitId && $payment['unit_id'] !== null && (int)$payment['unit_id'] !== $unitId) {
-            throw new RuntimeException('Este pagamento pertence a outra unidade.');
+        $unitId=(new OperatingUnitService())->currentId();
+        if($unitId&&$payment['unit_id']!==null&&(int)$payment['unit_id']!==$unitId)throw new RuntimeException('Este pagamento pertence a outra unidade.');
+    }
+
+    private function isLateEventPayment(array $payment):bool
+    {
+        return (string)($payment['order_channel']??'')==='event'&&(string)($payment['order_status']??'')==='cancelled'&&(string)($payment['order_payment_status']??'')==='paid'&&(string)($payment['status']??'')==='paid';
+    }
+
+    private function preflight(array $payment,int $userId):void
+    {
+        $duplicate=$payment['status']==='duplicate_paid';
+        if(!$duplicate&&($payment['status']!=='paid'||$payment['order_payment_status']!=='paid'))throw new RuntimeException('Somente pagamento integralmente confirmado pode ser estornado.');
+        if($duplicate){if($payment['provider']==='manual')throw new RuntimeException('Pagamento duplicado manual exige conferência do caixa.');return;}
+        $lateEvent=$this->isLateEventPayment($payment);
+        $pdo=Database::connection();
+        $parts=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status="paid"');$parts->execute([$payment['tenant_id'],$payment['order_id']]);
+        if((int)$parts->fetchColumn()>1)throw new RuntimeException('Este pedido possui pagamento dividido. Use o estorno total do pedido para devolver todas as parcelas com segurança.');
+        if($payment['order_status']==='cancelled'&&!$lateEvent)throw new RuntimeException('Pedido já está cancelado.');
+        $t=$pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND order_id=? AND status="checked_in"');$t->execute([$payment['tenant_id'],$payment['order_id']]);
+        if((int)$t->fetchColumn()>0)throw new RuntimeException('Há ingresso já utilizado neste pedido. O estorno automático foi bloqueado.');
+        $c=$pdo->prepare('SELECT COUNT(*) FROM promoter_commissions WHERE tenant_id=? AND order_id=? AND status="paid"');$c->execute([$payment['tenant_id'],$payment['order_id']]);
+        if((int)$c->fetchColumn()>0)throw new RuntimeException('A comissão deste pedido já foi paga. Regularize a comissão antes do estorno.');
+        if($payment['provider']==='manual'){
+            $cash=$pdo->prepare('SELECT id FROM cash_sessions WHERE tenant_id=? AND user_id=? AND unit_id=? AND status="open" ORDER BY id DESC LIMIT 1');$cash->execute([$payment['tenant_id'],$userId,$payment['unit_id']]);
+            if(!$cash->fetchColumn())throw new RuntimeException('Abra o caixa desta unidade antes de devolver um pagamento em dinheiro.');
         }
     }
 
-    private function preflight(array $payment, int $userId): void
+    private function finalize(int $refundId):array
     {
-        $duplicate = $payment['status'] === 'duplicate_paid';
-        if (!$duplicate && ($payment['status'] !== 'paid' || $payment['order_payment_status'] !== 'paid')) {
-            throw new RuntimeException('Somente pagamento integralmente confirmado pode ser estornado.');
-        }
-        if ($duplicate) {
-            if ($payment['provider'] === 'manual') throw new RuntimeException('Pagamento duplicado manual exige conferência do caixa.');
-            return;
-        }
-
-        $pdo = Database::connection();
-        $parts = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status="paid"');
-        $parts->execute([$payment['tenant_id'],$payment['order_id']]);
-        if ((int)$parts->fetchColumn() > 1) throw new RuntimeException('Este pedido possui pagamento dividido. Use o estorno total do pedido para devolver todas as parcelas com segurança.');
-        if ($payment['order_status'] === 'cancelled') throw new RuntimeException('Pedido já está cancelado.');
-
-        $t = $pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND order_id=? AND status="checked_in"');
-        $t->execute([$payment['tenant_id'],$payment['order_id']]);
-        if ((int)$t->fetchColumn() > 0) throw new RuntimeException('Há ingresso já utilizado neste pedido. O estorno automático foi bloqueado.');
-
-        $c = $pdo->prepare('SELECT COUNT(*) FROM promoter_commissions WHERE tenant_id=? AND order_id=? AND status="paid"');
-        $c->execute([$payment['tenant_id'],$payment['order_id']]);
-        if ((int)$c->fetchColumn() > 0) throw new RuntimeException('A comissão deste pedido já foi paga. Regularize a comissão antes do estorno.');
-
-        if ($payment['provider'] === 'manual') {
-            $cash = $pdo->prepare('SELECT id FROM cash_sessions WHERE tenant_id=? AND user_id=? AND unit_id=? AND status="open" ORDER BY id DESC LIMIT 1');
-            $cash->execute([$payment['tenant_id'],$userId,$payment['unit_id']]);
-            if (!$cash->fetchColumn()) throw new RuntimeException('Abra o caixa desta unidade antes de devolver um pagamento em dinheiro.');
-        }
-    }
-
-    private function finalize(int $refundId): array
-    {
-        $tenantId = Auth::tenantId();
-        if (!$tenantId) throw new RuntimeException('Empresa inválida.');
-
-        return Database::transaction(function (PDO $pdo) use ($refundId, $tenantId): array {
-            $s = $pdo->prepare(Database::portableSql($pdo, 'SELECT * FROM refunds WHERE id=? AND tenant_id=? FOR UPDATE'));
-            $s->execute([$refundId,$tenantId]);
-            $refund = $s->fetch();
-            if (!$refund) throw new RuntimeException('Estorno não encontrado.');
-            if ($refund['status'] === 'completed') return $refund;
-            if ($refund['status'] !== 'provider_succeeded') throw new RuntimeException('O provedor ainda não confirmou o estorno.');
-
-            $p = $pdo->prepare(Database::portableSql($pdo, 'SELECT p.*,o.customer_id,o.coupon_id,o.promoter_id,o.payment_status order_payment_status,o.unit_id FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.id=? AND p.tenant_id=? FOR UPDATE'));
-            $p->execute([$refund['payment_id'],$tenantId]);
-            $payment = $p->fetch();
-            if (!$payment) throw new RuntimeException('Pagamento do estorno não encontrado.');
-            $this->assertCurrentUnit($payment);
-            $unitId = (int)($payment['unit_id'] ?? 0);
-
-            // A duplicate provider payment does not cancel the canonical order and
-            // therefore must not reverse the EventMenu Delivery commission.
-            if ($payment['status'] === 'duplicate_paid') {
+        $tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');
+        return Database::transaction(function(PDO $pdo)use($refundId,$tenantId):array{
+            $s=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM refunds WHERE id=? AND tenant_id=? FOR UPDATE'));$s->execute([$refundId,$tenantId]);$refund=$s->fetch();
+            if(!$refund)throw new RuntimeException('Estorno não encontrado.');
+            if($refund['status']==='completed')return $refund;
+            if($refund['status']!=='provider_succeeded')throw new RuntimeException('O provedor ainda não confirmou o estorno.');
+            $p=$pdo->prepare(Database::portableSql($pdo,'SELECT p.*,o.customer_id,o.coupon_id,o.promoter_id,o.payment_status order_payment_status,o.unit_id FROM payments p JOIN orders o ON o.id=p.order_id AND o.tenant_id=p.tenant_id WHERE p.id=? AND p.tenant_id=? FOR UPDATE'));$p->execute([$refund['payment_id'],$tenantId]);$payment=$p->fetch();
+            if(!$payment)throw new RuntimeException('Pagamento do estorno não encontrado.');
+            $this->assertCurrentUnit($payment);$unitId=(int)($payment['unit_id']??0);
+            if($payment['status']==='duplicate_paid'){
                 $pdo->prepare('UPDATE payments SET status="refunded" WHERE id=? AND tenant_id=?')->execute([$refund['payment_id'],$tenantId]);
                 $pdo->prepare('UPDATE refunds SET status="completed",completed_at=CURRENT_TIMESTAMP,error_message=NULL WHERE id=? AND tenant_id=?')->execute([$refundId,$tenantId]);
-                Auth::audit('refund.duplicate_completed','refund',(string)$refundId,[
-                    'payment_id'=>(int)$refund['payment_id'],
-                    'order_id'=>(int)$refund['order_id'],
-                    'unit_id'=>$unitId,
-                    'amount_cents'=>(int)$refund['amount_cents'],
-                ]);
-                $s = $pdo->prepare('SELECT * FROM refunds WHERE id=?');
-                $s->execute([$refundId]);
-                return $s->fetch();
+                Auth::audit('refund.duplicate_completed','refund',(string)$refundId,['payment_id'=>(int)$refund['payment_id'],'order_id'=>(int)$refund['order_id'],'unit_id'=>$unitId,'amount_cents'=>(int)$refund['amount_cents']]);
+                $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$refundId]);return $s->fetch();
             }
+            $parts=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status="paid"');$parts->execute([$tenantId,$refund['order_id']]);
+            if((int)$parts->fetchColumn()>1)throw new RuntimeException('Estorno individual de parcela bloqueado: o pedido possui pagamento dividido.');
+            $checked=$pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND order_id=? AND status="checked_in"');$checked->execute([$tenantId,$refund['order_id']]);
+            if((int)$checked->fetchColumn()>0)throw new RuntimeException('Ingresso utilizado impede a conclusão do estorno.');
+            $paidCommission=$pdo->prepare('SELECT COUNT(*) FROM promoter_commissions WHERE tenant_id=? AND order_id=? AND status="paid"');$paidCommission->execute([$tenantId,$refund['order_id']]);
+            if((int)$paidCommission->fetchColumn()>0)throw new RuntimeException('Comissão paga impede a conclusão automática do estorno.');
 
-            $parts = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status="paid"');
-            $parts->execute([$tenantId,$refund['order_id']]);
-            if ((int)$parts->fetchColumn() > 1) throw new RuntimeException('Estorno individual de parcela bloqueado: o pedido possui pagamento dividido.');
-
-            $checked = $pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND order_id=? AND status="checked_in"');
-            $checked->execute([$tenantId,$refund['order_id']]);
-            if ((int)$checked->fetchColumn() > 0) throw new RuntimeException('Ingresso utilizado impede a conclusão do estorno.');
-
-            $paidCommission = $pdo->prepare('SELECT COUNT(*) FROM promoter_commissions WHERE tenant_id=? AND order_id=? AND status="paid"');
-            $paidCommission->execute([$tenantId,$refund['order_id']]);
-            if ((int)$paidCommission->fetchColumn() > 0) throw new RuntimeException('Comissão paga impede a conclusão automática do estorno.');
-
-            $stocks = $pdo->prepare('SELECT unit_id,product_id,SUM(quantity) qty,MAX(unit_cost_cents) unit_cost_cents FROM stock_movements WHERE tenant_id=? AND order_id=? AND type="out" GROUP BY unit_id,product_id');
-            $stocks->execute([$tenantId,$refund['order_id']]);
-            foreach ($stocks->fetchAll() as $row) {
-                $rowUnit = (int)($row['unit_id'] ?? $unitId);
-                if ($rowUnit < 1) continue;
-                $productId = (int)$row['product_id'];
-                $qty = (float)$row['qty'];
-                $key = 'refund:' . $refundId . ':unit:' . $rowUnit . ':product:' . $productId;
-                $exists = $pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=?');
-                $exists->execute([$tenantId,$key]);
-                if ($exists->fetchColumn()) continue;
-
-                $product = $pdo->prepare('SELECT average_cost_cents,min_stock_qty FROM products WHERE id=? AND tenant_id=?');
-                $product->execute([$productId,$tenantId]);
-                $pr = $product->fetch() ?: ['average_cost_cents'=>0,'min_stock_qty'=>0];
-                $insert = Database::portableSql($pdo, 'INSERT IGNORE INTO unit_inventory (tenant_id,unit_id,product_id,stock_qty,average_cost_cents,min_stock_qty) VALUES (?,?,?,?,?,?)');
-                $pdo->prepare($insert)->execute([$tenantId,$rowUnit,$productId,0,$row['unit_cost_cents'] ?? $pr['average_cost_cents'],$pr['min_stock_qty']]);
-                $pdo->prepare('UPDATE unit_inventory SET stock_qty=stock_qty+?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND unit_id=? AND product_id=?')
-                    ->execute([$qty,$tenantId,$rowUnit,$productId]);
-                $cost = (int)($row['unit_cost_cents'] ?? $pr['average_cost_cents']);
-                $pdo->prepare('INSERT INTO stock_movements (tenant_id,unit_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents,reason,performed_by) VALUES (?,?,?,?,"reversal",?,?,?,?,?,?)')
-                    ->execute([$tenantId,$rowUnit,$productId,$refund['order_id'],$qty,$key,$cost,(int)round($cost*$qty),'Reversão de estoque pelo estorno #'.$refundId,$refund['requested_by']]);
+            $stocks=$pdo->prepare('SELECT unit_id,product_id,SUM(quantity) qty,MAX(unit_cost_cents) unit_cost_cents FROM stock_movements WHERE tenant_id=? AND order_id=? AND type="out" GROUP BY unit_id,product_id');$stocks->execute([$tenantId,$refund['order_id']]);
+            foreach($stocks->fetchAll()as$row){
+                $rowUnit=(int)($row['unit_id']??$unitId);if($rowUnit<1)continue;$productId=(int)$row['product_id'];$qty=(float)$row['qty'];$key='refund:'.$refundId.':unit:'.$rowUnit.':product:'.$productId;
+                $exists=$pdo->prepare('SELECT id FROM stock_movements WHERE tenant_id=? AND idempotency_key=?');$exists->execute([$tenantId,$key]);if($exists->fetchColumn())continue;
+                $product=$pdo->prepare('SELECT average_cost_cents,min_stock_qty FROM products WHERE id=? AND tenant_id=?');$product->execute([$productId,$tenantId]);$pr=$product->fetch()?:['average_cost_cents'=>0,'min_stock_qty'=>0];
+                $insert=Database::portableSql($pdo,'INSERT IGNORE INTO unit_inventory (tenant_id,unit_id,product_id,stock_qty,average_cost_cents,min_stock_qty) VALUES (?,?,?,?,?,?)');$pdo->prepare($insert)->execute([$tenantId,$rowUnit,$productId,0,$row['unit_cost_cents']??$pr['average_cost_cents'],$pr['min_stock_qty']]);
+                $pdo->prepare('UPDATE unit_inventory SET stock_qty=stock_qty+?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND unit_id=? AND product_id=?')->execute([$qty,$tenantId,$rowUnit,$productId]);
+                $cost=(int)($row['unit_cost_cents']??$pr['average_cost_cents']);$pdo->prepare('INSERT INTO stock_movements (tenant_id,unit_id,product_id,order_id,type,quantity,idempotency_key,unit_cost_cents,total_cost_cents,reason,performed_by) VALUES (?,?,?,?,"reversal",?,?,?,?,?,?)')->execute([$tenantId,$rowUnit,$productId,$refund['order_id'],$qty,$key,$cost,(int)round($cost*$qty),'Reversão de estoque pelo estorno #'.$refundId,$refund['requested_by']]);
                 $this->syncLegacyProduct($pdo,$tenantId,$productId);
             }
 
-            $tickets = $pdo->prepare(Database::portableSql($pdo, 'SELECT batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="paid" GROUP BY batch_id FOR UPDATE'));
-            $tickets->execute([$tenantId,$refund['order_id']]);
-            foreach ($tickets->fetchAll() as $row) {
-                $pdo->prepare(Database::portableSql($pdo, 'UPDATE ticket_batches SET quantity_sold=GREATEST(0,quantity_sold-?) WHERE id=?'))
-                    ->execute([(int)$row['qty'],$row['batch_id']]);
-            }
+            $tickets=$pdo->prepare(Database::portableSql($pdo,'SELECT batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="paid" GROUP BY batch_id FOR UPDATE'));$tickets->execute([$tenantId,$refund['order_id']]);
+            foreach($tickets->fetchAll()as$row)$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_sold=GREATEST(0,quantity_sold-?) WHERE id=?'))->execute([(int)$row['qty'],$row['batch_id']]);
             $pdo->prepare('UPDATE tickets SET status="refunded" WHERE tenant_id=? AND order_id=? AND status="paid"')->execute([$tenantId,$refund['order_id']]);
 
-            if (!empty($payment['coupon_id'])) {
-                $r = $pdo->prepare('SELECT id FROM coupon_redemptions WHERE tenant_id=? AND order_id=? LIMIT 1');
-                $r->execute([$tenantId,$refund['order_id']]);
-                if ($r->fetchColumn()) {
-                    $pdo->prepare(Database::portableSql($pdo, 'UPDATE coupons SET uses_count=GREATEST(0,uses_count-1) WHERE id=? AND tenant_id=?'))
-                        ->execute([$payment['coupon_id'],$tenantId]);
-                }
+            if(!empty($payment['coupon_id'])){$r=$pdo->prepare('SELECT id FROM coupon_redemptions WHERE tenant_id=? AND order_id=? LIMIT 1');$r->execute([$tenantId,$refund['order_id']]);if($r->fetchColumn())$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET uses_count=GREATEST(0,uses_count-1) WHERE id=? AND tenant_id=?'))->execute([$payment['coupon_id'],$tenantId]);}
+            if(!empty($payment['customer_id'])){
+                $earn=$pdo->prepare('SELECT COALESCE(SUM(points),0) FROM customer_points_movements WHERE tenant_id=? AND customer_id=? AND order_id=? AND type="earn"');$earn->execute([$tenantId,$payment['customer_id'],$refund['order_id']]);$points=(int)$earn->fetchColumn();
+                if($points>0){$key='refund:'.$refundId.':points';$ins=$pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO customer_points_movements (tenant_id,customer_id,order_id,points,type,idempotency_key) VALUES (?,?,?, ?,"reversal",?)'));$ins->execute([$tenantId,$payment['customer_id'],$refund['order_id'],-$points,$key]);if($ins->rowCount()===1)$pdo->prepare('UPDATE customers SET points=points-? WHERE id=? AND tenant_id=?')->execute([$points,$payment['customer_id'],$tenantId]);}
             }
-
-            if (!empty($payment['customer_id'])) {
-                $earn = $pdo->prepare('SELECT COALESCE(SUM(points),0) FROM customer_points_movements WHERE tenant_id=? AND customer_id=? AND order_id=? AND type="earn"');
-                $earn->execute([$tenantId,$payment['customer_id'],$refund['order_id']]);
-                $points = (int)$earn->fetchColumn();
-                if ($points > 0) {
-                    $key = 'refund:' . $refundId . ':points';
-                    $ins = $pdo->prepare(Database::portableSql($pdo, 'INSERT IGNORE INTO customer_points_movements (tenant_id,customer_id,order_id,points,type,idempotency_key) VALUES (?,?,?, ?,"reversal",?)'));
-                    $ins->execute([$tenantId,$payment['customer_id'],$refund['order_id'],-$points,$key]);
-                    if ($ins->rowCount() === 1) {
-                        $pdo->prepare('UPDATE customers SET points=points-? WHERE id=? AND tenant_id=?')->execute([$points,$payment['customer_id'],$tenantId]);
-                    }
-                }
-            }
-
             (new LoyaltyPointsService())->restoreRedeemedForRefund($pdo,$tenantId,(int)$refund['order_id'],$refundId);
-            $pdo->prepare('UPDATE promoter_commissions SET status="cancelled" WHERE tenant_id=? AND order_id=? AND status IN ("pending","approved")')
-                ->execute([$tenantId,$refund['order_id']]);
-
-            if ($payment['provider'] === 'manual') {
-                $userId = (int)$refund['requested_by'];
-                $cs = $pdo->prepare(Database::portableSql($pdo, 'SELECT id FROM cash_sessions WHERE tenant_id=? AND user_id=? AND unit_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));
-                $cs->execute([$tenantId,$userId,$unitId]);
-                $cashSessionId = $cs->fetchColumn();
-                if (!$cashSessionId) throw new RuntimeException('O caixa desta unidade que solicitou a devolução não está mais aberto.');
-                $key = 'refund:' . $refundId . ':cash';
-                $pdo->prepare(Database::portableSql($pdo, 'INSERT IGNORE INTO cash_movements (tenant_id,cash_session_id,user_id,order_id,payment_id,type,method,direction,amount_cents,notes,idempotency_key) VALUES (?,?,?,?,?,"refund","cash","out",?,?,?)'))
-                    ->execute([$tenantId,$cashSessionId,$userId,$refund['order_id'],$refund['payment_id'],$refund['amount_cents'],'Estorno integral #'.$refundId,$key]);
+            $pdo->prepare('UPDATE promoter_commissions SET status="cancelled" WHERE tenant_id=? AND order_id=? AND status IN ("pending","approved")')->execute([$tenantId,$refund['order_id']]);
+            if($payment['provider']==='manual'){
+                $userId=(int)$refund['requested_by'];$cs=$pdo->prepare(Database::portableSql($pdo,'SELECT id FROM cash_sessions WHERE tenant_id=? AND user_id=? AND unit_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$cs->execute([$tenantId,$userId,$unitId]);$cashSessionId=$cs->fetchColumn();
+                if(!$cashSessionId)throw new RuntimeException('O caixa desta unidade que solicitou a devolução não está mais aberto.');$key='refund:'.$refundId.':cash';
+                $pdo->prepare(Database::portableSql($pdo,'INSERT IGNORE INTO cash_movements (tenant_id,cash_session_id,user_id,order_id,payment_id,type,method,direction,amount_cents,notes,idempotency_key) VALUES (?,?,?,?,?,"refund","cash","out",?,?,?)'))->execute([$tenantId,$cashSessionId,$userId,$refund['order_id'],$refund['payment_id'],$refund['amount_cents'],'Estorno integral #'.$refundId,$key]);
             }
-
             $pdo->prepare('UPDATE payments SET status="refunded" WHERE id=? AND tenant_id=?')->execute([$refund['payment_id'],$tenantId]);
             $pdo->prepare('UPDATE orders SET payment_status="refunded",status="cancelled" WHERE id=? AND tenant_id=?')->execute([$refund['order_id'],$tenantId]);
-
-            // Keep financial truth atomic with the canonical refund: the platform
-            // commission is reversed in the same DB transaction that cancels the
-            // order. If it was already invoiced/paid, the billing service creates
-            // one idempotent credit line; if it was not billed, only its status is
-            // reversed. A duplicate provider payment never reaches this branch.
-            (new MarketplaceCommissionService())->reverse(
-                $pdo,
-                $tenantId,
-                (int)$refund['order_id'],
-                'Estorno integral confirmado #' . $refundId . '.'
-            );
-
+            (new MarketplaceCommissionService())->reverse($pdo,$tenantId,(int)$refund['order_id'],'Estorno integral confirmado #'.$refundId.'.');
             $pdo->prepare('UPDATE refunds SET status="completed",completed_at=CURRENT_TIMESTAMP,error_message=NULL WHERE id=? AND tenant_id=?')->execute([$refundId,$tenantId]);
-            Auth::audit('refund.completed','refund',(string)$refundId,[
-                'payment_id'=>(int)$refund['payment_id'],
-                'order_id'=>(int)$refund['order_id'],
-                'unit_id'=>$unitId,
-                'amount_cents'=>(int)$refund['amount_cents'],
-            ]);
-            $s = $pdo->prepare('SELECT * FROM refunds WHERE id=?');
-            $s->execute([$refundId]);
-            return $s->fetch();
+            Auth::audit('refund.completed','refund',(string)$refundId,['payment_id'=>(int)$refund['payment_id'],'order_id'=>(int)$refund['order_id'],'unit_id'=>$unitId,'amount_cents'=>(int)$refund['amount_cents']]);
+            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$refundId]);return $s->fetch();
         });
     }
 
-    private function syncLegacyProduct(PDO $pdo, int $tenantId, int $productId): void
+    private function syncLegacyProduct(PDO $pdo,int $tenantId,int $productId):void
     {
-        $s = $pdo->prepare('SELECT COALESCE(SUM(stock_qty),0) qty,CASE WHEN COALESCE(SUM(stock_qty),0)>0 THEN CAST(ROUND(SUM(stock_qty*average_cost_cents)/SUM(stock_qty)) AS INTEGER) ELSE MAX(average_cost_cents) END avg_cost FROM unit_inventory WHERE tenant_id=? AND product_id=?');
-        $s->execute([$tenantId,$productId]);
-        $row = $s->fetch() ?: ['qty'=>0,'avg_cost'=>0];
-        $pdo->prepare('UPDATE products SET stock_qty=?,average_cost_cents=? WHERE id=? AND tenant_id=?')
-            ->execute([(float)$row['qty'],(int)($row['avg_cost'] ?? 0),$productId,$tenantId]);
+        $s=$pdo->prepare('SELECT COALESCE(SUM(stock_qty),0) qty,CASE WHEN COALESCE(SUM(stock_qty),0)>0 THEN CAST(ROUND(SUM(stock_qty*average_cost_cents)/SUM(stock_qty)) AS INTEGER) ELSE MAX(average_cost_cents) END avg_cost FROM unit_inventory WHERE tenant_id=? AND product_id=?');$s->execute([$tenantId,$productId]);$row=$s->fetch()?:['qty'=>0,'avg_cost'=>0];
+        $pdo->prepare('UPDATE products SET stock_qty=?,average_cost_cents=? WHERE id=? AND tenant_id=?')->execute([(float)$row['qty'],(int)($row['avg_cost']??0),$productId,$tenantId]);
     }
 }
