@@ -59,6 +59,11 @@ if(delyvreContext){
   });
   const secure=d.querySelector('.secure-note');
   if(secure)secure.innerHTML='🔒 <strong>Confirmação segura:</strong> o pedido só é marcado como pago depois da confirmação do provedor.';
+
+  const trackingLink=d.querySelector('.tracking-action a');
+  if(trackingLink){
+    try{const url=new URL(trackingLink.href,location.href);url.searchParams.set('source','delyvre');trackingLink.href=url.href}catch{}
+  }
 }
 
 const auto=root.dataset.autoRefresh==='1',indicator=d.querySelector('.sync-indicator');
