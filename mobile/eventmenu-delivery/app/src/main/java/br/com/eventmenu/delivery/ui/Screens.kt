@@ -41,9 +41,12 @@ import coil3.compose.AsyncImage
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 
-private val DeliveryRed = Color(0xFFD62828)
-private val DeliveryCream = Color(0xFFFFF8F1)
-private val DeliveryGreen = Color(0xFF197A43)
+private val DeliveryPrimary = Color(0xFF6D28D9)
+private val DeliveryPrimaryDark = Color(0xFF4C1D95)
+private val DeliveryAccent = Color(0xFF8B5CF6)
+private val DeliveryBackground = Color(0xFFFAF8FF)
+private val DeliveryLavender = Color(0xFFF1ECFF)
+private val DeliveryGreen = Color(0xFF137A4B)
 
 @Composable
 fun EventMenuDeliveryApp(vm: DeliveryViewModel) {
@@ -53,10 +56,23 @@ fun EventMenuDeliveryApp(vm: DeliveryViewModel) {
     }
     MaterialTheme(
         colorScheme = lightColorScheme(
-            primary = DeliveryRed,
-            secondary = Color(0xFFF77F00),
-            background = DeliveryCream,
+            primary = DeliveryPrimary,
+            onPrimary = Color.White,
+            primaryContainer = Color(0xFFE9DDFF),
+            onPrimaryContainer = DeliveryPrimaryDark,
+            secondary = DeliveryAccent,
+            secondaryContainer = DeliveryLavender,
+            background = DeliveryBackground,
             surface = Color.White,
+            surfaceVariant = Color(0xFFF3F0F9),
+            outlineVariant = Color(0xFFE2DDEB),
+        ),
+        shapes = Shapes(
+            extraSmall = RoundedCornerShape(8.dp),
+            small = RoundedCornerShape(12.dp),
+            medium = RoundedCornerShape(20.dp),
+            large = RoundedCornerShape(28.dp),
+            extraLarge = RoundedCornerShape(32.dp),
         ),
     ) {
         Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -75,7 +91,7 @@ fun EventMenuDeliveryApp(vm: DeliveryViewModel) {
             }
             if (vm.busy) {
                 Box(
-                    Modifier.fillMaxSize().background(Color.Black.copy(alpha = .18f)),
+                    Modifier.fillMaxSize().background(DeliveryPrimaryDark.copy(alpha = .16f)),
                     contentAlignment = Alignment.Center,
                 ) { CircularProgressIndicator() }
             }
@@ -101,12 +117,12 @@ private fun LoginScreen(vm: DeliveryViewModel) {
         )
         Button(
             { vm.login(email, password) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
             enabled = email.isNotBlank() && password.isNotBlank(),
-        ) { Text("Entrar") }
+        ) { Text("Entrar", fontWeight = FontWeight.Bold) }
         TextButton({ vm.forgotPassword(email) }, enabled = email.isNotBlank()) { Text("Esqueci minha senha") }
         HorizontalDivider()
-        OutlinedButton({ vm.navigate(Screen.Register) }, modifier = Modifier.fillMaxWidth()) { Text("Criar minha conta") }
+        OutlinedButton({ vm.navigate(Screen.Register) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Criar minha conta") }
     }
 }
 
@@ -134,9 +150,9 @@ private fun RegisterScreen(vm: DeliveryViewModel) {
         }
         Button(
             { vm.register(name, email, phone, password, legalAccepted) },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
             enabled = name.isNotBlank() && email.isNotBlank() && password.length >= 8 && legalAccepted,
-        ) { Text("Cadastrar e enviar confirmação") }
+        ) { Text("Cadastrar e enviar confirmação", fontWeight = FontWeight.Bold) }
         TextButton({ vm.navigate(Screen.Login) }) { Text("Já tenho conta") }
     }
 }
@@ -144,10 +160,12 @@ private fun RegisterScreen(vm: DeliveryViewModel) {
 @Composable
 private fun VerifyEmailScreen(vm: DeliveryViewModel) {
     AuthShell("Confirme seu e-mail", "Enviamos um link para ${vm.pendingEmail}. Só depois da confirmação o acesso será liberado.") {
-        Icon(Icons.Default.MarkEmailRead, null, Modifier.size(72.dp), tint = DeliveryRed)
+        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(24.dp)) {
+            Icon(Icons.Default.MarkEmailRead, null, Modifier.padding(18.dp).size(54.dp), tint = DeliveryPrimary)
+        }
         Text("Abra sua caixa de entrada e toque em “Confirmar meu e-mail”. O link abre novamente o EventMenu Delivery.", style = MaterialTheme.typography.bodyLarge)
-        Button({ vm.resendVerification() }, modifier = Modifier.fillMaxWidth()) { Text("Reenviar confirmação") }
-        OutlinedButton({ vm.navigate(Screen.Login) }, modifier = Modifier.fillMaxWidth()) { Text("Já confirmei · entrar") }
+        Button({ vm.resendVerification() }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Reenviar confirmação") }
+        OutlinedButton({ vm.navigate(Screen.Login) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Já confirmei · entrar") }
     }
 }
 
@@ -164,14 +182,16 @@ private fun HomeScreen(vm: DeliveryViewModel) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            item { Text("O que vai pedir hoje?", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+            item { PremiumHomeHero() }
             item {
                 OutlinedTextField(
                     search, { search = it; vm.loadStores(it) },
                     leadingIcon = { Icon(Icons.Default.Search, null) },
                     label = { Text("Buscar restaurante") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(18.dp),
                 )
             }
+            item { Text("Restaurantes", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             if (vm.stores.isEmpty()) item { EmptyCard("Nenhum restaurante disponível agora.") }
             items(vm.stores, key = { "${it.tenantId}-${it.unitId}" }) { store ->
                 StoreCard(store, { vm.openStore(store) }, { vm.toggleFavorite(store) })
@@ -181,8 +201,42 @@ private fun HomeScreen(vm: DeliveryViewModel) {
 }
 
 @Composable
+private fun PremiumHomeHero() {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = DeliveryPrimaryDark),
+        shape = RoundedCornerShape(28.dp),
+    ) {
+        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Surface(color = Color.White.copy(alpha = .12f), shape = RoundedCornerShape(999.dp)) {
+                Text("EVENTMENU DELIVERY", Modifier.padding(horizontal = 11.dp, vertical = 6.dp), color = Color.White, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            }
+            Text("O que vai pedir hoje?", color = Color.White, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
+            Text("Escolha seu restaurante, pague com segurança e acompanhe a entrega em tempo real.", color = Color.White.copy(alpha = .86f), style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                PremiumMiniPill(Icons.Default.Bolt, "Rápido")
+                PremiumMiniPill(Icons.Default.Lock, "Seguro")
+                PremiumMiniPill(Icons.Default.LocationOn, "Ao vivo")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PremiumMiniPill(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String) {
+    Surface(color = Color.White.copy(alpha = .12f), shape = RoundedCornerShape(999.dp)) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            Icon(icon, null, tint = Color.White, modifier = Modifier.size(15.dp)); Text(label, color = Color.White, style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
 private fun StoreCard(store: Store, onOpen: () -> Unit, onFavorite: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onOpen), shape = RoundedCornerShape(20.dp)) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        shape = RoundedCornerShape(24.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
         Column {
             if (store.coverUrl.isNotBlank()) {
                 AsyncImage(
@@ -204,7 +258,7 @@ private fun StoreCard(store: Store, onOpen: () -> Unit, onFavorite: () -> Unit) 
                         Icon(
                             if (store.favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                             null,
-                            tint = if (store.favorite) DeliveryRed else LocalContentColor.current,
+                            tint = if (store.favorite) DeliveryPrimary else LocalContentColor.current,
                         )
                     }
                 }
@@ -264,18 +318,22 @@ private fun CatalogScreen(vm: DeliveryViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (cat.store.coverUrl.isNotBlank()) AsyncImage(cat.store.coverUrl, cat.store.name, Modifier.fillMaxWidth().height(170.dp), contentScale = ContentScale.Crop)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        StatusPill(cat.store.acceptingOrders)
-                        Text("~${cat.store.deliveryEtaMinutes} min", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
-                    }
-                    if (cat.store.description.isNotBlank()) Text(cat.store.description)
-                    Text("Entrega ${money(cat.store.deliveryFeeCents)} · pedido mínimo ${money(cat.store.minimumOrderCents)}", style = MaterialTheme.typography.bodySmall)
-                    if (cat.store.scheduleNote.isNotBlank()) Text(cat.store.scheduleNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (!cat.store.acceptingOrders) {
-                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
-                            Text("O restaurante está com novos pedidos pausados. Você pode consultar o cardápio enquanto isso.", Modifier.padding(14.dp))
+                Card(shape = RoundedCornerShape(24.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (cat.store.coverUrl.isNotBlank()) AsyncImage(cat.store.coverUrl, cat.store.name, Modifier.fillMaxWidth().height(170.dp), contentScale = ContentScale.Crop)
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                StatusPill(cat.store.acceptingOrders)
+                                Text("~${cat.store.deliveryEtaMinutes} min", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold)
+                            }
+                            if (cat.store.description.isNotBlank()) Text(cat.store.description)
+                            Text("Entrega ${money(cat.store.deliveryFeeCents)} · pedido mínimo ${money(cat.store.minimumOrderCents)}", style = MaterialTheme.typography.bodySmall)
+                            if (cat.store.scheduleNote.isNotBlank()) Text(cat.store.scheduleNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (!cat.store.acceptingOrders) {
+                                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                                    Text("O restaurante está com novos pedidos pausados. Você pode consultar o cardápio enquanto isso.", Modifier.padding(14.dp))
+                                }
+                            }
                         }
                     }
                 }
@@ -297,14 +355,14 @@ private fun CatalogScreen(vm: DeliveryViewModel) {
 
 @Composable
 private fun ProductCard(product: Product, onAdd: () -> Unit) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp), elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)) {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (product.imageUrl.isNotBlank()) AsyncImage(product.imageUrl, product.name, Modifier.size(92.dp), contentScale = ContentScale.Crop)
             Column(Modifier.weight(1f)) {
                 Text(product.name, fontWeight = FontWeight.Bold)
                 if (product.description.isNotBlank()) Text(product.description, maxLines = 3, style = MaterialTheme.typography.bodySmall)
                 if (product.modifierGroups.isNotEmpty()) Text("Personalizável", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-                Text(money(product.priceCents), fontWeight = FontWeight.Bold, color = DeliveryRed)
+                Text(money(product.priceCents), fontWeight = FontWeight.Bold, color = DeliveryPrimary)
                 if (!product.available) Text("Indisponível", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelMedium)
             }
             FilledTonalIconButton(onAdd, enabled = product.available) { Icon(Icons.Default.Add, null) }
@@ -359,7 +417,7 @@ private fun ProductCustomizerDialog(product: Product, onDismiss: () -> Unit, onA
                     IconButton({ quantity = (quantity + 1).coerceAtMost(99) }) { Icon(Icons.Default.Add, null) }
                     Spacer(Modifier.weight(1f))
                     val extras = product.modifierGroups.flatMap { it.options }.filter { it.id in selected.values.flatten() }.sumOf { it.priceDeltaCents }
-                    Text(money((product.priceCents + extras) * quantity), fontWeight = FontWeight.Bold, color = DeliveryRed)
+                    Text(money((product.priceCents + extras) * quantity), fontWeight = FontWeight.Bold, color = DeliveryPrimary)
                 }
             }
         },
@@ -375,39 +433,77 @@ private fun CartScreen(vm: DeliveryViewModel) {
     val customer = vm.customer
     val store = vm.catalog?.store
     val subtotal = vm.cart.sumOf { it.totalCents() }
+    val discount = (vm.couponQuote?.discountCents ?: 0).coerceIn(0, subtotal)
     val fee = store?.deliveryFeeCents ?: 0
-    val estimate = subtotal + fee
+    val estimate = (subtotal - discount).coerceAtLeast(0) + fee
     val minimum = store?.minimumOrderCents ?: 0
     val storeOpen = store?.acceptingOrders != false
+    var couponInput by remember(store?.tenantId) { mutableStateOf(vm.couponCode) }
     var selectedAddress by remember(customer) { mutableIntStateOf(customer?.addresses?.firstOrNull { it.isDefault }?.id ?: customer?.addresses?.firstOrNull()?.id ?: 0) }
+    LaunchedEffect(vm.couponCode) { if (vm.couponCode.isNotBlank()) couponInput = vm.couponCode }
     Scaffold(topBar = { DeliveryTopBar("Seu carrinho", onBack = { vm.navigate(Screen.Catalog) }) }) { pad ->
         LazyColumn(
             Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (vm.cart.isEmpty()) item { EmptyCard("Seu carrinho está vazio. Volte ao cardápio para escolher seus itens.") }
             items(vm.cart.size) { i ->
                 val item = vm.cart[i]
-                Card {
+                Card(shape = RoundedCornerShape(20.dp)) {
                     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text(item.product.name, fontWeight = FontWeight.Bold)
                             if (item.optionIds.isNotEmpty()) Text("Com ${item.optionIds.size} adicional(is)", style = MaterialTheme.typography.bodySmall)
                             if (item.notes.isNotBlank()) Text("Obs.: ${item.notes}", style = MaterialTheme.typography.bodySmall)
-                            Text(money(item.totalCents()))
+                            Text(money(item.totalCents()), color = DeliveryPrimary, fontWeight = FontWeight.SemiBold)
                         }
-                        IconButton({ vm.updateCart(i, item.quantity - 1) }) { Icon(Icons.Default.Remove, null) }
-                        Text(item.quantity.toString())
-                        IconButton({ vm.updateCart(i, item.quantity + 1) }) { Icon(Icons.Default.Add, null) }
+                        FilledTonalIconButton({ vm.updateCart(i, item.quantity - 1) }) { Icon(Icons.Default.Remove, null) }
+                        Text(item.quantity.toString(), Modifier.padding(horizontal = 8.dp), fontWeight = FontWeight.Bold)
+                        FilledTonalIconButton({ vm.updateCart(i, item.quantity + 1) }) { Icon(Icons.Default.Add, null) }
                     }
                 }
             }
             item {
-                Card {
-                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Tem um cupom?", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        if (vm.couponQuote != null && vm.couponCode.isNotBlank()) {
+                            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(16.dp)) {
+                                Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Icon(Icons.Default.CheckCircle, null, tint = DeliveryPrimary)
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Cupom ${vm.couponCode} aplicado", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                        Text("Desconto: -${money(discount)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                    }
+                                    TextButton({ vm.clearCoupon(); couponInput = "" }) { Text("Remover") }
+                                }
+                            }
+                        } else {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                OutlinedTextField(
+                                    couponInput,
+                                    { couponInput = it.uppercase().filter { ch -> ch.isLetterOrDigit() || ch == '-' || ch == '_' }.take(80) },
+                                    label = { Text("Digite o código") },
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(16.dp),
+                                )
+                                Button({ vm.validateCoupon(couponInput) }, enabled = couponInput.isNotBlank() && subtotal > 0) { Text("Aplicar") }
+                            }
+                        }
+                        Text("O desconto é conferido novamente pelo servidor quando o pedido é criado.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item {
+                Card(shape = RoundedCornerShape(22.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Text("Resumo do pedido", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         SummaryRow("Subtotal", money(subtotal))
+                        if (discount > 0) SummaryRow("Desconto do cupom", "-${money(discount)}")
                         SummaryRow("Taxa de entrega", if (fee == 0) "Grátis" else money(fee))
                         HorizontalDivider()
-                        SummaryRow("Total estimado", money(estimate), strong = true)
-                        Text("O valor final é confirmado pelo servidor antes do pagamento.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        SummaryRow("TOTAL", money(estimate), strong = true)
+                        Text("O valor final é recalculado e confirmado pelo servidor antes do pagamento.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -418,13 +514,14 @@ private fun CartScreen(vm: DeliveryViewModel) {
                 item {
                     EmptyCard("Cadastre um endereço antes de finalizar.")
                     Spacer(Modifier.height(8.dp))
-                    Button({ vm.editAddress() }, Modifier.fillMaxWidth()) { Text("Cadastrar endereço") }
+                    Button({ vm.editAddress() }, Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Cadastrar endereço") }
                 }
             } else {
                 items(customer!!.addresses) { a ->
                     Card(
                         Modifier.fillMaxWidth().clickable { selectedAddress = a.id },
                         colors = CardDefaults.cardColors(containerColor = if (selectedAddress == a.id) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface),
+                        shape = RoundedCornerShape(18.dp),
                     ) {
                         Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
                             RadioButton(selectedAddress == a.id, { selectedAddress = a.id })
@@ -437,8 +534,8 @@ private fun CartScreen(vm: DeliveryViewModel) {
                 Button(
                     { vm.checkoutCart(selectedAddress) },
                     enabled = vm.cart.isNotEmpty() && selectedAddress > 0 && subtotal >= minimum && storeOpen,
-                    modifier = Modifier.fillMaxWidth(),
-                ) { Text("Confirmar pedido") }
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 54.dp),
+                ) { Text("Confirmar pedido", fontWeight = FontWeight.Bold) }
             }
         }
     }
@@ -448,7 +545,7 @@ private fun CartScreen(vm: DeliveryViewModel) {
 private fun SummaryRow(label: String, value: String, strong: Boolean = false) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, fontWeight = if (strong) FontWeight.Bold else FontWeight.Normal)
-        Text(value, fontWeight = if (strong) FontWeight.Bold else FontWeight.Normal)
+        Text(value, fontWeight = if (strong) FontWeight.Black else FontWeight.SemiBold, color = if (strong) DeliveryPrimaryDark else LocalContentColor.current)
     }
 }
 
@@ -466,8 +563,13 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
             Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             item {
-                Text("Pedido #${order.orderNumber}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                Text("Total ${money(order.totalCents)}", style = MaterialTheme.typography.titleLarge, color = DeliveryRed)
+                Card(colors = CardDefaults.cardColors(containerColor = DeliveryPrimaryDark), shape = RoundedCornerShape(24.dp)) {
+                    Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Pedido #${order.orderNumber}", color = Color.White.copy(alpha = .84f), style = MaterialTheme.typography.labelLarge)
+                        Text(money(order.totalCents), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = Color.White)
+                        Text("Escolha como pagar", color = Color.White.copy(alpha = .82f))
+                    }
+                }
             }
             if (vm.paymentWaiting) {
                 item {
@@ -476,7 +578,7 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
                             CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 3.dp)
                             Column {
                                 Text("Aguardando confirmação", fontWeight = FontWeight.Bold)
-                                Text("Não feche o pagamento nem tente outra forma. O EventMenu está consultando o servidor automaticamente.", style = MaterialTheme.typography.bodySmall)
+                                Text("O EventMenu está consultando o servidor e o provedor automaticamente. Não faça um segundo pagamento enquanto este estiver pendente.", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -486,19 +588,19 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
                 item { PixPayloadCard(pix, onCopy = { clipboard.setText(AnnotatedString(pix.copyPaste)) }) }
             }
             if (!vm.paymentWaiting) {
-                if (methods == null) item { CircularProgressIndicator() }
+                if (methods == null) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
                 else {
                     if (methods.pixProviders.isNotEmpty()) item {
                         Card {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("PIX", fontWeight = FontWeight.Bold)
-                                Text("O QR Code e o Copia e Cola ficam dentro do EventMenu. A confirmação é feita diretamente pelo provedor configurado.", style = MaterialTheme.typography.bodySmall)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) { Icon(Icons.Default.QrCode2, null, tint = DeliveryPrimary); Text("PIX", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium) }
+                                Text("O QR Code e o Copia e Cola ficam dentro do EventMenu. A confirmação usa webhook e consulta direta ao provedor como redundância.", style = MaterialTheme.typography.bodySmall)
                                 OutlinedTextField(
                                     taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF/CNPJ") },
                                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth(),
                                 )
                                 methods.pixProviders.forEach { provider ->
-                                    Button({ vm.payPix(provider, taxId) }, Modifier.fillMaxWidth(), enabled = taxId.length in listOf(11, 14)) {
+                                    Button({ vm.payPix(provider, taxId) }, Modifier.fillMaxWidth().heightIn(min = 50.dp), enabled = taxId.length in listOf(11, 14)) {
                                         Text("Gerar PIX · ${providerLabel(provider)}")
                                     }
                                 }
@@ -510,7 +612,7 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
                         Card {
                             Column(Modifier.padding(16.dp)) {
                                 Row(Modifier.fillMaxWidth().clickable { showCard = !showCard }, verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.CreditCard, null); Spacer(Modifier.width(10.dp)); Text("Cartão de crédito ou débito", Modifier.weight(1f), fontWeight = FontWeight.Bold); Icon(if (showCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+                                    Icon(Icons.Default.CreditCard, null, tint = DeliveryPrimary); Spacer(Modifier.width(10.dp)); Text("Cartão de crédito ou débito", Modifier.weight(1f), fontWeight = FontWeight.Bold); Icon(if (showCard) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
                                 }
                                 if (showCard) {
                                     Spacer(Modifier.height(14.dp))
@@ -525,7 +627,7 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
                         Card {
                             Column(Modifier.padding(16.dp)) {
                                 Row(Modifier.fillMaxWidth().clickable { showCash = !showCash }, verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.Payments, null); Spacer(Modifier.width(10.dp)); Text("Dinheiro na entrega", Modifier.weight(1f), fontWeight = FontWeight.Bold); Icon(if (showCash) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
+                                    Icon(Icons.Default.Payments, null, tint = DeliveryPrimary); Spacer(Modifier.width(10.dp)); Text("Dinheiro na entrega", Modifier.weight(1f), fontWeight = FontWeight.Bold); Icon(if (showCash) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
                                 }
                                 if (showCash) {
                                     Spacer(Modifier.height(10.dp))
@@ -539,20 +641,20 @@ private fun CheckoutScreen(vm: DeliveryViewModel) {
                     if (methods.pixProviders.isEmpty() && methods.cards.isEmpty() && !methods.cash) item { EmptyCard("Este restaurante ainda não configurou uma forma de pagamento para o Delivery.") }
                 }
             }
-            item { OutlinedButton({ vm.openOrder(order.orderNumber) }, Modifier.fillMaxWidth()) { Text("Acompanhar pedido") } }
+            item { OutlinedButton({ vm.openOrder(order.orderNumber) }, Modifier.fillMaxWidth().heightIn(min = 50.dp)) { Text("Acompanhar pedido") } }
         }
     }
 }
 
 @Composable
 private fun PixPayloadCard(pix: PixPayment, onCopy: () -> Unit) {
-    Card {
+    Card(shape = RoundedCornerShape(22.dp)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Text("PIX gerado · ${providerLabel(pix.provider)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(999.dp)) { Text("PIX gerado · ${providerLabel(pix.provider)}", Modifier.padding(horizontal = 12.dp, vertical = 7.dp), fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer) }
             PixQrImage(pix.imageUrl, pix.copyPaste)
             Text("PIX copia e cola", fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.Start))
             SelectionContainer { Text(pix.copyPaste, maxLines = 5, style = MaterialTheme.typography.bodySmall) }
-            OutlinedButton(onCopy, Modifier.fillMaxWidth()) { Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(8.dp)); Text("Copiar código PIX") }
+            Button(onCopy, Modifier.fillMaxWidth()) { Icon(Icons.Default.ContentCopy, null); Spacer(Modifier.width(8.dp)); Text("Copiar código PIX") }
             if (pix.expiresAt.isNotBlank()) Text("Validade: ${pix.expiresAt}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -594,11 +696,11 @@ private fun OrdersScreen(vm: DeliveryViewModel) {
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (vm.orders.isEmpty()) item { EmptyCard("Você ainda não fez pedidos.") }
             items(vm.orders, key = { it.orderNumber }) { o ->
-                Card(Modifier.fillMaxWidth().clickable { vm.openOrder(o.orderNumber) }) {
-                    Column(Modifier.padding(16.dp)) {
+                Card(Modifier.fillMaxWidth().clickable { vm.openOrder(o.orderNumber) }, shape = RoundedCornerShape(20.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Pedido #${o.orderNumber}", fontWeight = FontWeight.Bold); Text(money(o.totalCents), fontWeight = FontWeight.Bold) }
                         Text(o.storeName)
-                        Text(o.statusLabel, color = DeliveryRed)
+                        Text(o.statusLabel, color = DeliveryPrimary, fontWeight = FontWeight.SemiBold)
                         Text(paymentLabel(o.paymentStatus), style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -615,10 +717,10 @@ private fun OrderDetailScreen(vm: DeliveryViewModel) {
     Scaffold(topBar = { DeliveryTopBar("Pedido #${o.orderNumber}", onBack = vm::loadOrders) }) { pad ->
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             item {
-                Card {
+                Card(shape = RoundedCornerShape(22.dp)) {
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(o.storeName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                        Text(o.statusLabel, color = DeliveryRed, fontWeight = FontWeight.Bold)
+                        Text(o.statusLabel, color = DeliveryPrimary, fontWeight = FontWeight.Bold)
                         Text(paymentLabel(o.paymentStatus))
                         Text("Total ${money(o.totalCents)}")
                     }
@@ -626,9 +728,9 @@ private fun OrderDetailScreen(vm: DeliveryViewModel) {
             }
             vm.tracking?.let { t ->
                 item {
-                    Card {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer), shape = RoundedCornerShape(22.dp)) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                            Text("Entrega em tempo real", fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) { Icon(Icons.Default.LocationOn, null, tint = DeliveryPrimary); Text("Entrega em tempo real", fontWeight = FontWeight.Bold) }
                             Text(t.statusLabel)
                             if (t.latitude != null && t.longitude != null) {
                                 Text("Entregador: %.5f, %.5f".format(t.latitude, t.longitude))
@@ -662,23 +764,27 @@ private fun ProfileScreen(vm: DeliveryViewModel) {
     Scaffold(topBar = { DeliveryTopBar("Minha conta") }, bottomBar = { BottomNav(vm, Screen.Profile) }) { pad ->
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item {
-                OutlinedTextField(name, { name = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(phone, { phone = it }, label = { Text("Celular") }, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                Text(c?.email.orEmpty(), style = MaterialTheme.typography.bodySmall)
-                Spacer(Modifier.height(8.dp))
-                Button({ vm.saveProfile(name, phone) }, Modifier.fillMaxWidth()) { Text("Salvar perfil") }
+                Card(shape = RoundedCornerShape(22.dp)) {
+                    Column(Modifier.padding(16.dp)) {
+                        OutlinedTextField(name, { name = it }, label = { Text("Nome") }, modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(phone, { phone = it }, label = { Text("Celular") }, modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                        Text(c?.email.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.height(8.dp))
+                        Button({ vm.saveProfile(name, phone) }, Modifier.fillMaxWidth()) { Text("Salvar perfil") }
+                    }
+                }
             }
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text("Meus endereços", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    IconButton({ vm.editAddress() }) { Icon(Icons.Default.Add, null) }
+                    FilledTonalIconButton({ vm.editAddress() }) { Icon(Icons.Default.Add, null) }
                 }
             }
             if (c?.addresses.isNullOrEmpty()) item { EmptyCard("Cadastre seu endereço de entrega.") }
             else items(c!!.addresses, key = { it.id }) { a ->
-                Card {
+                Card(shape = RoundedCornerShape(18.dp)) {
                     Column(Modifier.padding(16.dp)) {
                         Row(Modifier.fillMaxWidth()) {
                             Column(Modifier.weight(1f)) { Text(a.label, fontWeight = FontWeight.Bold); Text("${a.street}, ${a.number}"); Text("${a.city}/${a.state}") }
@@ -712,21 +818,25 @@ private fun AddressEditorScreen(vm: DeliveryViewModel) {
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             item { LocationCaptureButton { a, b -> lat = a; lng = b } }
             item {
-                OutlinedTextField(label, { label = it }, label = { Text("Nome do endereço") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(cep, { cep = it }, label = { Text("CEP") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(street, { street = it }, label = { Text("Rua") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(number, { number = it }, label = { Text("Número") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(complement, { complement = it }, label = { Text("Complemento") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(neighborhood, { neighborhood = it }, label = { Text("Bairro") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(city, { city = it }, label = { Text("Cidade") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(state, { state = it.uppercase().take(2) }, label = { Text("UF") }, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(reference, { reference = it }, label = { Text("Referência") }, modifier = Modifier.fillMaxWidth())
-                Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(isDefault, { isDefault = it }); Text("Endereço principal") }
-                if (lat != null && lng != null) Text("GPS salvo: %.5f, %.5f".format(lat, lng), style = MaterialTheme.typography.bodySmall)
-                Button(
-                    { vm.saveAddress(Address(original?.id ?: 0, label, street, number, complement, neighborhood, city, state, cep, reference, vm.customer?.phone.orEmpty(), lat, lng, isDefault)) },
-                    Modifier.fillMaxWidth(), enabled = street.isNotBlank() && number.isNotBlank() && city.isNotBlank() && state.length == 2,
-                ) { Text("Salvar endereço") }
+                Card(shape = RoundedCornerShape(22.dp)) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(label, { label = it }, label = { Text("Nome do endereço") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(cep, { cep = it }, label = { Text("CEP") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(street, { street = it }, label = { Text("Rua") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(number, { number = it }, label = { Text("Número") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(complement, { complement = it }, label = { Text("Complemento") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(neighborhood, { neighborhood = it }, label = { Text("Bairro") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(city, { city = it }, label = { Text("Cidade") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(state, { state = it.uppercase().take(2) }, label = { Text("UF") }, modifier = Modifier.fillMaxWidth())
+                        OutlinedTextField(reference, { reference = it }, label = { Text("Referência") }, modifier = Modifier.fillMaxWidth())
+                        Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(isDefault, { isDefault = it }); Text("Endereço principal") }
+                        if (lat != null && lng != null) Text("GPS salvo: %.5f, %.5f".format(lat, lng), style = MaterialTheme.typography.bodySmall)
+                        Button(
+                            { vm.saveAddress(Address(original?.id ?: 0, label, street, number, complement, neighborhood, city, state, cep, reference, vm.customer?.phone.orEmpty(), lat, lng, isDefault)) },
+                            Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = street.isNotBlank() && number.isNotBlank() && city.isNotBlank() && state.length == 2,
+                        ) { Text("Salvar endereço") }
+                    }
+                }
             }
         }
     }
@@ -747,7 +857,7 @@ private fun LocationCaptureButton(onLocation: (Double, Double) -> Unit) {
         {
             if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED) capture()
             else launcher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
-        }, Modifier.fillMaxWidth(),
+        }, Modifier.fillMaxWidth().heightIn(min = 50.dp),
     ) { Icon(Icons.Default.MyLocation, null); Spacer(Modifier.width(8.dp)); Text(status) }
 }
 
@@ -758,13 +868,13 @@ private fun DeliveryTopBar(title: String, onBack: (() -> Unit)? = null, actions:
         title = { Text(title, fontWeight = FontWeight.Bold) },
         navigationIcon = { if (onBack != null) IconButton(onBack) { Icon(Icons.Default.ArrowBack, null) } },
         actions = actions,
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = DeliveryCream),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = DeliveryBackground, titleContentColor = DeliveryPrimaryDark),
     )
 }
 
 @Composable
 private fun BottomNav(vm: DeliveryViewModel, current: Screen) {
-    NavigationBar {
+    NavigationBar(containerColor = Color.White) {
         NavigationBarItem(current == Screen.Home, { vm.navigate(Screen.Home); vm.loadStores() }, icon = { Icon(Icons.Default.Home, null) }, label = { Text("Início") })
         NavigationBarItem(current == Screen.Orders, { vm.loadOrders() }, icon = { Icon(Icons.Default.ReceiptLong, null) }, label = { Text("Pedidos") })
         NavigationBarItem(current == Screen.Profile, { vm.openProfile() }, icon = { Icon(Icons.Default.Person, null) }, label = { Text("Conta") })
@@ -774,11 +884,12 @@ private fun BottomNav(vm: DeliveryViewModel, current: Screen) {
 @Composable
 private fun AuthShell(title: String, subtitle: String, content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Spacer(Modifier.height(36.dp))
-        Text("EventMenu", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = DeliveryRed)
-        Text("Delivery", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(20.dp))
-        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(30.dp))
+        Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(999.dp)) {
+            Text("EventMenu Delivery", Modifier.padding(horizontal = 14.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black, color = DeliveryPrimaryDark)
         Text(subtitle, color = MaterialTheme.colorScheme.onSurfaceVariant)
         content()
     }
@@ -786,7 +897,11 @@ private fun AuthShell(title: String, subtitle: String, content: @Composable Colu
 
 @Composable
 private fun EmptyCard(text: String) {
-    Card(Modifier.fillMaxWidth()) { Text(text, Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant), shape = RoundedCornerShape(20.dp)) {
+        Row(Modifier.padding(18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Info, null, tint = DeliveryPrimary); Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+        }
+    }
 }
 
 private fun providerLabel(p: String) = when (p) {
@@ -796,4 +911,4 @@ private fun providerLabel(p: String) = when (p) {
     "inter" -> "Banco Inter"
     else -> p
 }
-private fun paymentLabel(s: String) = when (s) { "paid" -> "Pagamento confirmado"; "pending", "created", "processing" -> "Aguardando pagamento"; "failed" -> "Pagamento não concluído"; else -> s }
+private fun paymentLabel(s: String) = when (s) { "paid" -> "Pagamento confirmado"; "pending", "created", "processing", "authorized" -> "Aguardando pagamento"; "failed", "rejected" -> "Pagamento não concluído"; "cancelled", "canceled" -> "Pagamento cancelado"; else -> s }
