@@ -81,10 +81,17 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
     suspend fun reorder(id: Int): JSONObject = request("api-delivery-customer.php?action=reorder", "POST", JSONObject().put("order_id", id)) { it.getJSONObject("reorder") }
     suspend fun review(id: Int, rating: Int, comment: String) { requestUnit("api-delivery-customer.php?action=review", "POST", JSONObject().put("order_id", id).put("rating", rating).put("comment", comment)) }
 
-    suspend fun paymentMethods(orderId: Int): PaymentMethods = request("api-delivery-customer.php?action=payment-methods&order_id=$orderId") { root ->
+    suspend fun paymentMethods(orderId: Int): PaymentMethods = request("api-delivery-payment-methods.php?order_id=$orderId") { root ->
         val m = root.getJSONObject("methods")
         val pix = m.optJSONArray("pix").toObjects { it.optString("provider") }.filter { it.isNotBlank() }
-        val cards = m.optJSONArray("card").toObjects { CardMethod(it.optString("provider"), it.optString("public_key"), it.optInt("max_installments", 12)) }
+        val cards = m.optJSONArray("card").toObjects { row ->
+            CardMethod(
+                row.optString("provider"),
+                row.optString("public_key"),
+                row.optInt("max_installments", 12),
+                row.optJSONArray("payment_types").toStrings().filter { it == "credit_card" || it == "debit_card" }.toSet().ifEmpty { setOf("credit_card", "debit_card") },
+            )
+        }
         PaymentMethods(pix, cards, m.optBoolean("cash"))
     }
 
@@ -92,9 +99,9 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
         "api-delivery-customer.php?action=payment-pix", "POST", JSONObject().put("order_id", orderId).put("provider", provider).put("tax_id", taxId)
     ) { root -> val p = root.getJSONObject("payment"); PixPayment(p.getInt("payment_id"), p.optString("provider"), p.optString("copy_paste"), p.optString("image_url"), p.optString("expires_at")) }
 
-    suspend fun card(orderId: Int, token: String, paymentMethodId: String, installments: Int, taxId: String, issuerId: String? = null): String = request(
+    suspend fun card(orderId: Int, token: String, paymentMethodId: String, paymentTypeId: String, installments: Int, taxId: String, issuerId: String? = null): String = request(
         "api-delivery-customer.php?action=payment-card", "POST",
-        JSONObject().put("order_id", orderId).put("provider", "mercadopago").put("card_token", token).put("payment_method_id", paymentMethodId).put("installments", installments).put("tax_id", taxId).apply { issuerId?.takeIf { it.isNotBlank() }?.let { put("issuer_id", it) } }
+        JSONObject().put("order_id", orderId).put("provider", "mercadopago").put("card_token", token).put("payment_method_id", paymentMethodId).put("payment_type_id", paymentTypeId).put("installments", installments).put("tax_id", taxId).apply { issuerId?.takeIf { it.isNotBlank() }?.let { put("issuer_id", it) } }
     ) { it.getJSONObject("payment").optString("status") }
 
     suspend fun cash(orderId: Int, changeForCents: Int?) { requestUnit(
@@ -141,4 +148,5 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
 }
 
 private fun <T> JSONArray?.toObjects(mapper: (JSONObject) -> T): List<T> { if (this == null) return emptyList(); val out = ArrayList<T>(length()); for (i in 0 until length()) optJSONObject(i)?.let { out += mapper(it) }; return out }
+private fun JSONArray?.toStrings(): List<String> { if (this == null) return emptyList(); val out = ArrayList<String>(length()); for (i in 0 until length()) optString(i).takeIf { it.isNotBlank() }?.let(out::add); return out }
 private fun JSONObject.optDoubleOrNull(key: String): Double? = if (!has(key) || isNull(key)) null else optDouble(key)
