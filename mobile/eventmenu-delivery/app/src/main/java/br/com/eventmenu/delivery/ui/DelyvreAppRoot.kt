@@ -300,7 +300,7 @@ private fun DelyvreCatalogScreen(vm: DeliveryViewModel) {
                     IconButton(
                         onClick = { vm.navigate(Screen.Home) },
                         modifier = Modifier.padding(12.dp).background(Color.White.copy(alpha = .94f), RoundedCornerShape(14.dp)),
-                    ) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar") }
+                    ) { Icon(Icons.Default.ArrowBack, contentDescription = "Voltar") }
                 }
             }
             item {
@@ -544,7 +544,7 @@ private fun DelyvreBottomBar(onHome: () -> Unit, onSearch: () -> Unit, onOrders:
     NavigationBar(containerColor = Color.White) {
         NavigationBarItem(selected = true, onClick = onHome, icon = { Icon(Icons.Default.Home, null) }, label = { Text("Início") })
         NavigationBarItem(selected = false, onClick = onSearch, icon = { Icon(Icons.Default.Search, null) }, label = { Text("Buscar") })
-        NavigationBarItem(selected = false, onClick = onOrders, icon = { Icon(Icons.AutoMirrored.Filled.ReceiptLong, null) }, label = { Text("Pedidos") })
+        NavigationBarItem(selected = false, onClick = onOrders, icon = { Icon(Icons.Default.ReceiptLong, null) }, label = { Text("Pedidos") })
         NavigationBarItem(selected = false, onClick = onBenefits, icon = { Icon(Icons.Default.LocalOffer, null) }, label = { Text("Benefícios") })
         NavigationBarItem(selected = false, onClick = onProfile, icon = { Icon(Icons.Default.Person, null) }, label = { Text("Perfil") })
     }
