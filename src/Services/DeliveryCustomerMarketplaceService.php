@@ -110,12 +110,7 @@ final class DeliveryCustomerMarketplaceService
 
     public function paymentMethods(PDO $pdo,int $accountId,int $orderId):array
     {
-        $order=$this->ownedOrder($pdo,$accountId,$orderId);$tenantId=(int)$order['tenant_id'];$q=$pdo->prepare('SELECT provider,config_encrypted FROM payment_gateways WHERE tenant_id=? AND active=1 ORDER BY id');$q->execute([$tenantId]);$pix=[];$card=[];
-        foreach($q->fetchAll()as$row){$provider=(string)$row['provider'];$config=Crypto::decryptJson((string)$row['config_encrypted']);$pixEnabled=!array_key_exists('pix_enabled',$config)||filter_var($config['pix_enabled'],FILTER_VALIDATE_BOOL);if(in_array($provider,['mercadopago','pagbank'],true)&&$pixEnabled)$pix[]=['provider'=>$provider];
-            if($provider==='mercadopago'&&filter_var($config['card_enabled']??false,FILTER_VALIDATE_BOOL)){ $publicKey=trim((string)($config['public_key']??''));if($publicKey!=='')$card[]=['provider'=>'mercadopago','public_key'=>$publicKey,'max_installments'=>max(1,min(12,(int)($config['max_installments']??12)))]; }
-        }
-        $settings=$this->tenantSettings($pdo,$tenantId);
-        return ['pix'=>$pix,'card'=>$card,'cash'=>!empty($settings['delivery_cash_enabled']),'currency'=>'BRL'];
+        return (new DeliveryPaymentMethodService())->forOrder($pdo,$accountId,$orderId);
     }
 
     public function markCash(PDO $pdo,int $accountId,int $orderId,?int $changeForCents=null):array
@@ -127,6 +122,7 @@ final class DeliveryCustomerMarketplaceService
         $existing=$pdo->prepare('SELECT order_id FROM delivery_customer_payment_preferences WHERE order_id=? LIMIT 1');$existing->execute([$orderId]);
         if($existing->fetchColumn())$pdo->prepare('UPDATE delivery_customer_payment_preferences SET method="cash",change_for_cents=?,updated_at=CURRENT_TIMESTAMP WHERE order_id=? AND account_id=?')->execute([$changeForCents,$orderId,$accountId]);
         else $pdo->prepare('INSERT INTO delivery_customer_payment_preferences (order_id,account_id,tenant_id,method,change_for_cents) VALUES (?,?,?,"cash",?)')->execute([$orderId,$accountId,(int)$order['tenant_id'],$changeForCents]);
+        (new OrderPaymentPreferenceService())->set($pdo,(int)$order['tenant_id'],$orderId,'cash',null,$changeForCents,'delivery_app');
         if((string)$order['payment_status']==='failed')$pdo->prepare('UPDATE orders SET payment_status="unpaid" WHERE id=? AND tenant_id=?')->execute([$orderId,(int)$order['tenant_id']]);
         return ['method'=>'cash','status'=>'selected','change_for_cents'=>$changeForCents];
     }
