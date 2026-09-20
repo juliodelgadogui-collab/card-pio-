@@ -15,6 +15,8 @@ final class TicketService
     public function reservePublic(int $eventId,int $batchId,int $quantity,array $buyer,?string $couponCode=null,?string $promoterCode=null): array
     {
         $quantity=max(1,min(10,$quantity));
+        $rate=new ApiRateLimitService();
+        $rate->assertAllowed('event.public.reserve.'.$eventId,$rate->requestSubject(),6,60,'Muitas reservas em pouco tempo. Aguarde um minuto e tente novamente.');
         return Database::transaction(function(PDO $pdo)use($eventId,$batchId,$quantity,$buyer,$couponCode,$promoterCode): array {
             $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT e.*,t.status tenant_status FROM events e JOIN tenants t ON t.id=e.tenant_id WHERE e.id=? AND e.status="published" FOR UPDATE'));
             $stmt->execute([$eventId]);
