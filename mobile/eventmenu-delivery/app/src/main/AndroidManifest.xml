@@ -10,7 +10,7 @@
         android:name=".DeliveryApplication"
         android:allowBackup="false"
         tools:replace="android:allowBackup"
-        android:label="EventMenu Delivery"
+        android:label="DELYVRE"
         android:icon="@mipmap/ic_delivery"
         android:roundIcon="@mipmap/ic_delivery_round"
         android:usesCleartextTraffic="false"

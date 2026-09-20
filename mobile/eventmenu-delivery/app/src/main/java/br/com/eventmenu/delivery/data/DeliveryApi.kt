@@ -32,8 +32,17 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
 
     suspend fun saveAddress(address:Address):Address{val body=JSONObject().put("id",address.id).put("label",address.label).put("street",address.street).put("number",address.number).put("complement",address.complement).put("neighborhood",address.neighborhood).put("city",address.city).put("state",address.state).put("postal_code",address.postalCode).put("reference",address.reference).put("phone",address.phone).put("is_default",address.isDefault);address.latitude?.let{body.put("latitude",it)};address.longitude?.let{body.put("longitude",it)};return request("api-delivery-customer.php?action=address-save","POST",body){address(it.getJSONObject("address"))}}
     suspend fun deleteAddress(id:Int){requestUnit("api-delivery-customer.php?action=address-delete","POST",JSONObject().put("id",id))}
-    suspend fun stores(query:String=""): List<Store> = request("api-delivery-customer.php?action=stores&q=${encode(query)}"){root->root.optJSONArray("stores").toObjects(::store)}
-    suspend fun catalog(tenantId:Int,unitId:Int):Catalog=request("api-delivery-customer.php?action=catalog&tenant_id=$tenantId&unit_id=$unitId"){root->val checkout=root.getJSONObject("checkout_session");Catalog(store(root.getJSONObject("store")),root.optJSONArray("categories").toObjects{Category(it.getInt("id"),it.optString("name"))},root.optJSONArray("products").toObjects(::product),checkout.getString("token"))}
+    suspend fun stores(query:String=""): List<Store> {
+        val path = if (tokenProvider().isNullOrBlank())
+            "api-marketplace.php?action=stores&q=${encode(query)}"
+        else
+            "api-delivery-customer.php?action=stores&q=${encode(query)}"
+        return if (tokenProvider().isNullOrBlank())
+            requestPublic(path){root->root.optJSONArray("stores").toObjects(::store)}
+        else
+            request(path){root->root.optJSONArray("stores").toObjects(::store)}
+    }
+    suspend fun catalog(tenantId:Int,unitId:Int):Catalog=requestPublic("api-marketplace.php?action=catalog&tenant_id=$tenantId&unit_id=$unitId"){root->val checkout=root.getJSONObject("checkout_session");Catalog(store(root.getJSONObject("store")),root.optJSONArray("categories").toObjects{Category(it.getInt("id"),it.optString("name"))},root.optJSONArray("products").toObjects(::product),checkout.getString("token"))}
     suspend fun favorite(tenantId:Int,value:Boolean){requestUnit("api-delivery-customer.php?action=favorite","POST",JSONObject().put("tenant_id",tenantId).put("favorite",value))}
     suspend fun couponQuote(tenantId:Int,code:String,subtotalCents:Int):CouponQuote=request("api-delivery-customer.php?action=coupon-quote","POST",JSONObject().put("tenant_id",tenantId).put("code",code.trim().uppercase()).put("subtotal_cents",subtotalCents)){root->val c=root.getJSONObject("coupon");CouponQuote(c.optString("code"),c.optInt("discount_cents"),c.optInt("min_order_cents"),if(c.isNull("max_discount_cents"))null else c.optInt("max_discount_cents"))}
     suspend fun createOrder(catalog:Catalog,addressId:Int,items:List<CartItem>,couponCode:String=""):OrderSummary{val lines=JSONArray();items.forEach{item->lines.put(JSONObject().put("product_id",item.product.id).put("quantity",item.quantity).put("option_ids",JSONArray(item.optionIds.toList())).put("notes",item.notes))};val body=JSONObject().put("entry_token",catalog.entryToken).put("address_id",addressId).put("items",lines);if(couponCode.isNotBlank())body.put("coupon_code",couponCode.trim().uppercase());return request("api-delivery-customer.php?action=order-create","POST",body){order(it.getJSONObject("order"))}}

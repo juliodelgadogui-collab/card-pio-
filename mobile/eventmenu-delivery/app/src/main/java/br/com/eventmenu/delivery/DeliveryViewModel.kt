@@ -27,7 +27,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     private val deliveryApp=app as? DeliveryApplication
     private val session=deliveryApp?.sessionStore?:SecureSessionStore(app)
     private val api=DeliveryApi{session.accessToken}
-    var screen by mutableStateOf<Screen>(if(session.accessToken.isNullOrBlank())Screen.Login else Screen.Home);private set
+    var screen by mutableStateOf<Screen>(Screen.Home);private set
     var customer by mutableStateOf<Customer?>(null);private set
     var stores by mutableStateOf<List<Store>>(emptyList());private set
     var catalog by mutableStateOf<Catalog?>(null);private set
@@ -48,52 +48,57 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     private var trackingJob:Job?=null
     private var paymentPollingJob:Job?=null
 
-    init{if(!session.accessToken.isNullOrBlank()){deliveryApp?.pushCoordinator?.syncAfterLogin();refreshSession()}}
+    val isAuthenticated:Boolean get()=!session.accessToken.isNullOrBlank()
+
+    init{if(isAuthenticated){deliveryApp?.pushCoordinator?.syncAfterLogin();refreshSession()}}
     fun clearMessage(){message=null}
     fun navigate(value:Screen){screen=value}
     fun emailConfirmed(){session.accessToken=null;PaymentUiContext.clear();customer=null;payerCpf="";screen=Screen.Login;message="E-mail confirmado. Entre com sua conta."}
 
     fun login(email:String,password:String)=action{
         val result=api.login(email.trim(),password);session.accessToken=result.token;customer=result.customer;deliveryApp?.pushCoordinator?.syncAfterLogin()
-        if(result.customer.cpfConfigured){screen=Screen.Home;loadStoresInternal()}else{screen=Screen.Profile;message="Complete seu CPF uma única vez para usar todos os meios de pagamento."}
+        if(result.customer.cpfConfigured){screen=if(cart.isNotEmpty()&&catalog!=null)Screen.Cart else Screen.Home;loadStoresInternal()}else{screen=Screen.Profile;message="Complete seu CPF uma única vez para usar todos os meios de pagamento."}
     }
     fun register(name:String,email:String,phone:String,password:String,legalAccepted:Boolean=false)=action{if(!legalAccepted)error("Aceite os Termos de Uso e a Política de Privacidade para continuar.");val result=api.register(name.trim(),email.trim(),phone.trim(),password,legalAccepted);pendingEmail=result.email;screen=Screen.VerifyEmail;message=if(result.emailSent)"Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."}
     fun registerWithCpf(name:String,cpf:String,email:String,phone:String,password:String,legalAccepted:Boolean=false)=action{if(!legalAccepted)error("Aceite os Termos de Uso e a Política de Privacidade para continuar.");val result=api.register(name.trim(),cpf.trim(),email.trim(),phone.trim(),password,legalAccepted);pendingEmail=result.email;screen=Screen.VerifyEmail;message=if(result.emailSent)"Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."}
     fun resendVerification()=action{api.resend(pendingEmail);message="Se o cadastro estiver pendente, um novo link foi enviado."}
     fun forgotPassword(email:String)=action{api.forgotPassword(email);message="Se a conta existir, você receberá um link para criar uma nova senha."}
-    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();PaymentUiContext.clear();customer=null;stores=emptyList();cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";screen=Screen.Login}
+    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";stores=api.stores();screen=Screen.Home}
     fun loadStores(query:String="")=action(showBusy=false){stores=api.stores(query)}
-    fun openStore(store:Store)=action{catalog=api.catalog(store.tenantId,store.unitId);cart.clear();clearCoupon(false);screen=Screen.Catalog;if(!store.acceptingOrders)message="Este restaurante está pausado no momento. Você pode ver o cardápio, mas novos pedidos estão temporariamente indisponíveis."}
-    fun toggleFavorite(store:Store)=action(showBusy=false){api.favorite(store.tenantId,!store.favorite);stores=stores.map{if(it.tenantId==store.tenantId&&it.unitId==store.unitId)it.copy(favorite=!store.favorite)else it}}
+    fun openStore(store:Store)=action{catalog=api.catalog(store.tenantId,store.unitId);cart.clear();clearCoupon(false);screen=Screen.Catalog;if(!store.acceptingOrders)message="Este restaurante está fechado para novos pedidos agora. Você ainda pode consultar o cardápio."}
+    fun toggleFavorite(store:Store){if(!isAuthenticated){screen=Screen.Login;message="Entre para salvar restaurantes nos favoritos.";return};action(showBusy=false){api.favorite(store.tenantId,!store.favorite);stores=stores.map{if(it.tenantId==store.tenantId&&it.unitId==store.unitId)it.copy(favorite=!store.favorite)else it}}}
     fun addToCart(product:Product,quantity:Int=1,optionIds:Set<Int> = emptySet(),notes:String=""){if(!product.available)return;val index=cart.indexOfFirst{it.product.id==product.id&&it.optionIds==optionIds&&it.notes==notes};if(index>=0)cart[index]=cart[index].copy(quantity=(cart[index].quantity+quantity).coerceAtMost(99))else cart+=CartItem(product,quantity.coerceIn(1,99),optionIds,notes);invalidateCouponForCartChange();message="${product.name} adicionado."}
     fun updateCart(index:Int,quantity:Int){if(index !in cart.indices)return;if(quantity<=0)cart.removeAt(index)else cart[index]=cart[index].copy(quantity=quantity.coerceAtMost(99));invalidateCouponForCartChange()}
     fun validateCoupon(code:String)=action{val cat=catalog?:error("Loja não carregada.");val normalized=code.trim().uppercase();if(normalized.isBlank())error("Digite o código do cupom.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<=0)error("Adicione itens ao carrinho antes de aplicar o cupom.");val quote=api.couponQuote(cat.store.tenantId,normalized,subtotal);couponCode=quote.code;couponQuote=quote;message="Cupom ${quote.code} aplicado: ${money(quote.discountCents)} de desconto."}
     fun clearCoupon(showMessage:Boolean=true){val had=couponQuote!=null||couponCode.isNotBlank();couponQuote=null;couponCode="";if(showMessage&&had)message="Cupom removido."}
     private fun invalidateCouponForCartChange(){if(couponQuote!=null||couponCode.isNotBlank()){couponQuote=null;couponCode="";message="O carrinho mudou. Aplique o cupom novamente."}}
 
-    fun checkoutCart(addressId:Int)=action{
-        val cat=catalog?:error("Loja não carregada.");if(!cat.store.acceptingOrders)error("Este restaurante pausou novos pedidos no momento.");if(cart.isEmpty())error("Seu carrinho está vazio.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<cat.store.minimumOrderCents)error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
-        val appliedCoupon=couponCode;if(appliedCoupon.isNotBlank())couponQuote=api.couponQuote(cat.store.tenantId,appliedCoupon,subtotal)
-        val order=api.createOrder(cat,addressId,cart.toList(),appliedCoupon);selectedOrder=order;PaymentUiContext.updateAmount(order.totalCents);cart.clear();clearCoupon(false);paymentMethods=api.paymentMethods(order.orderNumber);pixPayment=null;paymentWaiting=false;payerCpf="";if(paymentMethods?.cards?.isNotEmpty()==true&&customer?.cpfConfigured==true)runCatching{api.paymentIdentification()}.onSuccess{payerCpf=it};screen=Screen.Checkout
+    fun checkoutCart(addressId:Int){
+        if(!isAuthenticated){screen=Screen.Login;message="Entre para escolher o endereço e finalizar seu pedido.";return}
+        action{
+            val cat=catalog?:error("Loja não carregada.");if(!cat.store.acceptingOrders)error("Este restaurante pausou novos pedidos no momento.");if(cart.isEmpty())error("Seu carrinho está vazio.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<cat.store.minimumOrderCents)error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
+            val appliedCoupon=couponCode;if(appliedCoupon.isNotBlank())couponQuote=api.couponQuote(cat.store.tenantId,appliedCoupon,subtotal)
+            val order=api.createOrder(cat,addressId,cart.toList(),appliedCoupon);selectedOrder=order;PaymentUiContext.updateAmount(order.totalCents);cart.clear();clearCoupon(false);paymentMethods=api.paymentMethods(order.orderNumber);pixPayment=null;paymentWaiting=false;payerCpf="";if(paymentMethods?.cards?.isNotEmpty()==true&&customer?.cpfConfigured==true)runCatching{api.paymentIdentification()}.onSuccess{payerCpf=it};screen=Screen.Checkout
+        }
     }
     fun reloadPaymentMethods()=action(showBusy=false){val id=selectedOrder?.orderNumber?:return@action;paymentMethods=api.paymentMethods(id)}
     fun prepareCardIdentification()=action(showBusy=false){if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para pagar com cartão.");payerCpf=api.paymentIdentification()}
     fun payPix(provider:String,taxId:String)=action{if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para gerar o PIX.");val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");pixPayment=api.pix(id,provider,"");message="PIX gerado. Assim que o provedor confirmar, o pedido será atualizado automaticamente.";startPaymentPolling(id)}
     fun payCash(changeForCents:Int?)=action{val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;api.cash(id,changeForCents);PaymentUiContext.clear();message="Pagamento em dinheiro registrado para a entrega.";openOrderSuspend(id)}
     suspend fun payCardToken(token:String,paymentMethodId:String,paymentTypeId:String,installments:Int,taxId:String){if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para pagar com cartão.");val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");val status=api.card(id,token,paymentMethodId,paymentTypeId,installments,"");if(status=="paid"){paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";PaymentUiContext.clear();message=if(paymentTypeId=="debit_card")"Pagamento no débito aprovado." else "Pagamento no crédito aprovado.";openOrderSuspend(id)}else{pixPayment=null;message="Pagamento enviado. Aguardando confirmação do Mercado Pago.";startPaymentPolling(id)}}
-    fun loadOrders()=action{orders=api.orders();screen=Screen.Orders}
+    fun loadOrders(){if(!isAuthenticated){screen=Screen.Login;message="Entre para ver seus pedidos.";return};action{orders=api.orders();screen=Screen.Orders}}
     fun openOrder(id:Int)=action{openOrderSuspend(id)}
     private suspend fun openOrderSuspend(id:Int){selectedOrder=api.order(id);screen=Screen.OrderDetail;startTracking()}
     fun repeatOrder(id:Int)=action{val r=api.reorder(id);val s=r.getJSONObject("store");catalog=api.catalog(s.getInt("tenant_id"),s.getInt("unit_id"));if(catalog?.store?.acceptingOrders==false)error("Este restaurante pausou novos pedidos no momento.");cart.clear();clearCoupon(false);val items=r.optJSONArray("items");if(items!=null)for(i in 0 until items.length()){val row=items.getJSONObject(i);val product=catalog?.products?.firstOrNull{it.id==row.optInt("product_id")}?:continue;cart+=CartItem(product,row.optDouble("quantity",1.0).toInt().coerceAtLeast(1))};screen=Screen.Cart}
     fun submitReview(orderId:Int,rating:Int,comment:String)=action{api.review(orderId,rating,comment);message="Obrigado pela avaliação!"}
-    fun openProfile()=action{customer=api.me();screen=Screen.Profile}
-    fun editAddress(address:Address?=null){editingAddress=address;screen=Screen.AddressEditor}
+    fun openProfile(){if(!isAuthenticated){screen=Screen.Login;message="Entre para acessar seu perfil, endereços e benefícios.";return};action{customer=api.me();screen=Screen.Profile}}
+    fun editAddress(address:Address?=null){if(!isAuthenticated){screen=Screen.Login;message="Entre para salvar um endereço.";return};editingAddress=address;screen=Screen.AddressEditor}
     fun saveAddress(address:Address)=action{api.saveAddress(address);customer=api.me();editingAddress=null;screen=Screen.Profile;message="Endereço salvo."}
     fun deleteAddress(id:Int)=action{api.deleteAddress(id);customer=api.me();message="Endereço removido."}
     fun saveProfile(name:String,phone:String)=action{customer=api.saveProfile(name,phone);message="Perfil atualizado."}
-    fun saveProfile(name:String,phone:String,cpf:String)=action{customer=api.saveProfile(name,phone,cpf);payerCpf="";message="Perfil atualizado."}
+    fun saveProfile(name:String,phone:String,cpf:String)=action{customer=api.saveProfile(name,phone,cpf);payerCpf="";message="Perfil atualizado.";if(cart.isNotEmpty()&&catalog!=null)screen=Screen.Cart}
     fun refreshCurrentOrder(){selectedOrder?.orderNumber?.let(::openOrder)}
-    private fun refreshSession()=action(showBusy=false){try{customer=api.me();if(customer?.cpfConfigured==true){loadStoresInternal();screen=Screen.Home}else{screen=Screen.Profile;message="Complete seu CPF uma única vez para continuar."}}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();screen=Screen.Login}else throw e}}
+    private fun refreshSession()=action(showBusy=false){try{customer=api.me();if(customer?.cpfConfigured==true){loadStoresInternal();screen=Screen.Home}else{screen=Screen.Profile;message="Complete seu CPF uma única vez para continuar."}}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();customer=null;stores=api.stores();screen=Screen.Home}else throw e}}
     private suspend fun loadStoresInternal(){stores=api.stores()}
     private fun startPaymentPolling(orderId:Int){paymentPollingJob?.cancel();paymentWaiting=true;paymentPollingJob=viewModelScope.launch{repeat(90){delay(if(it==0)2_500 else 5_000);val result=runCatching{api.paymentStatus(orderId)}.getOrNull()?:return@repeat;when(result.optString("payment_status").lowercase()){ "paid"->{paymentWaiting=false;pixPayment=null;payerCpf="";PaymentUiContext.clear();message="Pagamento confirmado.";runCatching{openOrderSuspend(orderId)}.onFailure{message=it.message?:"Pagamento confirmado. Atualize seus pedidos."};return@launch};"failed","cancelled"->{paymentWaiting=false;pixPayment=null;message="O pagamento não foi concluído. Você pode tentar novamente ou escolher outra forma.";return@launch}}};paymentWaiting=false;message="A confirmação ainda não chegou. O pedido continuará sendo atualizado pelo servidor."}}
     private fun startTracking(){trackingJob?.cancel();tracking=null;val token=selectedOrder?.trackingToken?:return;trackingJob=viewModelScope.launch{repeat(180){runCatching{api.tracking(token)}.onSuccess{tracking=it};if(tracking?.status=="completed"||tracking?.status=="cancelled")return@launch;delay(10_000)}}}
