@@ -21,6 +21,10 @@ final class BankPixGatewayService
         if($active){
             foreach(['client_id','client_secret','pix_key','certificate_path']as$key)if(trim((string)($config[$key]??''))==='')throw new RuntimeException('Preencha credenciais, chave Pix e certificado do provedor.');
             if($provider==='inter'&&trim((string)($config['account_number']??''))==='')throw new RuntimeException('Informe a conta corrente do Banco Inter.');
+            $cert=(string)$config['certificate_path'];$ext=strtolower(pathinfo($cert,PATHINFO_EXTENSION));
+            if(!in_array($ext,['p12','pfx'],true)&&trim((string)($config['private_key_path']??''))==='')throw new RuntimeException('Certificados .crt/.cer/.pem exigem também a chave privada .key/.pem.');
+            (new PaymentCertificateService())->resolve($cert);
+            if(!in_array($ext,['p12','pfx'],true))(new PaymentCertificateService())->resolve((string)$config['private_key_path']);
         }
         $config['pix_enabled']=!array_key_exists('pix_enabled',$config)||filter_var($config['pix_enabled'],FILTER_VALIDATE_BOOL);
         $config['pix_priority']=max(1,min(999,(int)($config['pix_priority']??100)));
