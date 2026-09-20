@@ -11,7 +11,7 @@ use RuntimeException;
 
 final class PaymentService
 {
-    private const PROVIDERS=['stripe','pagbank','mercadopago','manual','tef'];
+    private const PROVIDERS=['stripe','pagbank','mercadopago','efi','inter','manual','tef'];
 
     public function create(int $orderId,string $provider,string $idempotencyKey,?int $amountCents=null):array
     {
