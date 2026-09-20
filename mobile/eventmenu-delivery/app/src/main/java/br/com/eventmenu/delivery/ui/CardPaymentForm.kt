@@ -40,13 +40,15 @@ fun CardPaymentForm(
     publicKey: String,
     maxInstallments: Int,
     customerName: String,
-    onTokenized: suspend (token: String, paymentMethodId: String, installments: Int, taxId: String) -> Unit,
+    paymentTypes: Set<String> = setOf("credit_card", "debit_card"),
+    onTokenized: suspend (token: String, paymentMethodId: String, paymentTypeId: String, installments: Int, taxId: String) -> Unit,
 ) {
     CardPaymentFormWithAmount(
         publicKey = publicKey,
         maxInstallments = maxInstallments,
         amountCents = PaymentUiContext.amountCents,
         customerName = customerName,
+        paymentTypes = paymentTypes,
         onTokenized = onTokenized,
     )
 }
@@ -57,7 +59,8 @@ private fun CardPaymentFormWithAmount(
     maxInstallments: Int,
     amountCents: Int,
     customerName: String,
-    onTokenized: suspend (token: String, paymentMethodId: String, installments: Int, taxId: String) -> Unit,
+    paymentTypes: Set<String>,
+    onTokenized: suspend (token: String, paymentMethodId: String, paymentTypeId: String, installments: Int, taxId: String) -> Unit,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -71,6 +74,7 @@ private fun CardPaymentFormWithAmount(
     var installmentOptions by remember { mutableStateOf<List<InstallmentChoice>>(emptyList()) }
     var installmentsLoading by remember { mutableStateOf(false) }
     var paymentMethodId by remember { mutableStateOf("") }
+    var paymentTypeId by remember { mutableStateOf("") }
     var cvvLength by remember { mutableIntStateOf(3) }
     var sdkReady by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -82,6 +86,7 @@ private fun CardPaymentFormWithAmount(
         installmentOptions = emptyList()
         installments = 0
         paymentMethodId = ""
+        paymentTypeId = ""
         if (publicKey.isBlank()) {
             error = "Cartão não configurado pelo restaurante."
             return@LaunchedEffect
@@ -93,10 +98,11 @@ private fun CardPaymentFormWithAmount(
             .onFailure { error = "Não foi possível iniciar o pagamento por cartão." }
     }
 
-    LaunchedEffect(bin, amountCents, maxInstallments, sdkReady) {
+    LaunchedEffect(bin, amountCents, maxInstallments, sdkReady, paymentTypes) {
         installmentOptions = emptyList()
         installments = 0
         paymentMethodId = ""
+        paymentTypeId = ""
         cvvLength = 3
         if (!sdkReady || bin.length < 8 || amountCents <= 0) return@LaunchedEffect
 
@@ -109,11 +115,24 @@ private fun CardPaymentFormWithAmount(
                 error = "Não foi possível identificar o cartão. Revise o número."
                 return@LaunchedEffect
             }
-            val method = methodsResult.data.firstOrNull()
+            val method = methodsResult.data.firstOrNull { candidate ->
+                candidate.paymentTypeId in paymentTypes && candidate.id?.isNotBlank() == true
+            } ?: methodsResult.data.firstOrNull()
             paymentMethodId = method?.id.orEmpty()
+            paymentTypeId = method?.paymentTypeId.orEmpty()
             cvvLength = method?.card?.securityCode?.length?.coerceIn(3, 4) ?: 3
-            if (paymentMethodId.isBlank()) {
-                error = "Não foi possível identificar a bandeira do cartão."
+            if (paymentMethodId.isBlank() || paymentTypeId !in setOf("credit_card", "debit_card")) {
+                error = "Este cartão não está disponível para crédito ou débito nesta conta."
+                return@LaunchedEffect
+            }
+            if (paymentTypeId !in paymentTypes) {
+                error = "Este restaurante não habilitou ${if (paymentTypeId == "debit_card") "cartão de débito" else "cartão de crédito"} no app."
+                return@LaunchedEffect
+            }
+
+            if (paymentTypeId == "debit_card") {
+                installmentOptions = listOf(InstallmentChoice(1, amountCents, amountCents, false))
+                installments = 1
                 return@LaunchedEffect
             }
 
@@ -143,7 +162,7 @@ private fun CardPaymentFormWithAmount(
                 .sortedBy { it.count }
 
             if (allowed.isEmpty()) {
-                error = "Nenhuma condição de parcelamento está disponível para este cartão."
+                error = "Nenhuma condição de parcelamento está disponível para este cartão de crédito."
                 return@LaunchedEffect
             }
             installmentOptions = allowed
@@ -156,7 +175,14 @@ private fun CardPaymentFormWithAmount(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Cartão", style = MaterialTheme.typography.titleLarge)
+        Text(
+            when (paymentTypeId) {
+                "debit_card" -> "Cartão de débito"
+                "credit_card" -> "Cartão de crédito"
+                else -> "Cartão de crédito ou débito"
+            },
+            style = MaterialTheme.typography.titleLarge,
+        )
         Text("Os dados sensíveis são tokenizados pelos campos PCI oficiais do Mercado Pago e não são enviados em texto ao EventMenu.", style = MaterialTheme.typography.bodySmall)
         if (amountCents <= 0) {
             Text("Não foi possível carregar o valor deste pedido. Volte ao carrinho e tente novamente.", color = MaterialTheme.colorScheme.error)
@@ -170,9 +196,7 @@ private fun CardPaymentFormWithAmount(
         SecureBox("Número do cartão") {
             CardNumberTextField(
                 state = number,
-                onEvent = { event ->
-                    if (event is CardNumberTextFieldEvent.OnBinChanged) bin = event.cardBin.orEmpty()
-                },
+                onEvent = { event -> if (event is CardNumberTextFieldEvent.OnBinChanged) bin = event.cardBin.orEmpty() },
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
@@ -181,9 +205,7 @@ private fun CardPaymentFormWithAmount(
             Box(Modifier.weight(1f)) {
                 SecureBox("Validade") {
                     ExpirationDateTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        state = expiration,
-                        onEvent = {},
+                        modifier = Modifier.fillMaxWidth(), state = expiration, onEvent = {},
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     )
                 }
@@ -191,10 +213,7 @@ private fun CardPaymentFormWithAmount(
             Box(Modifier.weight(1f)) {
                 SecureBox("CVV") {
                     SecurityCodeTextField(
-                        modifier = Modifier.fillMaxWidth(),
-                        state = cvv,
-                        onEvent = {},
-                        securityCodeSize = cvvLength,
+                        modifier = Modifier.fillMaxWidth(), state = cvv, onEvent = {}, securityCodeSize = cvvLength,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                         visualTransformation = PasswordVisualTransformation(),
                     )
@@ -204,41 +223,34 @@ private fun CardPaymentFormWithAmount(
         OutlinedTextField(holder, { holder = it }, label = { Text("Nome no cartão") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF/CNPJ") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth())
 
-        if (bin.length >= 8) {
+        if (bin.length >= 8 && paymentTypeId == "credit_card") {
             Text("Parcelas", style = MaterialTheme.typography.labelLarge)
             if (installmentsLoading) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Text("Consultando condições do seu cartão…", style = MaterialTheme.typography.bodySmall)
             } else if (installmentOptions.isNotEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     installmentOptions.forEach { option ->
                         val label = buildString {
                             append(option.count).append("x de ").append(money(option.installmentAmountCents))
                             if (!option.hasInterest) append(" sem juros")
                         }
-                        FilterChip(
-                            selected = installments == option.count,
-                            onClick = { installments = option.count },
-                            label = { Text(label) },
-                        )
+                        FilterChip(selected = installments == option.count, onClick = { installments = option.count }, label = { Text(label) })
                     }
                 }
                 installmentOptions.firstOrNull { it.count == installments }?.let { selected ->
-                    if (selected.hasInterest) {
-                        Text("Total no cartão: ${money(selected.totalAmountCents)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+                    if (selected.hasInterest) Text("Total no cartão: ${money(selected.totalAmountCents)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+        } else if (paymentTypeId == "debit_card") {
+            Text("Débito à vista · ${money(amountCents)}", style = MaterialTheme.typography.bodyMedium)
         }
 
         error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         Button(
             onClick = {
                 if (holder.isBlank() || taxId.length !in listOf(11,14) || bin.length < 8) { error = "Preencha cartão, nome e CPF/CNPJ."; return@Button }
-                if (paymentMethodId.isBlank() || installments < 1 || installmentOptions.none { it.count == installments }) { error = "Aguarde a validação do cartão e escolha uma parcela disponível."; return@Button }
+                if (paymentMethodId.isBlank() || paymentTypeId !in setOf("credit_card", "debit_card") || installments < 1 || installmentOptions.none { it.count == installments }) { error = "Aguarde a validação do cartão e escolha uma condição disponível."; return@Button }
                 busy = true; error = null
                 scope.launch {
                     try {
@@ -253,14 +265,14 @@ private fun CardPaymentFormWithAmount(
                             is Result.Success -> tokenResult.data.token
                             is Result.Error -> error("Não foi possível tokenizar o cartão. Revise os dados.")
                         }
-                        onTokenized(token, paymentMethodId, installments, taxId)
+                        onTokenized(token, paymentMethodId, paymentTypeId, installments, taxId)
                     } catch (t: Throwable) { error = t.message ?: "Não foi possível processar o cartão." }
                     finally { busy = false }
                 }
             },
             enabled = !busy && !installmentsLoading && installmentOptions.isNotEmpty(),
             modifier = Modifier.fillMaxWidth(),
-        ) { Text(if (busy) "Processando…" else "Pagar com cartão") }
+        ) { Text(if (busy) "Processando…" else if (paymentTypeId == "debit_card") "Pagar no débito" else "Pagar no crédito") }
     }
 }
 
