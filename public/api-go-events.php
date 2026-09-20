@@ -39,8 +39,12 @@ try{
         goe_method('POST');$rate->assertAllowed('event.order.deliver',$subject,90,60,'Muitas confirmações de retirada em pouco tempo. Aguarde alguns segundos.');$body=goe_body();$eventId=(int)($body['event_id']??0);$value=(string)($body['value']??'');
         goe_out(['ok'=>true,'order'=>(new EventOrderPickupService())->deliver($eventId,$value)]);
     }
-    if($action==='ticket-checkin'){goe_method('POST');$rate->assertAllowed('event.ticket.checkin',$subject,240,60,'Muitas leituras de ingresso em pouco tempo. Aguarde alguns segundos.');$body=goe_body();$result=(new TicketService())->checkIn((string)($body['token']??''));goe_out(['ok'=>true,'result'=>$result]);}
-    if($action==='guest-checkin'){goe_method('POST');$rate->assertAllowed('event.guest.checkin',$subject,240,60,'Muitas leituras de convidado em pouco tempo. Aguarde alguns segundos.');$body=goe_body();$guest=(new GuestService())->checkIn((string)($body['code']??''));goe_out(['ok'=>true,'guest'=>$guest]);}
+    if($action==='ticket-checkin'){
+        goe_method('POST');$rate->assertAllowed('event.ticket.checkin',$subject,240,60,'Muitas leituras de ingresso em pouco tempo. Aguarde alguns segundos.');$body=goe_body();$eventId=(int)($body['event_id']??0);if($eventId<1)throw new RuntimeException('Selecione o evento antes de validar o ingresso.');$result=(new TicketService())->checkIn((string)($body['token']??''),$eventId);goe_out(['ok'=>true,'result'=>$result]);
+    }
+    if($action==='guest-checkin'){
+        goe_method('POST');$rate->assertAllowed('event.guest.checkin',$subject,240,60,'Muitas leituras de convidado em pouco tempo. Aguarde alguns segundos.');$body=goe_body();$eventId=(int)($body['event_id']??0);if($eventId<1)throw new RuntimeException('Selecione o evento antes de validar o convidado.');$guest=(new GuestService())->checkIn((string)($body['code']??''),$eventId);goe_out(['ok'=>true,'guest'=>$guest]);
+    }
 
     goe_out(['ok'=>false,'error'=>'Endpoint de evento não encontrado.'],404);
 }catch(ApiRateLimitExceededException $e){goe_out(['ok'=>false,'error'=>$e->getMessage()],429);}catch(RuntimeException $e){goe_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))goe_out(['ok'=>false,'error'=>$e->getMessage()],500);goe_out(['ok'=>false,'error'=>'Erro interno.'],500);}
