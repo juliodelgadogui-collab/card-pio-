@@ -18,14 +18,25 @@ val ciBuild = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
 android {
     namespace = "br.com.eventmenu.connect"
     compileSdk = 36
+    ndkVersion = "28.0.13004108"
 
     defaultConfig {
         applicationId = "br.com.eventmenu.connect"
         minSdk = 26
         targetSdk = 36
         versionCode = ciBuild ?: 1
-        versionName = if (ciBuild != null) "1.0.$ciBuild" else "1.0.0"
+        versionName = if (ciBuild != null) "1.1.$ciBuild" else "1.1.0"
         buildConfigField("String", "API_BASE_URL", buildConfigString(apiBase))
+
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
+        externalNativeBuild {
+            cmake {
+                arguments += listOf("-DANDROID_STL=c++_shared")
+                cppFlags += "-std=c++17"
+            }
+        }
     }
 
     buildFeatures {
@@ -36,6 +47,21 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    sourceSets.getByName("main") {
+        jniLibs.srcDir("libnode/bin")
+    }
+
+    packaging {
+        jniLibs.useLegacyPackaging = false
     }
 
     buildTypes {
@@ -58,6 +84,7 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("com.google.zxing:core:3.5.3")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
