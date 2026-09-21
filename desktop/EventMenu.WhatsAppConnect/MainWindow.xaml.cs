@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private int _tenantId;
     private bool _initialized;
     private bool _reallyExit;
+    private bool _pairingMode;
 
     public MainWindow(bool startInBackground=false)
     {
@@ -32,6 +33,7 @@ public partial class MainWindow : Window
         _startInBackground=startInBackground;
         _timer.Tick+=Timer_Tick;
         CreateTrayIcon();
+        SetConnectionMode(false);
     }
 
     private void CreateTrayIcon()
@@ -177,9 +179,11 @@ public partial class MainWindow : Window
     private void UpdateLocalState(LocalBridgeState state)
     {
         var status=(state.Status??"disconnected").ToLowerInvariant();
+        var hasPairingCode=!string.IsNullOrWhiteSpace(state.PairingCode);
         StatusText.Text=status switch
         {
             "connected"=>"Conectado",
+            "qr" when hasPairingCode=>"Aguardando código",
             "qr"=>"Aguardando QR",
             "starting"=>"Iniciando",
             "reconnecting"=>"Reconectando",
@@ -190,8 +194,23 @@ public partial class MainWindow : Window
         StatusBadge.Background=new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(connected?"#DCFCE7":status=="error"?"#FEE2E2":"#F1F5F9"));
         StatusText.Foreground=new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(connected?"#166534":status=="error"?"#B91C1C":"#475569"));
         PhoneText.Text=string.IsNullOrWhiteSpace(state.Phone)?"—":FormatPhone(state.Phone);
-        ConnectButton.IsEnabled=status is not "starting" and not "reconnecting";
+        ConnectButton.IsEnabled=status is not "starting" and not "reconnecting" and not "connected";
+        GenerateCodeButton.IsEnabled=status is not "starting" and not "reconnecting" and not "connected";
         DisconnectButton.IsEnabled=status is "connected" or "qr" or "starting" or "reconnecting";
+
+        if(hasPairingCode)
+        {
+            SetConnectionMode(true);
+            PairingCodeText.Text=FormatPairingCode(state.PairingCode!);
+            PairingCodeBox.Visibility=Visibility.Visible;
+            if(!string.IsNullOrWhiteSpace(state.PairingPhone))PairingPhoneText.Text="+"+new string(state.PairingPhone.Where(char.IsDigit).ToArray());
+            ActivityText.Text="Código gerado. Digite-o no WhatsApp do celular.";
+        }
+        else
+        {
+            PairingCodeBox.Visibility=Visibility.Collapsed;
+            PairingCodeText.Text="—";
+        }
 
         if(!string.IsNullOrWhiteSpace(state.Qr))
         {
@@ -205,12 +224,28 @@ public partial class MainWindow : Window
             QrImage.Source=null;
             QrImage.Visibility=Visibility.Collapsed;
             QrPlaceholder.Visibility=Visibility.Visible;
-            QrHintText.Text=connected?"WhatsApp conectado. Você pode minimizar esta janela.":status=="reconnecting"?"Tentando reconectar a sessão salva...":"Clique em Conectar para gerar o QR Code.";
+            QrHintText.Text=connected?"WhatsApp conectado. Você pode minimizar esta janela.":status=="reconnecting"?"Tentando reconectar a sessão salva...":"Clique em Gerar QR Code ou use Conectar por código.";
         }
 
         if(!string.IsNullOrWhiteSpace(state.Error))ErrorText.Text=state.Error;
-        if(connected)ActivityText.Text=$"WhatsApp ativo neste computador • {DateTime.Now:HH:mm:ss}";
+        if(connected)
+        {
+            PairingCodeBox.Visibility=Visibility.Collapsed;
+            ActivityText.Text=$"WhatsApp ativo neste computador • {DateTime.Now:HH:mm:ss}";
+        }
     }
+
+    private void SetConnectionMode(bool pairing)
+    {
+        _pairingMode=pairing;
+        PairingPanel.Visibility=pairing?Visibility.Visible:Visibility.Collapsed;
+        QrPanel.Visibility=pairing?Visibility.Collapsed:Visibility.Visible;
+        ConnectButton.Visibility=pairing?Visibility.Collapsed:Visibility.Visible;
+        QrModeButton.Background=BrushFrom(pairing?"#475569":"#16A34A");
+        CodeModeButton.Background=BrushFrom(pairing?"#16A34A":"#475569");
+    }
+
+    private static SolidColorBrush BrushFrom(string color)=>new((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(color));
 
     private void SetQrImage(string dataUrl)
     {
@@ -223,6 +258,8 @@ public partial class MainWindow : Window
             var image=new BitmapImage();
             image.BeginInit();
             image.CacheOption=BitmapCacheOption.OnLoad;
+            image.CreateOptions=BitmapCreateOptions.PreservePixelFormat;
+            image.DecodePixelWidth=360;
             image.StreamSource=stream;
             image.EndInit();
             image.Freeze();
@@ -233,13 +270,14 @@ public partial class MainWindow : Window
             QrImage.Source=null;
             QrImage.Visibility=Visibility.Collapsed;
             QrPlaceholder.Visibility=Visibility.Visible;
-            QrHintText.Text="Não foi possível exibir o QR Code. Clique em Atualizar.";
+            QrHintText.Text="Não foi possível exibir o QR Code. Use Conectar por código.";
         }
     }
 
     private async void ConnectButton_Click(object sender,RoutedEventArgs e)
     {
         if(_bridge is null)return;
+        SetConnectionMode(false);
         ConnectButton.IsEnabled=false;
         ErrorText.Text="";
         try
@@ -254,10 +292,68 @@ public partial class MainWindow : Window
         finally{ConnectButton.IsEnabled=true;}
     }
 
+    private void QrModeButton_Click(object sender,RoutedEventArgs e)
+    {
+        SetConnectionMode(false);
+        ActivityText.Text="Modo QR Code selecionado.";
+    }
+
+    private void CodeModeButton_Click(object sender,RoutedEventArgs e)
+    {
+        SetConnectionMode(true);
+        ActivityText.Text="Informe o número do WhatsApp para gerar o código de conexão.";
+        PairingPhoneText.Focus();
+        PairingPhoneText.CaretIndex=PairingPhoneText.Text.Length;
+    }
+
+    private async void GenerateCodeButton_Click(object sender,RoutedEventArgs e)
+    {
+        if(_bridge is null)return;
+        var phone=PairingPhoneText.Text.Trim();
+        if(string.IsNullOrWhiteSpace(phone)||new string(phone.Where(char.IsDigit).ToArray()).Length<10)
+        {
+            ErrorText.Text="Informe o número do WhatsApp com DDD.";
+            PairingPhoneText.Focus();
+            return;
+        }
+
+        SetConnectionMode(true);
+        GenerateCodeButton.IsEnabled=false;
+        PairingCodeBox.Visibility=Visibility.Collapsed;
+        ErrorText.Text="";
+        ActivityText.Text="Solicitando código ao WhatsApp...";
+        try
+        {
+            await _bridge.EnsureStartedAsync(_shutdown.Token);
+            var state=await _bridge.RequestPairingCodeAsync(phone,_shutdown.Token);
+            UpdateLocalState(state);
+            if(string.IsNullOrWhiteSpace(state.PairingCode))throw new InvalidOperationException("O código ainda não foi gerado. Tente novamente em alguns segundos.");
+            ActivityText.Text="Código pronto. Digite-o no WhatsApp do celular.";
+        }
+        catch(Exception ex)
+        {
+            ErrorText.Text=ex.Message;
+            ActivityText.Text="Não foi possível gerar o código agora.";
+        }
+        finally{GenerateCodeButton.IsEnabled=true;}
+    }
+
+    private void CopyCodeButton_Click(object sender,RoutedEventArgs e)
+    {
+        var code=new string(PairingCodeText.Text.Where(c=>!char.IsWhiteSpace(c)&&c!='-').ToArray());
+        if(string.IsNullOrWhiteSpace(code)||code=="—")return;
+        try
+        {
+            System.Windows.Clipboard.SetText(code);
+            ActivityText.Text="Código copiado.";
+        }
+        catch(Exception ex){ErrorText.Text=ex.Message;}
+    }
+
     private async void DisconnectButton_Click(object sender,RoutedEventArgs e)
     {
         if(_bridge is null)return;
-        if(System.Windows.MessageBox.Show("Desconectar este WhatsApp do EventMenu? Será necessário escanear um novo QR Code para conectar novamente.","Desconectar WhatsApp",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        if(System.Windows.MessageBox.Show("Desconectar este WhatsApp do EventMenu? Será necessário usar um novo QR Code ou código de conexão para vincular novamente.","Desconectar WhatsApp",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
         DisconnectButton.IsEnabled=false;
         try
         {
@@ -265,6 +361,7 @@ public partial class MainWindow : Window
             UpdateLocalState(state);
             if(_cloud is not null)await _cloud.HeartbeatAsync("disconnected","","",$"EventMenu WhatsApp Connect - {Environment.MachineName}",_shutdown.Token);
             PendingText.Text="0";
+            PairingCodeBox.Visibility=Visibility.Collapsed;
             ActivityText.Text="WhatsApp desconectado deste computador.";
         }
         catch(Exception ex){ErrorText.Text=ex.Message;}
@@ -285,10 +382,20 @@ public partial class MainWindow : Window
     {
         StatusText.Text="Indisponível";
         ConnectButton.IsEnabled=false;
+        GenerateCodeButton.IsEnabled=false;
         DisconnectButton.IsEnabled=false;
         FooterText.Text=message;
         ErrorText.Text=message;
         QrHintText.Text="Clique em Atualizar para entrar no EventMenu Connect e identificar seu estabelecimento.";
+    }
+
+    private static string FormatPairingCode(string code)
+    {
+        var clean=new string(code.Where(c=>char.IsLetterOrDigit(c)).ToArray()).ToUpperInvariant();
+        if(clean.Length<=4)return clean;
+        var parts=new List<string>();
+        for(var i=0;i<clean.Length;i+=4)parts.Add(clean.Substring(i,Math.Min(4,clean.Length-i)));
+        return string.Join(" ",parts);
     }
 
     private static string FormatPhone(string digits)
