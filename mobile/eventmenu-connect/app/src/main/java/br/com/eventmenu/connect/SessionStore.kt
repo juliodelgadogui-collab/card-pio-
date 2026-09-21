@@ -49,6 +49,16 @@ class SessionStore(context: Context) {
     fun tenantName(): String = prefs.getString("tenant_name", "").orEmpty()
     fun hasSession(): Boolean = token().length >= 32 && refreshToken().length >= 32
 
+    fun savePairingCountry(regionCode: String) {
+        prefs.edit().putString("pairing_country", regionCode.uppercase(Locale.US)).apply()
+    }
+
+    fun pairingCountryRegion(): String = prefs.getString("pairing_country", "BR").orEmpty().ifBlank { "BR" }
+
+    fun clearRuntimeError() {
+        prefs.edit().putString("runtime_error", "").apply()
+    }
+
     fun clearAuth() {
         prefs.edit()
             .remove("token")
