@@ -93,14 +93,34 @@ final class DeliveryCustomerBenefitsService
 
     private function hasActiveCoupons(PDO $pdo,int $tenantId):bool
     {
-        $q=$pdo->prepare('SELECT 1 FROM coupons WHERE tenant_id=? AND active=1 AND (starts_at IS NULL OR starts_at<=CURRENT_TIMESTAMP) AND (ends_at IS NULL OR ends_at>=CURRENT_TIMESTAMP) LIMIT 1');$q->execute([$tenantId]);return(bool)$q->fetchColumn();
+        $q=$pdo->prepare('SELECT 1 FROM coupons WHERE tenant_id=? AND active=1 AND (starts_at IS NULL OR starts_at<=CURRENT_TIMESTAMP) AND (ends_at IS NULL OR ends_at>=CURRENT_TIMESTAMP) LIMIT 1');$q->execute([$tenantId]);if($q->fetchColumn())return true;
+        try{
+            $definitions=$pdo->query('SELECT * FROM marketplace_delivery_coupons WHERE active=1 AND (starts_at IS NULL OR starts_at<=CURRENT_TIMESTAMP) AND (ends_at IS NULL OR ends_at>=CURRENT_TIMESTAMP)')->fetchAll();
+            $service=new MarketplaceDeliveryCouponService();
+            foreach($definitions as$definition)if(in_array($tenantId,$service->targetTenantIds($pdo,$definition),true))return true;
+        }catch(\Throwable){
+        }
+        return false;
     }
 
     private function coupon(PDO $pdo,int $tenantId,string $code,bool $lock):array
     {
         $code=mb_strtoupper(trim($code));if($code==='')throw new RuntimeException('Informe o cupom.');
-        $sql='SELECT * FROM coupons WHERE tenant_id=? AND UPPER(code)=? AND active=1 LIMIT 1';if($lock)$sql=Database::portableSql($pdo,str_replace(' LIMIT 1',' FOR UPDATE',$sql));
-        $q=$pdo->prepare($sql);$q->execute([$tenantId,$code]);return$q->fetch()?:throw new RuntimeException('Cupom inválido.');
+        $coupon=$this->findCoupon($pdo,$tenantId,$code,$lock);
+        if($coupon)return$coupon;
+
+        // Cupons do Super ADM são materializados para a empresa no primeiro uso.
+        // Isso elimina a dependência do botão manual "Sincronizar empresas".
+        (new MarketplaceDeliveryCouponService())->ensureForTenantCode($pdo,$tenantId,$code);
+        $coupon=$this->findCoupon($pdo,$tenantId,$code,$lock);
+        return$coupon?:throw new RuntimeException('Cupom inválido.');
+    }
+
+    private function findCoupon(PDO $pdo,int $tenantId,string $code,bool $lock):?array
+    {
+        $sql='SELECT * FROM coupons WHERE tenant_id=? AND UPPER(code)=? AND active=1 LIMIT 1';
+        if($lock)$sql=Database::portableSql($pdo,str_replace(' LIMIT 1',' FOR UPDATE',$sql));
+        $q=$pdo->prepare($sql);$q->execute([$tenantId,$code]);$row=$q->fetch();return$row?:null;
     }
 
     private function assertCouponUsable(array $coupon,int $subtotalCents):void
