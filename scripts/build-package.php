@@ -3,15 +3,15 @@
 declare(strict_types=1);
 
 $root = dirname(__DIR__);
-$destination = $argv[1] ?? ($root . '/dist/EventMenu-Premium-1');
+$version = trim((string)@file_get_contents($root . '/VERSION')) ?: '0.0.0';
+$destination = $argv[1] ?? ($root . '/dist/eventmenu-server-' . $version);
 $destination = rtrim($destination, '/\\');
 
 function remove_tree(string $path): void
 {
     if (!file_exists($path)) return;
     if (is_file($path) || is_link($path)) { unlink($path); return; }
-    $items = scandir($path) ?: [];
-    foreach ($items as $item) {
+    foreach (scandir($path) ?: [] as $item) {
         if ($item === '.' || $item === '..') continue;
         remove_tree($path . DIRECTORY_SEPARATOR . $item);
     }
@@ -43,16 +43,24 @@ function write_file(string $path, string $contents): void
 remove_tree($destination);
 mkdir($destination, 0775, true);
 
-foreach (['app', 'src', 'database', 'public', 'vendor', 'integrations'] as $directory) {
+foreach (['app', 'src', 'database', 'public', 'vendor', 'integrations', 'scripts'] as $directory) {
     copy_tree($root . '/' . $directory, $destination . '/' . $directory);
 }
+if (is_dir($root . '/docs')) copy_tree($root . '/docs', $destination . '/docs');
 
-foreach (['composer.json', 'composer.lock', '.env.example'] as $file) {
-    if (is_file($root . '/' . $file)) copy($root . '/' . $file, $destination . '/' . $file);
+foreach (['composer.json', 'composer.lock', '.env.example', 'VERSION', 'CHANGELOG.md', 'README-INSTALL.md', 'install.sh', 'update.sh'] as $file) {
+    if (is_file($root . '/' . $file) && !copy($root . '/' . $file, $destination . '/' . $file)) {
+        throw new RuntimeException('Falha ao copiar: ' . $file);
+    }
 }
+@chmod($destination . '/install.sh', 0755);
+@chmod($destination . '/update.sh', 0755);
 
-mkdir($destination . '/storage', 0775, true);
+foreach (['storage', 'storage/backups', 'storage/private', 'downloads'] as $directory) {
+    if (!is_dir($destination . '/' . $directory)) mkdir($destination . '/' . $directory, 0775, true);
+}
 write_file($destination . '/storage/.gitkeep', '');
+write_file($destination . '/downloads/.gitkeep', '');
 
 $publicPhp = glob($root . '/public/*.php') ?: [];
 foreach ($publicPhp as $file) {
@@ -71,8 +79,8 @@ foreach (['manifest.webmanifest', 'sw.js'] as $file) {
 $deny = <<<'HTACCESS'
 Require all denied
 HTACCESS;
-foreach (['app', 'src', 'database', 'storage', 'vendor', 'public', 'integrations'] as $directory) {
-    write_file($destination . '/' . $directory . '/.htaccess', $deny . "\n");
+foreach (['app', 'src', 'database', 'storage', 'vendor', 'public', 'integrations', 'scripts', 'docs'] as $directory) {
+    if (is_dir($destination . '/' . $directory)) write_file($destination . '/' . $directory . '/.htaccess', $deny . "\n");
 }
 
 $rootHtaccess = <<<'HTACCESS'
@@ -81,7 +89,7 @@ DirectoryIndex index.php
 
 <IfModule mod_rewrite.c>
 RewriteEngine On
-RewriteRule ^(?:app|src|database|storage|vendor|public|integrations)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:app|src|database|storage|vendor|public|integrations|scripts|docs)(?:/|$) - [F,L,NC]
 </IfModule>
 
 <FilesMatch "^(?:\.env|composer\.(?:json|lock))$">
@@ -90,80 +98,36 @@ Require all denied
 HTACCESS;
 write_file($destination . '/.htaccess', $rootHtaccess . "\n");
 
-$deployReadme = <<<'TXT'
-EVENTMENU PREMIUM — PRIMEIRA INSTALAÇÃO /1 — SQLITE
+$deployReadme = <<<TXT
+EVENTMENU SERVER {$version} — PRIMEIRA INSTALAÇÃO /1 — SQLITE
 
-Este pacote foi gerado do HEAD atual do GitHub e foi preparado para um servidor totalmente vazio.
-O Composer NÃO precisa estar instalado no servidor: a pasta vendor já acompanha o pacote.
+Este pacote foi gerado para instalação em servidor vazio e não contém banco, clientes, pedidos, senhas, tokens ou sessões de produção.
 
-REQUISITOS DO SERVIDOR
-- PHP 8.2 ou superior.
-- Extensões: PDO, pdo_sqlite, mbstring, curl e openssl.
-- HTTPS recomendado desde a primeira instalação.
-- Apache/LiteSpeed com .htaccess habilitado, ou regras equivalentes no Nginx.
-- Permissão de escrita para a pasta do sistema durante a instalação e para storage depois.
-- Opcional para WhatsApp Beta: Node.js 22+, Chrome/Chromium e o worker em integrations/whatsapp-worker.
+REQUISITOS
+- PHP 8.2+ com PDO, pdo_sqlite, mbstring, curl e openssl.
+- HTTPS em produção.
+- Apache/LiteSpeed com .htaccess ou regras equivalentes no Nginx.
+- Node.js 22+ somente para a WhatsApp Bridge Beta (Baileys; não usa Chromium).
 
-INSTALAÇÃO DO ZERO
-1. Crie/abra a pasta /1 no domínio.
-2. Envie TODO o conteúdo deste pacote para essa pasta.
-3. NÃO crie banco de dados manualmente.
-4. NÃO é obrigatório renomear .env.example: se .env não existir, o instalador cria automaticamente.
-5. Acesse https://SEU-DOMINIO/1/install.php.
-6. Confira se todos os requisitos aparecem com ✅.
-7. Informe a URL, empresa inicial e os dados do Super ADM.
-8. Clique em "Instalar EventMenu com SQLite".
-9. O sistema criará automaticamente:
-   - .env com APP_KEY e CRON_SECRET aleatórios;
-   - storage/eventmenu.sqlite;
-   - schema e migrações atuais;
-   - empresa inicial;
-   - usuário Super ADM;
-   - storage/installed.lock para bloquear nova instalação.
-10. Entre em https://SEU-DOMINIO/1/.
-11. Configure o cron do servidor para executar a cada minuto:
+INSTALAÇÃO RECOMENDADA
+1. Extraia o pacote na pasta /1.
+2. Execute: chmod +x install.sh update.sh
+3. Execute: ./install.sh
+4. Informe URL, empresa inicial e Super ADM.
+5. O instalador cria .env com chaves aleatórias, SQLite, schema, migrations e installed.lock.
+6. Configure o cron a cada minuto conforme exibido.
 
-   * * * * * php /CAMINHO/DO/SITE/1/cron.php >/dev/null 2>&1
+ALTERNATIVA SEM SHELL
+Abra /1/install.php no navegador e use o instalador web.
 
-12. Entre como Super ADM, abra "Saúde do sistema" e confirme que Cron e Worker aparecem como OK.
+ATUALIZAÇÃO
+Use ./update.sh. Ele preserva .env/storage, cria backup do SQLite antes das migrations e nunca substitui o banco por um vazio.
 
-WHATSAPP BETA (OPCIONAL)
-- Leia integrations/whatsapp-worker/README.md.
-- Instale as dependências Node com npm install --omit=dev.
-- Execute a bridge vinculada a 127.0.0.1 ou a uma rede privada protegida.
-- Use o mesmo segredo em EVENTMENU_WHATSAPP_BRIDGE_SECRET no worker e WHATSAPP_BRIDGE_SECRET no .env do PHP.
-- Defina WHATSAPP_BRIDGE_ENABLED=true somente depois de a bridge estar saudável.
-- Não exponha integrations/, arquivos de sessão ou a porta da bridge diretamente na internet.
-- Esta integração usa WhatsApp Web não oficial e deve permanecer Beta até validação controlada com conta real.
+WHATSAPP BRIDGE BETA
+Leia integrations/whatsapp-worker/README.md. A engine é Baileys/WhatsApp Web. Mantenha segredo e sessões fora de public/.
 
-CRON / MANUTENÇÃO AUTOMÁTICA
-- O cron é obrigatório em produção e deve executar a cada minuto.
-- Ele processa a fila assíncrona, notificações push, WhatsApp Beta, expirações, limpezas e o agendamento do backup automático.
-- Prefira a execução CLI acima: ela NÃO precisa expor o CRON_SECRET.
-- Se o seu provedor só aceitar chamada HTTP, o endpoint cron.php exige o cabeçalho X-Cron-Secret com o valor protegido do .env.
-- O painel Super ADM > Saúde do sistema mostra o caminho real do cron.php e informa se Cron/Worker estão atrasados.
-
-BANCO INICIAL
-- Banco: SQLite.
-- Arquivo: storage/eventmenu.sqlite.
-- WAL e foreign keys são ativados automaticamente.
-- Nunca disponibilize storage publicamente.
-- Faça backup periódico do banco antes de atualizações importantes.
-
-ATUALIZAÇÕES
-- Envie os novos arquivos preservando .env e toda a pasta storage.
-- Entre como administrador autorizado e acesse /1/update.php para aplicar migrações.
-- NUNCA substitua storage/eventmenu.sqlite por um arquivo vazio durante atualização.
-
-SEGURANÇA
-- O .htaccess do pacote bloqueia .env, app, src, database, storage, vendor, public e integrations em Apache/LiteSpeed.
-- Em Nginx, replique esses bloqueios no virtual host.
-- SESSION_SECURE é ativado automaticamente quando a URL informada usa HTTPS.
-- Depois de instalado, install.php é bloqueado por installed.lock e pela existência do Super ADM.
-
-MIGRAÇÃO FUTURA PARA MYSQL/MARIADB
-O sistema mantém suporte a MySQL/MariaDB, mas a primeira instalação deste pacote usa SQLite conforme definido para a fase inicial do projeto.
+Consulte README-INSTALL.md e CHANGELOG.md para detalhes.
 TXT;
 write_file($destination . '/LEIA-ME-INSTALACAO.txt', $deployReadme . "\n");
 
-echo "Pacote SQLite de primeira instalação criado em: {$destination}\n";
+echo "Pacote EventMenu Server {$version} criado em: {$destination}\n";
