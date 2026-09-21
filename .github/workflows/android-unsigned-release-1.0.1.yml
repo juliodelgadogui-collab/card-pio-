@@ -1,0 +1,89 @@
+name: Android Unsigned Release 1.0.1
+
+on:
+  push:
+    branches:
+      - release/eventmenu-1.0.0-rc
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-unsigned-1.0.1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EVENTMENU_RELEASE: '1.0.1'
+  EVENTMENU_VERSION_NAME: '1.0.1'
+  EVENTMENU_VERSION_CODE: '10001'
+  EVENTMENU_DELIVERY_VERSION_NAME: '1.0.1'
+  EVENTMENU_DELIVERY_VERSION_CODE: '10001'
+  EVENTMENU_API_BASE_URL: 'https://go.gestao2.store/1/'
+  EVENTMENU_DELIVERY_API_BASE_URL: 'https://go.gestao2.store/1/'
+  EVENTMENU_ALLOW_UNSIGNED_RELEASE: 'true'
+  EVENTMENU_ALLOW_NO_FCM: 'true'
+  EVENTMENU_REQUIRE_FCM: 'false'
+
+jobs:
+  build:
+    name: Build unsigned GO + DELYVRE release APKs
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -111 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "EVENTMENU_BUILD_DATE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Build EventMenu GO Release unsigned
+        working-directory: mobile/eventmenu-go
+        run: gradle :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Build DELYVRE Release unsigned
+        working-directory: mobile/eventmenu-delivery
+        run: gradle :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Stage APKs and Android signing tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p unsigned-release
+          GO_APK="$(find mobile/eventmenu-go/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          DELYVRE_APK="$(find mobile/eventmenu-delivery/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$GO_APK" && test -f "$GO_APK"
+          test -n "$DELYVRE_APK" && test -f "$DELYVRE_APK"
+          cp "$GO_APK" unsigned-release/EventMenu-GO-1.0.1-UNSIGNED.apk
+          cp "$DELYVRE_APK" unsigned-release/DELYVRE-1.0.1-UNSIGNED.apk
+          cp "$ANDROID_SDK_ROOT/build-tools/36.0.0/lib/apksigner.jar" unsigned-release/apksigner.jar
+          sha256sum unsigned-release/*.apk > unsigned-release/UNSIGNED-SHA256SUMS.txt
+          ls -lh unsigned-release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Android-Unsigned-Release-1.0.1
+          path: unsigned-release/*
+          if-no-files-found: error
+          retention-days: 7
