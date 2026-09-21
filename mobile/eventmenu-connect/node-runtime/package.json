@@ -1,0 +1,14 @@
+{
+  "name": "eventmenu-connect-node-runtime",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@hapi/boom": "10.0.1",
+    "@whiskeysockets/baileys": "6.7.24",
+    "pino": "9.9.5"
+  }
+}
