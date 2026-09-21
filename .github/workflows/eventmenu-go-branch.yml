@@ -31,21 +31,30 @@ jobs:
           "$SDKMANAGER" --list_installed
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: '9.3.1'}
-      - name: Restore stable debug signing key
+      - name: Restore debug signing key
         id: go-signing-cache
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
           key: eventmenu-go-debug-keystore-v1
-          fail-on-cache-miss: true
-      - name: Verify stable debug signing identity
+      - name: Verify official signing identity when publishing canonical branch
         shell: bash
+        env:
+          CACHE_HIT: ${{ steps.go-signing-cache.outputs.cache-hit }}
         run: |
           set -euo pipefail
           KEYSTORE="$HOME/.android/debug.keystore"
           EXPECTED_SHA256="4D:EA:DF:DD:42:3D:9D:9B:A2:35:76:7B:5E:05:AC:44:8A:ED:B1:B8:34:A0:87:26:4F:ED:13:FD:48:8C:8A:27"
-          if [ ! -s "$KEYSTORE" ]; then
-            echo "::error::A chave de assinatura estável do EventMenu GO não foi restaurada. O build foi interrompido para não gerar um APK incompatível com instalações existentes."
+          IS_CANONICAL=false
+          if [ "${GITHUB_EVENT_NAME}" = "push" ] && [ "${GITHUB_REF}" = "refs/heads/dev/eventmenu-go" ]; then
+            IS_CANONICAL=true
+          fi
+          if [ "$IS_CANONICAL" != true ]; then
+            echo "Validation branch: official signing identity is not required for this non-distributable build."
+            exit 0
+          fi
+          if [ "$CACHE_HIT" != "true" ] || [ ! -s "$KEYSTORE" ]; then
+            echo "::error::A chave de assinatura estável do EventMenu GO não foi restaurada na branch oficial. O build foi interrompido para não gerar um APK incompatível com instalações existentes."
             exit 1
           fi
           ACTUAL_SHA256="$(keytool -list -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -n 1 | tr -d '\r')"
@@ -55,7 +64,7 @@ jobs:
             echo "Encontrado: $ACTUAL_SHA256"
             exit 1
           fi
-          echo "EventMenu GO signing SHA-256 verified: $ACTUAL_SHA256"
+          echo "EventMenu GO official signing SHA-256 verified: $ACTUAL_SHA256"
       - name: Stamp unique app version
         shell: bash
         run: |
