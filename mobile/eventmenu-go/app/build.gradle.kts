@@ -9,6 +9,8 @@ fun envValue(primary: String, fallback: String? = null): String =
 fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val allowUnsignedRelease = envValue("EVENTMENU_ALLOW_UNSIGNED_RELEASE").equals("true", ignoreCase = true)
+val allowNoFcm = envValue("EVENTMENU_ALLOW_NO_FCM").equals("true", ignoreCase = true)
 val apiBase = envValue("EVENTMENU_API_BASE_URL")
     .ifBlank { "https://go.gestao2.store/1/" }
     .trimEnd('/') + "/"
@@ -42,7 +44,7 @@ val firebaseConfig = linkedMapOf(
 val firebaseConfiguredCount = firebaseConfig.values.count { it.isNotBlank() }
 val firebaseEnabled = firebaseConfiguredCount == firebaseConfig.size
 val firebasePartial = firebaseConfiguredCount in 1 until firebaseConfig.size
-val firebaseRequired = envValue("EVENTMENU_REQUIRE_FCM").equals("true", ignoreCase = true) || releaseRequested
+val firebaseRequired = !allowNoFcm && (envValue("EVENTMENU_REQUIRE_FCM").equals("true", ignoreCase = true) || releaseRequested)
 if (firebasePartial) {
     val missing = firebaseConfig.filterValues { it.isBlank() }.keys.joinToString(", ")
     throw GradleException("Configuração Firebase incompleta. Faltando: $missing")
@@ -70,7 +72,7 @@ if (releaseSigningCount in 1 until releaseSigning.size) {
     val missing = releaseSigning.filterValues { it.isBlank() }.keys.joinToString(", ")
     throw GradleException("Assinatura Release incompleta. Faltando: $missing")
 }
-if (releaseRequested && !releaseSigningConfigured) {
+if (releaseRequested && !releaseSigningConfigured && !allowUnsignedRelease) {
     throw GradleException("Build Release exige o keystore permanente configurado por ambiente/secrets.")
 }
 if (releaseSigningConfigured && !file(releaseKeystorePath).isFile) {
