@@ -29,6 +29,11 @@ class TicketSalesActivity : FragmentActivity() {
             EventMenuTheme(brand) {
                 TicketSalesPage(repo, { finish() }, { url -> startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }, { text ->
                     startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply { type="text/plain"; putExtra(Intent.EXTRA_TEXT,text) }, "Compartilhar ingresso"))
+                }, { url ->
+                    // The printable ticket remains server-rendered so the QR/code is exactly the
+                    // same ticket already issued. Android's print-capable browser handles 58/80mm
+                    // printer plugins as well as standard system print services.
+                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url + if (url.contains('?')) "&print=1" else "?print=1")))
                 })
             }
         }
@@ -37,7 +42,7 @@ class TicketSalesActivity : FragmentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TicketSalesPage(repo: TicketSalesRepository,onBack:()->Unit,onOpen:(String)->Unit,onShare:(String)->Unit) {
+private fun TicketSalesPage(repo: TicketSalesRepository,onBack:()->Unit,onOpen:(String)->Unit,onShare:(String)->Unit,onPrint:(String)->Unit) {
     val scope=rememberCoroutineScope(); var events by remember{mutableStateOf<List<TicketSaleEvent>>(emptyList())}; var catalog by remember{mutableStateOf<TicketSaleCatalog?>(null)}
     var eventId by remember{mutableStateOf<Int?>(null)}; var batchId by remember{mutableStateOf<Int?>(null)}; var qty by remember{mutableIntStateOf(1)}; var method by remember{mutableStateOf("cash")}
     var name by remember{mutableStateOf("")}; var phone by remember{mutableStateOf("")}; var email by remember{mutableStateOf("")}; var result by remember{mutableStateOf<TicketSaleResult?>(null)}
@@ -57,7 +62,10 @@ private fun TicketSalesPage(repo: TicketSalesRepository,onBack:()->Unit,onOpen:(
             item{Text("Pagamento",style=MaterialTheme.typography.titleMedium);Row(horizontalArrangement=Arrangement.spacedBy(6.dp)){listOf("cash" to "Dinheiro","pix" to "Pix","card_pos" to "Cartão/POS").forEach{(v,l)->FilterChip(method==v,{method=v},{Text(l)})}};if(catalog?.canCourtesy==true)FilterChip(method=="courtesy",{method="courtesy"},{Text("Cortesia")})}
             item{Text("Comprador (opcional)",style=MaterialTheme.typography.titleMedium);Text("Deixe vazio para venda avulsa. Nenhum cliente fictício será criado.",color=MaterialTheme.colorScheme.onSurfaceVariant);OutlinedTextField(name,{name=it},label={Text("Nome")},modifier=Modifier.fillMaxWidth());OutlinedTextField(phone,{phone=it},label={Text("Telefone")},modifier=Modifier.fillMaxWidth());OutlinedTextField(email,{email=it},label={Text("E-mail")},modifier=Modifier.fillMaxWidth())}
             item{Button(onClick={val e=eventId;val b=batchId;if(e!=null&&b!=null)scope.launch{loading=true;error=null;runCatching{repo.sell(e,b,qty,method,name,phone,email)}.onSuccess{result=it;loadCatalog(e)}.onFailure{error=it.message};loading=false}},enabled=!loading&&eventId!=null&&batchId!=null&&selectedBatch!=null&&qty<=maxQty,modifier=Modifier.fillMaxWidth()){Text(if(loading)"Processando..." else "Concluir venda • ${formatMoney(total)}")}}
-            result?.let{sale->item{Card{Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Venda #${sale.orderId}",style=MaterialTheme.typography.titleLarge);Text(if(sale.anonymous)"Comprador não identificado" else "Venda identificada");Text("${sale.tickets.size} ingresso(s) · ${formatMoney(sale.totalCents)} · ${if(sale.paymentStatus=="paid")"Pago" else "Pagamento pendente"}");if(sale.paymentStatus!="paid")Button({onOpen(BuildConfig.API_BASE_URL.trimEnd('/')+"/pedido.php?t="+sale.publicToken)},Modifier.fillMaxWidth()){Text("Abrir pagamento / Pix")}}}};items(sale.tickets){t->Card{Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(t.code,style=MaterialTheme.typography.titleMedium);val url=BuildConfig.API_BASE_URL.trimEnd('/')+"/ingresso.php?t="+t.qrToken;Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton({onOpen(url)}){Text("Ver ingresso")};OutlinedButton({onShare(url)}){Text("Compartilhar")}}}}}}
+            result?.let{sale->
+                item{Card{Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text("Venda #${sale.orderId}",style=MaterialTheme.typography.titleLarge);Text(if(sale.anonymous)"Comprador não identificado" else "Venda identificada");Text("${sale.tickets.size} ingresso(s) · ${formatMoney(sale.totalCents)} · ${if(sale.paymentStatus=="paid")"Pago" else "Pagamento pendente"}");if(sale.paymentStatus!="paid")Button({onOpen(BuildConfig.API_BASE_URL.trimEnd('/')+"/pedido.php?t="+sale.publicToken)},Modifier.fillMaxWidth()){Text("Abrir pagamento / Pix")};if(sale.paymentStatus=="paid"&&sale.tickets.size==1){val t=sale.tickets.first();val url=BuildConfig.API_BASE_URL.trimEnd('/')+"/ingresso.php?t="+t.qrToken;Button({onPrint(url)},Modifier.fillMaxWidth()){Text("Imprimir ingresso")}};if(sale.paymentStatus=="paid"&&sale.tickets.size>1)Text("Ingressos prontos para impressão individual abaixo.",color=MaterialTheme.colorScheme.onSurfaceVariant)}}}
+                items(sale.tickets){t->Card{Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)){Text(t.code,style=MaterialTheme.typography.titleMedium);val url=BuildConfig.API_BASE_URL.trimEnd('/')+"/ingresso.php?t="+t.qrToken;Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton({onOpen(url)}){Text("Ver")};OutlinedButton({onShare(url)}){Text("Compartilhar")};Button({onPrint(url)}){Text("Imprimir")}}}}}
+            }
         }
     }
 }
