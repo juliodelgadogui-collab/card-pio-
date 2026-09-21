@@ -1,0 +1,327 @@
+name: EventMenu Suite 1.0.1 Release
+
+on:
+  push:
+    branches:
+      - release/eventmenu-1.0.0-rc
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eventmenu-suite-1.0.1-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  EVENTMENU_RELEASE: '1.0.1'
+  EVENTMENU_VERSION_NAME: '1.0.1'
+  EVENTMENU_VERSION_CODE: '10001'
+  EVENTMENU_API_BASE_URL: 'https://go.gestao2.store/1/'
+  EVENTMENU_DELIVERY_API_BASE_URL: 'https://go.gestao2.store/1/'
+
+jobs:
+  server:
+    name: Server 1.0.1 + clean install
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: 'curl, mbstring, openssl, pdo_sqlite'
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: PHP syntax validation
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: WhatsApp Bridge validation
+        run: |
+          node --check integrations/whatsapp-worker/server.js
+          cd integrations/whatsapp-worker
+          npm install --omit=dev --no-audit --no-fund
+          npm run check
+      - name: Server contracts and smoke tests
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          APP_URL: https://example.test/1
+          APP_BASE_PATH: /1
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-package.sqlite
+          SESSION_NAME: eventmenu_package_sqlite
+        run: |
+          set -euo pipefail
+          rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
+          php scripts/ci-public-ux-smoke.php
+          php scripts/ci-coupon-pricing-smoke.php
+          php scripts/ci-order-payment-preference-smoke.php
+          php scripts/ci-native-payment-route-smoke.php
+          php scripts/ci-whatsapp-smoke.php
+          php scripts/ci-db-smoke.php
+          php scripts/ci-sqlite-legacy-upgrade-smoke.php
+          php scripts/ci-db-repair-page-smoke.php
+          php scripts/ci-super-admin-smoke.php
+          php scripts/ci-permission-smoke.php
+          php scripts/ci-sensitive-rate-limit-smoke.php
+          php scripts/ci-operations-smoke.php
+          php scripts/ci-customer-identity-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-marketplace-finance-smoke.php
+          php scripts/ci-marketplace-native-contract-smoke.php
+          php scripts/ci-delivery-customer-order-smoke.php
+          php scripts/ci-auth-mail-smoke.php
+          php scripts/ci-url-smoke.php
+          php scripts/ci-backup-smoke.php
+          php scripts/ci-operational-resilience-smoke.php
+          php scripts/ci-production-readiness-smoke.php
+      - name: Build test package and test zero install
+        run: |
+          set -euo pipefail
+          php scripts/build-package.php "$RUNNER_TEMP/eventmenu-server-test"
+          chmod +x "$RUNNER_TEMP/eventmenu-server-test/install.sh"
+          cd "$RUNNER_TEMP/eventmenu-server-test"
+          EVENTMENU_INSTALL_URL='https://example.test/1' \
+          EVENTMENU_INSTALL_TENANT='Release Test' \
+          EVENTMENU_INSTALL_ADMIN_NAME='Release Admin' \
+          EVENTMENU_INSTALL_ADMIN_EMAIL='release@example.test' \
+          EVENTMENU_INSTALL_ADMIN_PASSWORD='ReleaseTest-1.0.1!' \
+          ./install.sh
+          test -f storage/eventmenu.sqlite
+          test -f storage/installed.lock
+          php -r '$p=new PDO("sqlite:storage/eventmenu.sqlite"); exit(((int)$p->query("SELECT COUNT(*) FROM users WHERE role=\"super_admin\"")->fetchColumn())===1?0:1);'
+      - name: Build clean server and portal artifacts
+        run: |
+          set -euo pipefail
+          php scripts/build-package.php "$RUNNER_TEMP/eventmenu-server-1.0.1"
+          cd "$RUNNER_TEMP"
+          zip -qr eventmenu-server-1.0.1.zip eventmenu-server-1.0.1
+          cd "$GITHUB_WORKSPACE"
+          zip -qr "$RUNNER_TEMP/eventmenu-portal-1.0.1.zip" portal-root
+          echo "RELEASE_META server sha256=$(sha256sum "$RUNNER_TEMP/eventmenu-server-1.0.1.zip" | cut -d' ' -f1) size=$(stat -c%s "$RUNNER_TEMP/eventmenu-server-1.0.1.zip") file=eventmenu-server-1.0.1.zip"
+          echo "RELEASE_META portal sha256=$(sha256sum "$RUNNER_TEMP/eventmenu-portal-1.0.1.zip" | cut -d' ' -f1) size=$(stat -c%s "$RUNNER_TEMP/eventmenu-portal-1.0.1.zip") file=eventmenu-portal-1.0.1.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Server-1.0.1
+          path: |
+            ${{ runner.temp }}/eventmenu-server-1.0.1.zip
+            ${{ runner.temp }}/eventmenu-portal-1.0.1.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  android-go:
+    name: EventMenu GO signed Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: mobile/eventmenu-go
+    env:
+      EVENTMENU_FIREBASE_PROJECT_ID: ${{ secrets.EVENTMENU_FIREBASE_PROJECT_ID }}
+      EVENTMENU_FIREBASE_APP_ID: ${{ secrets.EVENTMENU_FIREBASE_APP_ID }}
+      EVENTMENU_FIREBASE_API_KEY: ${{ secrets.EVENTMENU_FIREBASE_API_KEY }}
+      EVENTMENU_FIREBASE_SENDER_ID: ${{ secrets.EVENTMENU_FIREBASE_SENDER_ID }}
+      EVENTMENU_REQUIRE_FCM: 'true'
+      EVENTMENU_RELEASE_STORE_PASSWORD: ${{ secrets.EVENTMENU_ANDROID_KEYSTORE_PASSWORD }}
+      EVENTMENU_RELEASE_KEY_ALIAS: ${{ secrets.EVENTMENU_ANDROID_KEY_ALIAS }}
+      EVENTMENU_RELEASE_KEY_PASSWORD: ${{ secrets.EVENTMENU_ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK 36
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -111 2>/dev/null | sort -V | tail -n 1)"; fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Restore production signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.EVENTMENU_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_B64"
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/eventmenu-release.keystore"
+          echo "EVENTMENU_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/eventmenu-release.keystore" >> "$GITHUB_ENV"
+          echo "EVENTMENU_BUILD_DATE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Test, lint and build signed Release
+        run: gradle :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:bundleRelease --stacktrace --no-daemon
+      - name: Verify and stage artifacts
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          test -f "$APK" && test -f "$AAB"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          mkdir -p release
+          cp "$APK" release/EventMenu-GO-1.0.1.apk
+          cp "$AAB" release/EventMenu-GO-1.0.1.aab
+          echo "RELEASE_META go applicationId=br.com.eventmenu.go version=1.0.1 versionCode=10001 sha256=$(sha256sum release/EventMenu-GO-1.0.1.apk | cut -d' ' -f1) size=$(stat -c%s release/EventMenu-GO-1.0.1.apk) file=EventMenu-GO-1.0.1.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-GO-1.0.1
+          path: mobile/eventmenu-go/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  android-delyvre:
+    name: DELYVRE signed Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: mobile/eventmenu-delivery
+    env:
+      EVENTMENU_DELIVERY_VERSION_NAME: '1.0.1'
+      EVENTMENU_DELIVERY_VERSION_CODE: '10001'
+      EVENTMENU_RELEASE_STORE_PASSWORD: ${{ secrets.EVENTMENU_ANDROID_KEYSTORE_PASSWORD }}
+      EVENTMENU_RELEASE_KEY_ALIAS: ${{ secrets.EVENTMENU_ANDROID_KEY_ALIAS }}
+      EVENTMENU_RELEASE_KEY_PASSWORD: ${{ secrets.EVENTMENU_ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK 36
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -111 2>/dev/null | sort -V | tail -n 1)"; fi
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Restore production signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.EVENTMENU_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_B64"
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/eventmenu-release.keystore"
+          echo "EVENTMENU_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/eventmenu-release.keystore" >> "$GITHUB_ENV"
+          echo "EVENTMENU_BUILD_DATE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+      - name: Test, lint and build signed Release
+        run: gradle :app:testDebugUnitTest :app:lintRelease :app:assembleRelease :app:bundleRelease --stacktrace --no-daemon
+      - name: Verify and stage artifacts
+        run: |
+          set -euo pipefail
+          APK=app/build/outputs/apk/release/app-release.apk
+          AAB=app/build/outputs/bundle/release/app-release.aab
+          test -f "$APK" && test -f "$AAB"
+          "$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          mkdir -p release
+          cp "$APK" release/DELYVRE-1.0.1.apk
+          cp "$AAB" release/DELYVRE-1.0.1.aab
+          echo "RELEASE_META delyvre applicationId=br.com.eventmenu.delivery version=1.0.1 versionCode=10001 sha256=$(sha256sum release/DELYVRE-1.0.1.apk | cut -d' ' -f1) size=$(stat -c%s release/DELYVRE-1.0.1.apk) file=DELYVRE-1.0.1.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DELYVRE-1.0.1
+          path: mobile/eventmenu-delivery/release/*
+          if-no-files-found: error
+          retention-days: 30
+
+  desktop:
+    name: EventMenu Desktop 1.0.1
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build Desktop + WhatsApp Connect bundle
+        shell: pwsh
+        run: ./desktop/build-windows.ps1
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+      - name: Build installer and portable zip
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup não encontrado." }
+          & $iscc "desktop\installer\EventMenu.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path "desktop\artifacts\EventMenu-Desktop-win-x64\*" -DestinationPath "artifacts\EventMenu-Desktop-1.0.1-portable.zip" -Force
+          $setup = Get-ChildItem "artifacts\EventMenu-Desktop-installer\*.exe" | Select-Object -First 1
+          $hash = (Get-FileHash $setup.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $size = $setup.Length
+          Write-Host "RELEASE_META desktop version=1.0.1 sha256=$hash size=$size file=$($setup.Name)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Desktop-1.0.1
+          path: |
+            artifacts/EventMenu-Desktop-installer/*.exe
+            artifacts/EventMenu-Desktop-1.0.1-portable.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  bundle:
+    name: Final release bundle
+    runs-on: ubuntu-latest
+    needs: [server, android-go, android-delyvre, desktop]
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: collected
+      - name: Build manifest and final ZIP
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          find collected -type f -maxdepth 3 -exec cp {} release/ \;
+          python3 - <<'PY'
+          import hashlib, json, pathlib, datetime
+          root=pathlib.Path('release')
+          files={p.name:{'size_bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()} for p in root.iterdir() if p.is_file()}
+          manifest={
+            'release':'1.0.1',
+            'generated_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'apps':{
+              'eventmenu_go':{'name':'EventMenu GO','version':'1.0.1','versionCode':10001,'applicationId':'br.com.eventmenu.go','file':'EventMenu-GO-1.0.1.apk','latest_url':'https://go.gestao2.store/apk/eventmenu-go/latest.apk'},
+              'delyvre':{'name':'DELYVRE','version':'1.0.1','versionCode':10001,'applicationId':'br.com.eventmenu.delivery','file':'DELYVRE-1.0.1.apk','latest_url':'https://go.gestao2.store/apk/delyvre/latest.apk'},
+              'desktop':{'name':'EventMenu Desktop','version':'1.0.1','file':'EventMenu-Desktop-Setup-v1.0.1.exe','latest_url':'https://go.gestao2.store/download/eventmenu-desktop/latest.exe'},
+              'server':{'name':'EventMenu Server','version':'1.0.1','file':'eventmenu-server-1.0.1.zip'},
+              'portal':{'name':'EventMenu Download Portal','version':'1.0.1','file':'eventmenu-portal-1.0.1.zip'},
+              'whatsapp_bridge':{'name':'EventMenu WhatsApp Bridge','version':'1.0.1-beta.1','status':'beta'}
+            },
+            'files':files,
+          }
+          for item in manifest['apps'].values():
+            f=item.get('file')
+            if f in files: item.update(files[f])
+          (root/'manifest.json').write_text(json.dumps(manifest,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+          with (root/'SHA256SUMS.txt').open('w',encoding='utf-8') as out:
+            for name,meta in sorted(files.items()): out.write(f"{meta['sha256']}  {name}\n")
+          print(json.dumps(manifest,indent=2,ensure_ascii=False))
+          PY
+          (cd release && zip -qr ../EventMenu-1.0.1-release.zip .)
+          echo "RELEASE_META suite sha256=$(sha256sum EventMenu-1.0.1-release.zip | cut -d' ' -f1) size=$(stat -c%s EventMenu-1.0.1-release.zip) file=EventMenu-1.0.1-release.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-1.0.1-FINAL
+          path: |
+            release/*
+            EventMenu-1.0.1-release.zip
+          if-no-files-found: error
+          retention-days: 90
