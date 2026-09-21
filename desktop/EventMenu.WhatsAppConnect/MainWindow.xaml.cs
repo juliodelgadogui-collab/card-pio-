@@ -165,8 +165,8 @@ public partial class MainWindow : Window
             _=>"Desconectado"
         };
         var connected=status=="connected";
-        StatusBadge.Background=new SolidColorBrush((Color)ColorConverter.ConvertFromString(connected?"#DCFCE7":status=="error"?"#FEE2E2":"#F1F5F9"));
-        StatusText.Foreground=new SolidColorBrush((Color)ColorConverter.ConvertFromString(connected?"#166534":status=="error"?"#B91C1C":"#475569"));
+        StatusBadge.Background=new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(connected?"#DCFCE7":status=="error"?"#FEE2E2":"#F1F5F9"));
+        StatusText.Foreground=new SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(connected?"#166534":status=="error"?"#B91C1C":"#475569"));
         PhoneText.Text=string.IsNullOrWhiteSpace(state.Phone)?"—":FormatPhone(state.Phone);
         ConnectButton.IsEnabled=status is not "starting" and not "reconnecting";
         DisconnectButton.IsEnabled=status is "connected" or "qr" or "starting" or "reconnecting";
