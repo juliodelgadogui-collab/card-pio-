@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace EventMenu\Services;
 
+use EventMenu\Core\Database;
 use EventMenu\Core\Migrator;
 use PDO;
 use PDOException;
@@ -42,11 +43,26 @@ final class DeliveryOrderSchemaGuard
             throw new RuntimeException('Não foi possível atualizar a estrutura do DELYVRE durante uma transação ativa.');
         }
 
-        Migrator::run($pdo);
-
-        if (!$this->isReady($pdo)) {
-            throw new RuntimeException('O servidor do DELYVRE ainda não concluiu a atualização do banco de dados. Tente novamente em alguns segundos.');
+        $migrationError = null;
+        try {
+            Migrator::run($pdo);
+        } catch (Throwable $error) {
+            $migrationError = $error;
+            error_log('[eventmenu-delyvre-schema] migration: ' . $error::class . ': ' . $error->getMessage());
         }
+
+        if ($this->isReady($pdo)) return;
+
+        // Instalações SQLite antigas podem ter a migration registrada como
+        // aplicada, mas estar com tabela/coluna ausente por upload interrompido.
+        // Reaplicamos apenas DDL idempotente e os dois campos do marketplace.
+        if (Database::isSqlite($pdo)) {
+            $this->repairSqliteDrift($pdo);
+            if ($this->isReady($pdo)) return;
+        }
+
+        $suffix = $migrationError ? ' Detalhe técnico registrado no log do servidor.' : '';
+        throw new RuntimeException('O servidor do DELYVRE ainda não concluiu a atualização do banco de dados. Tente novamente em alguns segundos.' . $suffix);
     }
 
     public function isReady(PDO $pdo): bool
@@ -84,5 +100,69 @@ final class DeliveryOrderSchemaGuard
 
         $state = strtoupper((string)$error->getCode());
         return in_array($state, ['42S02', '42S22', '42703', '42P01'], true);
+    }
+
+    private function repairSqliteDrift(PDO $pdo): void
+    {
+        $this->ensureSqliteColumn($pdo, 'orders', 'unit_id', 'INTEGER NULL');
+        $this->ensureSqliteColumn($pdo, 'orders', 'order_source', "TEXT NOT NULL DEFAULT 'EVENTMENU_OWN'");
+        $this->ensureSqliteColumn($pdo, 'orders', 'marketplace_campaign_code', 'TEXT NULL');
+
+        // Migrations abaixo são naturalmente idempotentes no SQLite.
+        foreach ([
+            '011_stock_reservations.sql',
+            '029_commercial_plans.sql',
+            '056_marketplace_entry_tokens.sql',
+            '058_delivery_customer_accounts.sql',
+        ] as $migration) {
+            $this->execSqliteMigration($pdo, $migration);
+        }
+
+        // A 055 possui ALTER TABLE e CREATE TABLE sem IF NOT EXISTS. Os ALTERs
+        // já foram tratados acima; transformamos somente os CREATE TABLE para
+        // uma reaplicação segura, preservando os dados existentes.
+        $marketplacePath = $this->sqliteMigrationPath('055_eventmenu_delivery_marketplace.sql');
+        $marketplaceSql = file_get_contents($marketplacePath);
+        if ($marketplaceSql !== false) {
+            $marketplaceSql = preg_replace('/^\s*ALTER\s+TABLE\s+orders\s+ADD\s+COLUMN\s+[^;]+;\s*$/mi', '', $marketplaceSql) ?? $marketplaceSql;
+            $marketplaceSql = preg_replace('/\bCREATE\s+TABLE\s+(?!IF\s+NOT\s+EXISTS\b)/i', 'CREATE TABLE IF NOT EXISTS ', $marketplaceSql) ?? $marketplaceSql;
+            $pdo->exec($marketplaceSql);
+        }
+
+        // A migration 022 não é idempotente, então só é executada quando a
+        // tabela realmente não existe.
+        if (!$this->sqliteTableExists($pdo, 'order_status_history')) {
+            $this->execSqliteMigration($pdo, '022_order_status_history.sql');
+        }
+    }
+
+    private function ensureSqliteColumn(PDO $pdo, string $table, string $column, string $definition): void
+    {
+        if (!$this->sqliteTableExists($pdo, $table)) return;
+        foreach ($pdo->query('PRAGMA table_info("' . str_replace('"', '""', $table) . '")')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if ((string)($row['name'] ?? '') === $column) return;
+        }
+        $quotedTable = '"' . str_replace('"', '""', $table) . '"';
+        $quotedColumn = '"' . str_replace('"', '""', $column) . '"';
+        $pdo->exec('ALTER TABLE ' . $quotedTable . ' ADD COLUMN ' . $quotedColumn . ' ' . $definition);
+    }
+
+    private function sqliteTableExists(PDO $pdo, string $table): bool
+    {
+        $statement = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1");
+        $statement->execute([$table]);
+        return (bool)$statement->fetchColumn();
+    }
+
+    private function execSqliteMigration(PDO $pdo, string $name): void
+    {
+        $sql = file_get_contents($this->sqliteMigrationPath($name));
+        if ($sql === false) throw new RuntimeException('Não foi possível ler a migration de reparo ' . $name . '.');
+        $pdo->exec($sql);
+    }
+
+    private function sqliteMigrationPath(string $name): string
+    {
+        return dirname(__DIR__, 2) . '/database/sqlite/migrations/' . $name;
     }
 }
