@@ -1,6 +1,9 @@
-name: EventMenu GO Branch
+name: EventMenu GO Android
 on:
   push:
+    branches: [dev/eventmenu-go, 'fix/eventmenu-go-*']
+    paths: ['mobile/eventmenu-go/**','.github/workflows/eventmenu-go-branch.yml']
+  pull_request:
     branches: [dev/eventmenu-go]
     paths: ['mobile/eventmenu-go/**','.github/workflows/eventmenu-go-branch.yml']
   workflow_dispatch:
@@ -28,12 +31,31 @@ jobs:
           "$SDKMANAGER" --list_installed
       - uses: gradle/actions/setup-gradle@v4
         with: {gradle-version: '9.3.1'}
-      - uses: actions/cache@v4
-        with: {path: ~/.android/debug.keystore, key: eventmenu-go-debug-keystore-v1}
-      - name: Ensure stable debug signing key exists
+      - name: Restore stable debug signing key
+        id: go-signing-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: eventmenu-go-debug-keystore-v1
+          fail-on-cache-miss: true
+      - name: Verify stable debug signing identity
+        shell: bash
         run: |
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=EventMenu GO Development,O=EventMenu,C=BR" -keyalg RSA -keysize 2048 -validity 10000; fi
+          set -euo pipefail
+          KEYSTORE="$HOME/.android/debug.keystore"
+          EXPECTED_SHA256="4D:EA:DF:DD:42:3D:9D:9B:A2:35:76:7B:5E:05:AC:44:8A:ED:B1:B8:34:A0:87:26:4F:ED:13:FD:48:8C:8A:27"
+          if [ ! -s "$KEYSTORE" ]; then
+            echo "::error::A chave de assinatura estável do EventMenu GO não foi restaurada. O build foi interrompido para não gerar um APK incompatível com instalações existentes."
+            exit 1
+          fi
+          ACTUAL_SHA256="$(keytool -list -v -keystore "$KEYSTORE" -storepass android -alias androiddebugkey 2>/dev/null | sed -n 's/.*SHA256: //p' | head -n 1 | tr -d '\r')"
+          if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::A assinatura restaurada não corresponde à identidade oficial do APK EventMenu GO."
+            echo "Esperado: $EXPECTED_SHA256"
+            echo "Encontrado: $ACTUAL_SHA256"
+            exit 1
+          fi
+          echo "EventMenu GO signing SHA-256 verified: $ACTUAL_SHA256"
       - name: Stamp unique app version
         shell: bash
         run: |
