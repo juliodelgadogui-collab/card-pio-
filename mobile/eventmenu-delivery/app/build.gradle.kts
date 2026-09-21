@@ -23,6 +23,23 @@ if (releaseRequested && !firebaseConfigured && !allowReleaseWithoutFirebase) {
 val ciRunNumber = envValue("GITHUB_RUN_NUMBER").toIntOrNull()
 val buildNumber = (ciRunNumber ?: 2).coerceAtLeast(2)
 
+val delyvreIconBase64 = layout.projectDirectory.file("src/main/icon/delyvre_launcher.b64")
+val generatedDelyvreIconsDir = layout.buildDirectory.dir("generated/res/delyvreLauncher")
+val generateDelyvreLauncherIcons by tasks.registering {
+    group = "build setup"
+    description = "Gera os icones oficiais do DELYVRE a partir da arte aprovada."
+    inputs.file(delyvreIconBase64)
+    outputs.dir(generatedDelyvreIconsDir)
+    doLast {
+        val encoded = delyvreIconBase64.asFile.readText().replace("\n", "").replace("\r", "").trim()
+        val iconBytes = java.util.Base64.getDecoder().decode(encoded)
+        val mipmap = generatedDelyvreIconsDir.get().dir("mipmap-xxxhdpi").asFile
+        mipmap.mkdirs()
+        mipmap.resolve("ic_delivery.png").writeBytes(iconBytes)
+        mipmap.resolve("ic_delivery_round.png").writeBytes(iconBytes)
+    }
+}
+
 android {
     namespace = "br.com.eventmenu.delivery"
     compileSdk = 36
@@ -39,6 +56,7 @@ android {
         buildConfigField("String", "FIREBASE_API_KEY", configString(firebaseApiKey))
         buildConfigField("String", "FIREBASE_SENDER_ID", configString(firebaseSenderId))
     }
+    sourceSets.getByName("main").res.srcDir(generatedDelyvreIconsDir)
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildTypes {
@@ -48,6 +66,10 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+}
+
+tasks.matching { it.name == "preBuild" }.configureEach {
+    dependsOn(generateDelyvreLauncherIcons)
 }
 
 dependencies {
