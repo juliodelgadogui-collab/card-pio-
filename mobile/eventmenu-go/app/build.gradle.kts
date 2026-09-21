@@ -22,11 +22,11 @@ if (explicitVersionCodeRaw.isNotBlank() && (explicitVersionCodeLong == null || e
     throw GradleException("EVENTMENU_VERSION_CODE precisa ser inteiro positivo até ${Int.MAX_VALUE}.")
 }
 val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
-val appVersionCode = explicitVersionCodeLong?.toInt() ?: if (releaseRequested) 10000 else (ciBuildNumber?.let { 1000 + it } ?: 256)
+val appVersionCode = explicitVersionCodeLong?.toInt() ?: if (releaseRequested) 10001 else (ciBuildNumber?.let { 1000 + it } ?: 256)
 val appVersionName = envValue("EVENTMENU_VERSION_NAME").ifBlank {
-    if (releaseRequested) "1.0.0" else ciBuildNumber?.let { "0.2.${it}-dev" } ?: "0.2.56-dev"
+    if (releaseRequested) "1.0.1" else ciBuildNumber?.let { "0.2.${it}-dev" } ?: "0.2.56-dev"
 }
-val suiteRelease = envValue("EVENTMENU_RELEASE").ifBlank { if (releaseRequested) "1.0.0" else "dev" }
+val suiteRelease = envValue("EVENTMENU_RELEASE").ifBlank { if (releaseRequested) "1.0.1" else "dev" }
 val buildDateUtc = envValue("EVENTMENU_BUILD_DATE_UTC").ifBlank { "unknown" }
 
 val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
