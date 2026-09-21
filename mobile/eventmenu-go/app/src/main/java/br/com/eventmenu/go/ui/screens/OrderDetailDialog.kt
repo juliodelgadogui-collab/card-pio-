@@ -58,7 +58,28 @@ fun OrderDetailDialog(
             ) {
                 item {
                     Text("${orderChannelLabel(detail.channel)} · ${orderStatusLabel(detail.status)}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Black)
+                    if (detail.fromEventMenuDelivery) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                "EventMenu Delivery",
+                                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                    }
                     PaymentStatePill(detail.paymentStatus)
+                    detail.paymentPreference?.let { preference ->
+                        Text("Forma escolhida: ${preference.display}", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Preferência do cliente. O pagamento só é considerado recebido quando o status acima for confirmado pelo servidor.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                     usefulOrderText(detail.customerName)?.let { Text(it, fontWeight = FontWeight.SemiBold) }
                     usefulOrderText(detail.customerPhone)?.let { Text(it) }
                     usefulOrderText(detail.deliveryAddress)?.let { Text(it) }

@@ -66,17 +66,67 @@ public sealed class Order
     [JsonPropertyName("assigned_delivery_user_id")] public int? AssignedDeliveryUserId { get; set; }
     [JsonPropertyName("table_name")] public string? TableName { get; set; }
     [JsonPropertyName("created_at")] public string CreatedAt { get; set; } = "";
+    [JsonPropertyName("order_source")] public string OrderSource { get; set; } = "";
     public string TotalDisplay => (TotalCents / 100m).ToString("C2", new System.Globalization.CultureInfo("pt-BR"));
     public string ChannelDisplay => Channel switch { "counter" => "Balcão", "pickup" => "Retirada", "delivery" => "Delivery", "table" => "Mesa", "bar" or "event_bar" => "Evento / Bar", _ => Channel };
     public string StatusDisplay => Status switch { "pending" => "Pendente", "confirmed" => "Confirmado", "preparing" => "Em preparo", "ready" => "Pronto", "out_for_delivery" => "Em rota", "served" => "Servido", "completed" => "Concluído", "cancelled" => "Cancelado", _ => Status };
     public string PaymentStatusDisplay => PaymentStatus switch { "unpaid" => "Não pago", "pending" => "Pendente", "paid" => "Pago", "partially_paid" => "Parcial", "refunded" => "Estornado", "cancelled" => "Cancelado", _ => PaymentStatus };
     public string CreatedDisplay => ServerTimeDisplay.Local(CreatedAt, "dd/MM HH:mm");
+    public bool FromEventMenuDelivery => OrderSource.Equals("EVENTMENU_DELIVERY", StringComparison.OrdinalIgnoreCase);
+    public string SourceDisplay => FromEventMenuDelivery ? "EventMenu Delivery" : "";
 }
 
 public sealed class OrdersResponse
 {
     [JsonPropertyName("ok")] public bool Ok { get; set; }
     [JsonPropertyName("orders")] public List<Order> Orders { get; set; } = new();
+}
+
+public sealed class OrderSourceMeta
+{
+    [JsonPropertyName("order_id")] public int OrderId { get; set; }
+    [JsonPropertyName("order_source")] public string OrderSource { get; set; } = "";
+    [JsonPropertyName("payment_method")] public string? PaymentMethod { get; set; }
+    [JsonPropertyName("payment_provider")] public string? PaymentProvider { get; set; }
+    [JsonPropertyName("change_for_cents")] public int? ChangeForCents { get; set; }
+
+    public string PaymentPreferenceDisplay
+    {
+        get
+        {
+            var method = (PaymentMethod ?? "").Trim().ToLowerInvariant() switch
+            {
+                "pix" => "PIX",
+                "card_credit" => "Crédito",
+                "card_debit" => "Débito",
+                "cash" => "Dinheiro",
+                var value => value
+            };
+            if (string.IsNullOrWhiteSpace(method)) return "";
+
+            var provider = (PaymentProvider ?? "").Trim().ToLowerInvariant() switch
+            {
+                "mercadopago" => "Mercado Pago",
+                "pagbank" => "PagBank",
+                "efi" => "Efí",
+                "inter" => "Banco Inter",
+                _ => PaymentProvider?.Trim() ?? ""
+            };
+            var result = string.IsNullOrWhiteSpace(provider) ? method : $"{method} · {provider}";
+            if (PaymentMethod?.Equals("cash", StringComparison.OrdinalIgnoreCase) == true && ChangeForCents is int change)
+            {
+                var money = (change / 100m).ToString("C2", new System.Globalization.CultureInfo("pt-BR"));
+                result += $" · troco para {money}";
+            }
+            return result;
+        }
+    }
+}
+
+public sealed class OrderSourceMetaResponse
+{
+    [JsonPropertyName("ok")] public bool Ok { get; set; }
+    [JsonPropertyName("orders")] public List<OrderSourceMeta> Orders { get; set; } = new();
 }
 
 public sealed class CashResponse

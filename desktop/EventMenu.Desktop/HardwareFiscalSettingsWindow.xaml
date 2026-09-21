@@ -56,7 +56,6 @@
                         <Grid>
                             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                             <StackPanel>
-                                <TextBlock Text="Provedor" FontWeight="SemiBold" /><ComboBox x:Name="ProviderCombo" Margin="0,5,0,12" />
                                 <TextBlock Text="Nome no caixa" FontWeight="SemiBold" /><TextBox x:Name="TerminalLabelBox" Margin="0,5,0,12" />
                                 <TextBlock Text="Identificação da maquininha" FontWeight="SemiBold" /><TextBox x:Name="TerminalPinpadBox" Margin="0,5,0,12" />
                             </StackPanel>
@@ -68,8 +67,9 @@
                                 </StackPanel>
                                 <Expander Header="Configurações avançadas" Margin="0,4,0,0">
                                     <StackPanel Margin="12,10,0,4">
-                                        <TextBlock Text="Altere estes campos apenas quando o suporte ou o provedor da maquininha orientar."
+                                        <TextBlock Text="Altere estes campos apenas quando o suporte ou a empresa responsável pela maquininha orientar."
                                                    Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" FontSize="11" Margin="0,0,0,12" />
+                                        <TextBlock Text="Integração de pagamento" FontWeight="SemiBold" /><ComboBox x:Name="ProviderCombo" Margin="0,5,0,12" />
                                         <TextBlock Text="Tipo de integração" FontWeight="SemiBold" /><ComboBox x:Name="IntegrationModeCombo" Margin="0,5,0,12" />
                                         <TextBlock Text="Endereço do serviço local" FontWeight="SemiBold" />
                                         <TextBox x:Name="BridgeUrlBox" Margin="0,5,0,12" />

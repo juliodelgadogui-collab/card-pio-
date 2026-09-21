@@ -74,13 +74,22 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
     }
 
     suspend fun orders():List<Order>{
-        val a=api.getGo("orders",requireToken()).optJSONArray("orders")?:JSONArray()
-        return buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(
+        val token=requireToken()
+        val a=api.getGo("orders",token).optJSONArray("orders")?:JSONArray()
+        val base=buildList{for(i in 0 until a.length()){val o=a.getJSONObject(i);add(Order(
             id=o.getInt("id"),channel=o.optString("channel"),status=o.optString("status"),paymentStatus=o.optString("payment_status"),totalCents=o.optInt("total_cents"),
             customerName=o.optString("customer_name","Consumidor"),customerPhone=o.optString("customer_phone"),deliveryAddress=o.optString("delivery_address"),
             assignedDeliveryUserId=if(o.isNull("assigned_delivery_user_id"))null else o.optInt("assigned_delivery_user_id"),deliveryName=o.optString("delivery_name"),createdAt=o.optString("created_at"),tableName=o.optString("table_name"),
-            tableId=if(o.isNull("table_id"))null else o.optInt("table_id"),tabId=if(o.isNull("tab_id"))null else o.optInt("tab_id")
+            tableId=if(o.isNull("table_id"))null else o.optInt("table_id"),tabId=if(o.isNull("tab_id"))null else o.optInt("tab_id"),orderSource=o.optString("order_source")
         ))}}
+        if(base.isEmpty())return base
+        val sources=runCatching{
+            val ids=base.joinToString(","){it.id.toString()}
+            val meta=api.getOrderOps("source-meta",token,mapOf("ids" to ids)).optJSONArray("orders")?:JSONArray()
+            buildMap<Int,String>{for(i in 0 until meta.length()){val row=meta.getJSONObject(i);put(row.optInt("order_id"),row.optString("order_source"))}}
+        }.getOrDefault(emptyMap())
+        if(sources.isEmpty())return base
+        return base.map{order->order.copy(orderSource=sources[order.id]?:order.orderSource)}
     }
     suspend fun changeOrderStatus(orderId:Int,status:String)=api.postGo("order-status",requireToken(),JSONObject().put("order_id",orderId).put("status",status))
 
@@ -147,7 +156,15 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
     suspend fun nativePix(orderId:Int,taxId:String,amountCents:Int?=null):PixCharge{
         val body=JSONObject().put("order_id",orderId).put("tax_id",taxId);amountCents?.let{body.put("amount_cents",it)}
         val p=api.postGo("pix-create",requireToken(),body).getJSONObject("pix")
-        return PixCharge(p.getInt("payment_id"),p.getInt("order_id"),p.getInt("amount_cents"),p.getString("copy_paste"),p.optString("expires_at"))
+        return PixCharge(
+            paymentId=p.getInt("payment_id"),
+            orderId=p.getInt("order_id"),
+            amountCents=p.getInt("amount_cents"),
+            copyPaste=p.getString("copy_paste"),
+            expiresAt=p.optString("expires_at"),
+            provider=p.optString("provider"),
+            reused=p.optBoolean("reused",false),
+        )
     }
     suspend fun nfcIntent(orderId:Int,amountCents:Int?=null):TapOnRequest{
         val body=JSONObject().put("order_id",orderId);amountCents?.let{body.put("amount_cents",it)}
@@ -182,8 +199,24 @@ class EventMenuRepository(baseUrl: String, private val deviceId: String, val ses
         )
     }
     private fun parsePaymentBalance(p:JSONObject):PaymentBalance{
-        val a=p.optJSONArray("payments")?:JSONArray();val parts=buildList{for(i in 0 until a.length()){val x=a.getJSONObject(i);add(PaymentPart(x.getInt("id"),x.optString("provider"),x.optInt("amount_cents"),x.optString("status"),x.optString("verified_at")))}}
-        return PaymentBalance(p.getInt("order_id"),p.getInt("total_cents"),p.optInt("paid_cents"),p.optInt("remaining_cents"),p.optString("payment_status"),parts)
+        val a=p.optJSONArray("payments")?:JSONArray()
+        val parts=buildList{
+            for(i in 0 until a.length()){
+                val x=a.getJSONObject(i)
+                add(PaymentPart(x.getInt("id"),x.optString("provider"),x.optInt("amount_cents"),x.optString("status"),x.optString("verified_at")))
+            }
+        }
+        val lp=p.optJSONObject("latest_pix")
+        val latest=lp?.let{
+            PaymentPart(
+                id=it.optInt("payment_id"),
+                provider=it.optString("provider"),
+                amountCents=it.optInt("amount_cents"),
+                status=it.optString("status"),
+                verifiedAt=it.optString("verified_at"),
+            )
+        }
+        return PaymentBalance(p.getInt("order_id"),p.getInt("total_cents"),p.optInt("paid_cents"),p.optInt("remaining_cents"),p.optString("payment_status"),parts,latest)
     }
     private fun extractHandoffToken(value:String):String?{if(!value.contains("api-go.php")||!value.contains("handoff-view"))return null;val encoded=Regex("[?&]t=([^&]+)").find(value)?.groupValues?.getOrNull(1)?:return null;return URLDecoder.decode(encoded,"UTF-8").takeIf{it.length>=32}}
     private fun requireToken():String=sessionStore.token()?:throw ApiException("Sessão não encontrada.",401)

@@ -104,6 +104,7 @@ class EventMenuFirebaseMessagingService : FirebaseMessagingService() {
         val notificationId = data["notification_id"]?.toIntOrNull()?.takeIf { it > 0 } ?: return
         val tenantId = data["tenant_id"]?.toIntOrNull() ?: return
         val userId = data["user_id"]?.toIntOrNull() ?: return
+        if (PushMessagePolicy.isExpired(data["expires_at_epoch"])) return
         if (!app.pushCoordinator.accepts(tenantId, userId)) return
 
         val title = data["title"].orEmpty().ifBlank { message.notification?.title.orEmpty() }

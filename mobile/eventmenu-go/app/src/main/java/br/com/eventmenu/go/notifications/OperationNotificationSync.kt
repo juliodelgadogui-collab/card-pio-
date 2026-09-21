@@ -10,6 +10,7 @@ import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -18,6 +19,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.data.ApiException
 import br.com.eventmenu.go.data.AppNotification
 import br.com.eventmenu.go.navigation.AppDeepLinks
 import java.util.concurrent.TimeUnit
@@ -31,6 +33,7 @@ object OperationNotificationScheduler {
         val constraints = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
         val request = PeriodicWorkRequestBuilder<OperationNotificationWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             WORK_NAME,
@@ -92,10 +95,14 @@ class OperationNotificationWorker(
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
         val app = applicationContext as? EventMenuGoApplication ?: return Result.success()
-        return runCatching {
+        return try {
             val inbox = app.notificationRepository.inbox(80)
             OperationNotificationScheduler.showUnread(applicationContext, inbox.items)
             Result.success()
-        }.getOrElse { Result.success() }
+        } catch (error: ApiException) {
+            if (error.status == 0 || error.status >= 500) Result.retry() else Result.success()
+        } catch (_: Throwable) {
+            Result.success()
+        }
     }
 }

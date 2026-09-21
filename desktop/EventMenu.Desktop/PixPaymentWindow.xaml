@@ -23,9 +23,9 @@
             <Grid>
                 <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="18" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="CPF ou CNPJ" Style="{StaticResource FieldLabel}" />
+                    <TextBlock Text="CPF ou CNPJ (opcional)" Style="{StaticResource FieldLabel}" />
                     <TextBox x:Name="TaxIdBox" Height="42" MaxLength="18" />
-                    <TextBlock Text="Do cliente que está pagando" Foreground="#94A3B8" FontSize="10" Margin="1,5,0,0" />
+                    <TextBlock Text="Se vazio, o servidor usa os dados disponíveis/configurados pela empresa" Foreground="#94A3B8" FontSize="10" Margin="1,5,0,0" TextWrapping="Wrap" />
                 </StackPanel>
                 <StackPanel Grid.Column="2">
                     <TextBlock Text="Valor" Style="{StaticResource FieldLabel}" />
@@ -41,7 +41,7 @@
                     <Button x:Name="GenerateButton" Content="Gerar cobrança Pix" Height="46" Margin="0,0,0,16" Click="GenerateButton_Click" />
 
                     <Border Background="#F8FAFC" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="12" Padding="14" Margin="0,0,0,16">
-                        <TextBlock x:Name="StatusText" Text="Informe os dados acima para gerar a cobrança." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
+                        <TextBlock x:Name="StatusText" Text="Informe o valor para gerar a cobrança. O provedor será definido pelo servidor." Foreground="{DynamicResource MutedBrush}" TextWrapping="Wrap" />
                     </Border>
 
                     <Border x:Name="QrBorder" Visibility="Collapsed" Background="White" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="16" Padding="18" HorizontalAlignment="Center" Margin="0,0,0,16">

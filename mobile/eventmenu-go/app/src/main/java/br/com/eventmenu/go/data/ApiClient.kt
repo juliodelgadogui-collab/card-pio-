@@ -1,5 +1,6 @@
 package br.com.eventmenu.go.data
 
+import br.com.eventmenu.go.OperationalText
 import br.com.eventmenu.go.security.SecureSessionStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -130,25 +131,16 @@ class ApiClient(
             val stream = if (status in 200..299) connection.inputStream else connection.errorStream
             val text = stream?.bufferedReader()?.use { it.readText() }.orEmpty()
             val json = runCatching { JSONObject(text) }
-                .getOrElse { JSONObject().put("ok", false).put("error", "Resposta inválida do servidor.") }
+                .getOrElse { JSONObject().put("ok", false).put("error", "Não foi possível interpretar a resposta do servidor.") }
             if (status !in 200..299 || !json.optBoolean("ok", false)) {
-                val serverMessage = json.optString("error", "Falha na API.")
-                throw ApiException(friendlyError(serverMessage, status), status)
+                val serverMessage = json.optString("message").takeIf { it.isNotBlank() }
+                    ?: json.optString("error", "Não foi possível concluir esta operação.")
+                throw ApiException(OperationalText.friendlyApiMessage(serverMessage, status), status)
             }
             return json
         } finally {
             connection.disconnect()
         }
-    }
-
-    private fun friendlyError(message: String, status: Int): String {
-        val normalized = message.lowercase()
-        if (normalized.contains("database is locked") || normalized.contains("database table is locked")) {
-            return "O servidor está ocupado por alguns segundos. Aguarde e tente novamente."
-        }
-        val technical = normalized.contains("sqlstate[") || normalized.contains("pdoexception") || normalized.contains("general error:") || normalized.contains("constraint failed") || normalized.contains("stack trace")
-        if (technical) return if (status >= 500 || status == 0) "Não foi possível concluir a operação no servidor. Tente novamente." else "Não foi possível concluir esta operação."
-        return message.ifBlank { "Não foi possível concluir esta operação." }
     }
 
     private fun shouldRefresh(error: ApiException): Boolean {
@@ -198,7 +190,6 @@ class ApiClient(
     private fun isCacheableRead(path: String, method: String, action: String, token: String?): Boolean {
         if (method != "GET" || token.isNullOrBlank()) return false
         if (path == "api-go-events.php" && action == "bar-order-resolve") return false
-        // O Hub representa estado de hardware e comandos em tempo quase real. Nunca servir de cache.
         if (path == "api-hub.php") return false
         return path in CACHEABLE_PATHS
     }

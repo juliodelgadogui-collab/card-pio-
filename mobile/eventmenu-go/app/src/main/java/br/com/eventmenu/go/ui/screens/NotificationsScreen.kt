@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import br.com.eventmenu.go.OperationalText
 import br.com.eventmenu.go.data.AppNotification
 import br.com.eventmenu.go.navigation.AppDeepLinks
 import kotlinx.coroutines.delay
@@ -34,9 +35,18 @@ fun NotificationsScreen(
     onRefresh: () -> Unit,
 ) {
     val context = LocalContext.current
-    LaunchedEffect(Unit) {
+    val ordered = notifications.sortedWith(
+        compareByDescending<AppNotification> { it.unread }
+            .thenBy { priorityRank(it.priority) }
+            .thenByDescending { it.id }
+    )
+    val hasUrgentUnread = ordered.any { it.unread && it.priority.lowercase() in setOf("critical", "warning") }
+
+    LaunchedEffect(unreadCount, hasUrgentUnread) {
         while (true) {
-            delay(15_000)
+            // Enquanto há algo urgente, a tela acompanha mais de perto. Em estado normal,
+            // evita requisições desnecessárias e deixa o push/background fazer o trabalho principal.
+            delay(if (hasUrgentUnread) 8_000 else 30_000)
             onRefresh()
         }
     }
@@ -49,25 +59,41 @@ fun NotificationsScreen(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
                     Text("Avisos", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black)
-                    Text(if (unreadCount > 0) "$unreadCount novo(s)" else "Tudo em dia", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if (unreadCount > 0) "$unreadCount aviso${if (unreadCount == 1) "" else "s"} para você" else "Tudo em dia", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (unreadCount > 0) Button(onClick = onReadAll) { Text("Marcar todos") }
             }
         }
 
-        if (notifications.isEmpty()) {
+        if (hasUrgentUnread) {
+            item {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+                    Text(
+                        "Há um aviso que precisa da sua atenção.",
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+            }
+        }
+
+        if (ordered.isEmpty()) {
             item { Text("Nenhum aviso novo.", color = MaterialTheme.colorScheme.onSurfaceVariant) }
         } else {
-            items(notifications, key = { it.id }) { notification ->
+            items(ordered, key = { it.id }) { notification ->
                 NotificationCard(
                     notification = notification,
                     onRead = onRead,
-                    onOpen = { context.startActivity(AppDeepLinks.intent(context, notification)) },
+                    onOpen = {
+                        if (notification.unread) onRead(notification.id)
+                        context.startActivity(AppDeepLinks.intent(context, notification))
+                    },
                 )
             }
         }
 
-        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar") } }
+        item { OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth()) { Text("Atualizar avisos") } }
     }
 }
 
@@ -81,16 +107,16 @@ private fun NotificationCard(
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    notification.title,
+                    OperationalText.useful(notification.title) ?: "Aviso do EventMenu",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (notification.unread) FontWeight.Black else FontWeight.Bold,
                     modifier = Modifier.weight(1f),
                 )
                 NotificationPriorityPill(notification.priority)
             }
-            Text(notification.message)
+            OperationalText.useful(notification.message)?.let { Text(it) }
             notificationFriendlyTime(notification.createdAt)?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall) }
-            Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text("Abrir") }
+            Button(onClick = onOpen, modifier = Modifier.fillMaxWidth()) { Text(notificationActionLabel(notification)) }
             if (notification.unread) {
                 OutlinedButton(onClick = { onRead(notification.id) }, modifier = Modifier.fillMaxWidth()) { Text("Marcar como lido") }
             }
@@ -106,14 +132,41 @@ private fun NotificationPriorityPill(priority: String) {
         "success" -> "Concluído"
         else -> "Novo"
     }
-    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small) {
-        Text(label, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.onPrimaryContainer, style = MaterialTheme.typography.labelLarge)
+    val critical = priority.equals("critical", true)
+    Surface(
+        color = if (critical) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+        shape = MaterialTheme.shapes.small,
+    ) {
+        Text(
+            label,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            color = if (critical) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+}
+
+private fun priorityRank(priority: String): Int = when (priority.lowercase()) {
+    "critical" -> 0
+    "warning" -> 1
+    "success" -> 2
+    else -> 3
+}
+
+private fun notificationActionLabel(notification: AppNotification): String {
+    val type = (notification.type + " " + notification.entityType).lowercase()
+    return when {
+        "delivery" in type -> "Ver entrega"
+        "payment" in type || "pix" in type -> "Ver pagamento"
+        "order" in type || "kitchen" in type -> "Ver pedido"
+        "event" in type || "ticket" in type -> "Ver evento"
+        "cash" in type -> "Ver caixa"
+        else -> "Ver detalhes"
     }
 }
 
 private fun notificationFriendlyTime(value: String?): String? {
-    val clean = value?.trim().orEmpty()
-    if (clean.isBlank() || clean.equals("null", true) || clean.equals("undefined", true)) return null
+    val clean = OperationalText.useful(value) ?: return null
     val normalized = clean.replace('T', ' ')
     val date = normalized.substringBefore(' ')
     val time = normalized.substringAfter(' ', "").take(5)

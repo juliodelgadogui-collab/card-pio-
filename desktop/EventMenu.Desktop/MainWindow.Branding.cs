@@ -9,6 +9,10 @@ namespace EventMenu.Desktop;
 public partial class MainWindow
 {
     private bool _brandLoading;
+    private static readonly Color DefaultPrimary = Color.FromRgb(91, 52, 214);
+    private static readonly Color DefaultBackground = Color.FromRgb(246, 247, 251);
+    private static readonly Color DefaultSurface = Colors.White;
+    private static readonly Color DefaultText = Color.FromRgb(30, 27, 43);
 
     private async void ShellPanel_BrandVisibilityChanged(object sender, DependencyPropertyChangedEventArgs e)
     {
@@ -19,7 +23,7 @@ public partial class MainWindow
             using var service = new TenantBrandDesktopService(_store);
             var brand = await service.LoadAsync();
             if (brand is not null && brand.ApplyWeb) ApplyTenantBrand(brand);
-            else ApplyProfessionalShell();
+            else ApplyDefaultDesignTokens();
         }
         finally { _brandLoading = false; }
     }
@@ -30,25 +34,54 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(displayName)) displayName = "Minha empresa";
         TenantNameText.Text = displayName;
         Title = $"{displayName} • EventMenu";
+
+        var primary = ParseColor(brand.PrimaryColor, DefaultPrimary);
+        var background = ParseColor(brand.BackgroundColor, DefaultBackground);
+        var surface = ParseColor(brand.SurfaceColor, DefaultSurface);
+        var text = ParseColor(brand.TextColor, DefaultText);
+        ApplyDesignTokens(primary, background, surface, text);
         ApplyProfessionalShell();
 
-        foreach (var text in Descendants<TextBlock>(ShellPanel))
+        foreach (var textBlock in Descendants<TextBlock>(ShellPanel))
         {
-            if (text.Text == "EventMenu")
+            if (textBlock.Text == "EventMenu")
             {
-                text.Text = displayName;
+                textBlock.Text = displayName;
                 break;
             }
         }
     }
 
+    private void ApplyDefaultDesignTokens()
+    {
+        ApplyDesignTokens(DefaultPrimary, DefaultBackground, DefaultSurface, DefaultText);
+        ApplyProfessionalShell();
+    }
+
+    private static void ApplyDesignTokens(Color primary, Color background, Color surface, Color text)
+    {
+        var resources = Application.Current.Resources;
+        resources["AccentBrush"] = new SolidColorBrush(primary);
+        resources["AccentHoverBrush"] = new SolidColorBrush(Darken(primary, 0.14));
+        resources["AccentSoftBrush"] = new SolidColorBrush(Blend(primary, Colors.White, 0.90));
+        resources["BackgroundBrush"] = new SolidColorBrush(background);
+        resources["SurfaceBrush"] = new SolidColorBrush(surface);
+        resources["PrimaryBrush"] = new SolidColorBrush(text);
+
+        // Status são semânticos e não seguem a cor promocional da empresa.
+        resources["SuccessBrush"] = new SolidColorBrush(Color.FromRgb(15, 159, 110));
+        resources["SuccessSoftBrush"] = new SolidColorBrush(Color.FromRgb(234, 248, 242));
+        resources["WarningBrush"] = new SolidColorBrush(Color.FromRgb(194, 123, 8));
+        resources["WarningSoftBrush"] = new SolidColorBrush(Color.FromRgb(255, 245, 229));
+        resources["DangerBrush"] = new SolidColorBrush(Color.FromRgb(217, 45, 72));
+        resources["DangerSoftBrush"] = new SolidColorBrush(Color.FromRgb(255, 237, 240));
+    }
+
     private void ApplyProfessionalShell()
     {
-        ShellPanel.Background = new SolidColorBrush(Color.FromRgb(244, 246, 248));
+        ShellPanel.Background = (Brush)Application.Current.Resources["BackgroundBrush"];
         if (PosNavButton.Parent is not StackPanel menu) return;
 
-        // O menu está dentro de um ScrollViewer. Não dependa do Border ser o pai direto:
-        // os botões mantêm o mesmo acabamento mesmo quando a árvore visual muda.
         foreach (var button in menu.Children.OfType<Button>())
         {
             button.Background = Brushes.Transparent;
@@ -59,6 +92,27 @@ public partial class MainWindow
             button.Margin = new Thickness(0, 0, 0, 4);
         }
     }
+
+    private static Color ParseColor(string? value, Color fallback)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(value)) return fallback;
+            var parsed = ColorConverter.ConvertFromString(value.Trim());
+            return parsed is Color color ? color : fallback;
+        }
+        catch { return fallback; }
+    }
+
+    private static Color Darken(Color color, double amount) => Color.FromRgb(
+        (byte)Math.Clamp(color.R * (1 - amount), 0, 255),
+        (byte)Math.Clamp(color.G * (1 - amount), 0, 255),
+        (byte)Math.Clamp(color.B * (1 - amount), 0, 255));
+
+    private static Color Blend(Color source, Color target, double targetAmount) => Color.FromRgb(
+        (byte)Math.Clamp(source.R * (1 - targetAmount) + target.R * targetAmount, 0, 255),
+        (byte)Math.Clamp(source.G * (1 - targetAmount) + target.G * targetAmount, 0, 255),
+        (byte)Math.Clamp(source.B * (1 - targetAmount) + target.B * targetAmount, 0, 255));
 
     private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
     {

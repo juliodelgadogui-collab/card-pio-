@@ -8,8 +8,6 @@ fun envValue(primary: String, fallback: String? = null): String =
 
 fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-// Servidor oficial por padrão, mas configurável no ambiente de compilação para migração/staging.
-// O endereço não é editável pela interface do funcionário.
 val apiBase = envValue("EVENTMENU_API_BASE_URL")
     .ifBlank { "https://go.gestao2.store/1/" }
     .trimEnd('/') + "/"
@@ -17,9 +15,13 @@ if (!apiBase.startsWith("https://", ignoreCase = true)) {
     throw GradleException("EVENTMENU_API_BASE_URL precisa usar HTTPS.")
 }
 
-val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
-val appVersionCode = ciBuildNumber ?: 3
-val appVersionName = if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
+// GITHUB_RUN_NUMBER is scoped to a workflow. It previously made different GO
+// workflows/build histories appear to reuse the same public version. RUN_ID is
+// globally increasing and is injected by CI as EVENTMENU_VERSION_CODE.
+val ciVersionCode = envValue("EVENTMENU_VERSION_CODE").toLongOrNull()?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+val ciVersionName = envValue("EVENTMENU_VERSION_NAME")
+val appVersionCode = ciVersionCode ?: 256
+val appVersionName = ciVersionName.ifBlank { "0.2.56-dev" }
 
 val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
 val firebaseAppId = envValue("EVENTMENU_FIREBASE_APP_ID")
@@ -89,14 +91,10 @@ dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2026.06.00")
     implementation(composeBom)
     androidTestImplementation(composeBom)
-
-    // AGP 9.1 suporta compileSdk 36. As versões seguintes de Core/Lifecycle
-    // passaram a exigir API 37; mantenha estes pins até a migração coordenada do AGP.
     implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.10.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
-
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.foundation:foundation")
@@ -108,7 +106,6 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging:25.0.1")
     implementation("com.google.zxing:core:3.5.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
-
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

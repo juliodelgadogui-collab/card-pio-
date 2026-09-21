@@ -27,8 +27,8 @@ public partial class MainWindow
         if (ConnectionText.Parent is StackPanel connectionPanel)
         {
             var labels = connectionPanel.Children.OfType<TextBlock>().ToList();
-            if (labels.Count > 0) labels[0].Text = "Conexão";
-            if (labels.Count > 2) labels[2].Text = "situação do sistema";
+            if (labels.Count > 0) labels[0].Text = "Sistema";
+            if (labels.Count > 2) labels[2].Text = "situação da operação";
         }
 
         var attentionCard = DashboardView.Children.OfType<Border>().FirstOrDefault(x => Grid.GetRow(x) == 3);
@@ -71,9 +71,17 @@ public partial class MainWindow
     private void NormalizeConnectionText()
     {
         var text = ConnectionText.Text?.Trim() ?? "";
-        if (text.Equals("Servidor conectado", StringComparison.OrdinalIgnoreCase)) ConnectionText.Text = "Online";
-        else if (text.StartsWith("Servidor conectado parcialmente", StringComparison.OrdinalIgnoreCase)) ConnectionText.Text = "Conexão parcial";
-        else if (text.Equals("Atualizando...", StringComparison.OrdinalIgnoreCase)) ConnectionText.Text = "Atualizando";
+        if (text.Equals("Servidor conectado", StringComparison.OrdinalIgnoreCase)
+            || text.Equals("Online", StringComparison.OrdinalIgnoreCase))
+            ConnectionText.Text = "Normal ✓";
+        else if (text.StartsWith("Servidor conectado parcialmente", StringComparison.OrdinalIgnoreCase))
+            ConnectionText.Text = "Conexão parcial";
+        else if (text.Equals("Atualizando...", StringComparison.OrdinalIgnoreCase))
+            ConnectionText.Text = "Atualizando";
+        else if (text.Contains("offline", StringComparison.OrdinalIgnoreCase)
+                 || text.Contains("indispon", StringComparison.OrdinalIgnoreCase)
+                 || text.Contains("falha", StringComparison.OrdinalIgnoreCase))
+            ConnectionText.Text = "Precisa de atenção";
     }
 
     private void RefreshDashboardUx()
@@ -99,7 +107,7 @@ public partial class MainWindow
         {
             SetDashboardAttention(
                 "!",
-                $"{deliveryWithoutDriver} delivery sem entregador",
+                $"{deliveryWithoutDriver} entrega(s) sem entregador",
                 $"Há pedido de entrega que precisa de atribuição. {readyOrders} pronto(s), {pendingPayments} pagamento(s) pendente(s) e {occupiedTables} mesa(s) ocupada(s).",
                 true);
             return;
@@ -138,8 +146,8 @@ public partial class MainWindow
         {
             _dashboardAttentionIcon.Text = icon;
             _dashboardAttentionIcon.Foreground = warning
-                ? new SolidColorBrush(Color.FromRgb(217, 119, 6))
-                : TryFindResource("AccentBrush") as Brush ?? Brushes.RoyalBlue;
+                ? TryFindResource("WarningBrush") as Brush ?? Brushes.DarkOrange
+                : TryFindResource("SuccessBrush") as Brush ?? Brushes.SeaGreen;
         }
         if (_dashboardAttentionTitle is not null) _dashboardAttentionTitle.Text = title;
         if (_dashboardAttentionDetail is not null) _dashboardAttentionDetail.Text = detail;
