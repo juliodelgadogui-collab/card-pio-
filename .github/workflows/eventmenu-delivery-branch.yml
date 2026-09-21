@@ -1,8 +1,17 @@
-name: EventMenu Delivery Branch
+name: DELYVRE Android
 
 on:
   push:
-    branches: [wip/eventmenu-delivery-customer-app]
+    branches:
+      - dev/delyvre
+      - 'fix/delyvre-*'
+      - 'feature/delyvre-*'
+    paths:
+      - 'mobile/eventmenu-delivery/**'
+      - '.github/workflows/eventmenu-delivery-branch.yml'
+  pull_request:
+    branches:
+      - dev/delyvre
     paths:
       - 'mobile/eventmenu-delivery/**'
       - '.github/workflows/eventmenu-delivery-branch.yml'
@@ -12,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: eventmenu-delivery-${{ github.ref }}
+  group: delyvre-android-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -45,19 +54,19 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
-      - name: Run EventMenu Delivery unit tests
+      - name: Run DELYVRE unit tests
         run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
 
-      - name: Run EventMenu Delivery Android lint
+      - name: Run DELYVRE Android lint
         run: gradle :app:lintDebug --stacktrace --no-daemon
 
-      - name: Build EventMenu Delivery debug APK
+      - name: Build DELYVRE debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Upload APK
+      - name: Upload DELYVRE APK
         uses: actions/upload-artifact@v4
         with:
-          name: EventMenu-Delivery-debug-apk
+          name: DELYVRE-debug-apk
           path: mobile/eventmenu-delivery/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 7

@@ -1,7 +1,13 @@
 package br.com.eventmenu.delivery.ui
 
-fun isSafeDelyvreImageUrl(value: String): Boolean =
-    value.trim().startsWith("https://", ignoreCase = true)
+import java.net.URI
+
+fun isSafeDelyvreImageUrl(value: String): Boolean {
+    val uri = runCatching { URI(value.trim()) }.getOrNull() ?: return false
+    return uri.scheme.equals("https", ignoreCase = true) &&
+        !uri.host.isNullOrBlank() &&
+        uri.userInfo.isNullOrBlank()
+}
 
 fun delyvreStoreStatusLabel(acceptingOrders: Boolean): String =
     if (acceptingOrders) "Aberto" else "Fechado agora"
