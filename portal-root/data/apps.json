@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "updated_at": null,
+  "apps": {
+    "eventmenu-go": {
+      "name": "EventMenu GO",
+      "platform": "Android",
+      "audience": "Restaurantes e equipe",
+      "description": "Operação do restaurante, pedidos, produção e entregas no celular.",
+      "current": null,
+      "previous": null,
+      "latest_url": "https://go.gestao2.store/apk/eventmenu-go/latest.apk"
+    },
+    "delyvre": {
+      "name": "DELYVRE",
+      "platform": "Android",
+      "audience": "Clientes",
+      "description": "Aplicativo para clientes descobrirem estabelecimentos e fazerem pedidos.",
+      "current": null,
+      "previous": null,
+      "latest_url": "https://go.gestao2.store/apk/delyvre/latest.apk"
+    }
+  }
+}
