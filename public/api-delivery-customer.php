@@ -11,6 +11,7 @@ use EventMenu\Services\DeliveryCustomerAuthService;
 use EventMenu\Services\DeliveryCustomerDocumentService;
 use EventMenu\Services\DeliveryCustomerMarketplaceService;
 use EventMenu\Services\DeliveryCustomerPaymentService;
+use EventMenu\Services\DeliveryOrderSchemaGuard;
 use EventMenu\Services\MarketplaceCatalogService;
 use EventMenu\Services\OrderPaymentPreferenceService;
 
@@ -38,7 +39,21 @@ if($action==='stores'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_o
 if($action==='catalog'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$tenantId=(int)($_GET['tenant_id']??0);$unitId=(int)($_GET['unit_id']??0);if($tenantId<1||$unitId<1)throw new RuntimeException('Escolha um restaurante.');$data=(new MarketplaceCatalogService())->catalog($pdo,$tenantId,$unitId);$data['checkout_session']=(new EventMenu\Services\MarketplaceEntryTokenService())->issue($pdo,$tenantId,$unitId,null);delivery_customer_out(['ok'=>true]+$data);}
 if($action==='favorite'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'favorite'=>$market->toggleFavorite($pdo,$accountId,(int)($body['tenant_id']??0),!empty($body['favorite']))]);}
 if($action==='coupon-quote'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.coupon',$rate->requestSubject('account:'.$accountId),30,300,'Muitas tentativas de cupom. Aguarde um pouco.');$tenantId=(int)($body['tenant_id']??0);$subtotal=max(0,(int)($body['subtotal_cents']??0));$code=(string)($body['code']??'');if($tenantId<1||$subtotal<1)throw new RuntimeException('Carrinho inválido para aplicar cupom.');delivery_customer_out(['ok'=>true,'coupon'=>$market->couponQuote($pdo,$accountId,$tenantId,$code,$subtotal)]);}
-if($action==='order-create'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.order.create',$rate->requestSubject('account:'.$accountId),10,600,'Muitos pedidos enviados. Aguarde alguns minutos.');$order=Database::transaction(fn(PDO$tx):array=>$market->createOrder($tx,$accountId,$body));delivery_customer_out(['ok'=>true,'order'=>$order],201);}
+if($action==='order-create'){
+    if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);
+    $rate->assertAllowed('delivery.customer.order.create',$rate->requestSubject('account:'.$accountId),10,600,'Muitos pedidos enviados. Aguarde alguns minutos.');
+    $schemaGuard=new DeliveryOrderSchemaGuard();
+    $schemaGuard->ensure($pdo);
+    try{
+        $order=Database::transaction(fn(PDO$tx):array=>$market->createOrder($tx,$accountId,$body));
+    }catch(Throwable$createError){
+        if(!$schemaGuard->isSchemaFailure($createError))throw $createError;
+        error_log('[eventmenu-delyvre-order] schema retry: '.$createError::class.': '.$createError->getMessage());
+        $schemaGuard->ensure($pdo,true);
+        $order=Database::transaction(fn(PDO$tx):array=>$market->createOrder($tx,$accountId,$body));
+    }
+    delivery_customer_out(['ok'=>true,'order'=>$order],201);
+}
 if($action==='orders'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'orders'=>$market->orders($pdo,$accountId,(int)($_GET['limit']??50))]);}
 if($action==='order'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'order'=>$market->order($pdo,$accountId,(int)($_GET['order_id']??0))]);}
 if($action==='reorder'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'reorder'=>$market->reorder($pdo,$accountId,(int)($body['order_id']??0))]);}
