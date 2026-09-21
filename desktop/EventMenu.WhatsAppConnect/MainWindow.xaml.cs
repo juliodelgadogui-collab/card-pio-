@@ -59,28 +59,38 @@ public partial class MainWindow : Window
             ShowInTaskbar=false;
             Hide();
         }
-        await InitializeAsync();
+        await InitializeAsync(promptLogin:!_startInBackground);
     }
 
-    private async Task InitializeAsync()
+    private async Task InitializeAsync(bool promptLogin=false)
     {
         try
         {
+            _deviceId=_sharedSession.GetOrCreateDeviceId();
+            _cloud?.Dispose();
+            _cloud=new WhatsAppCloudClient(_sharedSession,_deviceId);
             _session=_sharedSession.Load();
+
             if(_session?.User is null||_session.User.TenantId<1)
             {
-                _timer.Start();
-                SetUnavailable("Abra o EventMenu Desktop e entre na sua conta. O Connect tentará reconhecer a sessão automaticamente.");
-                return;
+                if(promptLogin&&IsVisible)
+                {
+                    var login=new LoginWindow(_cloud){Owner=this};
+                    if(login.ShowDialog()==true)_session=_sharedSession.Load();
+                }
+
+                if(_session?.User is null||_session.User.TenantId<1)
+                {
+                    _timer.Start();
+                    SetUnavailable("Faça login no EventMenu Connect para identificar seu estabelecimento. Clique em Atualizar para abrir a tela de login.");
+                    return;
+                }
             }
 
             _tenantId=_session.User.TenantId;
-            _deviceId=_sharedSession.GetOrCreateDeviceId();
             TenantText.Text=string.IsNullOrWhiteSpace(_session.User.TenantName)?"Minha empresa":_session.User.TenantName;
             DeviceText.Text=Environment.MachineName;
-            _cloud?.Dispose();
             _bridge?.Dispose();
-            _cloud=new WhatsAppCloudClient(_sharedSession,_deviceId);
             _bridge=new LocalWhatsAppBridge(_tenantId);
 
             FooterText.Text="Iniciando o mecanismo local do WhatsApp...";
@@ -265,7 +275,7 @@ public partial class MainWindow : Window
     {
         if(_bridge is null||_cloud is null)
         {
-            await InitializeAsync();
+            await InitializeAsync(promptLogin:true);
             return;
         }
         await SyncOnceAsync(force:true);
@@ -278,7 +288,7 @@ public partial class MainWindow : Window
         DisconnectButton.IsEnabled=false;
         FooterText.Text=message;
         ErrorText.Text=message;
-        QrHintText.Text="Entre no EventMenu Desktop. O Connect tentará reconhecer a sessão automaticamente; você também pode clicar em Atualizar.";
+        QrHintText.Text="Clique em Atualizar para entrar no EventMenu Connect e identificar seu estabelecimento.";
     }
 
     private static string FormatPhone(string digits)
