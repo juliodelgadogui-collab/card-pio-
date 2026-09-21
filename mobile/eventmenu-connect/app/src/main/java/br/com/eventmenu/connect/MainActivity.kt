@@ -1,25 +1,17 @@
 package br.com.eventmenu.connect
 
-import android.accessibilityservice.AccessibilityService
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
-import android.app.Service
-import android.content.BroadcastReceiver
-import android.content.ComponentName
+import android.Manifest
+import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.IBinder
-import android.os.Looper
-import android.provider.Settings
-import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityNodeInfo
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,18 +26,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Logout
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -63,40 +57,30 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationCompat
-import androidx.core.content.ContextCompat
-import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeoutOrNull
-import org.json.JSONArray
-import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
-import java.util.UUID
 
 private val EventRed = Color(0xFFE31C24)
 private val EventDark = Color(0xFF15171A)
 private val EventGreen = Color(0xFF1FAD5B)
+private val EventMuted = Color(0xFF666A70)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 300)
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 300)
         }
         setContent {
             MaterialTheme(
@@ -116,18 +100,15 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 private fun EventMenuConnectApp() {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     var loggedIn by remember { mutableStateOf(SessionStore(context).hasSession()) }
-    if (loggedIn) {
-        DashboardScreen(onLogout = { loggedIn = false })
-    } else {
-        LoginScreen(onLoggedIn = { loggedIn = true })
-    }
+    if (loggedIn) DashboardScreen(onLogout = { loggedIn = false })
+    else LoginScreen(onLoggedIn = { loggedIn = true })
 }
 
 @Composable
 private fun LoginScreen(onLoggedIn: () -> Unit) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val scope = rememberCoroutineScope()
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -144,7 +125,7 @@ private fun LoginScreen(onLoggedIn: () -> Unit) {
             Text("EventMenu", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = EventDark)
             Text("Connect", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = EventRed)
             Spacer(Modifier.height(8.dp))
-            Text("Conecte o WhatsApp do seu restaurante ao EventMenu.", color = Color(0xFF666A70))
+            Text("WhatsApp do seu restaurante conectado sem abrir o aplicativo durante os envios.", color = EventMuted, textAlign = TextAlign.Center)
             Spacer(Modifier.height(28.dp))
             OutlinedTextField(
                 value = email,
@@ -179,6 +160,7 @@ private fun LoginScreen(onLoggedIn: () -> Unit) {
                     scope.launch {
                         try {
                             withContext(Dispatchers.IO) { EventMenuApi(context).login(email.trim(), password) }
+                            startConnectService(context)
                             error = ""
                             onLoggedIn()
                         } catch (e: Exception) {
@@ -204,26 +186,42 @@ private fun LoginScreen(onLoggedIn: () -> Unit) {
 
 @Composable
 private fun DashboardScreen(onLogout: () -> Unit) {
-    val context = LocalContext.current
+    val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { SessionStore(context) }
     val scope = rememberCoroutineScope()
-    var accessibility by remember { mutableStateOf(isAccessibilityEnabled(context)) }
-    var whatsapp by remember { mutableStateOf(isWhatsAppInstalled(context)) }
     var status by remember { mutableStateOf(store.runtimeStatus()) }
     var pending by remember { mutableStateOf(store.runtimePending()) }
     var lastError by remember { mutableStateOf(store.runtimeError()) }
     var lastSync by remember { mutableStateOf(store.runtimeLastSync()) }
+    var phone by remember { mutableStateOf(store.runtimePhone()) }
+    var pairingCode by remember { mutableStateOf(store.runtimePairingCode()) }
+    var qr by remember { mutableStateOf(store.runtimeQr()) }
+    var phoneInput by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        startConnectService(context)
         while (true) {
-            accessibility = isAccessibilityEnabled(context)
-            whatsapp = isWhatsAppInstalled(context)
             status = store.runtimeStatus()
             pending = store.runtimePending()
             lastError = store.runtimeError()
             lastSync = store.runtimeLastSync()
-            delay(1000)
+            phone = store.runtimePhone()
+            pairingCode = store.runtimePairingCode()
+            qr = store.runtimeQr()
+            delay(750)
         }
+    }
+
+    val connected = status.equals("connected", true)
+    val statusLabel = when (status.lowercase()) {
+        "connected" -> "Conectado"
+        "pairing" -> "Aguardando código"
+        "qr" -> "Aguardando QR Code"
+        "starting" -> "Iniciando"
+        "reconnecting" -> "Reconectando"
+        "error" -> "Erro"
+        else -> "Desconectado"
     }
 
     Column(
@@ -235,29 +233,17 @@ private fun DashboardScreen(onLogout: () -> Unit) {
         Text(store.tenantName().ifBlank { "Seu restaurante" }, style = MaterialTheme.typography.titleMedium, color = Color(0xFF5F6368))
 
         StatusCard(
-            title = "WhatsApp instalado",
-            ok = whatsapp,
-            detail = if (whatsapp) "WhatsApp encontrado neste aparelho" else "Instale WhatsApp ou WhatsApp Business",
+            title = "Conexão do WhatsApp",
+            ok = connected,
+            detail = if (connected) "Ativa em segundo plano${if (phone.isNotBlank()) " • ${formatPhone(phone)}" else ""}" else statusLabel,
         )
         StatusCard(
-            title = "Permissão de automação",
-            ok = accessibility,
-            detail = if (accessibility) "Ativa" else "Precisa ser ativada uma única vez",
-        )
-        StatusCard(
-            title = "Serviço EventMenu",
-            ok = status == "connected",
-            detail = when (status) {
-                "connected" -> "Ativo em segundo plano"
-                "error" -> "Erro: ${lastError.ifBlank { "verifique a configuração" }}"
-                else -> "Aguardando ativação"
-            },
+            title = "Envio silencioso",
+            ok = status != "error",
+            detail = "O EventMenu envia sem abrir o WhatsApp e sem usar Acessibilidade.",
         )
 
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color.White),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Fila do WhatsApp", fontWeight = FontWeight.Bold)
                 Text("Mensagens pendentes: $pending")
@@ -265,39 +251,122 @@ private fun DashboardScreen(onLogout: () -> Unit) {
             }
         }
 
-        if (!accessibility) {
-            Button(
-                onClick = { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = EventRed),
-            ) {
-                Icon(Icons.Default.Settings, contentDescription = null)
-                Spacer(Modifier.padding(4.dp))
-                Text("Ativar EventMenu Connect", fontWeight = FontWeight.Bold)
-            }
-        } else {
-            Button(
-                onClick = { startConnectService(context) },
-                enabled = whatsapp,
-                modifier = Modifier.fillMaxWidth().height(54.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = EventRed),
-            ) {
-                Icon(Icons.Default.Refresh, contentDescription = null)
-                Spacer(Modifier.padding(4.dp))
-                Text("Iniciar / Reconectar", fontWeight = FontWeight.Bold)
+        if (!connected) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Conectar WhatsApp", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("Use o código de conexão. É a melhor opção quando o WhatsApp está neste mesmo celular.", color = EventMuted)
+                    OutlinedTextField(
+                        value = phoneInput,
+                        onValueChange = { phoneInput = it.filter { ch -> ch.isDigit() || ch == '+' || ch == '(' || ch == ')' || ch == ' ' || ch == '-' } },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Número do WhatsApp com DDD") },
+                        placeholder = { Text("(22) 99999-9999") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        leadingIcon = { Icon(Icons.Default.PhoneAndroid, contentDescription = null) },
+                    )
+                    Button(
+                        onClick = {
+                            if (phoneInput.filter(Char::isDigit).length < 10) return@Button
+                            busy = true
+                            startConnectService(context, ConnectWorkerService.ACTION_PAIR, phoneInput)
+                            scope.launch { delay(2500); busy = false }
+                        },
+                        enabled = !busy && phoneInput.filter(Char::isDigit).length >= 10,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = EventRed),
+                    ) {
+                        if (busy) CircularProgressIndicator(color = Color.White, modifier = Modifier.height(22.dp))
+                        else {
+                            Icon(Icons.Default.Link, contentDescription = null)
+                            Spacer(Modifier.padding(4.dp))
+                            Text("Gerar código de conexão", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = { startConnectService(context, ConnectWorkerService.ACTION_QR) },
+                        modifier = Modifier.fillMaxWidth().height(50.dp),
+                    ) {
+                        Icon(Icons.Default.QrCode2, contentDescription = null)
+                        Spacer(Modifier.padding(4.dp))
+                        Text("Usar QR Code")
+                    }
+                }
             }
         }
 
-        Text(
-            "O app usa o WhatsApp já instalado neste Android. Quando existir uma mensagem na fila do EventMenu, o Connect abre a conversa, envia e confirma ao servidor. Não usa VPS.",
-            style = MaterialTheme.typography.bodySmall,
-            color = Color(0xFF777B80),
-        )
+        if (pairingCode.isNotBlank() && !connected) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF7ED)), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Código de conexão", fontWeight = FontWeight.Bold, color = Color(0xFF9A3412))
+                    Text(formatPairingCode(pairingCode), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = EventDark)
+                    Text("No WhatsApp, abra Aparelhos conectados → Conectar aparelho → Conectar com número de telefone e digite este código.", textAlign = TextAlign.Center, color = Color(0xFF7C4A22))
+                    OutlinedButton(onClick = { copyText(context, pairingCode) }) {
+                        Icon(Icons.Default.ContentCopy, contentDescription = null)
+                        Spacer(Modifier.padding(4.dp))
+                        Text("Copiar código")
+                    }
+                }
+            }
+        }
 
+        if (qr.isNotBlank() && !connected) {
+            val bitmap = remember(qr) { runCatching { makeQrBitmap(qr) }.getOrNull() }
+            if (bitmap != null) {
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(18.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("QR Code", fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(12.dp))
+                        Image(bitmap = bitmap.asImageBitmap(), contentDescription = "QR Code do WhatsApp", modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                        Text("WhatsApp → Aparelhos conectados → Conectar aparelho", color = EventMuted, textAlign = TextAlign.Center)
+                    }
+                }
+            }
+        }
+
+        if (connected) {
+            Button(
+                onClick = { startConnectService(context, ConnectWorkerService.ACTION_START) },
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = EventGreen),
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null)
+                Spacer(Modifier.padding(4.dp))
+                Text("Atualizar conexão", fontWeight = FontWeight.Bold)
+            }
+            OutlinedButton(
+                onClick = { startConnectService(context, ConnectWorkerService.ACTION_LOGOUT_WHATSAPP) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Desconectar WhatsApp") }
+        }
+
+        if (lastError.isNotBlank()) {
+            Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF0F1)), modifier = Modifier.fillMaxWidth()) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = EventRed)
+                    Spacer(Modifier.padding(6.dp))
+                    Text(lastError, color = Color(0xFF963742))
+                }
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = Color(0xFFECFDF5)), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Não interrompe o uso do celular", fontWeight = FontWeight.Bold, color = Color(0xFF166534))
+                Text("As mensagens são enviadas pelo mecanismo interno do EventMenu Connect. Ele não abre o aplicativo oficial do WhatsApp e não clica na tela.", color = Color(0xFF15803D))
+            }
+        }
+
+        HorizontalDivider()
         OutlinedButton(
             onClick = {
                 scope.launch {
-                    withContext(Dispatchers.IO) { runCatching { EventMenuApi(context).logout() } }
+                    withContext(Dispatchers.IO) {
+                        runCatching { EmbeddedWhatsAppEngine(context).logout() }
+                        runCatching { EventMenuApi(context).logout() }
+                    }
                     context.stopService(Intent(context, ConnectWorkerService::class.java))
                     store.clearAuth()
                     onLogout()
@@ -331,358 +400,34 @@ private fun StatusCard(title: String, ok: Boolean, detail: String) {
     }
 }
 
-private fun startConnectService(context: Context) {
-    ContextCompat.startForegroundService(context, Intent(context, ConnectWorkerService::class.java))
+private fun makeQrBitmap(value: String): Bitmap {
+    val size = 720
+    val matrix = QRCodeWriter().encode(value, BarcodeFormat.QR_CODE, size, size)
+    val pixels = IntArray(size * size)
+    for (y in 0 until size) {
+        for (x in 0 until size) {
+            pixels[y * size + x] = if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+        }
+    }
+    return Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888).apply { setPixels(pixels, 0, size, 0, 0, size, size) }
 }
 
-private fun isWhatsAppInstalled(context: Context): Boolean =
-    context.packageManager.getLaunchIntentForPackage("com.whatsapp.w4b") != null ||
-        context.packageManager.getLaunchIntentForPackage("com.whatsapp") != null
-
-private fun isAccessibilityEnabled(context: Context): Boolean {
-    val enabled = Settings.Secure.getString(context.contentResolver, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES) ?: return false
-    val expected = ComponentName(context, WhatsAppAccessibilityService::class.java).flattenToString()
-    return enabled.split(':').any { it.equals(expected, ignoreCase = true) }
+private fun formatPairingCode(value: String): String {
+    val compact = value.filter(Char::isLetterOrDigit).uppercase()
+    return compact.chunked(4).joinToString("-")
 }
 
-private class SessionStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences("eventmenu_connect", Context.MODE_PRIVATE)
-
-    fun deviceId(): String {
-        val current = prefs.getString("device_id", "").orEmpty()
-        if (current.length >= 8) return current
-        val created = "android-connect-" + UUID.randomUUID().toString()
-        prefs.edit().putString("device_id", created).apply()
-        return created
-    }
-
-    fun saveAuth(token: String, refresh: String, user: JSONObject) {
-        prefs.edit()
-            .putString("token", token)
-            .putString("refresh_token", refresh)
-            .putString("user_name", user.optString("name"))
-            .putString("tenant_name", user.optString("tenant_name"))
-            .apply()
-    }
-
-    fun updateTokens(token: String, refresh: String) {
-        prefs.edit().putString("token", token).putString("refresh_token", refresh).apply()
-    }
-
-    fun token(): String = prefs.getString("token", "").orEmpty()
-    fun refreshToken(): String = prefs.getString("refresh_token", "").orEmpty()
-    fun tenantName(): String = prefs.getString("tenant_name", "").orEmpty()
-    fun hasSession(): Boolean = token().length >= 32 && refreshToken().length >= 32
-    fun clearAuth() { prefs.edit().clear().apply() }
-
-    fun setRuntime(status: String, pending: Int = runtimePending(), error: String = "") {
-        prefs.edit()
-            .putString("runtime_status", status)
-            .putInt("runtime_pending", pending)
-            .putString("runtime_error", error)
-            .putString("runtime_last_sync", java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale("pt", "BR")).format(java.util.Date()))
-            .apply()
-    }
-
-    fun runtimeStatus(): String = prefs.getString("runtime_status", "disconnected").orEmpty()
-    fun runtimePending(): Int = prefs.getInt("runtime_pending", 0)
-    fun runtimeError(): String = prefs.getString("runtime_error", "").orEmpty()
-    fun runtimeLastSync(): String = prefs.getString("runtime_last_sync", "").orEmpty()
+private fun copyText(context: Context, value: String) {
+    val manager = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    manager.setPrimaryClip(ClipData.newPlainText("Código EventMenu Connect", value))
 }
 
-private class ApiException(val status: Int, message: String) : Exception(message)
-
-private class EventMenuApi(private val context: Context) {
-    private val store = SessionStore(context)
-    private val base = BuildConfig.API_BASE_URL
-
-    fun login(email: String, password: String) {
-        val body = JSONObject()
-            .put("email", email)
-            .put("password", password)
-            .put("device_id", store.deviceId())
-            .put("device_label", "EventMenu Connect Android - ${Build.MANUFACTURER} ${Build.MODEL}")
-        val result = request("api.php?action=login", "POST", body, auth = false)
-        val token = result.optString("token")
-        val refresh = result.optString("refresh_token")
-        if (token.length < 32 || refresh.length < 32) throw Exception("O servidor não retornou uma sessão válida.")
-        store.saveAuth(token, refresh, result.optJSONObject("user") ?: JSONObject())
+private fun formatPhone(value: String): String {
+    val digits = value.filter(Char::isDigit)
+    if (digits.startsWith("55") && digits.length >= 12) {
+        val ddd = digits.substring(2, 4)
+        val number = digits.substring(4)
+        if (number.length == 9) return "+55 ($ddd) ${number.take(5)}-${number.drop(5)}"
     }
-
-    fun logout() {
-        runCatching { request("api.php?action=logout", "POST", JSONObject(), auth = true) }
-    }
-
-    fun heartbeat(status: String): JSONObject {
-        val body = JSONObject()
-            .put("device_id", store.deviceId())
-            .put("device_label", "EventMenu Connect Android - ${Build.MANUFACTURER} ${Build.MODEL}")
-            .put("status", status)
-            .put("phone", "")
-            .put("error", "")
-        return agentRequest("heartbeat", "POST", body)
-    }
-
-    fun claim(limit: Int = 1): JSONArray {
-        val body = JSONObject().put("device_id", store.deviceId()).put("limit", limit)
-        return agentRequest("claim", "POST", body).optJSONArray("messages") ?: JSONArray()
-    }
-
-    fun ack(id: Int, claimToken: String) {
-        val body = JSONObject()
-            .put("device_id", store.deviceId())
-            .put("id", id)
-            .put("claim_token", claimToken)
-            .put("external_message_id", "android-local")
-        agentRequest("ack", "POST", body)
-    }
-
-    fun fail(id: Int, claimToken: String, error: String) {
-        val body = JSONObject()
-            .put("device_id", store.deviceId())
-            .put("id", id)
-            .put("claim_token", claimToken)
-            .put("error", error.take(450))
-        agentRequest("fail", "POST", body)
-    }
-
-    private fun agentRequest(action: String, method: String, body: JSONObject): JSONObject {
-        return try {
-            request("api-whatsapp-desktop.php?action=$action", method, body, auth = true)
-        } catch (e: ApiException) {
-            if (e.status == 401 && refresh()) request("api-whatsapp-desktop.php?action=$action", method, body, auth = true) else throw e
-        }
-    }
-
-    private fun refresh(): Boolean {
-        val refresh = store.refreshToken()
-        if (refresh.length < 32) return false
-        return try {
-            val body = JSONObject().put("refresh_token", refresh).put("device_id", store.deviceId())
-            val result = request("api.php?action=refresh", "POST", body, auth = false)
-            val token = result.optString("token")
-            val nextRefresh = result.optString("refresh_token")
-            if (token.length < 32 || nextRefresh.length < 32) false
-            else {
-                store.updateTokens(token, nextRefresh)
-                true
-            }
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    private fun request(path: String, method: String, body: JSONObject?, auth: Boolean): JSONObject {
-        val connection = (URL(base + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = method
-            connectTimeout = 10_000
-            readTimeout = 18_000
-            useCaches = false
-            setRequestProperty("Accept", "application/json")
-            setRequestProperty("Content-Type", "application/json; charset=utf-8")
-            setRequestProperty("X-Device-Id", store.deviceId())
-            setRequestProperty("User-Agent", "EventMenu-Connect-Android/${BuildConfig.VERSION_NAME}")
-            if (auth) setRequestProperty("Authorization", "Bearer ${store.token()}")
-            if (body != null && method != "GET") doOutput = true
-        }
-        if (body != null && method != "GET") connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
-        val code = connection.responseCode
-        val raw = runCatching {
-            (if (code in 200..299) connection.inputStream else connection.errorStream)?.bufferedReader()?.use { it.readText() }
-        }.getOrNull().orEmpty()
-        connection.disconnect()
-        val json = runCatching { if (raw.isBlank()) JSONObject() else JSONObject(raw) }.getOrElse { JSONObject() }
-        if (code !in 200..299) throw ApiException(code, json.optString("error").ifBlank { "Erro HTTP $code" })
-        if (json.has("ok") && !json.optBoolean("ok", false)) throw ApiException(code, json.optString("error").ifBlank { "Falha no servidor." })
-        return json
-    }
-}
-
-class ConnectWorkerService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private var worker: Job? = null
-    private var lastHeartbeat = 0L
-
-    override fun onCreate() {
-        super.onCreate()
-        createNotificationChannel()
-        startForeground(1010, notification("Aguardando mensagens do EventMenu"))
-    }
-
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (worker?.isActive != true) worker = scope.launch { loop() }
-        return START_STICKY
-    }
-
-    override fun onBind(intent: Intent?): IBinder? = null
-
-    override fun onDestroy() {
-        scope.cancel()
-        super.onDestroy()
-    }
-
-    private suspend fun loop() {
-        val store = SessionStore(this)
-        val api = EventMenuApi(this)
-        while (scope.isActive) {
-            if (!store.hasSession()) {
-                stopSelf()
-                break
-            }
-            val automation = WhatsAppAccessibilityService.instance
-            if (!isAccessibilityEnabled(this) || !isWhatsAppInstalled(this) || automation == null) {
-                store.setRuntime("disconnected", error = "Ative a permissão do EventMenu Connect e mantenha o WhatsApp instalado.")
-                delay(5_000)
-                continue
-            }
-            try {
-                val now = System.currentTimeMillis()
-                if (now - lastHeartbeat > 20_000) {
-                    val hb = api.heartbeat("connected")
-                    store.setRuntime("connected", hb.optInt("pending", store.runtimePending()), "")
-                    lastHeartbeat = now
-                }
-                val messages = api.claim(1)
-                if (messages.length() == 0) {
-                    delay(4_000)
-                    continue
-                }
-                val message = messages.getJSONObject(0)
-                val id = message.optInt("id")
-                val claimToken = message.optString("claim_token")
-                val recipient = message.optString("recipient")
-                val text = message.optString("message_text")
-                val sent = SendCoordinator.send(automation, recipient, text)
-                if (sent) {
-                    api.ack(id, claimToken)
-                    store.setRuntime("connected", pending = (store.runtimePending() - 1).coerceAtLeast(0), error = "")
-                } else {
-                    api.fail(id, claimToken, "O Android não conseguiu concluir o envio pelo WhatsApp.")
-                    store.setRuntime("error", error = "Não foi possível concluir um envio. O sistema tentará novamente.")
-                }
-                delay(1_500)
-            } catch (e: Exception) {
-                store.setRuntime("error", error = e.message ?: "Falha de sincronização")
-                delay(8_000)
-            }
-        }
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(NotificationChannel("eventmenu_connect", "EventMenu Connect", NotificationManager.IMPORTANCE_LOW))
-        }
-    }
-
-    private fun notification(text: String): android.app.Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            Intent(this, MainActivity::class.java),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        return NotificationCompat.Builder(this, "eventmenu_connect")
-            .setSmallIcon(R.drawable.ic_eventmenu_connect)
-            .setContentTitle("EventMenu Connect")
-            .setContentText(text)
-            .setOngoing(true)
-            .setContentIntent(pendingIntent)
-            .build()
-    }
-}
-
-private object SendCoordinator {
-    private val mutex = Mutex()
-    @Volatile private var waiter: CompletableDeferred<Boolean>? = null
-
-    suspend fun send(service: WhatsAppAccessibilityService, phone: String, text: String): Boolean = mutex.withLock {
-        val deferred = CompletableDeferred<Boolean>()
-        waiter = deferred
-        if (!service.openConversation(phone, text)) {
-            waiter = null
-            return@withLock false
-        }
-        val result = withTimeoutOrNull(30_000) { deferred.await() } ?: false
-        waiter = null
-        result
-    }
-
-    fun hasPending(): Boolean = waiter?.isActive == true
-    fun complete(success: Boolean) { waiter?.complete(success) }
-}
-
-class WhatsAppAccessibilityService : AccessibilityService() {
-    companion object {
-        @Volatile var instance: WhatsAppAccessibilityService? = null
-            private set
-    }
-
-    override fun onServiceConnected() {
-        super.onServiceConnected()
-        instance = this
-        if (SessionStore(this).hasSession()) startConnectService(this)
-    }
-
-    override fun onDestroy() {
-        if (instance === this) instance = null
-        SendCoordinator.complete(false)
-        super.onDestroy()
-    }
-
-    override fun onInterrupt() { SendCoordinator.complete(false) }
-
-    fun openConversation(rawPhone: String, text: String): Boolean {
-        val phone = normalizePhone(rawPhone) ?: return false
-        val pkg = when {
-            packageManager.getLaunchIntentForPackage("com.whatsapp.w4b") != null -> "com.whatsapp.w4b"
-            packageManager.getLaunchIntentForPackage("com.whatsapp") != null -> "com.whatsapp"
-            else -> return false
-        }
-        return try {
-            val uri = Uri.parse("https://wa.me/$phone?text=${Uri.encode(text)}")
-            startActivity(Intent(Intent.ACTION_VIEW, uri).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (!SendCoordinator.hasPending()) return
-        val pkg = event?.packageName?.toString().orEmpty()
-        if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") return
-        val root = rootInActiveWindow ?: return
-        val direct = runCatching { root.findAccessibilityNodeInfosByViewId("$pkg:id/send") }.getOrNull().orEmpty()
-        val node = direct.firstOrNull { it.isClickable } ?: findSendNode(root)
-        if (node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
-            SendCoordinator.complete(true)
-            Handler(Looper.getMainLooper()).postDelayed({ performGlobalAction(GLOBAL_ACTION_BACK) }, 900)
-        }
-    }
-
-    private fun findSendNode(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
-        val label = listOfNotNull(node.text?.toString(), node.contentDescription?.toString()).joinToString(" ").lowercase()
-        if (node.isClickable && (label.contains("enviar") || label == "send" || label.contains("send message"))) return node
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val found = findSendNode(child)
-            if (found != null) return found
-        }
-        return null
-    }
-
-    private fun normalizePhone(value: String): String? {
-        var digits = value.filter { it.isDigit() }.trimStart('0')
-        if (digits.length == 10 || digits.length == 11) digits = "55$digits"
-        return digits.takeIf { it.length in 12..15 }
-    }
-}
-
-class BootReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action == Intent.ACTION_BOOT_COMPLETED && SessionStore(context).hasSession()) {
-            startConnectService(context)
-        }
-    }
+    return if (digits.isBlank()) "" else "+$digits"
 }
