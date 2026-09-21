@@ -27,6 +27,31 @@ public sealed class WhatsAppCloudClient : IDisposable
         _http.DefaultRequestHeaders.Add("X-Device-Id",_deviceId);
     }
 
+    public async Task<SessionEnvelope> LoginAsync(string email,string password,CancellationToken ct=default)
+    {
+        email=email.Trim();
+        if(string.IsNullOrWhiteSpace(email)||string.IsNullOrWhiteSpace(password))throw new WhatsAppConnectException("Informe e-mail e senha.");
+        var login=await SendAsync<LoginRefreshResponse>(HttpMethod.Post,"api.php?action=login",new
+        {
+            email,
+            password,
+            device_id=_deviceId,
+            device_label=$"EventMenu WhatsApp Connect - {Environment.MachineName}"
+        },null,ct);
+        if(string.IsNullOrWhiteSpace(login.Token)||string.IsNullOrWhiteSpace(login.RefreshToken)||login.User is null||login.User.TenantId<1)
+            throw new WhatsAppConnectException("O servidor não retornou uma sessão válida.");
+        var session=new SessionEnvelope
+        {
+            Token=login.Token,
+            RefreshToken=login.RefreshToken,
+            ExpiresAt=login.ExpiresAt,
+            RefreshExpiresAt=login.RefreshExpiresAt,
+            User=login.User
+        };
+        _sessionStore.Save(session);
+        return session;
+    }
+
     public Task<CloudStateResponse> StateAsync(CancellationToken ct=default)=>SendWithRefreshAsync<CloudStateResponse>(HttpMethod.Get,"api-whatsapp-desktop.php?action=state",null,ct);
 
     public Task<CloudStateResponse> HeartbeatAsync(string status,string phone,string error,string deviceLabel,CancellationToken ct=default)=>
@@ -43,7 +68,7 @@ public sealed class WhatsAppCloudClient : IDisposable
 
     private async Task<T> SendWithRefreshAsync<T>(HttpMethod method,string url,object? body,CancellationToken ct)
     {
-        var session=_sessionStore.Load()??throw new WhatsAppConnectException("Abra o EventMenu Desktop e entre na sua conta primeiro.",HttpStatusCode.Unauthorized);
+        var session=_sessionStore.Load()??throw new WhatsAppConnectException("Faça login no EventMenu Connect.",HttpStatusCode.Unauthorized);
         try{return await SendAsync<T>(method,url,body,session.Token,ct);}
         catch(WhatsAppConnectException ex) when(ex.StatusCode==HttpStatusCode.Unauthorized)
         {
@@ -60,7 +85,7 @@ public sealed class WhatsAppCloudClient : IDisposable
             var latest=_sessionStore.Load();
             if(latest is not null&&latest.Token!=current.Token&&!string.IsNullOrWhiteSpace(latest.Token))return latest;
             var refreshed=await SendAsync<LoginRefreshResponse>(HttpMethod.Post,"api.php?action=refresh",new{refresh_token=current.RefreshToken,device_id=_deviceId},null,ct);
-            if(string.IsNullOrWhiteSpace(refreshed.Token)||string.IsNullOrWhiteSpace(refreshed.RefreshToken))throw new WhatsAppConnectException("A sessão do EventMenu terminou. Entre novamente no EventMenu Desktop.",HttpStatusCode.Unauthorized);
+            if(string.IsNullOrWhiteSpace(refreshed.Token)||string.IsNullOrWhiteSpace(refreshed.RefreshToken))throw new WhatsAppConnectException("A sessão do EventMenu terminou. Faça login novamente.",HttpStatusCode.Unauthorized);
             var session=new SessionEnvelope{Token=refreshed.Token,RefreshToken=refreshed.RefreshToken,ExpiresAt=refreshed.ExpiresAt,RefreshExpiresAt=refreshed.RefreshExpiresAt,User=refreshed.User??current.User};
             _sessionStore.Save(session);
             return session;
