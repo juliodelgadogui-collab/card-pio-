@@ -36,6 +36,8 @@ public sealed class LocalBridgeState
     [JsonPropertyName("ok")] public bool Ok { get; set; }
     [JsonPropertyName("status")] public string Status { get; set; } = "disconnected";
     [JsonPropertyName("qr")] public string? Qr { get; set; }
+    [JsonPropertyName("pairing_code")] public string? PairingCode { get; set; }
+    [JsonPropertyName("pairing_phone")] public string PairingPhone { get; set; } = "";
     [JsonPropertyName("phone")] public string Phone { get; set; } = "";
     [JsonPropertyName("error")] public string? Error { get; set; }
     [JsonPropertyName("updated_at")] public string UpdatedAt { get; set; } = "";
