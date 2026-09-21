@@ -100,6 +100,7 @@ fun EventMenuGoHubShell(
             onShowCustomer = hubViewModel::showCustomerDisplay,
             onChargeTef = hubViewModel::chargeTef,
             onAlert = hubViewModel::playAlert,
+            onReadScale = hubViewModel::readScale,
             onRevoke = hubViewModel::revokeSelected,
         )
     }
