@@ -23,11 +23,9 @@ private data class DashboardShortcutItem(val icon: ImageVector,val label: String
 fun RoleDashboardScreen(state:GoState,onNavigate:(AppScreen)->Unit,onScan:()->Unit,onRefresh:()->Unit){
  val session=state.session?:return;val permissions=session.permissions;val mode=state.mode?:return;val shift=state.workShift;val brand=LocalTenantBrand.current
  val tenant=brand?.displayName?.takeIf{it.isNotBlank()}?:session.user.tenantName.ifBlank{"Sua empresa"};val unit=dashboardUnitName(shift?.unitName);val shiftTime=shift?.startedAt?.takeIf{it.isNotBlank()}?.let(::dashboardTime)
- // Eventos precisa entrar antes do limite visual. Antes ele era o 9º item para administradores
- // e era descartado pelo take(8), exatamente o caso visto em produção.
  val shortcuts=buildList{
+  if("tickets" in permissions||"events" in permissions||mode==AppMode.EVENTS)add(DashboardShortcutItem(Icons.Default.ConfirmationNumber,"Ingressos","Vender, consultar e fazer check-in",AppScreen.EVENTS))
   if("cancellation_approve" in permissions||"discount_approve" in permissions||"reports" in permissions)add(DashboardShortcutItem(Icons.Default.Assessment,"Gestão","Indicadores e aprovações",AppScreen.MANAGER))
-  if(mode==AppMode.EVENTS||"events" in permissions||"tickets" in permissions)add(DashboardShortcutItem(Icons.Default.ConfirmationNumber,"Eventos","Ingressos e venda presencial",AppScreen.EVENTS))
   if("orders_view" in permissions||"orders_manage" in permissions)add(DashboardShortcutItem(Icons.Default.ReceiptLong,"Pedidos","Fila e detalhes",AppScreen.ORDERS))
   if("tables" in permissions)add(DashboardShortcutItem(Icons.Default.TableRestaurant,"Mesas","Contas e consumo",AppScreen.TABLES))
   if("orders_create" in permissions)add(DashboardShortcutItem(Icons.Default.PointOfSale,"Nova venda","Abrir PDV",AppScreen.POS))
