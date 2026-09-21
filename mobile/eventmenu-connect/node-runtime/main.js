@@ -34,6 +34,7 @@ const state = {
   qr: null,
   pairingCode: null,
   pairingExpiresAt: 0,
+  countryCode: String(config.country_code || 'BR').toUpperCase(),
   phone: '',
   error: '',
   lastDisconnectCode: 0,
@@ -63,6 +64,7 @@ function publicState() {
     qr: state.qr,
     pairing_code: state.pairingCode,
     pairing_expires_at: state.pairingExpiresAt || null,
+    country_code: state.countryCode,
     phone: state.phone,
     error: state.error || null,
     disconnect_code: state.lastDisconnectCode || null,
@@ -108,13 +110,22 @@ function phoneFromSocket(socket) {
   const raw = String(socket?.user?.id || '');
   const left = raw.split('@')[0].split(':')[0];
   const phone = left.replace(/\D+/g, '');
-  return /^\d{10,15}$/.test(phone) ? phone : '';
+  return /^\d{8,15}$/.test(phone) ? phone : '';
 }
-function normalizePhone(value) {
+function normalizePairPhone(value) {
+  const digits = String(value || '').replace(/\D+/g, '').replace(/^0+/, '');
+  if (!/^\d{8,15}$/.test(digits)) throw new Error('Número inválido. Selecione o país e informe o número corretamente.');
+  return digits;
+}
+function normalizeRecipient(value) {
   let digits = String(value || '').replace(/\D+/g, '').replace(/^0+/, '');
   if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
-  if (!/^\d{12,15}$/.test(digits)) throw new Error('Número inválido. Informe DDI + DDD + número.');
+  if (!/^\d{10,15}$/.test(digits)) throw new Error('Número de destino inválido.');
   return digits;
+}
+function normalizeCountryCode(value) {
+  const code = String(value || '').trim().toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? code : 'BR';
 }
 function cancelReconnect() {
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
@@ -141,19 +152,17 @@ async function resolveWhatsAppVersion() {
   try {
     const live = await fetchLatestWaWebVersion({
       headers: {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/140 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36',
         'Accept': '*/*',
       },
       timeout: 12000,
     });
     if (live?.isLatest && Array.isArray(live.version)) return live.version;
   } catch (_) {}
-
   try {
     const fallback = await fetchLatestBaileysVersion({ timeout: 12000 });
     if (Array.isArray(fallback?.version)) return fallback.version;
   } catch (_) {}
-
   return undefined;
 }
 async function resetForFreshPairing() {
@@ -164,7 +173,7 @@ async function resetForFreshPairing() {
   if (socket) {
     try { socket.end(new Error('Novo pareamento solicitado')); } catch (_) {}
   }
-  await new Promise((resolve) => setTimeout(resolve, 300));
+  await new Promise((resolve) => setTimeout(resolve, 350));
   await removeSessionFiles();
   state.status = 'disconnected';
   state.qr = null;
@@ -206,19 +215,19 @@ async function startSession() {
   const promise = (async () => {
     const { state: authState, saveCreds } = await useMultiFileAuthState(SESSION_ROOT);
     const version = await resolveWhatsAppVersion();
-
     const socket = makeWASocket({
       auth: {
         creds: authState.creds,
         keys: makeCacheableSignalKeyStore(authState.keys, logger),
       },
       ...(version ? { version } : {}),
+      countryCode: state.countryCode,
       logger,
       printQRInTerminal: false,
       markOnlineOnConnect: false,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
-      browser: Browsers.macOS('Chrome'),
+      browser: Browsers.windows('Chrome'),
       connectTimeoutMs: 60_000,
       keepAliveIntervalMs: 15_000,
       defaultQueryTimeoutMs: 60_000,
@@ -310,17 +319,18 @@ async function startSession() {
     })
     .finally(() => {
       state.starting = null;
-      if (!state.manualStop && ['disconnected'].includes(state.status)) scheduleReconnect();
+      if (!state.manualStop && state.status === 'disconnected') scheduleReconnect();
     });
 
   state.starting = promise;
   return promise;
 }
 
-async function requestPairingCode(phone) {
-  phone = normalizePhone(phone);
+async function requestPairingCode(phone, countryCode) {
+  phone = normalizePairPhone(phone);
   if (state.status === 'connected') return publicState();
 
+  state.countryCode = normalizeCountryCode(countryCode || state.countryCode);
   await resetForFreshPairing();
   await startSession();
   if (!state.socket) throw new Error('Mecanismo do WhatsApp ainda não iniciou. Tente novamente.');
@@ -365,7 +375,7 @@ async function logoutSession() {
 
 async function sendMessage(body) {
   if (!state.socket || state.status !== 'connected') throw new Error('WhatsApp não conectado.');
-  const phone = normalizePhone(body.phone);
+  const phone = normalizeRecipient(body.phone);
   const message = String(body.message || '').trim();
   if (!message || message.length > 4000) throw new Error('Mensagem inválida.');
   const result = await state.socket.sendMessage(`${phone}@s.whatsapp.net`, { text: message });
@@ -386,7 +396,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'POST' && url.pathname === '/pair') {
       const body = await readBody(req);
-      return json(res, 200, await requestPairingCode(body.phone));
+      return json(res, 200, await requestPairingCode(body.phone, body.country_code));
     }
     if (req.method === 'POST' && url.pathname === '/logout') return json(res, 200, await logoutSession());
     if (req.method === 'POST' && url.pathname === '/send') return json(res, 200, await sendMessage(await readBody(req)));
@@ -397,7 +407,6 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, async () => {
-  console.log(`EventMenu Connect local em http://${HOST}:${PORT}`);
   try {
     const creds = path.join(SESSION_ROOT, 'creds.json');
     if (fs.existsSync(creds)) startSession().catch(() => {});
