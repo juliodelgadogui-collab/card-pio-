@@ -8,6 +8,7 @@ require dirname(__DIR__).'/app/bootstrap.php';
 use EventMenu\Core\Database;
 use EventMenu\Core\Migrator;
 use EventMenu\Services\DeliveryCustomerMarketplaceService;
+use EventMenu\Services\DeliveryOrderSchemaGuard;
 use EventMenu\Services\MarketplaceCommissionService;
 use EventMenu\Services\MarketplaceEntryTokenService;
 
@@ -38,6 +39,16 @@ try {
     ] as $table) {
         $pdo->query('SELECT 1 FROM '.$table.' LIMIT 1');
     }
+
+    // Reproduz a falha de hospedagem real: migration 058 continua registrada,
+    // mas a tabela que vincula o pedido ao cliente desapareceu/ficou sem upload.
+    // O checkout deve reconstruí-la automaticamente antes de abrir a transação.
+    $pdo->exec('DROP TABLE delivery_customer_order_links');
+    $guard = new DeliveryOrderSchemaGuard();
+    delivery_order_assert(!$guard->isReady($pdo), 'Guard não detectou schema DELYVRE incompleto.');
+    $guard->ensure($pdo);
+    delivery_order_assert($guard->isReady($pdo), 'Guard não reparou schema DELYVRE incompleto.');
+    $pdo->query('SELECT account_id,tenant_id,order_id FROM delivery_customer_order_links WHERE 1=0');
 
     $slug = 'delyvre-order-'.bin2hex(random_bytes(4));
     $pdo->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,?,"premium","active")')
@@ -106,7 +117,7 @@ try {
     delivery_order_assert((string)$row['order_source'] === MarketplaceCommissionService::ORDER_SOURCE, 'Pedido DELYVRE perdeu a origem do marketplace.');
     delivery_order_assert((int)$row['total_cents'] === 1690, 'Total persistido do pedido ficou incorreto.');
 
-    echo "DELYVRE authenticated order smoke OK\n";
+    echo "DELYVRE authenticated order + schema repair smoke OK\n";
 } catch (Throwable $e) {
     delivery_order_fail($e::class.': '.$e->getMessage()."\n".$e->getTraceAsString());
 }
