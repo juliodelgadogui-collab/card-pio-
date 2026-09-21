@@ -25,7 +25,7 @@ try{
     $token=ApiAuthService::bearerToken();
     $deviceId=ApiAuthService::deviceId();
     if($token==='')whatsapp_desktop_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
-    $auth->authenticate($token,$deviceId);
+    try{$auth->authenticate($token,$deviceId);}catch(RuntimeException $e){whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],401);}
     if($deviceId==='')throw new RuntimeException('Dispositivo não identificado.');
 
     $service=new WhatsAppDesktopAgentService();
