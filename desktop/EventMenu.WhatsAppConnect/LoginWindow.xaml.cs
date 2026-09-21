@@ -1,5 +1,4 @@
 using System.Windows;
-using System.Windows.Input;
 using EventMenu.WhatsAppConnect.Services;
 
 namespace EventMenu.WhatsAppConnect;
@@ -17,9 +16,9 @@ public partial class LoginWindow : Window
 
     private async void LoginButton_Click(object sender,RoutedEventArgs e)=>await LoginAsync();
 
-    private async void PasswordBox_KeyDown(object sender,KeyEventArgs e)
+    private async void PasswordBox_KeyDown(object sender,System.Windows.Input.KeyEventArgs e)
     {
-        if(e.Key==Key.Enter)await LoginAsync();
+        if(e.Key==System.Windows.Input.Key.Enter)await LoginAsync();
     }
 
     private async Task LoginAsync()
