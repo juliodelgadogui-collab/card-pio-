@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">EventMenu Connect</string>
+    <string name="accessibility_description">Permite ao EventMenu Connect abrir o WhatsApp do estabelecimento e tocar em Enviar somente quando existir uma mensagem pendente da fila do EventMenu.</string>
+</resources>
