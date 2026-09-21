@@ -86,6 +86,7 @@ object EmbeddedNodeRuntime {
             .put("port", store.enginePort())
             .put("secret", store.engineSecret())
             .put("session_root", session.absolutePath)
+            .put("country_code", store.pairingCountryRegion())
         return File(root, "config.json").apply { writeText(config.toString()) }
     }
 
@@ -131,9 +132,17 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         return state()
     }
 
-    fun pair(phone: String): EmbeddedWhatsAppState {
+    fun pair(phone: String, countryCode: String): EmbeddedWhatsAppState {
         ensureStarted()
-        return stateFrom(request("pair", "POST", JSONObject().put("phone", phone)))
+        return stateFrom(
+            request(
+                "pair",
+                "POST",
+                JSONObject()
+                    .put("phone", phone)
+                    .put("country_code", countryCode.uppercase()),
+            )
+        )
     }
 
     fun logout(): EmbeddedWhatsAppState {
@@ -164,7 +173,7 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         val connection = (URL(base + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 4_000
-            readTimeout = if (path == "pair") 25_000 else 10_000
+            readTimeout = if (path == "pair") 25_000 else 12_000
             useCaches = false
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Authorization", "Bearer ${store.engineSecret()}")
