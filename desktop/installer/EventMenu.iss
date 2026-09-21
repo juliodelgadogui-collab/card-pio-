@@ -31,10 +31,10 @@ Name: "brazilianportuguese"; MessagesFile: "compiler:Languages\BrazilianPortugue
 
 [Tasks]
 Name: "desktopicon"; Description: "Criar atalho do EventMenu na área de trabalho"; GroupDescription: "Atalhos adicionais:"; Flags: unchecked
-Name: "whatsappstartup"; Description: "Iniciar o EventMenu WhatsApp Connect junto com o Windows"; GroupDescription: "WhatsApp:" 
+Name: "whatsappstartup"; Description: "Iniciar o EventMenu WhatsApp Connect junto com o Windows"; GroupDescription: "WhatsApp:"
 
 [Files]
-Source: "..\..\artifacts\EventMenu-Desktop-win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\artifacts\EventMenu-Desktop-win-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\EventMenu Desktop"; Filename: "{app}\{#MyAppExeName}"
