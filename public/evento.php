@@ -21,10 +21,26 @@ function ev_public_error(Throwable $e): string {
 
 $pdo=Database::connection();
 $slug=trim((string)($_GET['evento']??''));
+$tenantSlug=trim((string)($_GET['empresa']??''));
 $error=null;
-$s=$pdo->prepare('SELECT e.*,t.name tenant_name FROM events e JOIN tenants t ON t.id=e.tenant_id WHERE e.slug=? AND e.status="published" AND t.status="active" LIMIT 1');
-$s->execute([$slug]);
-$event=$s->fetch();
+if($slug===''){http_response_code(404);exit('Evento não encontrado.');}
+
+if($tenantSlug!==''){
+    $s=$pdo->prepare('SELECT e.*,t.name tenant_name,t.slug tenant_slug FROM events e JOIN tenants t ON t.id=e.tenant_id WHERE t.slug=? AND e.slug=? AND e.status="published" AND t.status="active" LIMIT 1');
+    $s->execute([$tenantSlug,$slug]);
+    $event=$s->fetch();
+}else{
+    $s=$pdo->prepare('SELECT e.*,t.name tenant_name,t.slug tenant_slug FROM events e JOIN tenants t ON t.id=e.tenant_id WHERE e.slug=? AND e.status="published" AND t.status="active" ORDER BY e.id LIMIT 2');
+    $s->execute([$slug]);
+    $matches=$s->fetchAll();
+    if(count($matches)!==1){http_response_code(404);exit(count($matches)>1?'Este link antigo é ambíguo. Solicite o link atualizado do evento.':'Evento não encontrado.');}
+    $event=$matches[0];
+    $tenantSlug=(string)$event['tenant_slug'];
+    if($_SERVER['REQUEST_METHOD']==='GET'){
+        header('Location: '.app_url('evento.php?empresa='.rawurlencode($tenantSlug).'&evento='.rawurlencode($slug)),true,301);
+        exit;
+    }
+}
 if(!$event||!TenantFeatures::events((int)($event['tenant_id']??0))){http_response_code(404);exit('Evento não encontrado.');}
 
 $brandService=new TenantBrandService();
@@ -40,7 +56,7 @@ $surface=(string)$visual['surface_color'];
 $text=(string)$visual['text_color'];
 $showEventMenu=(bool)$tenantBrand['show_eventmenu_brand'];
 $barOrdering=(int)($event['bar_enabled']??0)===1&&(int)($event['bar_unit_id']??0)>0&&TenantFeatures::menu((int)$event['tenant_id']);
-$barUrl=$barOrdering?app_url('event-bar.php?evento='.rawurlencode($slug)):'';
+$barUrl=$barOrdering?app_url('event-bar.php?empresa='.rawurlencode($tenantSlug).'&evento='.rawurlencode($slug)):'';
 
 if($_SERVER['REQUEST_METHOD']==='POST'){
     if(!Security::validateCsrf($_POST['_csrf']??null))$error='Sua sessão expirou. Atualize a página.';
@@ -58,7 +74,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
                 trim((string)($_POST['coupon']??''))?:null,
                 trim((string)($_POST['promoter']??''))?:null,
             );
-            header('Location: '.app_url('pedido.php?t='.rawurlencode($reservation['public_token'])),true,303);
+            header('Location: '.app_url('evento-pedido.php?t='.rawurlencode($reservation['public_token'])),true,303);
             exit;
         }catch(Throwable $e){$error=ev_public_error($e);}
     }
@@ -70,6 +86,9 @@ $batches=$b->fetchAll();
 $count=$pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND event_id=? AND status IN ("reserved","paid","checked_in")');
 $count->execute([$event['tenant_id'],$event['id']]);
 $usedCapacity=(int)$count->fetchColumn();
+$guestCount=$pdo->prepare('SELECT COALESCE(SUM(1+COALESCE(plus_ones,0)),0) FROM event_guests WHERE tenant_id=? AND event_id=? AND status IN ("invited","checked_in")');
+$guestCount->execute([$event['tenant_id'],$event['id']]);
+$usedCapacity+=(int)$guestCount->fetchColumn();
 $eventCapacity=$event['capacity_total']!==null?(int)$event['capacity_total']:null;
 $eventRemaining=$eventCapacity!==null?max(0,$eventCapacity-$usedCapacity):null;
 $typeUsage=[];
@@ -80,7 +99,8 @@ foreach($tu->fetchAll() as $r)$typeUsage[(int)$r['ticket_type_id']]=(int)$r['use
 $primary=ev_color($event['primary_color']??'',$brandPrimary);
 $secondary=ev_color($event['secondary_color']??'',$brandSecondary);
 $subtitle=trim((string)($event['public_subtitle']??''));
-$salesEnabled=(int)($event['sales_enabled']??1)===1;
+$eventEnded=!empty($event['ends_at'])&&strtotime((string)$event['ends_at'])<time();
+$salesEnabled=(int)($event['sales_enabled']??1)===1&&!$eventEnded;
 $starts=strtotime((string)$event['starts_at']);
 $mapUrl=trim((string)($event['map_url']??''));
 $lat=$event['latitude']!==null?(float)$event['latitude']:null;
@@ -129,7 +149,7 @@ $banner=trim((string)($event['banner_url']??''));
 <section class="card" id="ingressos">
   <div class="section-head"><div><span class="eyebrow" style="color:var(--primary)">Ingressos</span><h2>Escolha seu ingresso</h2></div><span class="muted">QR individual após confirmação</span></div>
   <?php if(!$salesEnabled):?>
-    <div class="closed">Venda online temporariamente indisponível.</div>
+    <div class="closed"><?= $eventEnded?'Este evento já foi encerrado.':'Venda online temporariamente indisponível.' ?></div>
   <?php elseif(!$batches):?>
     <div class="closed">Nenhum lote disponível no momento.</div>
   <?php else:?>
@@ -174,7 +194,7 @@ $banner=trim((string)($event['banner_url']??''));
     <?php if($mapEmbed):?><div class="map"><iframe loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="<?= Security::e($mapEmbed) ?>"></iframe></div><?php endif;?>
     <?php if($mapUrl):?><a class="map-link" target="_blank" rel="noopener" href="<?= Security::e($mapUrl) ?>">Abrir no mapa →</a><?php endif;?>
   </section>
-  <?php if($eventCapacity!==null):?><section class="card side-card"><span class="eyebrow" style="color:var(--primary)">Capacidade</span><span class="capacity"><?= $eventRemaining ?></span><p class="muted">vaga(s) ainda disponíveis considerando reservas e ingressos emitidos.</p></section><?php endif;?>
+  <?php if($eventCapacity!==null):?><section class="card side-card"><span class="eyebrow" style="color:var(--primary)">Capacidade</span><span class="capacity"><?= $eventRemaining ?></span><p class="muted">vaga(s) ainda disponíveis considerando ingressos, reservas, convidados e acompanhantes.</p></section><?php endif;?>
   <?php if($barOrdering):?><section class="card side-card"><span class="eyebrow" style="color:var(--primary)">Bar do evento</span><h2>Peça pelo celular</h2><p>Escolha seus produtos, pague online e retire apresentando o QR do pedido.</p><a class="bar-button" href="<?= Security::e($barUrl) ?>">Ver cardápio do bar →</a></section><?php endif;?>
   <section class="card side-card" id="experiencia"><span class="eyebrow" style="color:var(--primary)">Experiência</span><h2>Entrada por QR</h2><p>Cada ingresso possui QR individual e validação única no check-in.</p><div class="benefits"><span class="benefit">QR individual</span><span class="benefit">Check-in</span><span class="benefit">Pagamento online</span><?php if((int)($event['bar_enabled']??1)):?><span class="benefit">Bar no evento</span><?php endif;?></div></section>
 </aside>

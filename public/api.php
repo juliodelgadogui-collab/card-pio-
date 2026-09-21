@@ -8,10 +8,11 @@ use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\CashService;
-use EventMenu\Services\CheckoutService;
 use EventMenu\Services\GuestService;
+use EventMenu\Services\NativePixService;
 use EventMenu\Services\NfcService;
 use EventMenu\Services\OrderCreationService;
+use EventMenu\Services\OrderPaymentPreferenceService;
 use EventMenu\Services\OrderService;
 use EventMenu\Services\TicketService;
 
@@ -68,7 +69,8 @@ try{
         if(!Auth::can('delivery.assign'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$s=$pdo->prepare('SELECT id,name,phone FROM users WHERE tenant_id=? AND role="delivery" AND status="active" ORDER BY name');$s->execute([$tenantId]);api_out(['ok'=>true,'delivery_users'=>$s->fetchAll()]);
     }
     if($action==='pix-checkout'){
-        api_method('POST');$body=api_body();$orderId=(int)($body['order_id']??0);$s=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=?');$s->execute([$orderId,$tenantId]);$order=$s->fetch();if(!$order)api_out(['ok'=>false,'error'=>'Pedido não encontrado.'],404);if(!api_order_allowed($order))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);if(Auth::role()!=='delivery'&&!Auth::can('payments.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);if(Auth::role()==='delivery'&&(int)($order['assigned_delivery_user_id']??0)!==(int)Auth::id())api_out(['ok'=>false,'error'=>'Pedido não atribuído a este entregador.'],403);$checkout=(new CheckoutService())->create((string)$order['public_token'],'pagbank');api_out(['ok'=>true,'checkout'=>$checkout]);
+        api_method('POST');$body=api_body();$orderId=(int)($body['order_id']??0);$s=$pdo->prepare('SELECT * FROM orders WHERE id=? AND tenant_id=?');$s->execute([$orderId,$tenantId]);$order=$s->fetch();if(!$order)api_out(['ok'=>false,'error'=>'Pedido não encontrado.'],404);if(!api_order_allowed($order))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);if(Auth::role()!=='delivery'&&!Auth::can('payments.manage'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);if(Auth::role()==='delivery'&&(int)($order['assigned_delivery_user_id']??0)!==(int)Auth::id())api_out(['ok'=>false,'error'=>'Pedido não atribuído a este entregador.'],403);
+        $amount=isset($body['amount_cents'])?(int)$body['amount_cents']:null;$pix=(new NativePixService())->create($orderId,(string)($body['tax_id']??''),$amount,null);$provider=(string)($pix['provider']??'');if($provider==='')throw new RuntimeException('O servidor não conseguiu selecionar o provedor PIX.');(new OrderPaymentPreferenceService())->set($pdo,$tenantId,$orderId,'pix',$provider,null,'legacy_api');$checkout=['mode'=>'pix_native','redirect'=>false,'provider'=>$provider]+$pix;api_out(['ok'=>true,'pix'=>$pix,'checkout'=>$checkout],201);
     }
     if($action==='nfc-intent'){
         api_method('POST');if(!Auth::can('nfc.collect'))api_out(['ok'=>false,'error'=>'Acesso negado.'],403);$body=api_body();$result=(new NfcService())->createIntent((int)($body['order_id']??0),$deviceId);api_out(['ok'=>true]+$result,201);
