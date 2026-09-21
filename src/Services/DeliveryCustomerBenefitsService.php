@@ -15,16 +15,16 @@ final class DeliveryCustomerBenefitsService
         if($accountId<1||$tenantId<1)throw new RuntimeException('Cliente ou restaurante inválido.');
         $account=$this->account($pdo,$accountId);
         $customer=(new CustomerIdentityService())->findByPhone($pdo,$tenantId,(string)$account['phone']);
-        $loyalty=new LoyaltyPointsService();$config=$loyalty->config($pdo,$tenantId);$balance=0;
-        if($customer)$balance=$loyalty->balance($pdo,$tenantId,(int)$customer['id']);
+        $loyalty=new LoyaltyPointsService();$config=$loyalty->config($tenantId,$pdo);$balance=0;
+        if($customer){$loyaltySummary=$loyalty->summary($tenantId,(int)$customer['id'],$pdo);$balance=(int)$loyaltySummary['available'];}
         return [
             'loyalty'=>[
                 'enabled'=>(bool)$config['enabled'],
                 'balance_points'=>$balance,
-                'point_value_cents'=>(int)$config['point_value_cents'],
+                'point_value_cents'=>(int)$config['redeem_value_cents'],
                 'min_redeem_points'=>(int)$config['min_redeem_points'],
                 'max_redeem_percent'=>(int)$config['max_redeem_percent'],
-                'earn_rate'=>(float)$config['earn_rate'],
+                'earn_rate'=>(float)(1/$config['earn_amount_cents']),
             ],
             'coupon'=>['enabled'=>$this->hasActiveCoupons($pdo,$tenantId)],
         ];
@@ -74,7 +74,7 @@ final class DeliveryCustomerBenefitsService
         }
 
         $final=$pdo->prepare('SELECT subtotal_cents,discount_cents,delivery_fee_cents,total_cents,coupon_id,customer_id FROM orders WHERE id=? AND tenant_id=?');$final->execute([$orderId,$tenantId]);$totals=$final->fetch()?:throw new RuntimeException('Pedido não encontrado.');
-        $balance=(int)(new LoyaltyPointsService())->balance($pdo,$tenantId,(int)$totals['customer_id']);
+        $loyaltySummary=(new LoyaltyPointsService())->summary($tenantId,(int)$totals['customer_id'],$pdo);$balance=(int)$loyaltySummary['available'];
         return [
             'coupon'=>$couponResult,
             'loyalty'=>$loyaltyResult,
