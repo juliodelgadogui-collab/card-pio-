@@ -5,6 +5,7 @@ import path from 'node:path';
 import pino from 'pino';
 import { Boom } from '@hapi/boom';
 import makeWASocket, {
+  Browsers,
   DisconnectReason,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
@@ -104,10 +105,12 @@ function cancelReconnect() {
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
 }
-function scheduleReconnect() {
+function scheduleReconnect(delayOverride = null) {
   if (state.manualStop || state.starting || state.reconnectTimer) return;
   state.reconnectAttempt = Math.min(state.reconnectAttempt + 1, 8);
-  const delay = Math.min(60000, 2000 * (2 ** (state.reconnectAttempt - 1)));
+  const delay = delayOverride == null
+    ? Math.min(60000, 2000 * (2 ** (state.reconnectAttempt - 1)))
+    : delayOverride;
   state.status = 'reconnecting';
   touch();
   state.reconnectTimer = setTimeout(() => {
@@ -120,6 +123,16 @@ async function removeSessionFiles() {
   await fs.promises.mkdir(SESSION_ROOT, { recursive: true, mode: 0o700 });
 }
 
+async function waitUntilPairingReady(timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (state.qr && state.socket) return;
+    if (state.status === 'error') throw new Error(state.error || 'Falha ao preparar a conexão com o WhatsApp.');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error('O WhatsApp não ficou pronto para gerar o código. Tente novamente.');
+}
+
 async function startSession() {
   state.manualStop = false;
   cancelReconnect();
@@ -129,7 +142,7 @@ async function startSession() {
   state.status = state.reconnectAttempt > 0 ? 'reconnecting' : 'starting';
   state.error = '';
   state.qr = null;
-  state.pairingCode = null;
+  if (state.status !== 'pairing') state.pairingCode = null;
   touch();
 
   const promise = (async () => {
@@ -148,7 +161,10 @@ async function startSession() {
       markOnlineOnConnect: false,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
-      browser: ['EventMenu Connect', 'Chrome', '1.0.0'],
+      browser: Browsers.macOS('Desktop'),
+      connectTimeoutMs: 60_000,
+      keepAliveIntervalMs: 15_000,
+      defaultQueryTimeoutMs: 60_000,
     });
     state.socket = socket;
 
@@ -183,17 +199,19 @@ async function startSession() {
       if (connection === 'close') {
         if (state.socket === socket) state.socket = null;
         state.qr = null;
-        state.pairingCode = null;
         const code = disconnectCode(lastDisconnect);
         const loggedOut = code === DisconnectReason.loggedOut;
+        const restartRequired = code === DisconnectReason.restartRequired || code === 515;
         if (state.manualStop) {
           state.status = 'disconnected';
+          state.pairingCode = null;
           state.error = '';
           touch();
           return;
         }
         if (loggedOut) {
           state.status = 'disconnected';
+          state.pairingCode = null;
           state.phone = '';
           state.error = 'Sessão encerrada pelo WhatsApp. Conecte novamente.';
           state.reconnectAttempt = 0;
@@ -201,6 +219,14 @@ async function startSession() {
           removeSessionFiles().catch(() => {});
           return;
         }
+        if (restartRequired) {
+          state.status = 'reconnecting';
+          state.error = '';
+          touch();
+          scheduleReconnect(350);
+          return;
+        }
+        state.pairingCode = null;
         state.error = String(lastDisconnect?.error?.message || 'Conexão encerrada. Tentando reconectar.').slice(0, 400);
         touch();
         scheduleReconnect();
@@ -226,9 +252,11 @@ async function startSession() {
 
 async function requestPairingCode(phone) {
   phone = normalizePhone(phone);
+  if (state.status === 'connected') return publicState();
+  if (state.pairingCode && state.status === 'pairing') return publicState();
   await startSession();
   if (!state.socket) throw new Error('Mecanismo do WhatsApp ainda não iniciou. Tente novamente.');
-  await new Promise((resolve) => setTimeout(resolve, 1200));
+  await waitUntilPairingReady();
   const code = await state.socket.requestPairingCode(phone);
   if (!code) throw new Error('O WhatsApp não retornou o código de conexão.');
   state.pairingCode = String(code).replace(/\s+/g, '');
