@@ -144,22 +144,27 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
     fun send(phone: String, message: String): EmbeddedSendResult {
         ensureStarted()
         val result = request("send", "POST", JSONObject().put("phone", phone).put("message", message))
-        return EmbeddedSendResult(result.optString("message_id"))
+        return EmbeddedSendResult(jsonText(result, "message_id"))
     }
 
     private fun stateFrom(json: JSONObject): EmbeddedWhatsAppState = EmbeddedWhatsAppState(
-        status = json.optString("status", "disconnected"),
-        qr = json.optString("qr"),
-        pairingCode = json.optString("pairing_code"),
-        phone = json.optString("phone"),
-        error = json.optString("error"),
+        status = jsonText(json, "status", "disconnected"),
+        qr = jsonText(json, "qr"),
+        pairingCode = jsonText(json, "pairing_code"),
+        phone = jsonText(json, "phone"),
+        error = jsonText(json, "error"),
     )
+
+    private fun jsonText(json: JSONObject, key: String, fallback: String = ""): String {
+        if (!json.has(key) || json.isNull(key)) return fallback
+        return json.optString(key, fallback).takeUnless { it.equals("null", ignoreCase = true) } ?: fallback
+    }
 
     private fun request(path: String, method: String, body: JSONObject?): JSONObject {
         val connection = (URL(base + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 4_000
-            readTimeout = if (path == "pair") 20_000 else 10_000
+            readTimeout = if (path == "pair") 25_000 else 10_000
             useCaches = false
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Authorization", "Bearer ${store.engineSecret()}")
@@ -175,8 +180,8 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         }.getOrNull().orEmpty()
         connection.disconnect()
         val json = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
-        if (code !in 200..299) throw IllegalStateException(json.optString("error").ifBlank { "Falha no mecanismo local (HTTP $code)." })
-        if (json.has("ok") && !json.optBoolean("ok", false)) throw IllegalStateException(json.optString("error").ifBlank { "Falha no mecanismo local." })
+        if (code !in 200..299) throw IllegalStateException(jsonText(json, "error").ifBlank { "Falha no mecanismo local (HTTP $code)." })
+        if (json.has("ok") && !json.optBoolean("ok", false)) throw IllegalStateException(jsonText(json, "error").ifBlank { "Falha no mecanismo local." })
         return json
     }
 }
