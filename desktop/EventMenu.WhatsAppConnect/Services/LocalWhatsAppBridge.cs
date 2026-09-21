@@ -74,6 +74,9 @@ public sealed class LocalWhatsAppBridge : IDisposable
     public async Task<LocalBridgeState> StartSessionAsync(CancellationToken ct=default)=>
         await SendAsync<LocalBridgeState>(HttpMethod.Post,$"v1/sessions/{_settings.SessionKey}/start",new{},ct);
 
+    public async Task<LocalBridgeState> RequestPairingCodeAsync(string phone,CancellationToken ct=default)=>
+        await SendAsync<LocalBridgeState>(HttpMethod.Post,$"v1/sessions/{_settings.SessionKey}/pairing-code",new{phone},ct);
+
     public async Task<LocalBridgeState> LogoutAsync(CancellationToken ct=default)=>
         await SendAsync<LocalBridgeState>(HttpMethod.Post,$"v1/sessions/{_settings.SessionKey}/logout",new{},ct);
 
