@@ -69,7 +69,8 @@ public partial class MainWindow : Window
             _session=_sharedSession.Load();
             if(_session?.User is null||_session.User.TenantId<1)
             {
-                SetUnavailable("Abra o EventMenu Desktop e entre na sua conta primeiro.");
+                _timer.Start();
+                SetUnavailable("Abra o EventMenu Desktop e entre na sua conta. O Connect tentará reconhecer a sessão automaticamente.");
                 return;
             }
 
@@ -77,6 +78,8 @@ public partial class MainWindow : Window
             _deviceId=_sharedSession.GetOrCreateDeviceId();
             TenantText.Text=string.IsNullOrWhiteSpace(_session.User.TenantName)?"Minha empresa":_session.User.TenantName;
             DeviceText.Text=Environment.MachineName;
+            _cloud?.Dispose();
+            _bridge?.Dispose();
             _cloud=new WhatsAppCloudClient(_sharedSession,_deviceId);
             _bridge=new LocalWhatsAppBridge(_tenantId);
 
@@ -87,11 +90,20 @@ public partial class MainWindow : Window
         }
         catch(Exception ex)
         {
+            _timer.Start();
             SetUnavailable(ex.Message);
         }
     }
 
-    private async void Timer_Tick(object? sender,EventArgs e)=>await SyncOnceAsync();
+    private async void Timer_Tick(object? sender,EventArgs e)
+    {
+        if(_bridge is null||_cloud is null)
+        {
+            await InitializeAsync();
+            return;
+        }
+        await SyncOnceAsync();
+    }
 
     private async Task SyncOnceAsync(bool force=false)
     {
@@ -249,7 +261,15 @@ public partial class MainWindow : Window
         finally{DisconnectButton.IsEnabled=true;}
     }
 
-    private async void RefreshButton_Click(object sender,RoutedEventArgs e)=>await SyncOnceAsync(force:true);
+    private async void RefreshButton_Click(object sender,RoutedEventArgs e)
+    {
+        if(_bridge is null||_cloud is null)
+        {
+            await InitializeAsync();
+            return;
+        }
+        await SyncOnceAsync(force:true);
+    }
 
     private void SetUnavailable(string message)
     {
@@ -258,7 +278,7 @@ public partial class MainWindow : Window
         DisconnectButton.IsEnabled=false;
         FooterText.Text=message;
         ErrorText.Text=message;
-        QrHintText.Text="Entre no EventMenu Desktop para ativar esta integração.";
+        QrHintText.Text="Entre no EventMenu Desktop. O Connect tentará reconhecer a sessão automaticamente; você também pode clicar em Atualizar.";
     }
 
     private static string FormatPhone(string digits)
