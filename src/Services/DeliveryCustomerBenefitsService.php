@@ -17,14 +17,16 @@ final class DeliveryCustomerBenefitsService
         $customer=(new CustomerIdentityService())->findByPhone($pdo,$tenantId,(string)$account['phone']);
         $loyalty=new LoyaltyPointsService();$config=$loyalty->config($tenantId,$pdo);$balance=0;
         if($customer){$loyaltySummary=$loyalty->summary($tenantId,(int)$customer['id'],$pdo);$balance=(int)$loyaltySummary['available'];}
+        $pointValueCents=(int)round((int)$config['redeem_value_cents']/max(1,(int)$config['redeem_points']));
+        $earnRate=100/max(1,(int)$config['earn_amount_cents']);
         return [
             'loyalty'=>[
                 'enabled'=>(bool)$config['enabled'],
                 'balance_points'=>$balance,
-                'point_value_cents'=>(int)$config['redeem_value_cents'],
+                'point_value_cents'=>$pointValueCents,
                 'min_redeem_points'=>(int)$config['min_redeem_points'],
                 'max_redeem_percent'=>(int)$config['max_redeem_percent'],
-                'earn_rate'=>(float)(1/$config['earn_amount_cents']),
+                'earn_rate'=>$earnRate,
             ],
             'coupon'=>['enabled'=>$this->hasActiveCoupons($pdo,$tenantId)],
         ];
