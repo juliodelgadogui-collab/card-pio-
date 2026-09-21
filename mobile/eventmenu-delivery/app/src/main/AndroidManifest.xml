@@ -5,7 +5,7 @@
 
     <application
         android:allowBackup="true"
-        android:label="EventMenu Delivery"
+        android:label="DELYVRE"
         android:supportsRtl="true"
         android:theme="@style/Theme.EventMenuDelivery"
         android:usesCleartextTraffic="false">
