@@ -11,6 +11,7 @@ Ele é independente do sistema existente em `https://go.gestao2.store/1/` e não
 - `/apk/delyvre/latest.apk` — link permanente do DELYVRE
 - `/updates/apps.json` — manifesto JSON para consulta de versão pelos aplicativos
 - `/admin-apks.php` — publicação manual protegida por token
+- `/api/apk/publish` — publicação automática via GitHub Actions/CI
 
 ## Publicação
 
@@ -25,6 +26,7 @@ public_html/go/
 ├── download.php
 ├── updates.php
 ├── admin-apks.php
+├── api-apk-publish.php
 ├── assets/
 ├── data/
 ├── lib/
@@ -34,7 +36,7 @@ public_html/go/
 
 O Apache precisa permitir `.htaccess`/mod_rewrite para os links amigáveis. Caso não permita, os arquivos PHP continuam funcionando diretamente.
 
-## Token do administrador de APKs
+## Tokens de publicação
 
 A área `/admin-apks.php` nasce **desativada** por segurança. Defina no ambiente PHP/Apache:
 
@@ -43,6 +45,14 @@ EVENTMENU_APK_ADMIN_TOKEN=<token forte com pelo menos 20 caracteres>
 ```
 
 Não existe senha padrão no código.
+
+Para publicação automática por CI, configure também:
+
+```text
+EVENTMENU_APK_PUBLISH_TOKEN=<token forte com pelo menos 24 caracteres>
+```
+
+No GitHub, salve o mesmo valor como secret `EVENTMENU_APK_PUBLISH_TOKEN`. O workflow do EventMenu GO usa esse secret para publicar o APK novo automaticamente após um build bem-sucedido.
 
 ## Política dos 500 MB
 
@@ -55,7 +65,7 @@ Na terceira publicação, a versão mais antiga é removida automaticamente.
 
 O `latest.apk` **não é uma cópia física**: a regra de rewrite encaminha o link permanente para `download.php`, que entrega o arquivo versionado atual. Isso evita gastar o dobro do armazenamento.
 
-## Fluxo de publicação
+## Fluxo de publicação manual
 
 1. Acesse `/admin-apks.php`.
 2. Informe o token.

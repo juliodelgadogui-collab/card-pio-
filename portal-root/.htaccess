@@ -8,6 +8,7 @@ RewriteRule ^storage(?:/|$) - [F,L]
 RewriteRule ^lib(?:/|$) - [F,L]
 RewriteRule ^download/?$ downloads.php [L,QSA]
 RewriteRule ^updates/apps\.json$ updates.php [L,QSA]
+RewriteRule ^api/apk/publish$ api-apk-publish.php [L,QSA]
 RewriteRule ^apk/([a-z0-9-]+)/latest\.apk$ download.php?app=$1 [L,QSA]
 </IfModule>
 

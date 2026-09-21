@@ -74,6 +74,19 @@ jobs:
           path: mobile/eventmenu-go/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Publish latest APK to go.gestao2.store
+        env:
+          PUBLISH_TOKEN: ${{ secrets.EVENTMENU_APK_PUBLISH_TOKEN }}
+        if: ${{ env.PUBLISH_TOKEN != '' }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --silent --show-error \
+            -X POST 'https://go.gestao2.store/api/apk/publish' \
+            -H "Authorization: Bearer $PUBLISH_TOKEN" \
+            -F 'app=eventmenu-go' \
+            -F "version=0.2.${GITHUB_RUN_NUMBER}" \
+            -F "version_code=${GITHUB_RUN_NUMBER}" \
+            -F 'apk=@app/build/outputs/apk/debug/app-debug.apk'
 
   desktop-windows:
     name: Windows - EventMenu Desktop
