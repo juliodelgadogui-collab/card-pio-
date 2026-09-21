@@ -53,7 +53,7 @@ if (!is_dir($storagePath) && !mkdir($storagePath, 0775, true) && !is_dir($storag
 if (!is_file($envPath)) {
     writeEnv($root . '/.env.example', $envPath, [
         'APP_NAME' => 'EventMenu Server',
-        'EVENTMENU_RELEASE' => '1.0.0',
+        'EVENTMENU_RELEASE' => '1.0.1',
         'APP_ENV' => 'production',
         'APP_DEBUG' => 'false',
         'APP_URL' => $appUrl,
@@ -99,5 +99,5 @@ Database::transaction(function (PDO $pdo) use ($tenantName, $slug, $adminName, $
 if (file_put_contents($lockPath, date(DATE_ATOM), LOCK_EX) === false) throw new RuntimeException('Banco criado, mas falhou ao gravar installed.lock.');
 @chmod($lockPath, 0640);
 
-echo "EventMenu Server 1.0.0 instalado com SQLite em storage/eventmenu.sqlite\n";
+echo "EventMenu Server 1.0.1 instalado com SQLite em storage/eventmenu.sqlite\n";
 echo "Super ADM: {$adminEmail}\n";
