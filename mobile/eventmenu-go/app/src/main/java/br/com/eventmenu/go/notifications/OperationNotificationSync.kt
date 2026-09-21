@@ -19,6 +19,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import br.com.eventmenu.go.EventMenuGoApplication
+import br.com.eventmenu.go.R
 import br.com.eventmenu.go.data.ApiException
 import br.com.eventmenu.go.data.AppNotification
 import br.com.eventmenu.go.navigation.AppDeepLinks
@@ -56,7 +57,7 @@ object OperationNotificationScheduler {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_eventmenu_notification)
             .setContentTitle(notification.title.ifBlank { "EventMenu GO" })
             .setContentText(notification.message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(notification.message))
