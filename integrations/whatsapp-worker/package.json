@@ -1,8 +1,8 @@
 {
   "name": "eventmenu-whatsapp-bridge",
-  "version": "0.2.0-beta",
+  "version": "1.0.1-beta.1",
   "private": true,
-  "description": "Bridge local e isolada do EventMenu para sessões WhatsApp via Baileys, sem Chromium.",
+  "description": "Bridge local e isolada do EventMenu para sessões WhatsApp via Baileys, sem Chromium. EventMenu Release 1.0.1.",
   "main": "server.js",
   "type": "module",
   "scripts": {
