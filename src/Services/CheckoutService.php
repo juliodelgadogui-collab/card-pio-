@@ -45,7 +45,11 @@ final class CheckoutService
 
     private function mercadoPago(array $order,array $gateway,array $config,string $key): array
     {
-        $token=(string)($config['access_token']??'');if($token==='')throw new RuntimeException('Mercado Pago não configurado.');$notification=\app_absolute_url('webhook.php?provider=mercadopago&tenant='.rawurlencode($order['tenant_slug']));$return=\app_absolute_url('pedido.php?t='.rawurlencode($order['public_token']));
+        $token=(string)($config['access_token']??'');if($token==='')throw new RuntimeException('Mercado Pago não configurado.');
+        // Force signed Webhooks. Without source_news=webhooks Checkout Pro can also send
+        // legacy IPN notifications, which cannot be authenticated with the webhook secret.
+        $notification=\app_absolute_url('webhook.php?provider=mercadopago&tenant='.rawurlencode($order['tenant_slug']).'&source_news=webhooks');
+        $return=\app_absolute_url('pedido.php?t='.rawurlencode($order['public_token']));
         $body=['items'=>[['id'=>'order-'.$order['id'],'title'=>'Pedido EventMenu #'.$order['id'],'quantity'=>1,'currency_id'=>'BRL','unit_price'=>((int)$order['total_cents'])/100]],'external_reference'=>'eventmenu:'.$order['tenant_id'].':'.$order['id'],'back_urls'=>['success'=>$return,'pending'=>$return,'failure'=>$return],'notification_url'=>$notification,'metadata'=>['tenant_id'=>$order['tenant_id'],'order_id'=>$order['id']]];
         $data=$this->httpJson('POST','https://api.mercadopago.com/checkout/preferences',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$key],$body);$url=(string)($data['init_point']??'');if($url==='')throw new RuntimeException('Mercado Pago não retornou URL de pagamento.');return ['url'=>$url,'external_id'=>(string)($data['id']??''),'raw'=>$data];
     }
