@@ -14,7 +14,8 @@
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_eventmenu_connect"
         android:supportsRtl="true"
-        android:theme="@style/Theme.EventMenuConnect">
+        android:theme="@style/Theme.EventMenuConnect"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"
