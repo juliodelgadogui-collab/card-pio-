@@ -8,6 +8,7 @@ fun envValue(primary: String, fallback: String? = null): String =
 
 fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
+val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
 val apiBase = envValue("EVENTMENU_API_BASE_URL")
     .ifBlank { "https://go.gestao2.store/1/" }
     .trimEnd('/') + "/"
@@ -15,13 +16,18 @@ if (!apiBase.startsWith("https://", ignoreCase = true)) {
     throw GradleException("EVENTMENU_API_BASE_URL precisa usar HTTPS.")
 }
 
-// GITHUB_RUN_NUMBER is scoped to a workflow. It previously made different GO
-// workflows/build histories appear to reuse the same public version. RUN_ID is
-// globally increasing and is injected by CI as EVENTMENU_VERSION_CODE.
-val ciVersionCode = envValue("EVENTMENU_VERSION_CODE").toLongOrNull()?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
-val ciVersionName = envValue("EVENTMENU_VERSION_NAME")
-val appVersionCode = ciVersionCode ?: 256
-val appVersionName = ciVersionName.ifBlank { "0.2.56-dev" }
+val explicitVersionCodeRaw = envValue("EVENTMENU_VERSION_CODE")
+val explicitVersionCodeLong = explicitVersionCodeRaw.toLongOrNull()
+if (explicitVersionCodeRaw.isNotBlank() && (explicitVersionCodeLong == null || explicitVersionCodeLong !in 1..Int.MAX_VALUE.toLong())) {
+    throw GradleException("EVENTMENU_VERSION_CODE precisa ser inteiro positivo até ${Int.MAX_VALUE}.")
+}
+val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val appVersionCode = explicitVersionCodeLong?.toInt() ?: if (releaseRequested) 10000 else (ciBuildNumber?.let { 1000 + it } ?: 256)
+val appVersionName = envValue("EVENTMENU_VERSION_NAME").ifBlank {
+    if (releaseRequested) "1.0.0" else ciBuildNumber?.let { "0.2.${it}-dev" } ?: "0.2.56-dev"
+}
+val suiteRelease = envValue("EVENTMENU_RELEASE").ifBlank { if (releaseRequested) "1.0.0" else "dev" }
+val buildDateUtc = envValue("EVENTMENU_BUILD_DATE_UTC").ifBlank { "unknown" }
 
 val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
 val firebaseAppId = envValue("EVENTMENU_FIREBASE_APP_ID")
@@ -36,9 +42,7 @@ val firebaseConfig = linkedMapOf(
 val firebaseConfiguredCount = firebaseConfig.values.count { it.isNotBlank() }
 val firebaseEnabled = firebaseConfiguredCount == firebaseConfig.size
 val firebasePartial = firebaseConfiguredCount in 1 until firebaseConfig.size
-val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
 val firebaseRequired = envValue("EVENTMENU_REQUIRE_FCM").equals("true", ignoreCase = true) || releaseRequested
-
 if (firebasePartial) {
     val missing = firebaseConfig.filterValues { it.isBlank() }.keys.joinToString(", ")
     throw GradleException("Configuração Firebase incompleta. Faltando: $missing")
@@ -48,6 +52,29 @@ if (firebaseRequired && !firebaseEnabled) {
         "Firebase Cloud Messaging é obrigatório neste build. Configure EVENTMENU_FIREBASE_PROJECT_ID, " +
             "EVENTMENU_FIREBASE_APP_ID, EVENTMENU_FIREBASE_API_KEY e EVENTMENU_FIREBASE_SENDER_ID."
     )
+}
+
+val releaseKeystorePath = envValue("EVENTMENU_RELEASE_KEYSTORE_PATH")
+val releaseStorePassword = envValue("EVENTMENU_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = envValue("EVENTMENU_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = envValue("EVENTMENU_RELEASE_KEY_PASSWORD")
+val releaseSigning = linkedMapOf(
+    "EVENTMENU_RELEASE_KEYSTORE_PATH" to releaseKeystorePath,
+    "EVENTMENU_RELEASE_STORE_PASSWORD" to releaseStorePassword,
+    "EVENTMENU_RELEASE_KEY_ALIAS" to releaseKeyAlias,
+    "EVENTMENU_RELEASE_KEY_PASSWORD" to releaseKeyPassword,
+)
+val releaseSigningCount = releaseSigning.values.count { it.isNotBlank() }
+val releaseSigningConfigured = releaseSigningCount == releaseSigning.size
+if (releaseSigningCount in 1 until releaseSigning.size) {
+    val missing = releaseSigning.filterValues { it.isBlank() }.keys.joinToString(", ")
+    throw GradleException("Assinatura Release incompleta. Faltando: $missing")
+}
+if (releaseRequested && !releaseSigningConfigured) {
+    throw GradleException("Build Release exige o keystore permanente configurado por ambiente/secrets.")
+}
+if (releaseSigningConfigured && !file(releaseKeystorePath).isFile) {
+    throw GradleException("Keystore Release não encontrado no caminho informado.")
 }
 
 android {
@@ -61,6 +88,8 @@ android {
         versionCode = appVersionCode
         versionName = appVersionName
         buildConfigField("String", "API_BASE_URL", buildConfigString(apiBase))
+        buildConfigField("String", "EVENTMENU_RELEASE", buildConfigString(suiteRelease))
+        buildConfigField("String", "BUILD_DATE_UTC", buildConfigString(buildDateUtc))
         buildConfigField("boolean", "FIREBASE_ENABLED", firebaseEnabled.toString())
         buildConfigField("String", "FIREBASE_PROJECT_ID", buildConfigString(firebaseProjectId))
         buildConfigField("String", "FIREBASE_APP_ID", buildConfigString(firebaseAppId))
@@ -78,11 +107,28 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
         }
     }
 }
