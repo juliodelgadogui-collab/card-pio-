@@ -1,0 +1,68 @@
+<?php
+
+declare(strict_types=1);
+
+require __DIR__.'/../app/bootstrap.php';
+
+use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\WhatsAppDesktopAgentService;
+use RuntimeException;
+use Throwable;
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store, private, max-age=0');
+header('X-Content-Type-Options: nosniff');
+header('Referrer-Policy: no-referrer');
+if($_SERVER['REQUEST_METHOD']==='OPTIONS'){header('Allow: GET, POST, OPTIONS');http_response_code(204);exit;}
+
+function whatsapp_desktop_out(array $data,int $status=200):never{http_response_code($status);echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
+function whatsapp_desktop_body():array{$raw=file_get_contents('php://input');if($raw===false||trim($raw)==='')return $_POST?:[];try{$data=json_decode($raw,true,512,JSON_THROW_ON_ERROR);return is_array($data)?$data:[];}catch(Throwable){whatsapp_desktop_out(['ok'=>false,'error'=>'JSON inválido.'],400);}}
+function whatsapp_desktop_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)whatsapp_desktop_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
+function whatsapp_desktop_device(string $sessionDevice,array $body):string{$reported=mb_substr(trim((string)($body['device_id']??$sessionDevice)),0,190);if($sessionDevice!==''&&$reported!==''&&!hash_equals($sessionDevice,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');if($reported==='')throw new RuntimeException('Dispositivo não identificado.');return$reported;}
+
+try{
+    $auth=new ApiAuthService();
+    $token=ApiAuthService::bearerToken();
+    $deviceId=ApiAuthService::deviceId();
+    if($token==='')whatsapp_desktop_out(['ok'=>false,'error'=>'Token Bearer obrigatório.'],401);
+    $auth->authenticate($token,$deviceId);
+    if($deviceId==='')throw new RuntimeException('Dispositivo não identificado.');
+
+    $service=new WhatsAppDesktopAgentService();
+    $action=(string)($_GET['action']??'state');
+
+    if($action==='state'){
+        whatsapp_desktop_method('GET');
+        whatsapp_desktop_out(['ok'=>true]+$service->state($deviceId));
+    }
+
+    if($action==='heartbeat'){
+        whatsapp_desktop_method('POST');
+        $body=whatsapp_desktop_body();$reported=whatsapp_desktop_device($deviceId,$body);
+        $state=$service->heartbeat($reported,(string)($body['device_label']??''),(string)($body['status']??'disconnected'),(string)($body['phone']??''),(string)($body['error']??''));
+        whatsapp_desktop_out(['ok'=>true]+$state);
+    }
+
+    if($action==='claim'){
+        whatsapp_desktop_method('POST');
+        $body=whatsapp_desktop_body();$reported=whatsapp_desktop_device($deviceId,$body);
+        $messages=$service->claim($reported,(int)($body['limit']??5));
+        whatsapp_desktop_out(['ok'=>true,'messages'=>$messages]);
+    }
+
+    if($action==='ack'){
+        whatsapp_desktop_method('POST');
+        $body=whatsapp_desktop_body();$reported=whatsapp_desktop_device($deviceId,$body);
+        $message=$service->acknowledge($reported,(int)($body['id']??0),(string)($body['claim_token']??''),(string)($body['external_message_id']??''));
+        whatsapp_desktop_out(['ok'=>true,'message'=>$message]);
+    }
+
+    if($action==='fail'){
+        whatsapp_desktop_method('POST');
+        $body=whatsapp_desktop_body();$reported=whatsapp_desktop_device($deviceId,$body);
+        $message=$service->fail($reported,(int)($body['id']??0),(string)($body['claim_token']??''),(string)($body['error']??''));
+        whatsapp_desktop_out(['ok'=>true,'message'=>$message]);
+    }
+
+    whatsapp_desktop_out(['ok'=>false,'error'=>'Endpoint do WhatsApp Desktop não encontrado.'],404);
+}catch(RuntimeException $e){whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],500);whatsapp_desktop_out(['ok'=>false,'error'=>'Erro interno.'],500);}
