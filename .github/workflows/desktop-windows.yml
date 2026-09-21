@@ -5,12 +5,15 @@ on:
   push:
     branches:
       - feature/eventmenu-desktop
+      - wip/eventmenu-delivery-customer-auth-payments
     paths:
       - 'desktop/**'
+      - 'integrations/whatsapp-worker/**'
       - '.github/workflows/desktop-windows.yml'
   pull_request:
     paths:
       - 'desktop/**'
+      - 'integrations/whatsapp-worker/**'
       - '.github/workflows/desktop-windows.yml'
 
 permissions:
@@ -19,7 +22,7 @@ permissions:
 jobs:
   build-windows:
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -30,23 +33,9 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Restore
-        run: dotnet restore desktop/EventMenu.Desktop/EventMenu.Desktop.csproj
-
-      - name: Build
-        run: dotnet build desktop/EventMenu.Desktop/EventMenu.Desktop.csproj -c Release --no-restore
-
-      - name: Publish Windows x64
-        run: >-
-          dotnet publish desktop/EventMenu.Desktop/EventMenu.Desktop.csproj
-          -c Release
-          -r win-x64
-          --self-contained true
-          -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:DebugType=None
-          -p:DebugSymbols=false
-          -o artifacts/EventMenu-Desktop-win-x64
+      - name: Build EventMenu Desktop + WhatsApp Connect
+        shell: pwsh
+        run: ./desktop/build-windows.ps1
 
       - name: Install Inno Setup
         shell: pwsh
@@ -69,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: EventMenu-Desktop-win-x64
-          path: artifacts/EventMenu-Desktop-win-x64/**
+          path: desktop/artifacts/EventMenu-Desktop-win-x64/**
           if-no-files-found: error
           retention-days: 14
 
