@@ -34,9 +34,15 @@ final class MarketplaceDeliveryCouponService
 
         foreach($targetIds as$tenantId){
             if(isset($existingByTenant[$tenantId])){
-                $this->updateTenantCoupon($pdo,(int)$existingByTenant[$tenantId]['coupon_id'],$tenantId,$definition);
-                $applied++;
-                continue;
+                $couponId=(int)$existingByTenant[$tenantId]['coupon_id'];
+                $exists=$pdo->prepare('SELECT id FROM coupons WHERE id=? AND tenant_id=? LIMIT 1');
+                $exists->execute([$couponId,$tenantId]);
+                if($exists->fetchColumn()){
+                    $this->updateTenantCoupon($pdo,$couponId,$tenantId,$definition);
+                    $applied++;
+                    continue;
+                }
+                $pdo->prepare('DELETE FROM marketplace_delivery_coupon_targets WHERE marketplace_coupon_id=? AND tenant_id=?')->execute([$marketplaceCouponId,$tenantId]);
             }
 
             $collision=$pdo->prepare('SELECT c.id,c.active,t.name FROM coupons c JOIN tenants t ON t.id=c.tenant_id WHERE c.tenant_id=? AND UPPER(c.code)=UPPER(?) LIMIT 1');
@@ -46,18 +52,63 @@ final class MarketplaceDeliveryCouponService
                 continue;
             }
 
-            $insert=$pdo->prepare('INSERT INTO coupons (tenant_id,code,type,value,max_discount_cents,min_order_cents,max_uses,starts_at,ends_at,active) VALUES (?,?,?,?,?,?,?,?,?,?)');
-            $insert->execute([
-                $tenantId,(string)$definition['code'],(string)$definition['type'],(int)$definition['value'],
-                $definition['max_discount_cents']!==null?(int)$definition['max_discount_cents']:null,(int)$definition['min_order_cents'],
-                $definition['max_uses_per_tenant']!==null?(int)$definition['max_uses_per_tenant']:null,$definition['starts_at']?:null,$definition['ends_at']?:null,1,
-            ]);
-            $couponId=(int)$pdo->lastInsertId();
+            $couponId=$this->createTenantCoupon($pdo,$tenantId,$definition);
             $pdo->prepare('INSERT INTO marketplace_delivery_coupon_targets (marketplace_coupon_id,tenant_id,coupon_id) VALUES (?,?,?)')->execute([$marketplaceCouponId,$tenantId,$couponId]);
             $applied++;
         }
 
         return ['targets'=>count($targetIds),'applied'=>$applied,'deactivated'=>$deactivated,'conflicts'=>$conflicts];
+    }
+
+    /**
+     * Materializa um cupom do Super ADM somente para a empresa que está usando
+     * o DELYVRE. Assim o APK não depende de alguém clicar manualmente em
+     * "Sincronizar empresas" depois que uma loja entra no marketplace.
+     */
+    public function ensureForTenantCode(PDO $pdo,int $tenantId,string $code):?int
+    {
+        $code=mb_strtoupper(trim($code));
+        if($tenantId<1||$code==='')return null;
+
+        $q=$pdo->prepare('SELECT * FROM marketplace_delivery_coupons WHERE UPPER(code)=? AND active=1 LIMIT 1');
+        $q->execute([$code]);
+        $definition=$q->fetch();
+        if(!$definition)return null;
+
+        if(!in_array($tenantId,$this->targetTenantIds($pdo,$definition),true))return null;
+
+        $map=$pdo->prepare('SELECT coupon_id FROM marketplace_delivery_coupon_targets WHERE marketplace_coupon_id=? AND tenant_id=? LIMIT 1');
+        $map->execute([(int)$definition['id'],$tenantId]);
+        $mappedId=(int)($map->fetchColumn()?:0);
+        if($mappedId>0){
+            $exists=$pdo->prepare('SELECT id FROM coupons WHERE id=? AND tenant_id=? LIMIT 1');
+            $exists->execute([$mappedId,$tenantId]);
+            if($exists->fetchColumn()){
+                $this->updateTenantCoupon($pdo,$mappedId,$tenantId,$definition);
+                return $mappedId;
+            }
+            $pdo->prepare('DELETE FROM marketplace_delivery_coupon_targets WHERE marketplace_coupon_id=? AND tenant_id=?')->execute([(int)$definition['id'],$tenantId]);
+        }
+
+        // Um cupom criado pelo próprio restaurante com o mesmo código continua
+        // tendo prioridade e nunca é sobrescrito pelo cupom da plataforma.
+        $local=$pdo->prepare('SELECT id,active FROM coupons WHERE tenant_id=? AND UPPER(code)=? LIMIT 1');
+        $local->execute([$tenantId,$code]);
+        if($row=$local->fetch())return (int)$row['active']===1?(int)$row['id']:null;
+
+        try{
+            $couponId=$this->createTenantCoupon($pdo,$tenantId,$definition);
+            $pdo->prepare('INSERT INTO marketplace_delivery_coupon_targets (marketplace_coupon_id,tenant_id,coupon_id) VALUES (?,?,?)')->execute([(int)$definition['id'],$tenantId,$couponId]);
+            return $couponId;
+        }catch(\Throwable $e){
+            // Outra requisição pode ter materializado o mesmo cupom entre a
+            // consulta e o INSERT. Nesse caso, reutiliza o vencedor.
+            $winner=$pdo->prepare('SELECT id FROM coupons WHERE tenant_id=? AND UPPER(code)=? AND active=1 LIMIT 1');
+            $winner->execute([$tenantId,$code]);
+            $id=(int)($winner->fetchColumn()?:0);
+            if($id>0)return$id;
+            throw$e;
+        }
     }
 
     public function syncAll(PDO $pdo):array
@@ -86,6 +137,17 @@ final class MarketplaceDeliveryCouponService
     public function managedCouponId(PDO $pdo,int $tenantCouponId):?int
     {
         try{$q=$pdo->prepare('SELECT marketplace_coupon_id FROM marketplace_delivery_coupon_targets WHERE coupon_id=? LIMIT 1');$q->execute([$tenantCouponId]);$id=$q->fetchColumn();return$id!==false?(int)$id:null;}catch(\Throwable){return null;}
+    }
+
+    private function createTenantCoupon(PDO $pdo,int $tenantId,array $definition):int
+    {
+        $insert=$pdo->prepare('INSERT INTO coupons (tenant_id,code,type,value,max_discount_cents,min_order_cents,max_uses,starts_at,ends_at,active) VALUES (?,?,?,?,?,?,?,?,?,?)');
+        $insert->execute([
+            $tenantId,(string)$definition['code'],(string)$definition['type'],(int)$definition['value'],
+            $definition['max_discount_cents']!==null?(int)$definition['max_discount_cents']:null,(int)$definition['min_order_cents'],
+            $definition['max_uses_per_tenant']!==null?(int)$definition['max_uses_per_tenant']:null,$definition['starts_at']?:null,$definition['ends_at']?:null,1,
+        ]);
+        return(int)$pdo->lastInsertId();
     }
 
     private function updateTenantCoupon(PDO $pdo,int $couponId,int $tenantId,array $definition):void
