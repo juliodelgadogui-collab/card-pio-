@@ -34,6 +34,12 @@ jobs:
         run: |
           mkdir -p "$HOME/.android"
           if [ ! -f "$HOME/.android/debug.keystore" ]; then keytool -genkeypair -v -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey -keypass android -dname "CN=EventMenu GO Development,O=EventMenu,C=BR" -keyalg RSA -keysize 2048 -validity 10000; fi
+      - name: Stamp unique app version
+        shell: bash
+        run: |
+          echo "EVENTMENU_VERSION_CODE=${GITHUB_RUN_ID}" >> "$GITHUB_ENV"
+          echo "EVENTMENU_VERSION_NAME=0.2.${GITHUB_RUN_NUMBER}-b${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_ENV"
+          echo "GO build version: 0.2.${GITHUB_RUN_NUMBER}-b${GITHUB_RUN_ATTEMPT} (${GITHUB_RUN_ID})"
       - name: Unit tests
         run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
       - name: Android lint
@@ -41,4 +47,8 @@ jobs:
       - name: Build fresh APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
       - uses: actions/upload-artifact@v4
-        with: {name: EventMenu-GO-dev-debug-apk, path: mobile/eventmenu-go/app/build/outputs/apk/debug/app-debug.apk, if-no-files-found: error, retention-days: 7}
+        with:
+          name: EventMenu-GO-${{ github.run_number }}-debug-apk
+          path: mobile/eventmenu-go/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
