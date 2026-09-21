@@ -9,6 +9,7 @@ fun envValue(primary: String, fallback: String? = null): String =
 fun quoted(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 val releaseRequested = gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
+val allowUnsignedRelease = envValue("EVENTMENU_ALLOW_UNSIGNED_RELEASE").equals("true", ignoreCase = true)
 val apiBase = envValue("EVENTMENU_DELIVERY_API_BASE_URL", "EVENTMENU_API_BASE_URL")
     .ifBlank { "https://go.gestao2.store/1/" }
     .trimEnd('/') + "/"
@@ -45,7 +46,7 @@ if (releaseSigningCount in 1 until releaseSigning.size) {
     val missing = releaseSigning.filterValues { it.isBlank() }.keys.joinToString(", ")
     throw GradleException("Assinatura Release incompleta. Faltando: $missing")
 }
-if (releaseRequested && !releaseSigningConfigured) {
+if (releaseRequested && !releaseSigningConfigured && !allowUnsignedRelease) {
     throw GradleException("Build Release do DELYVRE exige o keystore permanente configurado por ambiente/secrets.")
 }
 if (releaseSigningConfigured && !file(releaseKeystorePath).isFile) {
