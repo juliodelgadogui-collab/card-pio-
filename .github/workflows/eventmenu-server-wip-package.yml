@@ -67,6 +67,7 @@ jobs:
           php scripts/ci-payment-invariants-smoke.php
           php scripts/ci-marketplace-finance-smoke.php
           php scripts/ci-marketplace-native-contract-smoke.php
+          php scripts/ci-delivery-customer-order-smoke.php
           php scripts/ci-auth-mail-smoke.php
           php scripts/ci-url-smoke.php
           php scripts/ci-backup-smoke.php
