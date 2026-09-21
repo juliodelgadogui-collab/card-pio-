@@ -44,7 +44,7 @@ try{
     if($action==='overview')goe_out(['ok'=>true,'events'=>$service->overview()]);
     if($action==='recent'){$eventId=(int)($_GET['event_id']??0);goe_out(['ok'=>true]+$service->recentEntries($eventId));}
     if($action==='ticket-sale-catalog'){
-        Auth::requirePermission('tickets.manage');$eventId=(int)($_GET['event_id']??0);$tenantId=Auth::tenantId();if(!$tenantId||$eventId<1)throw new RuntimeException('Selecione um evento válido.');$pdo=Database::pdo();
+        Auth::requirePermission('tickets.manage');$eventId=(int)($_GET['event_id']??0);$tenantId=Auth::tenantId();if(!$tenantId||$eventId<1)throw new RuntimeException('Selecione um evento válido.');$pdo=Database::connection();
         if(!goe_table_exists($pdo,'events'))throw new RuntimeException('Estrutura de eventos ausente no servidor.');
         foreach(['id','name','status','starts_at','tenant_id'] as$c)if(!goe_column_exists($pdo,'events',$c))throw new RuntimeException('Bilheteria precisa de atualização no servidor: campo events.'.$c.' ausente.');
         $e=$pdo->prepare('SELECT id,name,status,starts_at FROM events WHERE id=? AND tenant_id=?');$e->execute([$eventId,$tenantId]);$event=$e->fetch(PDO::FETCH_ASSOC);if(!$event||!in_array((string)$event['status'],['published','draft'],true))throw new RuntimeException('Evento indisponível para venda.');
