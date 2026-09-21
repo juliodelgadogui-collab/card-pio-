@@ -9,6 +9,8 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -21,6 +23,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.min
 
 class ConnectWorkerService : Service() {
     companion object {
@@ -29,6 +32,7 @@ class ConnectWorkerService : Service() {
         const val ACTION_QR = "br.com.eventmenu.connect.QR"
         const val ACTION_LOGOUT_WHATSAPP = "br.com.eventmenu.connect.LOGOUT_WHATSAPP"
         const val EXTRA_PHONE = "phone"
+        const val EXTRA_COUNTRY = "country"
         private const val CHANNEL_ID = "eventmenu_connect"
         private const val NOTIFICATION_ID = 1010
     }
@@ -39,6 +43,7 @@ class ConnectWorkerService : Service() {
     private lateinit var api: EventMenuApi
     private lateinit var engine: EmbeddedWhatsAppEngine
     private var lastHeartbeat = 0L
+    private var consecutiveFailures = 0
 
     override fun onCreate() {
         super.onCreate()
@@ -60,7 +65,8 @@ class ConnectWorkerService : Service() {
         when (intent?.action) {
             ACTION_PAIR -> {
                 val phone = intent.getStringExtra(EXTRA_PHONE).orEmpty()
-                scope.launch { pair(phone) }
+                val country = intent.getStringExtra(EXTRA_COUNTRY).orEmpty().ifBlank { store.pairingCountryRegion() }
+                scope.launch { pair(phone, country) }
             }
             ACTION_QR -> scope.launch { startQr() }
             ACTION_LOGOUT_WHATSAPP -> scope.launch { logoutWhatsApp() }
@@ -81,13 +87,23 @@ class ConnectWorkerService : Service() {
                 stopSelf()
                 return
             }
+
+            if (!networkAvailable()) {
+                promote("EventMenu Connect • aguardando internet")
+                if (store.runtimeStatus() != "connected") {
+                    store.setRuntime(store.runtimeStatus(), error = "Sem internet. O Connect reconecta automaticamente quando a rede voltar.")
+                }
+                delay(8_000)
+                continue
+            }
+
             try {
                 engine.ensureStarted()
                 val local = engine.state()
                 syncLocalState(local)
 
                 val now = System.currentTimeMillis()
-                if (now - lastHeartbeat > 20_000) {
+                if (now - lastHeartbeat > 30_000) {
                     val heartbeat = api.heartbeat(local.status, local.phone, local.error)
                     store.setRuntime(
                         status = local.status,
@@ -100,10 +116,11 @@ class ConnectWorkerService : Service() {
                     lastHeartbeat = now
                 }
 
+                consecutiveFailures = 0
                 if (local.status.equals("connected", ignoreCase = true)) {
-                    processQueue()
+                    val processed = processQueue()
                     promote(if (local.phone.isBlank()) "WhatsApp conectado • EventMenu ativo" else "WhatsApp ${formatPhone(local.phone)} • EventMenu ativo")
-                    delay(2_500)
+                    delay(if (processed > 0) 1_500 else 8_000)
                 } else {
                     promote(
                         when (local.status.lowercase()) {
@@ -115,20 +132,24 @@ class ConnectWorkerService : Service() {
                             else -> "EventMenu Connect ativo • WhatsApp desconectado"
                         }
                     )
-                    delay(3_500)
+                    delay(if (local.status.equals("pairing", true) || local.status.equals("qr", true)) 1_500 else 5_000)
                 }
             } catch (e: Exception) {
-                store.setRuntime("error", error = e.message ?: "Falha no mecanismo interno do WhatsApp")
+                consecutiveFailures = min(consecutiveFailures + 1, 6)
+                val message = e.message ?: "Falha no mecanismo interno do WhatsApp"
+                store.setRuntime("error", error = message)
                 promote("EventMenu Connect tentando recuperar a conexão")
-                runCatching { api.heartbeat("error", error = e.message.orEmpty()) }
-                delay(7_000)
+                runCatching { api.heartbeat("error", error = message) }
+                val backoff = min(60_000L, 4_000L * (1L shl (consecutiveFailures - 1)))
+                delay(backoff)
             }
         }
     }
 
-    private fun processQueue() {
+    private fun processQueue(): Int {
         val messages = api.claim(3)
-        if (messages.length() == 0) return
+        if (messages.length() == 0) return 0
+        var processed = 0
         for (index in 0 until messages.length()) {
             val message = messages.getJSONObject(index)
             val id = message.optInt("id")
@@ -138,34 +159,42 @@ class ConnectWorkerService : Service() {
             try {
                 val sent = engine.send(recipient, text)
                 api.ack(id, claimToken, sent.messageId)
+                processed++
                 store.setRuntime("connected", pending = (store.runtimePending() - 1).coerceAtLeast(0), error = "")
             } catch (e: Exception) {
                 runCatching { api.fail(id, claimToken, e.message ?: "Falha no envio local") }
                 store.setRuntime("connected", error = "Uma mensagem não pôde ser enviada agora. O sistema tentará novamente.")
             }
         }
+        return processed
     }
 
-    private fun pair(phone: String) {
+    private fun pair(phone: String, countryCode: String) {
         try {
-            if (phone.filter(Char::isDigit).length < 10) throw IllegalArgumentException("Informe o número do WhatsApp com DDD.")
+            val digits = phone.filter(Char::isDigit)
+            if (digits.length !in 8..15) throw IllegalArgumentException("Informe um número de WhatsApp válido.")
+            val region = countryCode.trim().uppercase()
+            if (!Regex("^[A-Z]{2}$").matches(region)) throw IllegalArgumentException("País inválido.")
+            store.savePairingCountry(region)
+            store.clearRuntimeError()
             promote("Gerando código de conexão")
-            val state = engine.pair(phone)
+            val state = engine.pair(digits, region)
             syncLocalState(state)
             runCatching { api.heartbeat("qr", state.phone, state.error) }
         } catch (e: Exception) {
-            store.setRuntime("error", error = e.message ?: "Não foi possível gerar o código.")
+            store.setRuntime("error", pairingCode = "", qr = "", error = e.message ?: "Não foi possível gerar o código.")
         }
     }
 
     private fun startQr() {
         try {
+            store.clearRuntimeError()
             promote("Gerando QR Code")
             val state = engine.startQr()
             syncLocalState(state)
             runCatching { api.heartbeat("qr", state.phone, state.error) }
         } catch (e: Exception) {
-            store.setRuntime("error", error = e.message ?: "Não foi possível gerar o QR Code.")
+            store.setRuntime("error", qr = "", error = e.message ?: "Não foi possível gerar o QR Code.")
         }
     }
 
@@ -188,6 +217,13 @@ class ConnectWorkerService : Service() {
             pairingCode = state.pairingCode,
             qr = state.qr,
         )
+    }
+
+    private fun networkAvailable(): Boolean {
+        val manager = getSystemService(ConnectivityManager::class.java) ?: return true
+        val network = manager.activeNetwork ?: return false
+        val caps = manager.getNetworkCapabilities(network) ?: return false
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 
     private fun createNotificationChannel() {
@@ -239,9 +275,15 @@ class ConnectWorkerService : Service() {
     }
 }
 
-fun startConnectService(context: Context, action: String = ConnectWorkerService.ACTION_START, phone: String = "") {
+fun startConnectService(
+    context: Context,
+    action: String = ConnectWorkerService.ACTION_START,
+    phone: String = "",
+    countryCode: String = "",
+) {
     val intent = Intent(context, ConnectWorkerService::class.java).setAction(action)
     if (phone.isNotBlank()) intent.putExtra(ConnectWorkerService.EXTRA_PHONE, phone)
+    if (countryCode.isNotBlank()) intent.putExtra(ConnectWorkerService.EXTRA_COUNTRY, countryCode)
     ContextCompat.startForegroundService(context, intent)
 }
 
