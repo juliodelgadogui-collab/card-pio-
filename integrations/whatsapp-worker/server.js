@@ -70,6 +70,10 @@ function stateFor(key) {
       status: 'disconnected',
       qr: null,
       qrSeq: 0,
+      pairingCode: null,
+      pairingPhone: '',
+      pairingMode: false,
+      registered: false,
       phone: '',
       error: '',
       socket: null,
@@ -88,6 +92,8 @@ function publicState(state) {
     ok: true,
     status: state.status,
     qr: state.qr,
+    pairing_code: state.pairingCode,
+    pairing_phone: state.pairingPhone,
     phone: state.phone,
     error: state.error || null,
     updated_at: state.updatedAt,
@@ -109,6 +115,8 @@ function scheduleReconnect(state) {
   state.reconnectAttempt = attempt;
   const delay = Math.min(60000, 2000 * (2 ** (attempt - 1)));
   state.status = 'reconnecting';
+  state.pairingCode = null;
+  state.pairingMode = false;
   touch(state);
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
@@ -133,17 +141,29 @@ function phoneFromSocket(socket) {
   return /^\d{10,15}$/.test(phone) ? phone : '';
 }
 
+function normalizePairingPhone(value) {
+  let digits = String(value || '').replace(/\D+/g, '').replace(/^00/, '');
+  digits = digits.replace(/^0+/, '');
+  if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+  if (!/^\d{12,15}$/.test(digits)) throw new Error('Informe o número do WhatsApp com DDD. Ex.: (22) 99999-9999.');
+  return digits;
+}
+
 async function setQr(state, rawQr) {
+  if (state.pairingMode) return;
   const seq = ++state.qrSeq;
   try {
     const dataUrl = await QRCode.toDataURL(rawQr, {
       type: 'image/png',
-      width: 320,
-      margin: 1,
-      errorCorrectionLevel: 'M',
+      width: 360,
+      margin: 3,
+      errorCorrectionLevel: 'H',
+      color: { dark: '#000000', light: '#FFFFFF' },
     });
-    if (seq !== state.qrSeq || state.manualStop) return;
+    if (seq !== state.qrSeq || state.manualStop || state.pairingMode) return;
     state.qr = dataUrl;
+    state.pairingCode = null;
+    state.pairingPhone = '';
     state.status = 'qr';
     state.error = '';
     touch(state);
@@ -160,15 +180,27 @@ async function removeSessionFiles(key) {
   await fs.promises.rm(sessionDir(key), { recursive: true, force: true });
 }
 
-async function startSession(key) {
+async function startSession(key, mode = 'qr') {
   if (!SESSION_RE.test(key)) throw new Error('Sessão inválida.');
   const state = stateFor(key);
   state.manualStop = false;
   cancelReconnect(state);
 
-  if (state.socket && ['connected', 'starting', 'qr', 'reconnecting'].includes(state.status)) return state;
+  if (state.socket && ['connected', 'starting', 'qr', 'reconnecting'].includes(state.status)) {
+    if (mode === 'qr' && state.status !== 'connected') {
+      state.pairingMode = false;
+      state.pairingCode = null;
+      state.pairingPhone = '';
+    }
+    return state;
+  }
   if (state.starting) return state.starting;
 
+  state.pairingMode = mode === 'pairing';
+  if (!state.pairingMode) {
+    state.pairingCode = null;
+    state.pairingPhone = '';
+  }
   state.status = state.reconnectAttempt > 0 ? 'reconnecting' : 'starting';
   state.error = '';
   state.qr = null;
@@ -180,6 +212,7 @@ async function startSession(key) {
     try { await fs.promises.chmod(dir, 0o700); } catch (_) {}
 
     const { state: authState, saveCreds } = await useMultiFileAuthState(dir);
+    state.registered = Boolean(authState.creds.registered);
     let version;
     try {
       ({ version } = await fetchLatestBaileysVersion());
@@ -221,6 +254,10 @@ async function startSession(key) {
         state.status = 'connected';
         state.qr = null;
         state.qrSeq += 1;
+        state.pairingCode = null;
+        state.pairingPhone = '';
+        state.pairingMode = false;
+        state.registered = true;
         state.error = '';
         state.reconnectAttempt = 0;
         state.phone = phoneFromSocket(socket);
@@ -231,6 +268,9 @@ async function startSession(key) {
         if (state.socket === socket) state.socket = null;
         state.qr = null;
         state.qrSeq += 1;
+        state.pairingCode = null;
+        state.pairingPhone = '';
+        state.pairingMode = false;
         const code = disconnectCode(lastDisconnect);
         const loggedOut = code === DisconnectReason.loggedOut;
 
@@ -244,7 +284,8 @@ async function startSession(key) {
         if (loggedOut) {
           state.status = 'disconnected';
           state.phone = '';
-          state.error = 'Sessão encerrada pelo WhatsApp. Gere um novo QR Code.';
+          state.registered = false;
+          state.error = 'Sessão encerrada pelo WhatsApp. Gere um novo QR Code ou use a conexão por código.';
           state.reconnectAttempt = 0;
           touch(state);
           removeSessionFiles(key).catch(() => {});
@@ -261,7 +302,7 @@ async function startSession(key) {
   })()
     .catch((error) => {
       state.socket = null;
-      state.status = state.qr ? 'qr' : 'error';
+      state.status = state.qr || state.pairingCode ? 'qr' : 'error';
       state.error = String(error?.message || error || 'Falha ao iniciar sessão.').slice(0, 400);
       touch(state);
       throw error;
@@ -273,6 +314,38 @@ async function startSession(key) {
 
   state.starting = promise;
   return promise;
+}
+
+async function requestPairingCode(key, body) {
+  if (!SESSION_RE.test(key)) throw new Error('Sessão inválida.');
+  const phone = normalizePairingPhone(body.phone);
+  const state = stateFor(key);
+  state.pairingMode = true;
+  state.pairingCode = null;
+  state.pairingPhone = phone;
+  state.qr = null;
+  state.qrSeq += 1;
+  state.error = '';
+  touch(state);
+
+  await startSession(key, 'pairing');
+  if (state.status === 'connected' || state.registered) {
+    state.pairingMode = false;
+    state.pairingPhone = '';
+    throw new Error('Este WhatsApp já possui uma sessão salva. Desconecte antes de gerar um novo código.');
+  }
+  if (!state.socket || typeof state.socket.requestPairingCode !== 'function') {
+    throw new Error('Esta versão do mecanismo local não suporta conexão por código.');
+  }
+
+  const code = String(await state.socket.requestPairingCode(phone)).trim().toUpperCase();
+  if (!code) throw new Error('O WhatsApp não retornou um código de conexão. Tente novamente.');
+  state.pairingCode = code;
+  state.pairingPhone = phone;
+  state.status = 'qr';
+  state.error = '';
+  touch(state);
+  return state;
 }
 
 async function logoutSession(key) {
@@ -294,6 +367,10 @@ async function logoutSession(key) {
   } finally {
     await removeSessionFiles(key).catch(() => {});
     state.qr = null;
+    state.pairingCode = null;
+    state.pairingPhone = '';
+    state.pairingMode = false;
+    state.registered = false;
     state.phone = '';
     state.error = '';
     state.status = 'disconnected';
@@ -363,10 +440,11 @@ const server = http.createServer(async (req, res) => {
         engine: 'baileys',
         sessions: sessions.size,
         saved_sessions: saved.length,
+        pairing_code: true,
       });
     }
 
-    const match = pathname.match(/^\/v1\/sessions\/([a-f0-9]{64})(?:\/(start|logout|send))?$/);
+    const match = pathname.match(/^\/v1\/sessions\/([a-f0-9]{64})(?:\/(start|pairing-code|logout|send))?$/);
     if (!match) return json(res, 404, { ok: false, error: 'Rota não encontrada.' });
 
     const key = match[1];
@@ -375,9 +453,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && !action) return json(res, 200, publicState(stateFor(key)));
     if (req.method === 'POST' && action === 'start') {
       const state = stateFor(key);
-      startSession(key).catch(() => {});
+      state.pairingMode = false;
+      state.pairingCode = null;
+      state.pairingPhone = '';
+      startSession(key, 'qr').catch(() => {});
       return json(res, 202, publicState(state));
     }
+    if (req.method === 'POST' && action === 'pairing-code') return json(res, 200, publicState(await requestPairingCode(key, await readBody(req))));
     if (req.method === 'POST' && action === 'logout') return json(res, 200, publicState(await logoutSession(key)));
     if (req.method === 'POST' && action === 'send') return json(res, 200, await sendMessage(key, await readBody(req)));
 
