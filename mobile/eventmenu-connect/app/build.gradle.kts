@@ -85,6 +85,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     implementation("com.google.zxing:core:3.5.3")
+    implementation("com.googlecode.libphonenumber:libphonenumber:9.0.39")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
