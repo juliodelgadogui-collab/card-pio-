@@ -1,3 +1,5 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
@@ -24,16 +26,19 @@ val ciRunNumber = envValue("GITHUB_RUN_NUMBER").toIntOrNull()
 val buildNumber = (ciRunNumber ?: 2).coerceAtLeast(2)
 
 val delyvreIconBase64 = layout.projectDirectory.file("src/main/icon/delyvre_launcher.b64")
-val generatedDelyvreIconsDir = layout.buildDirectory.dir("generated/res/delyvreLauncher")
+val delyvreLauncherMipmapDir = layout.projectDirectory.dir("src/main/res/mipmap-xxxhdpi")
 val generateDelyvreLauncherIcons by tasks.registering {
     group = "build setup"
     description = "Gera os icones oficiais do DELYVRE a partir da arte aprovada."
     inputs.file(delyvreIconBase64)
-    outputs.dir(generatedDelyvreIconsDir)
+    outputs.files(
+        delyvreLauncherMipmapDir.file("ic_delivery.png"),
+        delyvreLauncherMipmapDir.file("ic_delivery_round.png")
+    )
     doLast {
         val encoded = delyvreIconBase64.asFile.readText().replace("\n", "").replace("\r", "").trim()
-        val iconBytes = java.util.Base64.getDecoder().decode(encoded)
-        val mipmap = generatedDelyvreIconsDir.get().dir("mipmap-xxxhdpi").asFile
+        val iconBytes = Base64.getDecoder().decode(encoded)
+        val mipmap = delyvreLauncherMipmapDir.asFile
         mipmap.mkdirs()
         mipmap.resolve("ic_delivery.png").writeBytes(iconBytes)
         mipmap.resolve("ic_delivery_round.png").writeBytes(iconBytes)
@@ -56,7 +61,6 @@ android {
         buildConfigField("String", "FIREBASE_API_KEY", configString(firebaseApiKey))
         buildConfigField("String", "FIREBASE_SENDER_ID", configString(firebaseSenderId))
     }
-    sourceSets.getByName("main").res.srcDir(generatedDelyvreIconsDir)
     buildFeatures { compose = true; buildConfig = true }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildTypes {
