@@ -95,7 +95,7 @@
                                 <Border x:Name="PairingCodeBox" Visibility="Collapsed" Background="White" BorderBrush="#BBF7D0" BorderThickness="1" CornerRadius="12" Padding="16" Margin="0,14,0,0">
                                     <StackPanel>
                                         <TextBlock Text="DIGITE ESTE CÓDIGO NO WHATSAPP" Foreground="#166534" FontSize="10" FontWeight="Bold" HorizontalAlignment="Center" />
-                                        <TextBlock x:Name="PairingCodeText" Text="—" FontFamily="Consolas" FontSize="31" FontWeight="Bold" LetterSpacing="2" Foreground="#0F172A" HorizontalAlignment="Center" Margin="0,8,0,10" />
+                                        <TextBlock x:Name="PairingCodeText" Text="—" FontFamily="Consolas" FontSize="31" FontWeight="Bold" Foreground="#0F172A" HorizontalAlignment="Center" Margin="0,8,0,10" />
                                         <Button x:Name="CopyCodeButton" Content="Copiar código" Click="CopyCodeButton_Click" Background="#0F172A" HorizontalAlignment="Center" Margin="0" />
                                     </StackPanel>
                                 </Border>
