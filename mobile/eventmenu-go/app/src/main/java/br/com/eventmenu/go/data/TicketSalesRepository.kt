@@ -32,6 +32,10 @@ class TicketSalesRepository(baseUrl:String,deviceId:String,private val sessionSt
         return parseWorkShift(root.getJSONObject("shift"))?:throw ApiException("Não foi possível iniciar a operação de Eventos.")
     }
     suspend fun events():List<TicketSaleEvent>{
+        // Abrir a Bilheteria é uma intenção explícita de operar Eventos. Mantemos a regra
+        // centralizada no servidor: ele valida permissão e impede encerrar turnos que tenham
+        // pendências. Assim não existe uma configuração escondida no painel para ativar o módulo.
+        activateEventsShift()
         val a=api.getEvents("overview",requireToken()).optJSONArray("events")?:JSONArray()
         return buildList{for(i in 0 until a.length()){val e=a.getJSONObject(i);if(e.optString("status") in setOf("published","draft"))add(TicketSaleEvent(e.getInt("id"),e.optString("name"),e.optString("starts_at")))}}
     }
