@@ -1,7 +1,6 @@
 package br.com.eventmenu.connect
 
 import android.Manifest
-import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -39,6 +38,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -189,6 +190,11 @@ private fun DashboardScreen(onLogout: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { SessionStore(context) }
     val scope = rememberCoroutineScope()
+    val countries = remember { CountryPhone.countries }
+    var selectedCountry by remember {
+        mutableStateOf(countries.firstOrNull { it.regionCode == store.pairingCountryRegion() } ?: CountryPhone.defaultCountry())
+    }
+    var countryMenuOpen by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf(store.runtimeStatus()) }
     var pending by remember { mutableStateOf(store.runtimePending()) }
     var lastError by remember { mutableStateOf(store.runtimeError()) }
@@ -197,6 +203,7 @@ private fun DashboardScreen(onLogout: () -> Unit) {
     var pairingCode by remember { mutableStateOf(store.runtimePairingCode()) }
     var qr by remember { mutableStateOf(store.runtimeQr()) }
     var phoneInput by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -209,20 +216,21 @@ private fun DashboardScreen(onLogout: () -> Unit) {
             phone = store.runtimePhone()
             pairingCode = store.runtimePairingCode()
             qr = store.runtimeQr()
-            delay(750)
+            delay(700)
         }
     }
 
     val connected = status.equals("connected", true)
     val statusLabel = when (status.lowercase()) {
         "connected" -> "Conectado"
-        "pairing" -> "Aguardando código"
+        "pairing" -> "Aguardando o código ser confirmado"
         "qr" -> "Aguardando QR Code"
         "starting" -> "Iniciando"
-        "reconnecting" -> "Reconectando"
+        "reconnecting" -> if (pairingCode.isNotBlank()) "Código recebido • concluindo conexão" else "Reconectando"
         "error" -> "Erro"
         else -> "Desconectado"
     }
+    val phonePreview = remember(selectedCountry, phoneInput) { CountryPhone.preview(selectedCountry, phoneInput) }
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
@@ -255,25 +263,73 @@ private fun DashboardScreen(onLogout: () -> Unit) {
             Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Conectar WhatsApp", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("Use o código de conexão. É a melhor opção quando o WhatsApp está neste mesmo celular.", color = EventMuted)
+                    Text("Escolha o país e informe somente o número. O Connect monta e valida o número internacional antes de pedir o código.", color = EventMuted)
+
+                    Box(modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(
+                            onClick = { countryMenuOpen = true },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text("${flagEmoji(selectedCountry.regionCode)} ${selectedCountry.label}")
+                        }
+                        DropdownMenu(
+                            expanded = countryMenuOpen,
+                            onDismissRequest = { countryMenuOpen = false },
+                        ) {
+                            countries.forEach { country ->
+                                DropdownMenuItem(
+                                    text = { Text("${flagEmoji(country.regionCode)} ${country.label}") },
+                                    onClick = {
+                                        selectedCountry = country
+                                        store.savePairingCountry(country.regionCode)
+                                        localError = ""
+                                        countryMenuOpen = false
+                                    },
+                                )
+                            }
+                        }
+                    }
+
                     OutlinedTextField(
                         value = phoneInput,
-                        onValueChange = { phoneInput = it.filter { ch -> ch.isDigit() || ch == '+' || ch == '(' || ch == ')' || ch == ' ' || ch == '-' } },
+                        onValueChange = {
+                            phoneInput = it.filter { ch -> ch.isDigit() || ch == '+' || ch == '(' || ch == ')' || ch == ' ' || ch == '-' }
+                            localError = ""
+                        },
                         modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Número do WhatsApp com DDD") },
-                        placeholder = { Text("(22) 99999-9999") },
+                        label = { Text("Número do WhatsApp") },
+                        placeholder = { Text(if (selectedCountry.regionCode == "BR") "(22) 99999-9999" else "Número sem o DDI") },
                         singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         leadingIcon = { Icon(Icons.Default.PhoneAndroid, contentDescription = null) },
                     )
+                    Text("Será conectado: $phonePreview", style = MaterialTheme.typography.bodySmall, color = Color(0xFF5F6368))
+
+                    if (localError.isNotBlank()) Text(localError, color = EventRed, style = MaterialTheme.typography.bodySmall)
+
                     Button(
                         onClick = {
-                            if (phoneInput.filter(Char::isDigit).length < 10) return@Button
+                            val normalized = try {
+                                CountryPhone.normalize(selectedCountry, phoneInput)
+                            } catch (e: Exception) {
+                                localError = e.message ?: "Número inválido."
+                                return@Button
+                            }
+                            store.savePairingCountry(selectedCountry.regionCode)
+                            store.clearRuntimeError()
                             busy = true
-                            startConnectService(context, ConnectWorkerService.ACTION_PAIR, phoneInput)
-                            scope.launch { delay(2500); busy = false }
+                            localError = ""
+                            startConnectService(context, ConnectWorkerService.ACTION_PAIR, normalized, selectedCountry.regionCode)
+                            scope.launch {
+                                val deadline = System.currentTimeMillis() + 28_000
+                                while (System.currentTimeMillis() < deadline) {
+                                    delay(350)
+                                    if (store.runtimePairingCode().isNotBlank() || store.runtimeError().isNotBlank() || store.runtimeStatus().equals("connected", true)) break
+                                }
+                                busy = false
+                            }
                         },
-                        enabled = !busy && phoneInput.filter(Char::isDigit).length >= 10,
+                        enabled = !busy && phoneInput.any(Char::isDigit),
                         modifier = Modifier.fillMaxWidth().height(52.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = EventRed),
                     ) {
@@ -281,7 +337,7 @@ private fun DashboardScreen(onLogout: () -> Unit) {
                         else {
                             Icon(Icons.Default.Link, contentDescription = null)
                             Spacer(Modifier.padding(4.dp))
-                            Text("Gerar código de conexão", fontWeight = FontWeight.Bold)
+                            Text(if (pairingCode.isBlank()) "Gerar código de conexão" else "Gerar novo código", fontWeight = FontWeight.Bold)
                         }
                     }
                     OutlinedButton(
@@ -302,11 +358,17 @@ private fun DashboardScreen(onLogout: () -> Unit) {
                     Text("Código de conexão", fontWeight = FontWeight.Bold, color = Color(0xFF9A3412))
                     Text(formatPairingCode(pairingCode), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Black, color = EventDark)
                     Text("No WhatsApp, abra Aparelhos conectados → Conectar aparelho → Conectar com número de telefone e digite este código.", textAlign = TextAlign.Center, color = Color(0xFF7C4A22))
+                    if (status.equals("reconnecting", true)) {
+                        Text("Código recebido. O Connect está concluindo o vínculo em segundo plano.", textAlign = TextAlign.Center, color = Color(0xFF166534), fontWeight = FontWeight.Bold)
+                    }
                     OutlinedButton(onClick = { copyText(context, pairingCode) }) {
                         Icon(Icons.Default.ContentCopy, contentDescription = null)
                         Spacer(Modifier.padding(4.dp))
                         Text("Copiar código")
                     }
+                    OutlinedButton(
+                        onClick = { startConnectService(context, ConnectWorkerService.ACTION_LOGOUT_WHATSAPP) },
+                    ) { Text("Cancelar tentativa") }
                 }
             }
         }
@@ -430,4 +492,10 @@ private fun formatPhone(value: String): String {
         if (number.length == 9) return "+55 ($ddd) ${number.take(5)}-${number.drop(5)}"
     }
     return if (digits.isBlank()) "" else "+$digits"
+}
+
+private fun flagEmoji(regionCode: String): String {
+    val code = regionCode.uppercase()
+    if (code.length != 2) return "🌐"
+    return code.map { char -> Character.toChars(0x1F1E6 + (char.code - 'A'.code)).concatToString() }.joinToString("")
 }
