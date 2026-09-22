@@ -8,6 +8,8 @@ const worker = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventme
 const store = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventmenu/connect/SessionStore.kt'), 'utf8');
 const manifest = fs.readFileSync(path.join(root, 'app/src/main/AndroidManifest.xml'), 'utf8');
 const backgroundGuard = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventmenu/connect/EventMenuConnectApplication.kt'), 'utf8');
+const resilience = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventmenu/connect/ConnectionResilienceSupervisor.kt'), 'utf8');
+const packageReceiver = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventmenu/connect/PackageUpdatedReceiver.kt'), 'utf8');
 const network = fs.readFileSync(path.join(root, 'app/src/main/res/xml/network_security_config.xml'), 'utf8');
 
 function assert(condition, message) {
@@ -28,7 +30,6 @@ assert(pairingBlock.length > 0 && !pairingBlock.includes('clearInboundQueue()'),
 assert(main.includes('async function logoutSession()') && main.slice(main.indexOf('async function logoutSession()')).includes('clearInboundQueue()'), 'Logout completo precisa limpar inbound para impedir mistura entre contas.');
 
 // Pairing-code hardening: pair-success normally closes the first socket with 515.
-// The fresh credentials must finish persisting before the immediate reconnect.
 assert(main.includes('let credsSaveChain = Promise.resolve()'), 'Pareamento não serializa a persistência das credenciais.');
 assert(main.includes('await credsSaveChain'), '515 pode reiniciar antes de as credenciais novas serem persistidas.');
 assert(main.includes('scheduleReconnect(0, false)'), '515 não está configurado para reconexão imediata sem backoff.');
@@ -52,9 +53,22 @@ assert(manifest.includes('android:networkSecurityConfig="@xml/network_security_c
 assert(manifest.includes('android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'), 'Connect não pode solicitar liberação da otimização de bateria.');
 assert(manifest.includes('android:stopWithTask="false"'), 'Serviço ainda pode ser encerrado junto com a tela/tarefa.');
 assert(manifest.includes('android:name=".EventMenuConnectApplication"'), 'Guardião de pareamento em segundo plano não está ativado.');
+assert(manifest.includes('android:name=".PackageUpdatedReceiver"') && manifest.includes('android.intent.action.MY_PACKAGE_REPLACED'), 'Connect não retoma automaticamente após atualização do APK.');
 assert(backgroundGuard.includes('PowerManager.PARTIAL_WAKE_LOCK'), 'Pareamento não mantém CPU/socket acordados ao trocar de aplicativo.');
 assert(backgroundGuard.includes('lock.acquire(5 * 60 * 1000L)'), 'Wake lock de pareamento precisa ter timeout curto e explícito.');
 assert(backgroundGuard.includes('ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'), 'App não oferece liberação de otimização de bateria.');
+assert(backgroundGuard.includes('ConnectionResilienceSupervisor(this).also { it.start() }'), 'Supervisor de resiliência não inicia com o processo do Connect.');
+
+// Functional resilience stays internal; no technical dashboard is required.
+assert(resilience.includes('registerDefaultNetworkCallback'), 'Troca/retorno de rede não é observada pelo Connect.');
+assert(resilience.includes('NET_CAPABILITY_VALIDATED'), 'Supervisor não confirma internet validada antes de recuperar.');
+assert(resilience.includes('PowerManager.PARTIAL_WAKE_LOCK'), 'Transição de conexão não protege CPU/socket em segundo plano.');
+assert(resilience.includes('engine.startQr()'), 'Supervisor não consegue estimular retomada segura da sessão existente.');
+assert(resilience.includes('"reconnecting", "starting" -> stuckFor >= 90_000'), 'Watchdog não detecta reconexão travada.');
+assert(resilience.includes('"error" -> stuckFor >= 20_000'), 'Watchdog não recupera falhas transitórias persistentes.');
+assert(resilience.includes('status == "disconnected" || isTerminal(current)'), 'Autorreparo pode reabrir pareamento após logout explícito.');
+assert(packageReceiver.includes('Intent.ACTION_MY_PACKAGE_REPLACED') && packageReceiver.includes('startConnectService(context)'), 'Receiver de atualização não retoma o serviço.');
+
 assert(network.includes('cleartextTrafficPermitted="false"'), 'Configuração base ainda permite cleartext.');
 assert(network.includes('127.0.0.1'), 'Loopback interno do Node não foi preservado.');
 
