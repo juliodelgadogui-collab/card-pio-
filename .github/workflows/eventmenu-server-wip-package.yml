@@ -57,6 +57,7 @@ jobs:
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-whatsapp-commerce-smoke.php
+          php scripts/ci-whatsapp-commerce-order-smoke.php
           php scripts/ci-whatsapp-history-smoke.php
           php scripts/ci-sqlite-legacy-upgrade-smoke.php
           php scripts/ci-db-repair-page-smoke.php
@@ -89,6 +90,7 @@ jobs:
           test -f database/migrations/066_ticket_counter_sales.sql
           test -f database/migrations/067_ticket_type_commercial_fields.sql
           test -f database/migrations/071_whatsapp_commerce_inbound.sql
+          test -f database/migrations/072_whatsapp_commerce_draft_channel.sql
           test -f database/sqlite/migrations/062_marketplace_delivery_coupons.sql
           test -f database/sqlite/migrations/063_delivery_coupon_customer_payment_hardening.sql
           test -f database/sqlite/migrations/064_order_payment_preferences.sql
@@ -96,8 +98,11 @@ jobs:
           test -f database/sqlite/migrations/066_ticket_counter_sales.sql
           test -f database/sqlite/migrations/067_ticket_type_commercial_fields.sql
           test -f database/sqlite/migrations/071_whatsapp_commerce_inbound.sql
+          test -f database/sqlite/migrations/072_whatsapp_commerce_draft_channel.sql
           test -f src/Services/WhatsAppCommerceService.php
+          test -f src/Services/WhatsAppCommerceOrderService.php
           test -f scripts/ci-whatsapp-commerce-smoke.php
+          test -f scripts/ci-whatsapp-commerce-order-smoke.php
           test -f scripts/ci-whatsapp-history-smoke.php
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
@@ -112,6 +117,7 @@ jobs:
           test -f "$PACKAGE/src/Services/OrderPaymentPreferenceService.php"
           test -f "$PACKAGE/src/Services/WhatsAppIntegrationService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceOrderService.php"
           test -f "$PACKAGE/src/Services/TicketCounterSaleService.php"
           test -f "$PACKAGE/public/api-delivery-payment-methods.php"
           test -f "$PACKAGE/public/api-order-payment.php"
@@ -123,9 +129,11 @@ jobs:
           test -f "$PACKAGE/database/migrations/066_ticket_counter_sales.sql"
           test -f "$PACKAGE/database/migrations/067_ticket_type_commercial_fields.sql"
           test -f "$PACKAGE/database/migrations/071_whatsapp_commerce_inbound.sql"
+          test -f "$PACKAGE/database/migrations/072_whatsapp_commerce_draft_channel.sql"
           test -f "$PACKAGE/database/sqlite/migrations/066_ticket_counter_sales.sql"
           test -f "$PACKAGE/database/sqlite/migrations/067_ticket_type_commercial_fields.sql"
           test -f "$PACKAGE/database/sqlite/migrations/071_whatsapp_commerce_inbound.sql"
+          test -f "$PACKAGE/database/sqlite/migrations/072_whatsapp_commerce_draft_channel.sql"
       - name: Generate checksums
         run: |
           cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
