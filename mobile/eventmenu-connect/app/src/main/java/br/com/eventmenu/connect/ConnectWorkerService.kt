@@ -156,8 +156,18 @@ class ConnectWorkerService : Service() {
             val claimToken = message.optString("claim_token")
             val recipient = message.optString("recipient")
             val text = message.optString("message_text")
+            val mediaType = message.optString("media_type").trim().lowercase()
+            val mediaUrl = message.optString("media_url").trim()
+            val mediaFilename = message.optString("media_filename").trim()
+            val mediaMime = message.optString("media_mime").trim()
             try {
-                val sent = engine.send(recipient, text)
+                val sent = when {
+                    mediaType.isBlank() && mediaUrl.isBlank() -> engine.send(recipient, text)
+                    mediaUrl.isBlank() -> throw IllegalArgumentException("A mídia da mensagem está sem endereço para download.")
+                    mediaType == "image" -> engine.sendMedia(recipient, text, "image", mediaUrl, mediaFilename, mediaMime)
+                    mediaType == "document" || mediaType == "pdf" -> engine.sendMedia(recipient, text, "document", mediaUrl, mediaFilename, mediaMime)
+                    else -> throw IllegalArgumentException("Tipo de mídia não suportado: $mediaType")
+                }
                 api.ack(id, claimToken, sent.messageId)
                 processed++
                 store.setRuntime("connected", pending = (store.runtimePending() - 1).coerceAtLeast(0), error = "")
