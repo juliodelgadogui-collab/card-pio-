@@ -8,6 +8,7 @@ use EventMenu\Core\Auth;
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\ExpeditionDeliveryService;
 use EventMenu\Services\ProductionDesktopService;
+use EventMenu\Services\ProductionPrintPolicyService;
 use EventMenu\Services\ProductionPrintRecoveryService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -29,9 +30,15 @@ try{
     if($action==='expedition'){prod_method('GET');$orders=$service->expedition();prod_out(['ok'=>true,'orders'=>(new ExpeditionDeliveryService())->enrich($orders)]);}
     if($action==='job-status'){prod_method('POST');$body=prod_body();prod_out(['ok'=>true,'job'=>$service->changeJobStatus((int)($body['job_id']??0),(string)($body['status']??''),(string)($body['reason']??''))]);}
     if($action==='order-expedite'){prod_method('POST');$body=prod_body();$service->expediteOrder((int)($body['order_id']??0));prod_out(['ok'=>true]);}
-    if($action==='print-claim'){prod_method('POST');$body=prod_body();$reported=prod_device($deviceId,$body);(new ProductionPrintRecoveryService())->recoverCurrentUnit();prod_out(['ok'=>true,'print'=>$service->claimPrint($reported)]);}
+    if($action==='print-claim'){
+        prod_method('POST');$body=prod_body();$reported=prod_device($deviceId,$body);
+        (new ProductionPrintRecoveryService())->recoverCurrentUnit();
+        (new ProductionPrintPolicyService())->syncCurrentUnit();
+        prod_out(['ok'=>true,'print'=>$service->claimPrint($reported)]);
+    }
     if($action==='print-complete'){prod_method('POST');$body=prod_body();$reported=prod_device($deviceId,$body);prod_out(['ok'=>true,'queue'=>$service->completePrint((int)($body['queue_id']??0),$reported,!empty($body['success']),(string)($body['error']??''))]);}
     if($action==='print-retry'){prod_method('POST');$body=prod_body();prod_out(['ok'=>true,'queue'=>$service->retryPrint((int)($body['queue_id']??0),(string)($body['reason']??''))]);}
+    if($action==='print-reprint'){prod_method('POST');$body=prod_body();$ids=(new ProductionPrintPolicyService())->reprintOrder((int)($body['order_id']??0),(string)($body['scope']??'complete'),(string)($body['reason']??''),isset($body['station_id'])?(int)$body['station_id']:null);prod_out(['ok'=>true,'queue_ids'=>$ids],201);}
     if($action==='station-printer'){prod_method('POST');Auth::requirePermission('production.manage');$body=prod_body();$reported=trim((string)($body['device_id']??''));if($reported!=='')$reported=prod_device($deviceId,$body);prod_out(['ok'=>true,'station'=>$service->bindStationPrinter((int)($body['station_id']??0),$reported,(string)($body['printer_target']??''),!empty($body['automatic']))]);}
 
     prod_out(['ok'=>false,'error'=>'Endpoint de produção não encontrado.'],404);
