@@ -72,6 +72,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     var editingAddress by mutableStateOf<Address?>(null);private set
     private var profileReturnScreen:Screen?=null
     private var trackingJob:Job?=null
+    private var orderRefreshJob:Job?=null
     private var paymentPollingJob:Job?=null
     private var marketplaceJob:Job?=null
     private var storeSearchJob:Job?=null
@@ -102,7 +103,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun registerWithCpf(name:String,cpf:String,email:String,phone:String,password:String,legalAccepted:Boolean=false)=action{if(!legalAccepted)error("Aceite os Termos de Uso e a Política de Privacidade para continuar.");val result=api.register(name.trim(),cpf.trim(),email.trim(),phone.trim(),password,legalAccepted);pendingEmail=result.email;screen=Screen.VerifyEmail;message=if(result.emailSent)"Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."}
     fun resendVerification()=action{api.resend(pendingEmail);message="Se o cadastro estiver pendente, um novo link foi enviado."}
     fun forgotPassword(email:String)=action{api.forgotPassword(email);message="Se a conta existir, você receberá um link para criar uma nova senha."}
-    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();cartPersistence.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();paymentWaiting=false;paymentSubmitting=false;paymentPhase=PaymentPhase.Idle;pixPayment=null;payerCpf="";profileReturnScreen=null;stores=api.stores();storeSearchQuery="";storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}
+    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();cartPersistence.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();orderRefreshJob?.cancel();paymentPollingJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();paymentWaiting=false;paymentSubmitting=false;paymentPhase=PaymentPhase.Idle;pixPayment=null;payerCpf="";profileReturnScreen=null;stores=api.stores();storeSearchQuery="";storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}
 
     fun loadHome(){loadStores();loadRecentOrdersForHome()}
     fun loadStores(query:String=""){
@@ -201,7 +202,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
                 val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.")
                 paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null
                 api.cash(id,changeForCents)
-                paymentPhase=PaymentPhase.Confirmed
+                paymentPhase=PaymentPhase.Idle
                 PaymentUiContext.clear();message="Pagamento em dinheiro registrado para a entrega.";openOrderSuspend(id)
             }finally{paymentSubmitting=false}
         }
@@ -223,7 +224,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun loadOrders(){if(!isAuthenticated){screen=Screen.Login;message="Entre para ver seus pedidos.";return};mainDestination=MainDestination.Orders;screen=Screen.Orders;action{orders=api.orders()}}
     fun refreshOrders()=action(showBusy=false){if(isAuthenticated)orders=api.orders()}
     fun openOrder(id:Int)=action{openOrderSuspend(id)}
-    private suspend fun openOrderSuspend(id:Int){selectedOrder=api.order(id);screen=Screen.OrderDetail;startTracking()}
+    private suspend fun openOrderSuspend(id:Int){selectedOrder=api.order(id);screen=Screen.OrderDetail;startTracking();startOrderRefresh(id)}
     fun repeatOrder(id:Int)=action{val r=api.reorder(id);val s=r.getJSONObject("store");catalog=api.catalog(s.getInt("tenant_id"),s.getInt("unit_id"));if(catalog?.store?.acceptingOrders==false)error("Este restaurante pausou novos pedidos no momento.");cart.clear();clearCoupon(false);val items=r.optJSONArray("items");if(items!=null)for(i in 0 until items.length()){val row=items.getJSONObject(i);val product=catalog?.products?.firstOrNull{it.id==row.optInt("product_id")}?:continue;cart+=CartItem(product,row.optDouble("quantity",1.0).toInt().coerceAtLeast(1))};persistCart();screen=Screen.Cart}
     fun submitReview(orderId:Int,rating:Int,comment:String)=action{api.review(orderId,rating,comment);message="Obrigado pela avaliação!"}
     fun openProfile(){if(!isAuthenticated){screen=Screen.Login;message="Entre para acessar seu perfil, endereços e benefícios.";return};profileReturnScreen=if(screen==Screen.Checkout)Screen.Checkout else null;mainDestination=MainDestination.Profile;screen=Screen.Profile;action{customer=api.me()}}
@@ -251,11 +252,26 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
     }
+    private fun startOrderRefresh(orderId:Int){
+        orderRefreshJob?.cancel()
+        orderRefreshJob=viewModelScope.launch{
+            var attempt=0
+            while(isActive&&screen==Screen.OrderDetail&&selectedOrder?.orderNumber==orderId){
+                delay(orderPollDelayMillis(attempt++))
+                val previousTrackingToken=selectedOrder?.trackingToken
+                val fresh=runCatching{api.order(orderId)}.getOrNull()?:continue
+                selectedOrder=fresh
+                orders=orders.map{if(it.orderNumber==orderId)fresh else it}
+                if(previousTrackingToken!=fresh.trackingToken&&!fresh.trackingToken.isNullOrBlank())startTracking()
+                if(isTerminalOrderStatus(fresh.status))return@launch
+            }
+        }
+    }
     private fun startTracking(){
         trackingJob?.cancel();tracking=null;val token=selectedOrder?.trackingToken?:return
         trackingJob=viewModelScope.launch{
             var attempt=0
-            while(isActive&&selectedOrder?.trackingToken==token){
+            while(isActive&&screen==Screen.OrderDetail&&selectedOrder?.trackingToken==token){
                 runCatching{api.tracking(token)}.onSuccess{tracking=it}
                 if(isTerminalOrderStatus(tracking?.status.orEmpty()))return@launch
                 delay(trackingPollDelayMillis(attempt++))
@@ -294,7 +310,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun classifyMarketplaceIssue(t:Throwable):MarketplaceLoadIssue=when(t){is UnknownHostException,is ConnectException,is NoRouteToHostException->MarketplaceLoadIssue.Offline;is SocketTimeoutException->MarketplaceLoadIssue.Temporary;is ApiException->MarketplaceLoadIssue.ServerUnavailable;else->MarketplaceLoadIssue.Temporary}
     private fun action(showBusy:Boolean=true,block:suspend()->Unit){viewModelScope.launch{if(showBusy)busy=true;try{block()}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();customer=null;payerCpf="";screen=Screen.Login};message=e.message}catch(t:Throwable){message=t.message?:"Não foi possível concluir agora."}finally{if(showBusy)busy=false}}}
-    override fun onCleared(){trackingJob?.cancel();paymentPollingJob?.cancel();marketplaceJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();payerCpf="";PaymentUiContext.clear();super.onCleared()}
+    override fun onCleared(){trackingJob?.cancel();orderRefreshJob?.cancel();paymentPollingJob?.cancel();marketplaceJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();payerCpf="";PaymentUiContext.clear();super.onCleared()}
 }
 
 fun money(cents:Int):String=java.text.NumberFormat.getCurrencyInstance(java.util.Locale("pt","BR")).format(cents/100.0)
