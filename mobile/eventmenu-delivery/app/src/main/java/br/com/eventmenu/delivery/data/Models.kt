@@ -45,6 +45,7 @@ data class Store(
     val deliveryRadiusKm: Double = 0.0,
     val pickupEnabled: Boolean = false,
     val scheduleNote: String = "",
+    val categories: List<String> = emptyList(),
 )
 
 data class Category(val id: Int, val name: String)
