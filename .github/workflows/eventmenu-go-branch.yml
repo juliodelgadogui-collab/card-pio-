@@ -31,6 +31,8 @@ jobs:
       run:
         working-directory: mobile/eventmenu-go
     env:
+      # FCM is optional for branch/debug validation. Production FCM is mandatory
+      # in the dedicated EventMenu Production Release workflow.
       EVENTMENU_FIREBASE_PROJECT_ID: ${{ secrets.EVENTMENU_FIREBASE_PROJECT_ID }}
       EVENTMENU_FIREBASE_APP_ID: ${{ secrets.EVENTMENU_FIREBASE_APP_ID }}
       EVENTMENU_FIREBASE_API_KEY: ${{ secrets.EVENTMENU_FIREBASE_API_KEY }}
@@ -40,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -103,98 +105,26 @@ jobs:
       - name: Build signed debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Verify debug APK signature
+      - name: Verify debug APK signature and metadata
         shell: bash
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
-
-      - name: Validate production release secrets
-        shell: bash
-        env:
-          RELEASE_KEYSTORE_B64: ${{ secrets.EVENTMENU_RELEASE_KEYSTORE_BASE64 }}
-          RELEASE_STORE_PASSWORD: ${{ secrets.EVENTMENU_RELEASE_STORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.EVENTMENU_RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.EVENTMENU_RELEASE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          missing=()
-          [ -n "${EVENTMENU_FIREBASE_PROJECT_ID:-}" ] || missing+=(EVENTMENU_FIREBASE_PROJECT_ID)
-          [ -n "${EVENTMENU_FIREBASE_APP_ID:-}" ] || missing+=(EVENTMENU_FIREBASE_APP_ID)
-          [ -n "${EVENTMENU_FIREBASE_API_KEY:-}" ] || missing+=(EVENTMENU_FIREBASE_API_KEY)
-          [ -n "${EVENTMENU_FIREBASE_SENDER_ID:-}" ] || missing+=(EVENTMENU_FIREBASE_SENDER_ID)
-          [ -n "${RELEASE_KEYSTORE_B64:-}" ] || missing+=(EVENTMENU_RELEASE_KEYSTORE_BASE64)
-          [ -n "${RELEASE_STORE_PASSWORD:-}" ] || missing+=(EVENTMENU_RELEASE_STORE_PASSWORD)
-          [ -n "${RELEASE_KEY_ALIAS:-}" ] || missing+=(EVENTMENU_RELEASE_KEY_ALIAS)
-          [ -n "${RELEASE_KEY_PASSWORD:-}" ] || missing+=(EVENTMENU_RELEASE_KEY_PASSWORD)
-          if [ "${#missing[@]}" -ne 0 ]; then
-            printf '::error::Missing GitHub Secrets for production release: %s\n' "${missing[*]}"
-            exit 1
-          fi
-
-      - name: Prepare production signing key
-        shell: bash
-        env:
-          RELEASE_KEYSTORE_B64: ${{ secrets.EVENTMENU_RELEASE_KEYSTORE_BASE64 }}
-          RELEASE_STORE_PASSWORD: ${{ secrets.EVENTMENU_RELEASE_STORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.EVENTMENU_RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.EVENTMENU_RELEASE_KEY_PASSWORD }}
-        run: |
-          set -euo pipefail
-          KEYSTORE="$RUNNER_TEMP/eventmenu-go-release.jks"
-          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
-          chmod 600 "$KEYSTORE"
-          test -s "$KEYSTORE"
-          keytool -list -keystore "$KEYSTORE" -storepass "$RELEASE_STORE_PASSWORD" -alias "$RELEASE_KEY_ALIAS" >/dev/null
-          echo "EVENTMENU_RELEASE_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
-          echo "EVENTMENU_RELEASE_STORE_PASSWORD=$RELEASE_STORE_PASSWORD" >> "$GITHUB_ENV"
-          echo "EVENTMENU_RELEASE_KEY_ALIAS=$RELEASE_KEY_ALIAS" >> "$GITHUB_ENV"
-          echo "EVENTMENU_RELEASE_KEY_PASSWORD=$RELEASE_KEY_PASSWORD" >> "$GITHUB_ENV"
-          echo "EVENTMENU_REQUIRE_FCM=true" >> "$GITHUB_ENV"
-          echo "EVENTMENU_REQUIRE_RELEASE_SIGNING=true" >> "$GITHUB_ENV"
-
-      - name: Build production release APK
-        run: gradle :app:assembleRelease --stacktrace --no-daemon
-
-      - name: Verify production APK signature and metadata
-        shell: bash
-        env:
-          EXPECTED_CERT_SHA256: ${{ secrets.EVENTMENU_RELEASE_CERT_SHA256 }}
-        run: |
-          set -euo pipefail
-          APK="app/build/outputs/apk/release/app-release.apk"
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           test -s "$APK"
-          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner.txt"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
           "$AAPT" dump badging "$APK" | head -n 3
-          ACTUAL_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apksigner.txt" | head -n1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-          test -n "$ACTUAL_CERT"
-          if [ -n "${EXPECTED_CERT_SHA256:-}" ]; then
-            EXPECTED="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
-            if [ "$ACTUAL_CERT" != "$EXPECTED" ]; then
-              echo "::error::Release certificate SHA-256 does not match EVENTMENU_RELEASE_CERT_SHA256"
-              exit 1
-            fi
-          fi
-          mkdir -p dist
-          cp "$APK" "dist/EventMenu-GO-v${EVENTMENU_VERSION_NAME}.apk"
-          sha256sum "dist/EventMenu-GO-v${EVENTMENU_VERSION_NAME}.apk" | tee "dist/EventMenu-GO-v${EVENTMENU_VERSION_NAME}.apk.sha256"
+          mkdir -p dist-debug
+          cp "$APK" "dist-debug/EventMenu-GO-debug-v${EVENTMENU_VERSION_NAME}.apk"
+          sha256sum "dist-debug/EventMenu-GO-debug-v${EVENTMENU_VERSION_NAME}.apk" \
+            > "dist-debug/EventMenu-GO-debug-v${EVENTMENU_VERSION_NAME}.apk.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: EventMenu-GO-${{ github.run_number }}-debug-apk
-          path: mobile/eventmenu-go/app/build/outputs/apk/debug/app-debug.apk
+          path: |
+            mobile/eventmenu-go/dist-debug/EventMenu-GO-debug-*.apk
+            mobile/eventmenu-go/dist-debug/EventMenu-GO-debug-*.sha256
           if-no-files-found: error
           retention-days: 7
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: EventMenu-GO-${{ github.run_number }}-release-apk
-          path: |
-            mobile/eventmenu-go/dist/EventMenu-GO-*.apk
-            mobile/eventmenu-go/dist/EventMenu-GO-*.sha256
-          if-no-files-found: error
-          retention-days: 30
