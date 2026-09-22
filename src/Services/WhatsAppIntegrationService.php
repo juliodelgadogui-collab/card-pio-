@@ -12,7 +12,8 @@ use Throwable;
 final class WhatsAppIntegrationService
 {
     private const EVENTS = [
-        'order_received' => 'Olá {cliente}! Recebemos o seu pedido #{pedido}. Total: {total}.',
+        'order_received' => 'Olá {nome}! Recebemos o seu pedido #{pedido}. Total: {valor}.',
+        'order_confirmed' => 'Olá {nome}! Seu pedido #{pedido} foi confirmado. {previsao}',
         'payment_confirmed' => 'Pagamento do pedido #{pedido} confirmado. Obrigado, {cliente}!',
         'preparing' => 'Seu pedido #{pedido} já está sendo preparado.',
         'ready' => 'Seu pedido #{pedido} está pronto.',
@@ -20,7 +21,7 @@ final class WhatsAppIntegrationService
         'delivered' => 'Pedido #{pedido} entregue. Obrigado por pedir com a gente!',
         'cancelled' => 'O pedido #{pedido} foi cancelado. Se precisar, fale com o estabelecimento.',
     ];
-    private const VARIABLES = ['pedido','cliente','status','total','link','restaurante'];
+    private const VARIABLES = ['pedido','cliente','nome','status','total','valor','previsao','link','restaurante'];
 
     /** @return array<string,string> */
     public function defaultTemplates(): array { return self::EVENTS; }
@@ -83,7 +84,7 @@ final class WhatsAppIntegrationService
     {
         $q=$pdo->prepare('SELECT o.id,o.status,o.total_cents,c.name customer_name,c.phone customer_phone,t.name restaurant_name FROM orders o JOIN tenants t ON t.id=o.tenant_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.id=? AND o.tenant_id=? LIMIT 1');$q->execute([$orderId,$tenantId]);$order=$q->fetch(PDO::FETCH_ASSOC);if(!$order)return null;
         $link='';if($eventType==='out_for_delivery'){try{$l=$pdo->prepare('SELECT token_encrypted,expires_at,revoked_at FROM delivery_tracking_links WHERE tenant_id=? AND order_id=? LIMIT 1');$l->execute([$tenantId,$orderId]);$row=$l->fetch(PDO::FETCH_ASSOC);if($row&&empty($row['revoked_at'])&&strtotime((string)$row['expires_at'])>time()){$token=Crypto::decrypt((string)$row['token_encrypted']);if($token!=='')$link=\app_absolute_url('delivery-track.php?token='.rawurlencode($token));}}catch(Throwable){}}
-        return$this->queueEvent($pdo,$tenantId,$eventType,(string)($order['customer_phone']??''),['pedido'=>(string)$orderId,'cliente'=>(string)($order['customer_name']?:'cliente'),'status'=>$this->friendlyStatus((string)$order['status']),'total'=>'R$ '.number_format(((int)$order['total_cents'])/100,2,',','.'),'link'=>$link,'restaurante'=>(string)$order['restaurant_name']],$orderId,$dedupeSuffix);
+        $customer=(string)($order['customer_name']?:'cliente');$value='R$ '.number_format(((int)$order['total_cents'])/100,2,',','.');$forecast='';try{$p=$pdo->prepare('SELECT estimated_ready_at FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$p->execute([$orderId,$tenantId]);$raw=$p->fetchColumn();if(is_string($raw)&&trim($raw)!=='')$forecast='Previsão: '.date('H:i',strtotime($raw)).'.';}catch(Throwable){}return$this->queueEvent($pdo,$tenantId,$eventType,(string)($order['customer_phone']??''),['pedido'=>(string)$orderId,'cliente'=>$customer,'nome'=>$customer,'status'=>$this->friendlyStatus((string)$order['status']),'total'=>$value,'valor'=>$value,'previsao'=>$forecast,'link'=>$link,'restaurante'=>(string)$order['restaurant_name']],$orderId,$dedupeSuffix);
     }
 
     public function queueEvent(PDO $pdo,int $tenantId,string $eventType,string $recipient,array $context=[],?int$orderId=null,string$dedupeSuffix=''):?int
