@@ -23,7 +23,7 @@ public partial class MainWindow
             window.MinWidth = 860;
             window.MinHeight = 560;
             window.SizeChanged += (_, _) => window.ApplyDesktopLayout();
-            window.StateChanged += (_, _) => window.Dispatcher.BeginInvoke(window.ApplyDesktopLayout);
+            window.StateChanged += (_, _) => window.Dispatcher.BeginInvoke(new Action(window.ApplyDesktopLayout));
         }
 
         if (!window._desktopInitialFitDone)
