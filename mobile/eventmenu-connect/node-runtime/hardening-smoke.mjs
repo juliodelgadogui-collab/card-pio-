@@ -20,12 +20,21 @@ assert(main.includes('const transientDisconnect'), 'Reconexões transitórias n�
 assert(main.includes('408') && main.includes('428') && main.includes('503'), 'Códigos transitórios esperados não estão protegidos.');
 assert(main.includes("parsed.protocol !== 'https:'"), 'Download de mídia ainda aceita transporte externo sem HTTPS.');
 
+const pairingStart = main.indexOf('async function resetForFreshPairing()');
+const pairingEnd = main.indexOf('async function waitUntilPairingReady', pairingStart);
+const pairingBlock = pairingStart >= 0 && pairingEnd > pairingStart ? main.slice(pairingStart, pairingEnd) : '';
+assert(pairingBlock.length > 0 && !pairingBlock.includes('clearInboundQueue()'), 'Novo pareamento ainda apaga mensagens inbound não confirmadas.');
+assert(main.includes('async function logoutSession()') && main.slice(main.indexOf('async function logoutSession()')).includes('clearInboundQueue()'), 'Logout completo precisa limpar inbound para impedir mistura entre contas.');
+
 assert(worker.includes('savePendingOutboundAck'), 'Android não persiste ACK depois do envio.');
 assert(worker.includes('flushPendingAcks'), 'Android não reconcilia ACKs pendentes antes de novos envios.');
-assert(worker.includes('eventmenu-outbox-$id'), 'ID estável da outbox não é enviado ao runtime Node.');
+assert(worker.includes('api.claim(1)'), 'Worker deve manter somente um lease outbound por vez.');
+assert(worker.includes('eventmenu-tenant-${store.tenantId()}-outbox-$id'), 'Idempotência local não está isolada por empresa.');
 assert(worker.includes('NUNCA chamamos fail()'), 'Separação entre falha de envio e falha de ACK não está explícita.');
 assert(worker.includes('NET_CAPABILITY_VALIDATED'), 'Worker não valida conectividade real antes de sincronizar.');
 assert(store.includes('pending_outbound_acks'), 'Recibos pendentes não sobrevivem a reinício do processo.');
+assert(store.includes('.putInt("tenant_id"') && store.includes('fun tenantId(): Int'), 'Identidade da empresa não é persistida para isolar a idempotência.');
+assert(store.includes('.remove("tenant_id")'), 'Logout do EventMenu não limpa a identidade local da empresa.');
 
 assert(manifest.includes('android:usesCleartextTraffic="false"'), 'Aplicativo ainda libera HTTP externo globalmente.');
 assert(manifest.includes('android:networkSecurityConfig="@xml/network_security_config"'), 'Network Security Config não está ativado.');
