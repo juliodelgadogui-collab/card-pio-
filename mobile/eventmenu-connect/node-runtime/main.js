@@ -26,7 +26,10 @@ const MAX_MEDIA = 20 * 1024 * 1024;
 const MEDIA_TIMEOUT = 30_000;
 const MAX_REDIRECTS = 4;
 const MAX_INBOUND_QUEUE = 5000;
-const INBOUND_FILE = path.join(path.dirname(SESSION_ROOT), 'eventmenu-whatsapp-inbound.json');
+const MAX_SENT_LEDGER = 5000;
+const DATA_ROOT = path.dirname(SESSION_ROOT);
+const INBOUND_FILE = path.join(DATA_ROOT, 'eventmenu-whatsapp-inbound.json');
+const SENT_FILE = path.join(DATA_ROOT, 'eventmenu-whatsapp-sent.json');
 const logger = pino({ level: 'silent' });
 
 if (!SECRET || SECRET.length < 48) throw new Error('Segredo local inválido.');
@@ -53,25 +56,45 @@ const state = {
 };
 
 function touch() { state.updatedAt = new Date().toISOString(); }
-function readInboundQueue() {
+function readJsonArray(file) {
   try {
-    const raw = fs.readFileSync(INBOUND_FILE, 'utf8');
+    const raw = fs.readFileSync(file, 'utf8');
     const rows = JSON.parse(raw);
     return Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
   } catch (_) {
     return [];
   }
 }
-function writeInboundQueue(rows) {
-  const directory = path.dirname(INBOUND_FILE);
+function writeJsonArray(file, rows) {
+  const directory = path.dirname(file);
   fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
-  const temporary = `${INBOUND_FILE}.tmp`;
+  const temporary = `${file}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(rows), { encoding: 'utf8', mode: 0o600 });
-  fs.renameSync(temporary, INBOUND_FILE);
+  fs.renameSync(temporary, file);
 }
+function readInboundQueue() { return readJsonArray(INBOUND_FILE); }
+function writeInboundQueue(rows) { writeJsonArray(INBOUND_FILE, rows); }
 function clearInboundQueue() {
   try { fs.rmSync(INBOUND_FILE, { force: true }); } catch (_) {}
   try { fs.rmSync(`${INBOUND_FILE}.tmp`, { force: true }); } catch (_) {}
+}
+function readSentLedger() { return readJsonArray(SENT_FILE); }
+function writeSentLedger(rows) { writeJsonArray(SENT_FILE, rows.slice(-MAX_SENT_LEDGER)); }
+function normalizeIdempotencyKey(value) {
+  const key = String(value || '').trim();
+  if (!key) return '';
+  if (!/^[A-Za-z0-9._:-]{1,120}$/.test(key)) throw new Error('Chave de idempotência local inválida.');
+  return key;
+}
+function sentReceipt(key) {
+  if (!key) return null;
+  return readSentLedger().find((row) => String(row?.key || '') === key) || null;
+}
+function rememberSent(key, messageId) {
+  if (!key) return;
+  const rows = readSentLedger().filter((row) => String(row?.key || '') !== key);
+  rows.push({ key, message_id: String(messageId || '').slice(0, 190), sent_at: Date.now() });
+  writeSentLedger(rows);
 }
 function enqueueInbound(row) {
   const id = String(row?.provider_message_id || '').trim();
@@ -408,6 +431,18 @@ async function startSession() {
         state.lastDisconnectCode = code;
         const loggedOut = code === DisconnectReason.loggedOut;
         const restartRequired = code === DisconnectReason.restartRequired || code === 515;
+        const transientDisconnect = [
+          DisconnectReason.connectionClosed,
+          DisconnectReason.connectionLost,
+          DisconnectReason.timedOut,
+          DisconnectReason.unavailableService,
+          408,
+          428,
+          500,
+          502,
+          503,
+          504,
+        ].includes(code);
         if (state.manualStop) {
           state.status = 'disconnected';
           state.pairingCode = null;
@@ -427,11 +462,13 @@ async function startSession() {
           removeSessionFiles().catch(() => {});
           return;
         }
-        if (restartRequired) {
+        if (restartRequired || transientDisconnect) {
           state.status = 'reconnecting';
+          state.pairingCode = null;
+          state.pairingExpiresAt = 0;
           state.error = '';
           touch();
-          scheduleReconnect(350);
+          scheduleReconnect(restartRequired ? 350 : null);
           return;
         }
         state.pairingCode = null;
@@ -439,7 +476,7 @@ async function startSession() {
         state.status = 'error';
         state.error = code === 405
           ? 'O WhatsApp recusou a versão do cliente (405). Gere um novo código; o Connect atualizará a versão Web automaticamente.'
-          : `Conexão com o WhatsApp encerrada${code ? ` (código ${code})` : ''}. Gere um novo código.`;
+          : `Conexão com o WhatsApp encerrada${code ? ` (código ${code})` : ''}. O Connect tentará recuperar a sessão automaticamente.`;
         touch();
         if (code !== 405) scheduleReconnect();
       }
@@ -515,11 +552,10 @@ async function downloadMedia(value, redirects = 0) {
   let parsed;
   try { parsed = new URL(String(value || '')); }
   catch (_) { throw new Error('Endereço da mídia inválido.'); }
-  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('A mídia precisa usar HTTP ou HTTPS.');
+  if (parsed.protocol !== 'https:') throw new Error('A mídia precisa usar HTTPS.');
 
   return new Promise((resolve, reject) => {
-    const transport = parsed.protocol === 'https:' ? https : http;
-    const request = transport.get(parsed, {
+    const request = https.get(parsed, {
       headers: {
         'User-Agent': 'EventMenu-Connect-Android/1.0',
         'Accept': '*/*',
@@ -572,6 +608,16 @@ async function downloadMedia(value, redirects = 0) {
 
 async function sendMessage(body) {
   if (!state.socket || state.status !== 'connected') throw new Error('WhatsApp não conectado.');
+  const idempotencyKey = normalizeIdempotencyKey(body.idempotency_key);
+  const previous = sentReceipt(idempotencyKey);
+  if (previous) {
+    return {
+      ok: true,
+      message_id: String(previous.message_id || ''),
+      duplicate_prevented: true,
+    };
+  }
+
   const phone = normalizeRecipient(body.phone);
   const message = String(body.message || '').trim();
   if (message.length > 4000) throw new Error('Mensagem grande demais.');
@@ -606,7 +652,9 @@ async function sendMessage(body) {
     }
   }
 
-  return { ok: true, message_id: String(result?.key?.id || '') };
+  const messageId = String(result?.key?.id || '');
+  rememberSent(idempotencyKey, messageId);
+  return { ok: true, message_id: messageId, duplicate_prevented: false };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -614,7 +662,14 @@ const server = http.createServer(async (req, res) => {
     if (!authorized(req)) return json(res, 401, { ok: false, error: 'Não autorizado.' });
     const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
     if (req.method === 'GET' && url.pathname === '/health') {
-      return json(res, 200, { ok: true, engine: 'baileys-embedded', node: process.version, status: state.status, inbound_pending: readInboundQueue().length });
+      return json(res, 200, {
+        ok: true,
+        engine: 'baileys-embedded',
+        node: process.version,
+        status: state.status,
+        inbound_pending: readInboundQueue().length,
+        sent_ledger: readSentLedger().length,
+      });
     }
     if (req.method === 'GET' && url.pathname === '/state') return json(res, 200, publicState());
     if (req.method === 'GET' && url.pathname === '/inbound') return json(res, 200, { ok: true, messages: inboundBatch(url.searchParams.get('limit')) });
