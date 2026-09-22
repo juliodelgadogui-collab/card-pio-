@@ -1,6 +1,7 @@
 package br.com.eventmenu.connect
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -148,6 +149,17 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
     fun logout(): EmbeddedWhatsAppState {
         ensureStarted()
         return stateFrom(request("logout", "POST", JSONObject()))
+    }
+
+    fun inbound(limit: Int = 10): JSONArray {
+        ensureStarted()
+        return request("inbound?limit=${limit.coerceIn(1, 50)}", "GET", null).optJSONArray("messages") ?: JSONArray()
+    }
+
+    fun acknowledgeInbound(providerMessageId: String) {
+        if (providerMessageId.isBlank()) return
+        ensureStarted()
+        request("inbound/ack", "POST", JSONObject().put("ids", JSONArray().put(providerMessageId.take(190))))
     }
 
     fun send(phone: String, message: String): EmbeddedSendResult {
