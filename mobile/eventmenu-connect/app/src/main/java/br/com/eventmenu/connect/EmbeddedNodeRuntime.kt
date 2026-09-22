@@ -100,6 +100,10 @@ data class EmbeddedWhatsAppState(
     val pairingCode: String,
     val phone: String,
     val error: String,
+    val inboundPending: Int,
+    val inboundUnresolved: Int,
+    val lastInboundAt: String,
+    val lastInboundError: String,
 )
 
 data class EmbeddedSendResult(val messageId: String)
@@ -203,6 +207,10 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         pairingCode = jsonText(json, "pairing_code"),
         phone = jsonText(json, "phone"),
         error = jsonText(json, "error"),
+        inboundPending = json.optInt("inbound_pending", 0),
+        inboundUnresolved = json.optInt("inbound_unresolved", 0),
+        lastInboundAt = jsonText(json, "last_inbound_at"),
+        lastInboundError = jsonText(json, "last_inbound_error"),
     )
 
     private fun jsonText(json: JSONObject, key: String, fallback: String = ""): String {
