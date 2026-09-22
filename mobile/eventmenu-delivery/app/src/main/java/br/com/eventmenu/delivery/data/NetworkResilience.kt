@@ -5,12 +5,15 @@ import java.net.NoRouteToHostException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 
-internal fun shouldRetryDeliveryRequest(method: String, attempt: Int, throwable: Throwable): Boolean {
-    if (!method.equals("GET", ignoreCase = true) || attempt >= 2) return false
-    return throwable is SocketTimeoutException ||
+internal fun isDeliveryNetworkFailure(throwable: Throwable): Boolean =
+    throwable is SocketTimeoutException ||
         throwable is ConnectException ||
         throwable is NoRouteToHostException ||
         throwable is UnknownHostException
+
+internal fun shouldRetryDeliveryRequest(method: String, attempt: Int, throwable: Throwable): Boolean {
+    if (!method.equals("GET", ignoreCase = true) || attempt >= 2) return false
+    return isDeliveryNetworkFailure(throwable)
 }
 
 internal fun retryDelayMillis(attempt: Int): Long = when (attempt) {
