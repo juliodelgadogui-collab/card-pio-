@@ -44,8 +44,8 @@ internal static class ResponsiveWindowBehavior
 
         var workArea = SystemParameters.WorkArea;
         const double safeMargin = 20;
-        var availableWidth = Math.Max(520, workArea.Width - safeMargin);
-        var availableHeight = Math.Max(420, workArea.Height - safeMargin);
+        var availableWidth = Math.Max(320, workArea.Width - safeMargin);
+        var availableHeight = Math.Max(280, workArea.Height - safeMargin);
 
         // A MinWidth/MinHeight larger than the logical work area is common when
         // Windows is at 125% or 150% scaling. Lower only the minimum necessary.
