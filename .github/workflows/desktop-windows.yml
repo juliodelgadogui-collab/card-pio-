@@ -2,8 +2,18 @@ name: EventMenu Desktop Windows
 on:
   workflow_dispatch:
   push:
-    branches: [dev/eventmenu-desktop]
-    paths: ['desktop/**','.github/workflows/desktop-windows.yml']
+    branches:
+      - dev/eventmenu-desktop
+      - 'fix/eventmenu-desktop-*'
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-windows.yml'
+  pull_request:
+    branches:
+      - dev/eventmenu-desktop
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/desktop-windows.yml'
 permissions: {contents: read}
 concurrency: {group: 'eventmenu-desktop-${{ github.ref }}', cancel-in-progress: true}
 jobs:
