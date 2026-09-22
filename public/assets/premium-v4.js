@@ -1,8 +1,15 @@
 (()=>{
 'use strict';
 const d=document;
+
+/* Premium v5 is appended after the parsed page so it wins over legacy/page-local
+   style blocks while preserving them as compatibility fallbacks. */
+for(const file of ['premium-v5.css','premium-v5-runtime.css']){const css=d.createElement('link');css.rel='stylesheet';css.href=new URL('assets/'+file,location.href).toString();(d.body||d.documentElement).appendChild(css)}
+
 const params=new URLSearchParams(location.search);
-const route=params.get('route')||'dashboard';
+const path=(location.pathname.split('/').pop()||'').toLowerCase();
+const directRoute=path==='whatsapp.php'?'whatsapp':path==='support.php'?'support':'';
+const route=directRoute||params.get('route')||'dashboard';
 d.body.classList.add('route-'+route.replace(/[^a-z0-9_-]/gi,'-'));
 
 const normalizeText=s=>(s||'').trim().toLowerCase();
@@ -31,7 +38,7 @@ function enhanceStatuses(root=d){
 }
 function enhanceTables(root=d){
  nodesIncludingRoot(root,'.table-wrap').forEach(wrap=>{
-   if(wrap.classList.contains('no-mobile-cards')||wrap.classList.contains('responsive-table'))return;
+   if(wrap.classList.contains('no-mobile-cards'))return;
    const table=wrap.querySelector('table');if(!table)return;
    const headers=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());if(!headers.length)return;
    [...table.querySelectorAll('tbody tr')].forEach(row=>[...row.children].forEach((cell,i)=>{if(cell.tagName==='TD'&&!cell.dataset.label)cell.dataset.label=headers[i]||''}));
@@ -66,7 +73,7 @@ async function enhancePlatformCockpit(){
      cockpitCard('EventMenu Delivery',String(x.delivery_active||0),'Empresas ativas no marketplace',(x.delivery_active||0)>0?'success':'muted',link('marketplace-finance','companies')),
      cockpitCard('Comissões',money(x.commissions_due_cents),'A receber / faturadas',(x.commissions_due_cents||0)>0?'warning':'success',link('marketplace-finance')),
      cockpitCard('Campanhas',String(x.campaigns_active||0),'Campanhas ativas no Delivery',(x.campaigns_active||0)>0?'info':'muted',link('marketplace-campaigns')),
-     cockpitCard('Cupons Delivery','%', 'Criar descontos para clientes do app','info',link('marketplace-coupons')),
+     cockpitCard('Cupons Delivery','%','Criar descontos para clientes do app','info',link('marketplace-coupons')),
      cockpitCard('Impulsiona',money(x.impulsiona_balance_cents),`${x.impulsiona_companies||0} empresa(s) participante(s)`,(x.impulsiona_companies||0)>0?'info':'muted',link('marketplace-finance')),
      cockpitCard('Faturas em aberto',String(x.invoices_open||0),`${x.invoices_overdue||0} vencida(s)`,(x.invoices_overdue||0)>0?'danger':(x.invoices_open||0)>0?'warning':'success',link('marketplace-finance','invoices')),
      cockpitCard('Saúde do sistema',String(x.health_warnings||0),'Alertas que precisam de revisão',x.health==='error'?'danger':x.health==='warning'?'warning':'success',link('system-health'))
@@ -77,6 +84,61 @@ async function enhancePlatformCockpit(){
    const oldMetrics=host.nextElementSibling;if(oldMetrics?.classList.contains('metric-grid'))oldMetrics.hidden=true;
  }catch(e){console.warn('Cockpit indisponível no momento.',e)}
 }
-ensurePlatformCouponNav();enhanceStatuses();enhanceTables();enhancePlatformCockpit();
+
+async function applyCapabilities(){
+ if(d.body.classList.contains('em-platform'))return;
+ try{
+   const endpoint=new URL('api-ui-capabilities.php',location.href);const r=await fetch(endpoint,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)return;const body=await r.json();if(!body.ok||!body.data)return;
+   const disabled=new Set(body.data.disabled_routes||[]);
+   d.querySelectorAll('.nav a[data-route]').forEach(a=>{if(disabled.has(a.dataset.route||''))a.remove()});
+   d.querySelectorAll('.nav-group').forEach(g=>{if(!g.querySelector('a'))g.remove()});
+   const modules=body.data.modules||{};
+   const hideByHref=[['whatsapp.php','whatsapp'],['support.php','whatsapp'],['receipt-settings','printing'],['route=reports','reports'],['route=units','units']];
+   d.querySelectorAll('a[href]').forEach(a=>{for(const [needle,module] of hideByHref){if(modules[module]===false&&a.getAttribute('href')?.includes(needle)){const card=a.closest('.card');(card||a).hidden=true;break}}});
+ }catch(e){}
+}
+
+function enhanceSettingsHub(){
+ if(route!=='settings')return;
+ const grid=d.querySelector('.metric-grid');if(!grid||grid.dataset.v5Grouped)return;grid.dataset.v5Grouped='1';
+ const cards=[...grid.children].filter(el=>el.matches('a.card'));
+ const search=d.createElement('div');search.className='em-settings-search';search.innerHTML='<input type="search" aria-label="Buscar configuração" placeholder="Buscar configuração, WhatsApp, PIX, impressão..."><span class="em-live-indicator">Configurações da empresa</span>';grid.before(search);
+ const categoryFor=card=>{const tag=normalizeText(card.querySelector('.eyebrow')?.textContent);if(/whatsapp|atendimento|e-mail/.test(tag))return['Comunicação','WhatsApp, atendimento e mensagens'];if(/pagamentos|pix/.test(tag))return['Pagamentos','Gateways e recebimentos'];if(/delivery|fidelidade|impressão/.test(tag))return['Operação','Venda, entrega e experiência'];return['Empresa','Identidade e configurações gerais']};
+ const groups=new Map();for(const card of cards){const [name,desc]=categoryFor(card);if(!groups.has(name))groups.set(name,{desc,cards:[]});groups.get(name).cards.push(card)}
+ grid.hidden=true;for(const [name,g] of groups){const section=d.createElement('section');section.className='em-settings-group';section.dataset.settingsGroup=name;section.innerHTML=`<div class="em-settings-group-title"><div><span class="eyebrow">${name.toUpperCase()}</span><h2>${name}</h2></div><span class="muted">${g.desc}</span></div><div class="em-settings-group-grid"></div>`;const host=section.querySelector('.em-settings-group-grid');g.cards.forEach(c=>host.appendChild(c));grid.before(section)}
+ const input=search.querySelector('input');input?.addEventListener('input',()=>{const q=normalizeText(input.value);d.querySelectorAll('.em-settings-group').forEach(group=>{let shown=0;group.querySelectorAll('.card').forEach(card=>{const ok=!q||normalizeText(card.textContent).includes(q);card.hidden=!ok;if(ok)shown++});group.hidden=shown===0})});
+}
+
+function enhanceDashboardChart(){
+ if(route!=='dashboard')return;d.querySelectorAll('.chart-bar[title]').forEach(bar=>{if(bar.querySelector('.em-chart-value'))return;const parts=(bar.getAttribute('title')||'').split('·');const value=(parts[1]||'').trim();if(!value)return;const tag=d.createElement('i');tag.className='em-chart-value';tag.textContent=value;bar.appendChild(tag)});
+}
+
+function enhanceSuperTenantEditor(){
+ if(route!=='super')return;const editor=d.querySelector('#editar-empresa'),form=editor?.querySelector('form');if(!form||form.dataset.v5Tabs)return;form.dataset.v5Tabs='1';form.classList.add('em-tabbed-form');
+ const children=[...form.children];const submit=children.find(el=>el.matches('button[type="submit"],button.primary'))||children.at(-1);const visible=children.filter(el=>el!==submit&&!el.matches('input[type="hidden"]'));
+ const modulesAt=visible.findIndex(el=>normalizeText(el.textContent).includes('módulos ativos'));const adminAt=visible.findIndex(el=>normalizeText(el.textContent).includes('administrador da empresa'));
+ if(modulesAt<0||adminAt<0)return;
+ const tabs=d.createElement('div');tabs.className='em-form-tabs';tabs.setAttribute('role','tablist');
+ const sections=[['Empresa e contrato',visible.slice(0,modulesAt)],['Módulos',visible.slice(modulesAt,adminAt)],['Administrador',visible.slice(adminAt)]];
+ sections.forEach(([label,nodes],i)=>{const btn=d.createElement('button');btn.type='button';btn.textContent=label;btn.className=i===0?'active':'';btn.setAttribute('role','tab');const panel=d.createElement('section');panel.className='em-form-tabpanel'+(i===0?' active':'');panel.dataset.tab=String(i);nodes.forEach(n=>panel.appendChild(n));btn.addEventListener('click',()=>{tabs.querySelectorAll('button').forEach(x=>x.classList.remove('active'));form.querySelectorAll('.em-form-tabpanel').forEach(x=>x.classList.remove('active'));btn.classList.add('active');panel.classList.add('active')});tabs.appendChild(btn);form.appendChild(panel)});
+ const firstPanel=form.querySelector('.em-form-tabpanel');if(firstPanel)form.insertBefore(tabs,firstPanel);if(submit){const action=d.createElement('div');action.className='em-form-submit';action.appendChild(submit);form.appendChild(action)}
+}
+
+function dashboardLiveRefresh(){
+ if(route!=='dashboard')return;
+ const section=d.querySelector('section[aria-label="Atenção agora"]');if(!section)return;
+ const info=section.querySelector('.section-head .muted');if(info){info.className='em-live-indicator';info.textContent='Atualizado agora'}let last=Date.now(),busy=false;
+ const attention={preparing:'Em preparo',ready:'Prontos',delivery:'Em entrega',overdue:'Atrasados',pending_payments:'Pagamentos',low_stock:'Estoque baixo'};
+ const metric={sales:'Vendas do dia',orders:'Pedidos hoje',ticket_average:'Ticket médio',active_orders:'Em operação'};
+ const setAttention=(label,value)=>{const card=[...d.querySelectorAll('.attention-card')].find(x=>normalizeText(x.querySelector('span')?.textContent)===normalizeText(label));if(card)card.querySelector('strong').textContent=String(value)};
+ const setMetric=(label,value)=>{const card=[...d.querySelectorAll('.dashboard-metric')].find(x=>normalizeText(x.querySelector('.muted')?.textContent)===normalizeText(label));if(card)card.querySelector('strong').textContent=value};
+ const mark=()=>{if(!info)return;const sec=Math.max(0,Math.floor((Date.now()-last)/1000));info.textContent=sec<5?'Atualizado agora':`Atualizado há ${sec}s`;info.classList.toggle('is-stale',sec>65)};setInterval(mark,5000);
+ async function refresh(){if(busy||d.hidden)return;busy=true;try{const endpoint=new URL('api-dashboard-live.php',location.href);const r=await fetch(endpoint,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}}),body=await r.json();if(!r.ok||!body.ok)return;const x=body.data||{};for(const [key,label] of Object.entries(attention))setAttention(label,x[key]??0);for(const [key,label] of Object.entries(metric))setMetric(label,['sales','ticket_average'].includes(key)?money(x[key]??0):String(x[key]??0));const quick=d.querySelector('.quick-grid .quick-card');if(quick){const strong=quick.querySelector('strong'),span=quick.querySelector('span');if(strong)strong.textContent=`${x.occupied_tables||0} mesas ocupadas`;if(span)span.textContent=`${x.open_tabs||0} comandas abertas nesta unidade.`}last=Date.now();mark()}catch(e){if(info)info.classList.add('is-stale')}finally{busy=false}}
+ setInterval(refresh,30000);d.addEventListener('visibilitychange',()=>{if(!d.hidden&&Date.now()-last>30000)refresh()});
+}
+
+function improveDialogs(){d.querySelectorAll('dialog').forEach(dialog=>{dialog.addEventListener('click',e=>{const rect=dialog.getBoundingClientRect();if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)dialog.close()})})}
+
+ensurePlatformCouponNav();enhanceStatuses();enhanceTables();enhanceSettingsHub();enhanceDashboardChart();enhanceSuperTenantEditor();enhancePlatformCockpit();applyCapabilities();dashboardLiveRefresh();improveDialogs();
 const observer=new MutationObserver(mutations=>{for(const m of mutations)for(const n of m.addedNodes)if(n.nodeType===1){enhanceStatuses(n);enhanceTables(n)}});observer.observe(d.body,{childList:true,subtree:true});
 })();
