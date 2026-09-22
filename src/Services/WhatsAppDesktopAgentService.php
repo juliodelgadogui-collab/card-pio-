@@ -68,7 +68,7 @@ final class WhatsAppDesktopAgentService
     {
         $tenantId=$this->tenantId();$deviceHash=$this->deviceHash($deviceId);$limit=max(1,min(20,$limit));
         $this->assertAgent($tenantId,$deviceHash);
-        return Database::transaction(function(PDO $pdo)use($tenantId,$deviceHash,$limit):array{
+        $messages=Database::transaction(function(PDO $pdo)use($tenantId,$deviceHash,$limit):array{
             $pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_failed\',locked_at=NULL,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,last_error=COALESCE(last_error,\'Lease do Desktop expirou.\'),updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND status=\'desktop_sending\' AND claim_expires_at IS NOT NULL AND claim_expires_at<CURRENT_TIMESTAMP')->execute([$tenantId]);
             $sql='SELECT id FROM whatsapp_outbox WHERE tenant_id=? AND status IN (\'queued\',\'failed\',\'desktop_queued\',\'desktop_failed\') AND attempt_count<max_attempts AND available_at<=CURRENT_TIMESTAMP ORDER BY id LIMIT '.$limit.' FOR UPDATE';
             $select=$pdo->prepare(Database::portableSql($pdo,$sql));$select->execute([$tenantId]);$ids=array_map('intval',$select->fetchAll(PDO::FETCH_COLUMN)?:[]);$out=[];
@@ -77,15 +77,19 @@ final class WhatsAppDesktopAgentService
                 $u=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_sending\',attempt_count=attempt_count+1,locked_at=CURRENT_TIMESTAMP,claim_token=?,claimed_by_device_hash=?,claim_expires_at=?,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status IN (\'queued\',\'failed\',\'desktop_queued\',\'desktop_failed\')');
                 $u->execute([$token,$deviceHash,$expires,$id,$tenantId]);if($u->rowCount()!==1)continue;
                 $q=$pdo->prepare('SELECT id,order_id,event_type,recipient,message_text,payload_json,attempt_count,max_attempts,claim_token,claim_expires_at,created_at FROM whatsapp_outbox WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$id,$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);
-                if($row){
-                    $this->ensureConversationMessage($pdo,$tenantId,$row,'sending');
-                    $media=$this->mediaFromPayload($row['payload_json']??null);
-                    unset($row['payload_json']);
-                    $out[]=array_merge($row,$media);
-                }
+                if($row)$out[]=$row;
             }
             return$out;
         });
+        if(!$messages)return[];
+        $pdo=Database::connection();$out=[];
+        foreach($messages as$row){
+            $this->ensureConversationMessage($pdo,$tenantId,$row,'sending');
+            $media=$this->mediaFromPayload($row['payload_json']??null);
+            unset($row['payload_json']);
+            $out[]=array_merge($row,$media);
+        }
+        return$out;
     }
 
     /** @return array<string,mixed> */
