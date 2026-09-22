@@ -28,6 +28,14 @@ class Stage3SyncRulesTest {
     }
 
     @Test
+    fun `order refresh backs off without an arbitrary stop`() {
+        assertEquals(5_000L, orderPollDelayMillis(0))
+        assertEquals(10_000L, orderPollDelayMillis(6))
+        assertEquals(30_000L, orderPollDelayMillis(18))
+        assertEquals(30_000L, orderPollDelayMillis(10_000))
+    }
+
+    @Test
     fun `tracking backs off and only official terminal order states stop it`() {
         assertEquals(10_000L, trackingPollDelayMillis(0))
         assertEquals(15_000L, trackingPollDelayMillis(6))
