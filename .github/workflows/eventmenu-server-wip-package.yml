@@ -57,6 +57,7 @@ jobs:
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-whatsapp-commerce-smoke.php
+          php scripts/ci-whatsapp-history-smoke.php
           php scripts/ci-sqlite-legacy-upgrade-smoke.php
           php scripts/ci-db-repair-page-smoke.php
           php scripts/ci-super-admin-smoke.php
@@ -97,6 +98,7 @@ jobs:
           test -f database/sqlite/migrations/071_whatsapp_commerce_inbound.sql
           test -f src/Services/WhatsAppCommerceService.php
           test -f scripts/ci-whatsapp-commerce-smoke.php
+          test -f scripts/ci-whatsapp-history-smoke.php
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
       - name: Verify WIP payment, WhatsApp and ticket files
