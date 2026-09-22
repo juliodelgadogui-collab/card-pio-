@@ -32,6 +32,9 @@ em_header('Configurações','settings');
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('whatsapp.php')) ?>">
     <span class="eyebrow">WHATSAPP · BETA</span><h3>Conexão e mensagens</h3><p class="muted">Conecte o WhatsApp por QR Code e configure avisos automáticos de pedido, pagamento, preparo e entrega.</p><span class="button secondary compact">Configurar WhatsApp</span>
   </a>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('support.php')) ?>">
+    <span class="eyebrow">ATENDIMENTO</span><h3>Central WhatsApp</h3><p class="muted">Veja conversas, assuma atendimentos, responda clientes e acompanhe pedido, endereço e histórico em uma tela.</p><span class="button secondary compact">Abrir Central</span>
+  </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=email-settings')) ?>">
     <span class="eyebrow">E-MAIL</span><h3>Servidor SMTP</h3><p class="muted"><?= !empty($mail['enabled']) ? 'Envio de e-mail está configurado e ativo.' : 'Configure remetente, servidor, usuário, senha e teste de envio.' ?></p><span class="status-pill <?= !empty($mail['enabled']) ? 'active' : '' ?>"><?= !empty($mail['enabled']) ? 'Ativo' : 'Configurar' ?></span>
   </a>
