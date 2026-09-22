@@ -30,7 +30,7 @@ em_header('Configurações','settings');
     <span class="eyebrow">IMAGENS</span><h3>Logo e capa</h3><p class="muted">Envie arquivos direto do celular ou computador, sem precisar colar URL.</p><span class="button secondary compact">Gerenciar imagens</span>
   </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('whatsapp.php')) ?>">
-    <span class="eyebrow">WHATSAPP · BETA</span><h3>Conexão e mensagens</h3><p class="muted">Conecte o WhatsApp por QR Code e configure avisos automáticos de pedido, pagamento, preparo e entrega.</p><span class="button secondary compact">Configurar WhatsApp</span>
+    <span class="eyebrow">WHATSAPP · EVENTMENU CONNECT</span><h3>Conexão e mensagens</h3><p class="muted">Acompanhe o EventMenu Connect e configure avisos automáticos de pedido, pagamento, preparo e entrega. Pareamento e sessão ficam no aplicativo Connect.</p><span class="button secondary compact">Configurar WhatsApp</span>
   </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('support.php')) ?>">
     <span class="eyebrow">ATENDIMENTO</span><h3>Central WhatsApp</h3><p class="muted">Veja conversas, assuma atendimentos, responda clientes e acompanhe pedido, endereço e histórico em uma tela.</p><span class="button secondary compact">Abrir Central</span>
