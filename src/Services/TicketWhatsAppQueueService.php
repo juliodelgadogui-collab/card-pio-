@@ -82,7 +82,7 @@ final class TicketWhatsAppQueueService
 
             $customer=trim((string)($row['customer_name']??''));$event=trim((string)($row['event_name']??''));
             $ticketUrl=\app_absolute_url('ingresso.php?t='.rawurlencode($qr));
-            $imageUrl=\app_absolute_url('ingresso-imagem.php?t='.rawurlencode($qr));
+            $imageUrl=\app_absolute_url('ingresso-imagem.php?t='.rawurlencode($qr).'&ticket_id='.$ticketId);
             $details=[];if(!empty($row['starts_at']))$details[]=date('d/m/Y · H:i',strtotime((string)$row['starts_at']));
             if(trim((string)($row['venue']??''))!=='')$details[]=trim((string)$row['venue']);
             $message='Olá'.($customer!==''?', '.$customer:'').'! 🎟️'."\n\n"
@@ -90,7 +90,7 @@ final class TicketWhatsAppQueueService
                 .'Ingresso: '.(string)$row['code'].($details?"\n".implode(' · ',$details):'')."\n"
                 .'Apresente o QR Code desta imagem na entrada.'."\n"
                 .'Ingresso online: '.$ticketUrl;
-            $payload=json_encode(['media_type'=>'image','media_url'=>$imageUrl,'media_filename'=>'ingresso-'.preg_replace('/[^A-Za-z0-9_-]/','',(string)$row['code']).'.png','media_mime'=>'image/png','ticket_id'=>$ticketId,'ticket_url'=>$ticketUrl],JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
+            $payload=json_encode(['media_type'=>'image','media_url'=>$imageUrl,'media_filename'=>'ingresso-'.preg_replace('/[^A-Za-z0-9_-]/','',(string)$row['code']).'.png','media_mime'=>'image/png','ticket_id'=>$ticketId,'ticket_code'=>(string)$row['code'],'ticket_token_hash'=>hash('sha256',$qr),'ticket_url'=>$ticketUrl],JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
             try{
                 $insert=$pdo->prepare('INSERT INTO whatsapp_outbox (tenant_id,order_id,event_type,recipient,message_text,payload_json,status,available_at,idempotency_key) VALUES (?,?,?,?,?,?,"desktop_queued",CURRENT_TIMESTAMP,?)');
                 $insert->execute([$tenantId,$orderId,self::EVENT_TYPE,$recipient,mb_substr($message,0,2000),$payload,$key]);$queued++;
