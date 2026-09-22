@@ -57,6 +57,7 @@ $base = [
     'timestamp' => time(),
     'payload' => [],
 ];
+$outboxCount = $pdo->prepare('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=? AND event_type="commerce_auto"');
 
 // OFF: persistir sem responder nem alterar o estado comercial.
 $offId = 'CI.OFF.' . bin2hex(random_bytes(8));
@@ -71,7 +72,8 @@ $conversation = $q->fetch(PDO::FETCH_ASSOC);
 commerce_assert(is_array($conversation), 'Conversa não foi persistida.');
 $conversationId = (int)$conversation['id'];
 commerce_assert($conversation['mode'] === 'auto' && $conversation['state'] === 'IDLE', 'Commerce desligado alterou estado ou modo da conversa.');
-commerce_assert((int)$pdo->query('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=' . $tenantId)->fetchColumn() === 0, 'Commerce desligado criou outbox.');
+$outboxCount->execute([$tenantId]);
+commerce_assert((int)$outboxCount->fetchColumn() === 0, 'Commerce desligado criou outbox.');
 
 $duplicate = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $offId, 'text' => 'menu']);
 commerce_assert(!empty($duplicate['duplicate']), 'provider_message_id repetido não foi deduplicado.');
@@ -85,14 +87,13 @@ $menuId = 'CI.MENU.' . bin2hex(random_bytes(8));
 $menu = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $menuId, 'text' => 'MENU']);
 commerce_assert(($menu['state'] ?? '') === 'WELCOME', 'Comando MENU não levou a WELCOME.');
 commerce_assert(!empty($menu['reply_queued']), 'Comando MENU não enfileirou resposta.');
-$q = $pdo->prepare('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=? AND event_type="commerce_auto"');
-$q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 1, 'MENU deveria gerar uma única resposta automática.');
+$outboxCount->execute([$tenantId]);
+commerce_assert((int)$outboxCount->fetchColumn() === 1, 'MENU deveria gerar uma única resposta automática.');
 
 $menuDuplicate = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $menuId, 'text' => 'MENU']);
 commerce_assert(!empty($menuDuplicate['duplicate']), 'Reentrega do MENU não foi reconhecida como duplicada.');
-$q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 1, 'Reentrega do MENU duplicou o outbox.');
+$outboxCount->execute([$tenantId]);
+commerce_assert((int)$outboxCount->fetchColumn() === 1, 'Reentrega do MENU duplicou o outbox.');
 
 // Transferência básica: entra em waiting_human e pausa a automação nas mensagens seguintes.
 $humanId = 'CI.HUMAN.' . bin2hex(random_bytes(8));
@@ -100,15 +101,15 @@ $human = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => 
 commerce_assert(($human['mode'] ?? '') === 'waiting_human', 'Comando de atendente não pausou o bot.');
 commerce_assert(($human['state'] ?? '') === 'WAITING_HUMAN', 'Estado WAITING_HUMAN não foi persistido.');
 commerce_assert(!empty($human['reply_queued']), 'Transferência humana não confirmou a entrada na fila.');
-$q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 2, 'Transferência humana deveria gerar apenas uma confirmação adicional.');
+$outboxCount->execute([$tenantId]);
+commerce_assert((int)$outboxCount->fetchColumn() === 2, 'Transferência humana deveria gerar apenas uma confirmação adicional.');
 
 $pausedId = 'CI.PAUSED.' . bin2hex(random_bytes(8));
 $paused = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $pausedId, 'text' => 'menu']);
 commerce_assert(($paused['mode'] ?? '') === 'waiting_human', 'Mensagem enquanto aguardava atendente reativou o bot.');
 commerce_assert(empty($paused['reply_queued']), 'Bot respondeu enquanto aguardava atendimento humano.');
-$q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 2, 'Modo humano criou resposta automática indevida.');
+$outboxCount->execute([$tenantId]);
+commerce_assert((int)$outboxCount->fetchColumn() === 2, 'Modo humano criou resposta automática indevida.');
 
 $queue = $commerce->humanQueue($pdo, $tenantId);
 commerce_assert(count($queue) === 1 && (int)$queue[0]['id'] === $conversationId, 'Conversa não apareceu na fila humana básica.');
@@ -133,8 +134,8 @@ commerce_assert($autoRow && $autoRow['mode'] === 'auto' && $autoRow['state'] ===
 $orderCommandId = 'CI.ORDER.' . bin2hex(random_bytes(8));
 $orderCommand = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $orderCommandId, 'text' => 'acompanhar pedido']);
 commerce_assert(!empty($orderCommand['reply_queued']), 'Comando global acompanhar pedido não foi reconhecido.');
-$q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 3, 'Comando de acompanhamento deveria gerar apenas uma resposta adicional.');
+$outboxCount->execute([$tenantId]);
+commerce_assert((int)$outboxCount->fetchColumn() === 3, 'Comando de acompanhamento deveria gerar apenas uma resposta adicional.');
 
 $q = $pdo->prepare('SELECT COUNT(*) FROM whatsapp_messages WHERE tenant_id=? AND direction="inbound"');
 $q->execute([$tenantId]);
