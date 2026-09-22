@@ -322,7 +322,8 @@ async function resetForFreshPairing() {
   }
   await new Promise((resolve) => setTimeout(resolve, 350));
   await removeSessionFiles();
-  clearInboundQueue();
+  // A fila inbound é durável: reparo/repareamento do mesmo tenant não descarta mensagens
+  // que o servidor ainda não confirmou. O logout completo continua limpando-a abaixo.
   state.status = 'disconnected';
   state.qr = null;
   state.pairingCode = null;
