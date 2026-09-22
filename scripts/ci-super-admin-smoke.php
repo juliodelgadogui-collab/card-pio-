@@ -7,6 +7,7 @@ require dirname(__DIR__) . '/app/bootstrap.php';
 use EventMenu\Core\Auth;
 use EventMenu\Core\Database;
 use EventMenu\Core\TenantFeatures;
+use EventMenu\Services\BackgroundJobService;
 
 function super_fail(string $message): never { fwrite(STDERR,"SUPER CI FAIL: {$message}\n"); exit(1); }
 
@@ -35,19 +36,8 @@ $moduleSlug='super-modules-'.bin2hex(random_bytes(3));
 $moduleSettings=json_encode([
     'business_type'=>'full',
     'modules'=>[
-        'catalog'=>true,
-        'pos'=>true,
-        'kitchen'=>true,
-        'restaurant'=>true,
-        'delivery'=>false,
-        'inventory'=>false,
-        'customers'=>true,
-        'payments'=>true,
-        'events'=>true,
-        'whatsapp'=>false,
-        'reports'=>false,
-        'units'=>true,
-        'printing'=>false,
+        'catalog'=>true,'pos'=>true,'kitchen'=>true,'restaurant'=>true,'delivery'=>false,'inventory'=>false,
+        'customers'=>true,'payments'=>true,'events'=>true,'whatsapp'=>false,'reports'=>false,'units'=>true,'printing'=>false,
     ],
 ],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
 $pdo->prepare('INSERT INTO tenants (name,slug,plan,status,settings) VALUES (?,?,"premium","active",?)')->execute(['Module Override CI',$moduleSlug,$moduleSettings]);
@@ -90,4 +80,13 @@ if(!TenantFeatures::moduleEnabled('whatsapp',$legacyEventId))super_fail('Compati
 if(!TenantFeatures::routeEnabled('reports',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos perdeu relatórios.');
 if(!TenantFeatures::routeEnabled('receipt',$legacyEventId))super_fail('Compatibilidade legada: rota central de impressão foi bloqueada.');
 
-echo "CI Super ADM smoke OK\n";
+/* Recovery center backend: failed jobs can be retried or explicitly discarded. */
+$pdo->prepare('INSERT INTO background_jobs (tenant_id,type,payload,status,attempts,max_attempts,run_at,last_error) VALUES (NULL,"backup.daily","{}","failed",5,5,CURRENT_TIMESTAMP,"CI failure")')->execute();
+$jobId=(int)$pdo->lastInsertId();$jobs=new BackgroundJobService();$jobs->retryJob($jobId);
+$s=$pdo->prepare('SELECT status,last_error FROM background_jobs WHERE id=?');$s->execute([$jobId]);$job=$s->fetch();
+if((string)($job['status']??'')!=='retry'||$job['last_error']!==null)super_fail('Central operacional não reenfileirou job falho corretamente.');
+$pdo->prepare('UPDATE background_jobs SET status="failed",last_error="CI second failure" WHERE id=?')->execute([$jobId]);$jobs->discardJob($jobId);
+$s=$pdo->prepare('SELECT status FROM background_jobs WHERE id=?');$s->execute([$jobId]);if((string)$s->fetchColumn()!=='discarded')super_fail('Central operacional não descartou job falho corretamente.');
+if(!is_file(dirname(__DIR__).'/public/operational-center.php'))super_fail('Central operacional não foi empacotada.');
+
+echo "CI Super ADM modules + operational recovery smoke OK\n";
