@@ -49,7 +49,7 @@ final class WhatsAppCommerceService
 
             try{$result=(new WhatsAppCommerceOrderService())->handle($pdo,$tenantId,$conversation,$text,$name);}
             catch(RuntimeException $e){try{Auth::audit('whatsapp.commerce_validation_error','whatsapp_conversation',(string)$conversationId,['state'=>$state,'error'=>mb_substr($e->getMessage(),0,300)]);}catch(Throwable){}$queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'commerce_validation',"⚠️ ".$e->getMessage()."\n\nDigite *MENU* para voltar ao início ou *ATENDENTE* para falar com uma pessoa.");return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>$state,'reply_queued'=>$queued,'commerce_enabled'=>true,'validation_error'=>true];}
-            if(!empty($result['handled'])){$this->auditStage1Transition($pdo,$tenantId,$conversation,$result,$normalized);$reply=(string)($result['reply']??'');$kind=(string)($result['kind']??'commerce');$queued=$reply!==''?$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,$kind,$reply):false;return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($result['state']??$state),'reply_queued'=>$queued,'commerce_enabled'=>true,'draft_order_id'=>$result['draft_order_id']??null];}
+            if(!empty($result['handled'])){$this->auditStage1Transition($pdo,$tenantId,$conversation,$result);$reply=(string)($result['reply']??'');$kind=(string)($result['kind']??'commerce');$queued=$reply!==''?$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,$kind,$reply):false;return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($result['state']??$state),'reply_queued'=>$queued,'commerce_enabled'=>true,'draft_order_id'=>$result['draft_order_id']??null];}
 
             $queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'fallback',"Não consegui entender sua resposta.\n\nDigite *MENU* para voltar ao início ou *ATENDENTE* para falar com uma pessoa.");return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>$state,'reply_queued'=>$queued,'commerce_enabled'=>true];
         });
@@ -74,7 +74,7 @@ final class WhatsAppCommerceService
         $pdo->prepare('UPDATE whatsapp_conversations SET mode=\'waiting_human\',state=\'WAITING_HUMAN\',assigned_user_id=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$conversationId,$tenantId]);$replyQueued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'human_transfer','Certo! 👤 Seu atendimento foi encaminhado para a equipe. O atendimento automático ficará pausado enquanto você aguarda.');try{Auth::audit('whatsapp.conversation_waiting_human','whatsapp_conversation',(string)$conversationId,['phone_suffix'=>substr($phone,-4)]);}catch(Throwable){}return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'waiting_human','state'=>'WAITING_HUMAN','reply_queued'=>$replyQueued,'commerce_enabled'=>true];
     }
 
-    private function auditStage1Transition(PDO $pdo,int $tenantId,array $conversation,array $result,string $command):void
+    private function auditStage1Transition(PDO $pdo,int $tenantId,array $conversation,array $result):void
     {
         try{
             $conversationId=(int)($conversation['id']??0);$from=(string)($conversation['state']??'IDLE');$to=(string)($result['state']??$from);$oldDraftId=(int)($conversation['draft_order_id']??0);$newDraftId=(int)($result['draft_order_id']??0);$draftId=$newDraftId>0?$newDraftId:$oldDraftId;$kind=(string)($result['kind']??'');$context=[];$raw=$conversation['context_json']??null;if(is_string($raw)&&trim($raw)!==''){$decoded=json_decode($raw,true);if(is_array($decoded))$context=$decoded;}
@@ -86,7 +86,7 @@ final class WhatsAppCommerceService
             elseif($kind==='cart_cancelled')$event='whatsapp.draft_cancelled';
             elseif($from==='CART'&&$to==='CART'&&($context['cart_action']??'')==='qty_value')$event='whatsapp.item_quantity_changed';
             elseif($from==='CART'&&$to==='CART'&&($context['cart_action']??'')==='remove_item')$event='whatsapp.item_removed';
-            if($event!=='')Auth::audit($event,$draftId>0?'order':'whatsapp_conversation',(string)($draftId>0?$draftId:$conversationId),['conversation_id'=>$conversationId,'from_state'=>$from,'to_state'=>$to,'command'=>$command]);
+            if($event!=='')Auth::audit($event,$draftId>0?'order':'whatsapp_conversation',(string)($draftId>0?$draftId:$conversationId),['conversation_id'=>$conversationId,'from_state'=>$from,'to_state'=>$to]);
         }catch(Throwable){}
     }
 
