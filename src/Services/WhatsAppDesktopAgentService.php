@@ -76,7 +76,12 @@ final class WhatsAppDesktopAgentService
                 $token=bin2hex(random_bytes(32));$expires=gmdate('Y-m-d H:i:s',time()+120);
                 $u=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_sending\',attempt_count=attempt_count+1,locked_at=CURRENT_TIMESTAMP,claim_token=?,claimed_by_device_hash=?,claim_expires_at=?,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status IN (\'queued\',\'failed\',\'desktop_queued\',\'desktop_failed\')');
                 $u->execute([$token,$deviceHash,$expires,$id,$tenantId]);if($u->rowCount()!==1)continue;
-                $q=$pdo->prepare('SELECT id,order_id,event_type,recipient,message_text,attempt_count,max_attempts,claim_token,claim_expires_at,created_at FROM whatsapp_outbox WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$id,$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);if($row)$out[]=$row;
+                $q=$pdo->prepare('SELECT id,order_id,event_type,recipient,message_text,payload_json,attempt_count,max_attempts,claim_token,claim_expires_at,created_at FROM whatsapp_outbox WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$id,$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);
+                if($row){
+                    $media=$this->mediaFromPayload($row['payload_json']??null);
+                    unset($row['payload_json']);
+                    $out[]=array_merge($row,$media);
+                }
             }
             return$out;
         });
@@ -87,8 +92,8 @@ final class WhatsAppDesktopAgentService
     {
         $tenantId=$this->tenantId();$deviceHash=$this->deviceHash($deviceId);$claimToken=$this->claimToken($claimToken);if($id<1)throw new RuntimeException('Mensagem inválida.');
         $externalMessageId=mb_substr(trim($externalMessageId),0,190);$pdo=Database::connection();
-        $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'sent\',sent_at=CURRENT_TIMESTAMP,locked_at=NULL,external_message_id=?,last_error=NULL,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=?');
-        $s->execute([$externalMessageId?:null,$id,$tenantId,$claimToken,$deviceHash]);if($s->rowCount()!==1)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
+        $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'sent\',provider=?,sent_at=CURRENT_TIMESTAMP,locked_at=NULL,external_message_id=?,last_error=NULL,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=?');
+        $s->execute([self::PROVIDER,$externalMessageId?:null,$id,$tenantId,$claimToken,$deviceHash]);if($s->rowCount()!==1)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
         return['id'=>$id,'status'=>'sent','external_message_id'=>$externalMessageId?:null];
     }
 
@@ -102,6 +107,36 @@ final class WhatsAppDesktopAgentService
             $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_failed\',locked_at=NULL,available_at=?,last_error=?,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND claim_token=? AND claimed_by_device_hash=?');$s->execute([$available,$error,$id,$tenantId,$claimToken,$deviceHash]);
             return['id'=>$id,'status'=>'desktop_failed','attempt_count'=>$attempt,'max_attempts'=>(int)$row['max_attempts'],'available_at'=>$available];
         });
+    }
+
+    /** @return array<string,string> */
+    private function mediaFromPayload(mixed $raw):array
+    {
+        if(!is_string($raw)||trim($raw)==='')return[];
+        $payload=json_decode($raw,true);
+        if(!is_array($payload))return[];
+
+        $type=strtolower(trim((string)($payload['media_type']??'')));
+        if($type==='pdf')$type='document';
+        if(!in_array($type,['image','document'],true))return[];
+
+        $url=trim((string)($payload['media_url']??''));
+        $parts=$url!==''?parse_url($url):false;
+        $scheme=is_array($parts)?strtolower((string)($parts['scheme']??'')):'';
+        $host=is_array($parts)?trim((string)($parts['host']??'')):'';
+        if(!in_array($scheme,['http','https'],true)||$host==='')return[];
+
+        $filename=mb_substr(trim((string)($payload['media_filename']??'')),0,190);
+        $mime=mb_substr(strtolower(trim((string)($payload['media_mime']??''))),0,120);
+        if($type==='document'&&$filename==='')$filename='documento.pdf';
+        if($type==='document'&&$mime==='')$mime='application/pdf';
+
+        return[
+            'media_type'=>$type,
+            'media_url'=>$url,
+            'media_filename'=>$filename,
+            'media_mime'=>$mime,
+        ];
     }
 
     private function assertAgent(int $tenantId,string $deviceHash):void
