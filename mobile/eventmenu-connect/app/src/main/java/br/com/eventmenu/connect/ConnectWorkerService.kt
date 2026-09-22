@@ -211,7 +211,8 @@ class ConnectWorkerService : Service() {
     }
 
     private fun processQueue(): Int {
-        val messages = api.claim(3)
+        // Uma reserva por vez evita que PDFs/imagens lentos consumam o lease das mensagens seguintes.
+        val messages = api.claim(1)
         if (messages.length() == 0) return 0
         var processed = 0
         for (index in 0 until messages.length()) {
