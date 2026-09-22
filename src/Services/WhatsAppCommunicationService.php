@@ -37,7 +37,7 @@ final class WhatsAppCommunicationService
         $mediaType=(string)($data['media_type']??'');if(!in_array($mediaType,['','image','document'],true))throw new RuntimeException('Tipo de anexo inválido.');
         $mediaUrl=trim((string)($data['media_url']??''));if($mediaType!==''&&!filter_var($mediaUrl,FILTER_VALIDATE_URL))throw new RuntimeException('Informe uma URL HTTPS válida para o anexo.');
         if($mediaUrl!==''&&strtolower((string)parse_url($mediaUrl,PHP_URL_SCHEME))!=='https')throw new RuntimeException('O anexo deve usar HTTPS.');
-        $recipients=$this->resolveRecipients($pdo,$tenantId,$data);if(!$recipients)throw new RuntimeException('Nenhum destinatário válido foi encontrado.');
+        $recipients=$this->resolveRecipients($pdo,$tenantId,$data);if(!$recipients)throw new RuntimeException('Nenhum destinatário válido foi encontrado.');if(count($recipients)>1000&&!filter_var((string)($data['confirm_large_send']??''),FILTER_VALIDATE_BOOL))throw new RuntimeException('Este envio possui mais de 1.000 destinatários. Refine o público antes de continuar.');
         $audienceJson=json_encode(['event_id'=>(int)($data['event_id']??0)],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         $ins=$pdo->prepare('INSERT INTO whatsapp_communications (tenant_id,title,message_text,audience_type,audience_json,media_type,media_url,media_filename,media_mime,status,recipient_count,queued_count,created_by) VALUES (?,?,?,?,?,?,?,?,?,"queued",?,?,?)');
         $ins->execute([$tenantId,$title,$message,$audience,$audienceJson,$mediaType?:null,$mediaUrl?:null,mb_substr(trim((string)($data['media_filename']??'')),0,255)?:null,mb_substr(trim((string)($data['media_mime']??'')),0,120)?:null,count($recipients),count($recipients),$userId]);
