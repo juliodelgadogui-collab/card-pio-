@@ -338,7 +338,7 @@ private fun DelyvreProductCardV4(product: Product, onOpen: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DelyvreProductSheet(
+internal fun DelyvreProductSheet(
     product: Product,
     storeOpen: Boolean,
     onDismiss: () -> Unit,
