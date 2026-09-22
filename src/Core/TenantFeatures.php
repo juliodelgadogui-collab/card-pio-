@@ -36,7 +36,7 @@ final class TenantFeatures
             'routes' => ['inventory', 'purchases'],
         ],
         'customers' => [
-            'label' => 'Clientes, comunicação e cupons',
+            'label' => 'Clientes, fidelidade e cupons',
             'routes' => ['customers', 'communications', 'coupons'],
         ],
         'payments' => [
@@ -46,6 +46,22 @@ final class TenantFeatures
         'events' => [
             'label' => 'Eventos e ingressos',
             'routes' => ['events', 'event-admin', 'tickets', 'guests', 'promoters'],
+        ],
+        'whatsapp' => [
+            'label' => 'WhatsApp Commerce e atendimento',
+            'routes' => [],
+        ],
+        'reports' => [
+            'label' => 'Relatórios',
+            'routes' => ['reports'],
+        ],
+        'units' => [
+            'label' => 'Múltiplas unidades',
+            'routes' => ['units'],
+        ],
+        'printing' => [
+            'label' => 'Impressão e cupom',
+            'routes' => ['receipt-settings'],
         ],
     ];
 
@@ -58,12 +74,7 @@ final class TenantFeatures
         if (!$row) return self::FULL;
 
         $settings = self::settingsFromRow($row);
-        $type = (string)($settings['business_type'] ?? '');
-        if (!in_array($type, [self::FULL, self::MENU, self::EVENT], true)) {
-            $plan = (string)($row['plan'] ?? '');
-            $type = in_array($plan, [self::MENU, self::EVENT], true) ? $plan : self::FULL;
-        }
-        return $type;
+        return self::typeFromRow($row, $settings);
     }
 
     public static function label(?int $tenantId = null): string
@@ -78,28 +89,40 @@ final class TenantFeatures
     public static function moduleCatalog(): array
     {
         $catalog = [];
-        foreach (self::MODULES as $code => $config) {
-            $catalog[$code] = (string)$config['label'];
-        }
+        foreach (self::MODULES as $code => $config) $catalog[$code] = (string)$config['label'];
         return $catalog;
+    }
+
+    public static function routeModuleMap(): array
+    {
+        $map = [];
+        foreach (self::MODULES as $code => $config) {
+            foreach ($config['routes'] as $route) $map[(string)$route] = (string)$code;
+        }
+        return $map;
+    }
+
+    public static function moduleForRoute(string $route): ?string
+    {
+        $map = self::routeModuleMap();
+        return isset($map[$route]) ? (string)$map[$route] : null;
     }
 
     public static function defaultModulesForType(string $type): array
     {
         if (!in_array($type, [self::FULL, self::MENU, self::EVENT], true)) $type = self::FULL;
-
         $defaults = array_fill_keys(array_keys(self::MODULES), false);
-        if ($type === self::FULL) {
-            return array_fill_keys(array_keys(self::MODULES), true);
-        }
+
+        if ($type === self::FULL) return array_fill_keys(array_keys(self::MODULES), true);
+
         if ($type === self::MENU) {
             foreach (array_keys(self::MODULES) as $code) $defaults[$code] = $code !== 'events';
             return $defaults;
         }
 
-        $defaults['customers'] = true;
-        $defaults['payments'] = true;
-        $defaults['events'] = true;
+        foreach (['customers','payments','events','whatsapp','reports','units','printing'] as $code) {
+            $defaults[$code] = true;
+        }
         return $defaults;
     }
 
@@ -127,9 +150,9 @@ final class TenantFeatures
         $configured = $settings['modules'] ?? null;
         if (!is_array($configured)) return self::defaultModulesForType($type);
 
-        $explicit = [];
+        $explicit = self::defaultModulesForType($type);
         foreach (array_keys(self::MODULES) as $code) {
-            $explicit[$code] = !empty($configured[$code]);
+            if (array_key_exists($code, $configured)) $explicit[$code] = !empty($configured[$code]);
         }
         return $explicit;
     }
@@ -153,19 +176,14 @@ final class TenantFeatures
 
     public static function routeEnabled(string $route, ?int $tenantId = null): bool
     {
-        foreach (self::MODULES as $code => $config) {
-            if (in_array($route, $config['routes'], true)) {
-                return self::moduleEnabled($code, $tenantId);
-            }
-        }
-        return true;
+        $module = self::moduleForRoute($route);
+        return $module === null || self::moduleEnabled($module, $tenantId);
     }
 
     private static function tenantRow(int $tenantId): ?array
     {
         static $cache = [];
         if (array_key_exists($tenantId, $cache)) return $cache[$tenantId];
-
         $s = Database::connection()->prepare('SELECT plan,settings FROM tenants WHERE id=? LIMIT 1');
         $s->execute([$tenantId]);
         $row = $s->fetch();
