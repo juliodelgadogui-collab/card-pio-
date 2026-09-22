@@ -4,7 +4,7 @@ const d=document;
 
 /* Premium v5 is appended after the parsed page so it wins over legacy/page-local
    style blocks while preserving them as compatibility fallbacks. */
-const v5=d.createElement('link');v5.rel='stylesheet';v5.href=new URL('assets/premium-v5.css',location.href).toString();(d.body||d.documentElement).appendChild(v5);
+for(const file of ['premium-v5.css','premium-v5-runtime.css']){const css=d.createElement('link');css.rel='stylesheet';css.href=new URL('assets/'+file,location.href).toString();(d.body||d.documentElement).appendChild(css)}
 
 const params=new URLSearchParams(location.search);
 const path=(location.pathname.split('/').pop()||'').toLowerCase();
@@ -109,18 +109,36 @@ function enhanceSettingsHub(){
  const input=search.querySelector('input');input?.addEventListener('input',()=>{const q=normalizeText(input.value);d.querySelectorAll('.em-settings-group').forEach(group=>{let shown=0;group.querySelectorAll('.card').forEach(card=>{const ok=!q||normalizeText(card.textContent).includes(q);card.hidden=!ok;if(ok)shown++});group.hidden=shown===0})});
 }
 
+function enhanceDashboardChart(){
+ if(route!=='dashboard')return;d.querySelectorAll('.chart-bar[title]').forEach(bar=>{if(bar.querySelector('.em-chart-value'))return;const parts=(bar.getAttribute('title')||'').split('·');const value=(parts[1]||'').trim();if(!value)return;const tag=d.createElement('i');tag.className='em-chart-value';tag.textContent=value;bar.appendChild(tag)});
+}
+
+function enhanceSuperTenantEditor(){
+ if(route!=='super')return;const editor=d.querySelector('#editar-empresa'),form=editor?.querySelector('form');if(!form||form.dataset.v5Tabs)return;form.dataset.v5Tabs='1';form.classList.add('em-tabbed-form');
+ const children=[...form.children];const submit=children.find(el=>el.matches('button[type="submit"],button.primary'))||children.at(-1);const visible=children.filter(el=>el!==submit&&!el.matches('input[type="hidden"]'));
+ const modulesAt=visible.findIndex(el=>normalizeText(el.textContent).includes('módulos ativos'));const adminAt=visible.findIndex(el=>normalizeText(el.textContent).includes('administrador da empresa'));
+ if(modulesAt<0||adminAt<0)return;
+ const tabs=d.createElement('div');tabs.className='em-form-tabs';tabs.setAttribute('role','tablist');
+ const sections=[['Empresa e contrato',visible.slice(0,modulesAt)],['Módulos',visible.slice(modulesAt,adminAt)],['Administrador',visible.slice(adminAt)]];
+ sections.forEach(([label,nodes],i)=>{const btn=d.createElement('button');btn.type='button';btn.textContent=label;btn.className=i===0?'active':'';btn.setAttribute('role','tab');const panel=d.createElement('section');panel.className='em-form-tabpanel'+(i===0?' active':'');panel.dataset.tab=String(i);nodes.forEach(n=>panel.appendChild(n));btn.addEventListener('click',()=>{tabs.querySelectorAll('button').forEach(x=>x.classList.remove('active'));form.querySelectorAll('.em-form-tabpanel').forEach(x=>x.classList.remove('active'));btn.classList.add('active');panel.classList.add('active')});tabs.appendChild(btn);form.appendChild(panel)});
+ const firstPanel=form.querySelector('.em-form-tabpanel');if(firstPanel)form.insertBefore(tabs,firstPanel);if(submit){const action=d.createElement('div');action.className='em-form-submit';action.appendChild(submit);form.appendChild(action)}
+}
+
 function dashboardLiveRefresh(){
  if(route!=='dashboard')return;
  const section=d.querySelector('section[aria-label="Atenção agora"]');if(!section)return;
- const info=section.querySelector('.section-head .muted');if(info){info.className='em-live-indicator';info.textContent='Atualizado agora'}
- const selectors=['.attention-grid','.dashboard-metrics','.dashboard-grid','.responsive-table'];let last=Date.now(),busy=false;
- const mark=()=>{if(!info)return;const sec=Math.max(0,Math.floor((Date.now()-last)/1000));info.textContent=sec<5?'Atualizado agora':`Atualizado há ${sec}s`;info.classList.toggle('is-stale',sec>45)};setInterval(mark,5000);
- async function refresh(){if(busy||d.hidden)return;busy=true;try{const r=await fetch(location.href,{credentials:'same-origin',cache:'no-store',headers:{'X-EventMenu-Refresh':'dashboard'}});if(!r.ok)return;const html=await r.text(),doc=new DOMParser().parseFromString(html,'text/html');for(const sel of selectors){const current=d.querySelector(sel),next=doc.querySelector(sel);if(current&&next){current.replaceWith(next);enhanceStatuses(next);enhanceTables(next)}}last=Date.now();mark()}catch(e){if(info)info.classList.add('is-stale')}finally{busy=false}}
- setInterval(refresh,20000);d.addEventListener('visibilitychange',()=>{if(!d.hidden&&Date.now()-last>20000)refresh()});
+ const info=section.querySelector('.section-head .muted');if(info){info.className='em-live-indicator';info.textContent='Atualizado agora'}let last=Date.now(),busy=false;
+ const attention={preparing:'Em preparo',ready:'Prontos',delivery:'Em entrega',overdue:'Atrasados',pending_payments:'Pagamentos',low_stock:'Estoque baixo'};
+ const metric={sales:'Vendas do dia',orders:'Pedidos hoje',ticket_average:'Ticket médio',active_orders:'Em operação'};
+ const setAttention=(label,value)=>{const card=[...d.querySelectorAll('.attention-card')].find(x=>normalizeText(x.querySelector('span')?.textContent)===normalizeText(label));if(card)card.querySelector('strong').textContent=String(value)};
+ const setMetric=(label,value)=>{const card=[...d.querySelectorAll('.dashboard-metric')].find(x=>normalizeText(x.querySelector('.muted')?.textContent)===normalizeText(label));if(card)card.querySelector('strong').textContent=value};
+ const mark=()=>{if(!info)return;const sec=Math.max(0,Math.floor((Date.now()-last)/1000));info.textContent=sec<5?'Atualizado agora':`Atualizado há ${sec}s`;info.classList.toggle('is-stale',sec>65)};setInterval(mark,5000);
+ async function refresh(){if(busy||d.hidden)return;busy=true;try{const endpoint=new URL('api-dashboard-live.php',location.href);const r=await fetch(endpoint,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}}),body=await r.json();if(!r.ok||!body.ok)return;const x=body.data||{};for(const [key,label] of Object.entries(attention))setAttention(label,x[key]??0);for(const [key,label] of Object.entries(metric))setMetric(label,['sales','ticket_average'].includes(key)?money(x[key]??0):String(x[key]??0));const quick=d.querySelector('.quick-grid .quick-card');if(quick){const strong=quick.querySelector('strong'),span=quick.querySelector('span');if(strong)strong.textContent=`${x.occupied_tables||0} mesas ocupadas`;if(span)span.textContent=`${x.open_tabs||0} comandas abertas nesta unidade.`}last=Date.now();mark()}catch(e){if(info)info.classList.add('is-stale')}finally{busy=false}}
+ setInterval(refresh,30000);d.addEventListener('visibilitychange',()=>{if(!d.hidden&&Date.now()-last>30000)refresh()});
 }
 
 function improveDialogs(){d.querySelectorAll('dialog').forEach(dialog=>{dialog.addEventListener('click',e=>{const rect=dialog.getBoundingClientRect();if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)dialog.close()})})}
 
-ensurePlatformCouponNav();enhanceStatuses();enhanceTables();enhanceSettingsHub();enhancePlatformCockpit();applyCapabilities();dashboardLiveRefresh();improveDialogs();
+ensurePlatformCouponNav();enhanceStatuses();enhanceTables();enhanceSettingsHub();enhanceDashboardChart();enhanceSuperTenantEditor();enhancePlatformCockpit();applyCapabilities();dashboardLiveRefresh();improveDialogs();
 const observer=new MutationObserver(mutations=>{for(const m of mutations)for(const n of m.addedNodes)if(n.nodeType===1){enhanceStatuses(n);enhanceTables(n)}});observer.observe(d.body,{childList:true,subtree:true});
 })();
