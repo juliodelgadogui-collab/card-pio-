@@ -195,7 +195,7 @@ class ConnectWorkerService : Service() {
                 if (e.status == 422) {
                     // O lease antigo expirou ou foi reaberto no servidor. Liberamos o recibo
                     // local para que a mesma outbox seja reivindicada novamente. O runtime
-                    // Node guarda a idempotência por ID da outbox e não reenviará no WhatsApp.
+                    // Node guarda a idempotência por empresa + ID da outbox e não reenviará.
                     store.removePendingOutboundAck(receipt.id)
                     store.setRuntime("connected", error = "Confirmação antiga expirou. O Connect reconciliará o envio sem duplicar a mensagem.")
                     continue
@@ -225,7 +225,7 @@ class ConnectWorkerService : Service() {
             val mediaUrl = message.optString("media_url").trim()
             val mediaFilename = message.optString("media_filename").trim()
             val mediaMime = message.optString("media_mime").trim()
-            val idempotencyKey = "eventmenu-outbox-$id"
+            val idempotencyKey = "eventmenu-tenant-${store.tenantId()}-outbox-$id"
 
             val sent = try {
                 when {
