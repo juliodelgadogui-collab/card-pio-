@@ -1,6 +1,6 @@
 CREATE TABLE whatsapp_connections (
   tenant_id BIGINT UNSIGNED PRIMARY KEY,
-  provider VARCHAR(32) NOT NULL DEFAULT 'wppconnect',
+  provider VARCHAR(32) NOT NULL DEFAULT 'eventmenu_connect',
   session_key CHAR(64) NOT NULL,
   status VARCHAR(24) NOT NULL DEFAULT 'disconnected',
   phone_number VARCHAR(32) NULL,
