@@ -10,6 +10,7 @@ use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\TicketWhatsAppQueueService;
 use EventMenu\Services\WhatsAppCommercePaymentService;
 use EventMenu\Services\WhatsAppCommerceService;
+use EventMenu\Services\WhatsAppCommerceStatusSyncService;
 use EventMenu\Services\WhatsAppDesktopAgentService;
 
 header('Content-Type: application/json; charset=utf-8');
@@ -23,8 +24,9 @@ function whatsapp_desktop_body():array{$raw=file_get_contents('php://input');if(
 function whatsapp_desktop_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)whatsapp_desktop_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
 function whatsapp_desktop_device(string $sessionDevice,array $body):string{$reported=mb_substr(trim((string)($body['device_id']??$sessionDevice)),0,190);if($sessionDevice!==''&&$reported!==''&&!hash_equals($sessionDevice,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');if($reported==='')throw new RuntimeException('Dispositivo não identificado.');return$reported;}
 function whatsapp_desktop_sync_automations():array{
-    $result=['ticket_messages_queued'=>0,'ticket_sync_ok'=>true,'commerce_payment_messages_queued'=>0,'commerce_payment_sync_ok'=>true];
+    $result=['ticket_messages_queued'=>0,'ticket_sync_ok'=>true,'commerce_payment_messages_queued'=>0,'commerce_payment_sync_ok'=>true,'commerce_status_messages_queued'=>0,'commerce_status_sync_ok'=>true];
     try{$result['ticket_messages_queued']=(new TicketWhatsAppQueueService())->syncCurrentTenant(50);}catch(Throwable $e){$result['ticket_sync_ok']=false;if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))$result['ticket_sync_error']=$e->getMessage();}
+    try{$result['commerce_status_messages_queued']=(new WhatsAppCommerceStatusSyncService())->syncCurrentTenant(null,null,100);}catch(Throwable $e){$result['commerce_status_sync_ok']=false;if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))$result['commerce_status_sync_error']=$e->getMessage();}
     try{$result['commerce_payment_messages_queued']=(new WhatsAppCommercePaymentService())->syncPaidConversations(null,null,50);}catch(Throwable $e){$result['commerce_payment_sync_ok']=false;if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))$result['commerce_payment_sync_error']=$e->getMessage();}
     return$result;
 }
