@@ -2,9 +2,9 @@
 'use strict';
 const d=document;
 
-/* Premium v5 is intentionally loaded after the legacy layers. This keeps old screens
-   compatible while making this file the single visual override for the admin UI. */
-const v5=d.createElement('link');v5.rel='stylesheet';v5.href=new URL('assets/premium-v5.css',location.href).toString();d.head.appendChild(v5);
+/* Premium v5 is appended after the parsed page so it wins over legacy/page-local
+   style blocks while preserving them as compatibility fallbacks. */
+const v5=d.createElement('link');v5.rel='stylesheet';v5.href=new URL('assets/premium-v5.css',location.href).toString();(d.body||d.documentElement).appendChild(v5);
 
 const params=new URLSearchParams(location.search);
 const path=(location.pathname.split('/').pop()||'').toLowerCase();
@@ -90,7 +90,7 @@ async function applyCapabilities(){
  try{
    const endpoint=new URL('api-ui-capabilities.php',location.href);const r=await fetch(endpoint,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)return;const body=await r.json();if(!body.ok||!body.data)return;
    const disabled=new Set(body.data.disabled_routes||[]);
-   d.querySelectorAll('.nav a[data-route]').forEach(a=>{if(disabled.has(a.dataset.route||''))a.closest('a')?.remove()});
+   d.querySelectorAll('.nav a[data-route]').forEach(a=>{if(disabled.has(a.dataset.route||''))a.remove()});
    d.querySelectorAll('.nav-group').forEach(g=>{if(!g.querySelector('a'))g.remove()});
    const modules=body.data.modules||{};
    const hideByHref=[['whatsapp.php','whatsapp'],['support.php','whatsapp'],['receipt-settings','printing'],['route=reports','reports'],['route=units','units']];
