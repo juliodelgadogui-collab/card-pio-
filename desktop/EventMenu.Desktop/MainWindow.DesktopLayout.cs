@@ -9,6 +9,7 @@ public partial class MainWindow
 {
     private bool _desktopLayoutHooksReady;
     private bool _desktopInitialFitDone;
+    private bool _desktopFittingWorkArea;
 
     static MainWindow()
     {
@@ -24,42 +25,63 @@ public partial class MainWindow
             window.MinWidth = 860;
             window.MinHeight = 560;
             window.SizeChanged += (_, _) => window.ApplyDesktopLayout();
-            window.StateChanged += (_, _) => window.Dispatcher.BeginInvoke(new Action(window.ApplyDesktopLayout));
+            window.LocationChanged += (_, _) => window.FitMainWindowToWorkArea(center: false);
+            window.DpiChanged += (_, _) => window.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                window.FitMainWindowToWorkArea(center: false);
+                window.ApplyDesktopLayout();
+            }));
+            window.StateChanged += (_, _) => window.Dispatcher.BeginInvoke(new Action(() =>
+            {
+                window.FitMainWindowToWorkArea(center: false);
+                window.ApplyDesktopLayout();
+            }));
         }
 
         if (!window._desktopInitialFitDone)
         {
             window._desktopInitialFitDone = true;
-            window.FitMainWindowToWorkArea();
+            window.FitMainWindowToWorkArea(center: true);
         }
 
         window.ApplyDesktopLayout();
     }
 
-    private void FitMainWindowToWorkArea()
+    private void FitMainWindowToWorkArea(bool center)
     {
-        if (WindowState != WindowState.Normal) return;
+        if (WindowState != WindowState.Normal || _desktopFittingWorkArea) return;
+        _desktopFittingWorkArea = true;
 
-        var workArea = SystemParameters.WorkArea;
-        const double safeMargin = 16;
-        var availableWidth = Math.Max(320, workArea.Width - safeMargin);
-        var availableHeight = Math.Max(300, workArea.Height - safeMargin);
+        try
+        {
+            var workArea = MonitorWorkArea.Get(this);
+            const double safeMargin = 16;
+            var availableWidth = Math.Max(320, workArea.Width - safeMargin);
+            var availableHeight = Math.Max(300, workArea.Height - safeMargin);
 
-        MinWidth = Math.Min(MinWidth, availableWidth);
-        MinHeight = Math.Min(MinHeight, availableHeight);
+            MinWidth = Math.Min(MinWidth, availableWidth);
+            MinHeight = Math.Min(MinHeight, availableHeight);
 
-        if (double.IsNaN(Width) || Width <= 0 || Width > availableWidth)
-            Width = availableWidth;
-        if (double.IsNaN(Height) || Height <= 0 || Height > availableHeight)
-            Height = availableHeight;
+            if (double.IsNaN(Width) || Width <= 0 || Width > availableWidth)
+                Width = availableWidth;
+            if (double.IsNaN(Height) || Height <= 0 || Height > availableHeight)
+                Height = availableHeight;
 
-        Width = Math.Max(MinWidth, Math.Min(Width, availableWidth));
-        Height = Math.Max(MinHeight, Math.Min(Height, availableHeight));
+            Width = Math.Max(MinWidth, Math.Min(Width, availableWidth));
+            Height = Math.Max(MinHeight, Math.Min(Height, availableHeight));
 
-        // Recenter after clamping. This prevents part of the window from opening
-        // outside the visible work area when Windows display scaling is 125/150%.
-        Left = workArea.Left + Math.Max(0, (workArea.Width - Width) / 2);
-        Top = workArea.Top + Math.Max(0, (workArea.Height - Height) / 2);
+            var desiredLeft = center ? workArea.Left + (workArea.Width - Width) / 2 : Left;
+            var desiredTop = center ? workArea.Top + (workArea.Height - Height) / 2 : Top;
+
+            // Clamp to the monitor that actually contains the window. This keeps the
+            // app on a secondary display instead of pulling it back to the primary one.
+            Left = Math.Max(workArea.Left, Math.Min(desiredLeft, workArea.Right - Width));
+            Top = Math.Max(workArea.Top, Math.Min(desiredTop, workArea.Bottom - Height));
+        }
+        finally
+        {
+            _desktopFittingWorkArea = false;
+        }
     }
 
     private void ApplyDesktopLayout()
