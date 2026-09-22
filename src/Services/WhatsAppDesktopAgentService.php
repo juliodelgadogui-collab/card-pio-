@@ -93,8 +93,8 @@ final class WhatsAppDesktopAgentService
     {
         $tenantId=$this->tenantId();$deviceHash=$this->deviceHash($deviceId);$claimToken=$this->claimToken($claimToken);if($id<1)throw new RuntimeException('Mensagem inválida.');
         $externalMessageId=mb_substr(trim($externalMessageId),0,190);$pdo=Database::connection();
-        $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'sent\',provider=?,sent_at=CURRENT_TIMESTAMP,locked_at=NULL,external_message_id=?,last_error=NULL,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=?');
-        $s->execute([self::PROVIDER,$externalMessageId?:null,$id,$tenantId,$claimToken,$deviceHash]);if($s->rowCount()!==1)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
+        $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'sent\',sent_at=CURRENT_TIMESTAMP,locked_at=NULL,external_message_id=?,last_error=NULL,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=?');
+        $s->execute([$externalMessageId?:null,$id,$tenantId,$claimToken,$deviceHash]);if($s->rowCount()!==1)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
         $this->syncCommunicationRecipient($pdo,$tenantId,$id,'sent');
         $this->syncConversationMessage($pdo,$tenantId,$id,'sent',$externalMessageId);
         return['id'=>$id,'status'=>'sent','external_message_id'=>$externalMessageId?:null];
