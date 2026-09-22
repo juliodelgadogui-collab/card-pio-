@@ -83,6 +83,10 @@ jobs:
               -dname "CN=DELYVRE Development,O=EventMenu,C=BR" \
               -keyalg RSA -keysize 2048 -validity 10000
           fi
+          DEBUG_CERT="$(keytool -exportcert -rfc -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test -n "$DEBUG_CERT"
+          echo "DELYVRE_DEBUG_CERT_SHA256=$DEBUG_CERT" >> "$GITHUB_ENV"
+          echo "Stable DELYVRE debug certificate SHA-256: $DEBUG_CERT"
 
       - name: Stamp bounded debug version
         shell: bash
@@ -115,7 +119,13 @@ jobs:
           APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
           AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
           test -s "$APK"
-          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/delyvre-debug-apksigner.txt"
+          APK_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/delyvre-debug-apksigner.txt" | head -n1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test -n "$APK_CERT"
+          if [ "$APK_CERT" != "$DELYVRE_DEBUG_CERT_SHA256" ]; then
+            echo "::error::Debug APK certificate does not match the cached DELYVRE debug keystore"
+            exit 1
+          fi
           "$AAPT" dump badging "$APK" | head -n 3
           mkdir -p dist-debug
           cp "$APK" "dist-debug/DELYVRE-debug-${DELYVRE_VERSION_NAME}.apk"
