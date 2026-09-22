@@ -58,7 +58,7 @@ final class WhatsAppDesktopAgentService
         $tenantId=$this->tenantId();$deviceHash=$this->deviceHash($deviceId);$pdo=Database::connection();
         $q=$pdo->prepare('SELECT id,device_label,status,phone_number,engine,last_seen_at,last_error,created_at,updated_at FROM whatsapp_desktop_agents WHERE tenant_id=? AND device_hash=? LIMIT 1');
         $q->execute([$tenantId,$deviceHash]);$agent=$q->fetch(PDO::FETCH_ASSOC)?:null;
-        $c=$pdo->prepare('SELECT provider,status,phone_number,automation_enabled,last_connected_at,last_seen_at,last_error FROM whatsapp_connections WHERE tenant_id=? LIMIT 1');$c->execute([$tenantId]);$connection=$c->fetch(PDO::FETCH_ASSOC)?:null;
+        $c=$pdo->prepare('SELECT provider,status,phone_number,automation_enabled,commerce_enabled,last_connected_at,last_seen_at,last_error FROM whatsapp_connections WHERE tenant_id=? LIMIT 1');$c->execute([$tenantId]);$connection=$c->fetch(PDO::FETCH_ASSOC)?:null;
         $p=$pdo->prepare('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=? AND status IN (\'queued\',\'failed\',\'desktop_queued\',\'desktop_failed\') AND attempt_count<max_attempts');$p->execute([$tenantId]);
         return ['agent'=>$agent,'connection'=>$connection,'pending'=>(int)$p->fetchColumn(),'provider'=>self::PROVIDER];
     }
@@ -76,6 +76,7 @@ final class WhatsAppDesktopAgentService
                 $token=bin2hex(random_bytes(32));$expires=gmdate('Y-m-d H:i:s',time()+120);
                 $u=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_sending\',attempt_count=attempt_count+1,locked_at=CURRENT_TIMESTAMP,claim_token=?,claimed_by_device_hash=?,claim_expires_at=?,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status IN (\'queued\',\'failed\',\'desktop_queued\',\'desktop_failed\')');
                 $u->execute([$token,$deviceHash,$expires,$id,$tenantId]);if($u->rowCount()!==1)continue;
+                $this->syncConversationMessage($pdo,$tenantId,$id,'sending');
                 $q=$pdo->prepare('SELECT id,order_id,event_type,recipient,message_text,payload_json,attempt_count,max_attempts,claim_token,claim_expires_at,created_at FROM whatsapp_outbox WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$id,$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);
                 if($row){
                     $media=$this->mediaFromPayload($row['payload_json']??null);
@@ -95,6 +96,7 @@ final class WhatsAppDesktopAgentService
         $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'sent\',provider=?,sent_at=CURRENT_TIMESTAMP,locked_at=NULL,external_message_id=?,last_error=NULL,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=?');
         $s->execute([self::PROVIDER,$externalMessageId?:null,$id,$tenantId,$claimToken,$deviceHash]);if($s->rowCount()!==1)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
         $this->syncCommunicationRecipient($pdo,$tenantId,$id,'sent');
+        $this->syncConversationMessage($pdo,$tenantId,$id,'sent',$externalMessageId);
         return['id'=>$id,'status'=>'sent','external_message_id'=>$externalMessageId?:null];
     }
 
@@ -104,11 +106,23 @@ final class WhatsAppDesktopAgentService
         $tenantId=$this->tenantId();$deviceHash=$this->deviceHash($deviceId);$claimToken=$this->claimToken($claimToken);if($id<1)throw new RuntimeException('Mensagem inválida.');$error=mb_substr(trim($error),0,500);if($error==='')$error='Falha no envio local do WhatsApp.';
         return Database::transaction(function(PDO $pdo)use($tenantId,$deviceHash,$claimToken,$id,$error):array{
             $q=$pdo->prepare(Database::portableSql($pdo,'SELECT attempt_count,max_attempts FROM whatsapp_outbox WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=? LIMIT 1 FOR UPDATE'));$q->execute([$id,$tenantId,$claimToken,$deviceHash]);$row=$q->fetch(PDO::FETCH_ASSOC);if(!$row)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
-            $attempt=(int)$row['attempt_count'];$delay=min(3600,30*(2**max(0,$attempt-1)));$available=gmdate('Y-m-d H:i:s',time()+$delay);
+            $attempt=(int)$row['attempt_count'];$delay=min(3600,30*(2**max(0,$attempt-1)));$available=gmdate('Y-m-d H:i:s',time()+$delay);$terminal=$attempt>=(int)$row['max_attempts'];
             $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_failed\',locked_at=NULL,available_at=?,last_error=?,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND claim_token=? AND claimed_by_device_hash=?');$s->execute([$available,$error,$id,$tenantId,$claimToken,$deviceHash]);
-            $this->syncCommunicationRecipient($pdo,$tenantId,$id,$attempt>=(int)$row['max_attempts']?'failed':'retrying');
+            $this->syncCommunicationRecipient($pdo,$tenantId,$id,$terminal?'failed':'retrying');
+            $this->syncConversationMessage($pdo,$tenantId,$id,$terminal?'failed':'retrying');
             return['id'=>$id,'status'=>'desktop_failed','attempt_count'=>$attempt,'max_attempts'=>(int)$row['max_attempts'],'available_at'=>$available];
         });
+    }
+
+    private function syncConversationMessage(PDO $pdo,int $tenantId,int $outboxId,string $status,string $providerMessageId=''):void
+    {
+        try{
+            if($providerMessageId!==''){
+                $pdo->prepare('UPDATE whatsapp_messages SET status=?,provider_message_id=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND outbox_id=?')->execute([$status,$providerMessageId,$tenantId,$outboxId]);
+            }else{
+                $pdo->prepare('UPDATE whatsapp_messages SET status=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND outbox_id=?')->execute([$status,$tenantId,$outboxId]);
+            }
+        }catch(\Throwable $e){error_log('[whatsapp-message-sync] '.$e::class.': '.$e->getMessage());}
     }
 
     private function syncCommunicationRecipient(PDO $pdo,int $tenantId,int $outboxId,string $status):void
