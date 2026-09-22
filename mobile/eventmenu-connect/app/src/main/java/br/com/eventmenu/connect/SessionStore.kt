@@ -8,6 +8,13 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+data class PendingOutboundAck(
+    val id: Int,
+    val claimToken: String,
+    val externalMessageId: String,
+    val savedAt: Long,
+)
+
 class SessionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("eventmenu_connect", Context.MODE_PRIVATE)
 
@@ -72,7 +79,69 @@ class SessionStore(context: Context) {
             .remove("runtime_phone")
             .remove("runtime_pairing_code")
             .remove("runtime_qr")
+            .remove("pending_outbound_acks")
             .apply()
+    }
+
+    @Synchronized
+    fun savePendingOutboundAck(id: Int, claimToken: String, externalMessageId: String): Boolean {
+        if (id < 1 || claimToken.isBlank()) return false
+        val root = pendingAckJson()
+        root.put(
+            id.toString(),
+            JSONObject()
+                .put("id", id)
+                .put("claim_token", claimToken.take(128))
+                .put("external_message_id", externalMessageId.take(190))
+                .put("saved_at", System.currentTimeMillis())
+        )
+        prunePendingAcks(root)
+        return prefs.edit().putString("pending_outbound_acks", root.toString()).commit()
+    }
+
+    @Synchronized
+    fun pendingOutboundAcks(): List<PendingOutboundAck> {
+        val root = pendingAckJson()
+        val rows = mutableListOf<PendingOutboundAck>()
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val row = root.optJSONObject(key) ?: continue
+            val id = row.optInt("id", key.toIntOrNull() ?: 0)
+            val token = row.optString("claim_token").trim()
+            if (id < 1 || token.isBlank()) continue
+            rows += PendingOutboundAck(
+                id = id,
+                claimToken = token,
+                externalMessageId = row.optString("external_message_id").take(190),
+                savedAt = row.optLong("saved_at", 0L),
+            )
+        }
+        return rows.sortedBy { it.savedAt }
+    }
+
+    @Synchronized
+    fun removePendingOutboundAck(id: Int) {
+        if (id < 1) return
+        val root = pendingAckJson()
+        root.remove(id.toString())
+        prefs.edit().putString("pending_outbound_acks", root.toString()).commit()
+    }
+
+    private fun pendingAckJson(): JSONObject {
+        val raw = prefs.getString("pending_outbound_acks", "").orEmpty()
+        return runCatching { if (raw.isBlank()) JSONObject() else JSONObject(raw) }.getOrElse { JSONObject() }
+    }
+
+    private fun prunePendingAcks(root: JSONObject) {
+        if (root.length() <= 100) return
+        val rows = mutableListOf<Pair<String, Long>>()
+        val keys = root.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            rows += key to (root.optJSONObject(key)?.optLong("saved_at", 0L) ?: 0L)
+        }
+        rows.sortedBy { it.second }.take((root.length() - 100).coerceAtLeast(0)).forEach { root.remove(it.first) }
     }
 
     fun setRuntime(
