@@ -28,7 +28,11 @@ final class WhatsAppCustomerRegistrationService
         if(in_array($state,self::STATES,true))return true;
         if(!in_array($state,['IDLE','WELCOME'],true))return false;
         $customer=$this->identity->findByPhone($pdo,$tenantId,$phone);
-        if($customer)$this->bindConversation($pdo,$tenantId,(int)$conversation['id'],(int)$customer['id']);
+        if($customer){
+            $customerId=(int)$customer['id'];$conversationId=(int)($conversation['id']??0);$alreadyLinked=(int)($conversation['customer_id']??0);
+            $this->bindConversation($pdo,$tenantId,$conversationId,$customerId);
+            if($alreadyLinked<1)$this->audit('customer_identified',$conversationId,$customerId);
+        }
         return !$this->profileComplete($customer);
     }
 
