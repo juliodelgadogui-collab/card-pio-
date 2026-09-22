@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Core\Database;
+use EventMenu\Core\TenantFeatures;
 use EventMenu\Services\ApiRateLimitExceededException;
 use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\DeliveryCustomerAuthService;
@@ -28,6 +29,7 @@ if($action==='login'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_o
 if($action==='forgot-password'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.forgot',$subject,5,3600,'Aguarde antes de pedir outro link.');try{$auth->forgotPassword($pdo,(string)($body['email']??''));}catch(Throwable$e){error_log('[delivery-forgot] '.$e::class.': '.$e->getMessage());}delivery_customer_out(['ok'=>true,'message'=>'Se a conta existir, enviaremos as instruções para o e-mail.']);}
 if($action==='reset-password'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.reset',$subject,8,3600,'Muitas tentativas. Aguarde.');Database::transaction(fn(PDO$tx)=>$auth->resetPassword($tx,(string)($body['token']??''),(string)($body['password']??'')));delivery_customer_out(['ok'=>true,'message'=>'Senha atualizada. Entre novamente.']);}
 $bearer=delivery_customer_bearer();$account=$auth->authenticate($pdo,$bearer);$accountId=(int)$account['id'];$rate->assertAllowed('delivery.customer.auth',$rate->requestSubject('account:'.$accountId),240,60,'Muitas atualizações em pouco tempo.');
+$assertOrderModule=static function(int $orderId,string $module)use($pdo,$accountId,$market):array{$order=$market->ownedOrder($pdo,$accountId,$orderId);if(!TenantFeatures::moduleEnabled($module,(int)$order['tenant_id']))throw new RuntimeException($module==='payments'?'Pagamentos estão desativados para esta empresa.':'Este recurso está desativado para esta empresa.');return$order;};
 if($action==='logout'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$pushToken=trim((string)($body['push_token']??''));if($pushToken!=='')$pdo->prepare('UPDATE delivery_customer_push_devices SET active=0,last_seen_at=CURRENT_TIMESTAMP WHERE account_id=? AND push_token=?')->execute([$accountId,$pushToken]);$auth->logout($pdo,$bearer);delivery_customer_out(['ok'=>true]);}
 if($action==='me'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'customer'=>$auth->me($pdo,$accountId)]);}
 if($action==='profile-save'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'customer'=>$auth->updateProfile($pdo,$accountId,$body)]);}
@@ -42,40 +44,27 @@ if($action==='coupon-quote'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_cus
 if($action==='order-create'){
     if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);
     $rate->assertAllowed('delivery.customer.order.create',$rate->requestSubject('account:'.$accountId),10,600,'Muitos pedidos enviados. Aguarde alguns minutos.');
-    $schemaGuard=new DeliveryOrderSchemaGuard();
-    $schemaGuard->ensure($pdo);
-    try{
-        $order=Database::transaction(fn(PDO$tx):array=>$market->createOrder($tx,$accountId,$body));
-    }catch(Throwable$createError){
-        if(!$schemaGuard->isSchemaFailure($createError))throw $createError;
-        error_log('[eventmenu-delyvre-order] schema retry: '.$createError::class.': '.$createError->getMessage());
-        $schemaGuard->ensure($pdo,true);
-        $order=Database::transaction(fn(PDO$tx):array=>$market->createOrder($tx,$accountId,$body));
-    }
+    $schemaGuard=new DeliveryOrderSchemaGuard();$schemaGuard->ensure($pdo);
+    try{$order=Database::transaction(fn(PDO$tx):array=>$market->createOrder($tx,$accountId,$body));}
+    catch(Throwable$createError){if(!$schemaGuard->isSchemaFailure($createError))throw $createError;error_log('[eventmenu-delyvre-order] schema retry: '.$createError::class.': '.$createError->getMessage());$schemaGuard->ensure($pdo,true);$order=Database::transaction(fn(PDO$tx):array=>$market->createOrder($tx,$accountId,$body));}
     delivery_customer_out(['ok'=>true,'order'=>$order],201);
 }
 if($action==='orders'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'orders'=>$market->orders($pdo,$accountId,(int)($_GET['limit']??50))]);}
 if($action==='order'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'order'=>$market->order($pdo,$accountId,(int)($_GET['order_id']??0))]);}
 if($action==='reorder'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'reorder'=>$market->reorder($pdo,$accountId,(int)($body['order_id']??0))]);}
 if($action==='review'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$review=Database::transaction(fn(PDO$tx):array=>$market->review($tx,$accountId,(int)($body['order_id']??0),(int)($body['rating']??0),(string)($body['comment']??'')));delivery_customer_out(['ok'=>true,'review'=>$review]);}
-if($action==='payment-methods'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'methods'=>$market->paymentMethods($pdo,$accountId,(int)($_GET['order_id']??0))]);}
+if($action==='payment-methods'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$orderId=(int)($_GET['order_id']??0);$assertOrderModule($orderId,'payments');delivery_customer_out(['ok'=>true,'methods'=>$market->paymentMethods($pdo,$accountId,$orderId)]);}
 if($action==='payment-pix'){
-    if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);
-    $rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');
+    if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');
     $cpf=(new DeliveryCustomerDocumentService())->cpfFromAccount($account);if($cpf==='')throw new RuntimeException('Informe seu CPF no perfil para continuar com o pagamento.');
-    $orderId=(int)($body['order_id']??0);$payment=$payments->pix($pdo,$accountId,$orderId,(string)($body['provider']??''),$cpf);$owned=$market->ownedOrder($pdo,$accountId,$orderId);
-    (new OrderPaymentPreferenceService())->set($pdo,(int)$owned['tenant_id'],$orderId,'pix',(string)($payment['provider']??''),null,'delivery_app');
-    delivery_customer_out(['ok'=>true,'payment'=>$payment],201);
+    $orderId=(int)($body['order_id']??0);$owned=$assertOrderModule($orderId,'payments');$payment=$payments->pix($pdo,$accountId,$orderId,(string)($body['provider']??''),$cpf);(new OrderPaymentPreferenceService())->set($pdo,(int)$owned['tenant_id'],$orderId,'pix',(string)($payment['provider']??''),null,'delivery_app');delivery_customer_out(['ok'=>true,'payment'=>$payment],201);
 }
 if($action==='payment-card'){
-    if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);
-    $rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');
+    if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$rate->assertAllowed('delivery.customer.payment',$rate->requestSubject('account:'.$accountId),15,600,'Muitas tentativas de pagamento. Aguarde.');
     $cpf=(new DeliveryCustomerDocumentService())->cpfFromAccount($account);if($cpf==='')throw new RuntimeException('Informe seu CPF no perfil para continuar com o pagamento.');
-    $orderId=(int)($body['order_id']??0);$cardPayload=$body;$cardPayload['tax_id']=$cpf;$payment=$payments->card($pdo,$accountId,$orderId,$cardPayload);$owned=$market->ownedOrder($pdo,$accountId,$orderId);$paymentType=strtolower(trim((string)($payment['payment_type_id']??$cardPayload['payment_type_id']??'')));$method=$paymentType==='debit_card'?'card_debit':'card_credit';
-    (new OrderPaymentPreferenceService())->set($pdo,(int)$owned['tenant_id'],$orderId,$method,(string)($payment['provider']??'mercadopago'),null,'delivery_app');
-    delivery_customer_out(['ok'=>true,'payment'=>$payment],201);
+    $orderId=(int)($body['order_id']??0);$owned=$assertOrderModule($orderId,'payments');$cardPayload=$body;$cardPayload['tax_id']=$cpf;$payment=$payments->card($pdo,$accountId,$orderId,$cardPayload);$paymentType=strtolower(trim((string)($payment['payment_type_id']??$cardPayload['payment_type_id']??'')));$method=$paymentType==='debit_card'?'card_debit':'card_credit';(new OrderPaymentPreferenceService())->set($pdo,(int)$owned['tenant_id'],$orderId,$method,(string)($payment['provider']??'mercadopago'),null,'delivery_app');delivery_customer_out(['ok'=>true,'payment'=>$payment],201);
 }
-if($action==='payment-cash'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$change=array_key_exists('change_for_cents',$body)&&$body['change_for_cents']!==null?(int)$body['change_for_cents']:null;delivery_customer_out(['ok'=>true,'payment'=>$market->markCash($pdo,$accountId,(int)($body['order_id']??0),$change)]);}
-if($action==='payment-status'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);delivery_customer_out(['ok'=>true,'payment'=>$payments->status($pdo,$accountId,(int)($_GET['order_id']??0))]);}
+if($action==='payment-cash'){if($_SERVER['REQUEST_METHOD']!=='POST')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$orderId=(int)($body['order_id']??0);$assertOrderModule($orderId,'payments');$change=array_key_exists('change_for_cents',$body)&&$body['change_for_cents']!==null?(int)$body['change_for_cents']:null;delivery_customer_out(['ok'=>true,'payment'=>$market->markCash($pdo,$accountId,$orderId,$change)]);}
+if($action==='payment-status'){if($_SERVER['REQUEST_METHOD']!=='GET')delivery_customer_out(['ok'=>false,'message'=>'Ação indisponível.'],405);$orderId=(int)($_GET['order_id']??0);$assertOrderModule($orderId,'payments');delivery_customer_out(['ok'=>true,'payment'=>$payments->status($pdo,$accountId,$orderId)]);}
 delivery_customer_out(['ok'=>false,'code'=>'NOT_FOUND','message'=>'Ação não encontrada.'],404);
 }catch(ApiRateLimitExceededException$e){delivery_customer_out(['ok'=>false,'code'=>'RATE_LIMITED','message'=>delivery_customer_error($e)['message']],429);}catch(RuntimeException$e){$err=delivery_customer_error($e);$status=$err['code']==='UNAUTHENTICATED'?401:422;delivery_customer_out(['ok'=>false]+$err,$status);}catch(Throwable$e){error_log('[eventmenu-delivery-customer] '.$e::class.': '.$e->getMessage());delivery_customer_out(['ok'=>false,'code'=>'INTERNAL_ERROR','message'=>'Não foi possível concluir agora. Tente novamente.'],500);}
