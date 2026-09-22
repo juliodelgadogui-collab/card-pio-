@@ -8,6 +8,7 @@ use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\ApiRateLimitExceededException;
 use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\TicketWhatsAppQueueService;
+use EventMenu\Services\WhatsAppCommercePaymentService;
 use EventMenu\Services\WhatsAppCommerceService;
 use EventMenu\Services\WhatsAppDesktopAgentService;
 
@@ -21,7 +22,12 @@ function whatsapp_desktop_out(array $data,int $status=200):never{http_response_c
 function whatsapp_desktop_body():array{$raw=file_get_contents('php://input');if($raw===false||trim($raw)==='')return $_POST?:[];try{$data=json_decode($raw,true,512,JSON_THROW_ON_ERROR);return is_array($data)?$data:[];}catch(Throwable){whatsapp_desktop_out(['ok'=>false,'error'=>'JSON inválido.'],400);}}
 function whatsapp_desktop_method(string $expected):void{if($_SERVER['REQUEST_METHOD']!==$expected)whatsapp_desktop_out(['ok'=>false,'error'=>'Método não permitido.'],405);}
 function whatsapp_desktop_device(string $sessionDevice,array $body):string{$reported=mb_substr(trim((string)($body['device_id']??$sessionDevice)),0,190);if($sessionDevice!==''&&$reported!==''&&!hash_equals($sessionDevice,$reported))throw new RuntimeException('Identificação do dispositivo não confere com a sessão.');if($reported==='')throw new RuntimeException('Dispositivo não identificado.');return$reported;}
-function whatsapp_desktop_sync_tickets():array{$result=['ticket_messages_queued'=>0,'ticket_sync_ok'=>true];try{$result['ticket_messages_queued']=(new TicketWhatsAppQueueService())->syncCurrentTenant(50);}catch(Throwable $e){$result['ticket_sync_ok']=false;if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))$result['ticket_sync_error']=$e->getMessage();}return$result;}
+function whatsapp_desktop_sync_automations():array{
+    $result=['ticket_messages_queued'=>0,'ticket_sync_ok'=>true,'commerce_payment_messages_queued'=>0,'commerce_payment_sync_ok'=>true];
+    try{$result['ticket_messages_queued']=(new TicketWhatsAppQueueService())->syncCurrentTenant(50);}catch(Throwable $e){$result['ticket_sync_ok']=false;if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))$result['ticket_sync_error']=$e->getMessage();}
+    try{$result['commerce_payment_messages_queued']=(new WhatsAppCommercePaymentService())->syncPaidConversations(null,null,50);}catch(Throwable $e){$result['commerce_payment_sync_ok']=false;if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))$result['commerce_payment_sync_error']=$e->getMessage();}
+    return$result;
+}
 
 try{
     $auth=new ApiAuthService();
@@ -36,13 +42,13 @@ try{
 
     if($action==='state'){
         whatsapp_desktop_method('GET');
-        whatsapp_desktop_out(['ok'=>true]+whatsapp_desktop_sync_tickets()+$service->state($deviceId));
+        whatsapp_desktop_out(['ok'=>true]+whatsapp_desktop_sync_automations()+$service->state($deviceId));
     }
 
     if($action==='heartbeat'){
         whatsapp_desktop_method('POST');
         $body=whatsapp_desktop_body();$reported=whatsapp_desktop_device($deviceId,$body);
-        $sync=whatsapp_desktop_sync_tickets();
+        $sync=whatsapp_desktop_sync_automations();
         $state=$service->heartbeat($reported,(string)($body['device_label']??''),(string)($body['status']??'disconnected'),(string)($body['phone']??''),(string)($body['error']??''));
         whatsapp_desktop_out(['ok'=>true]+$sync+$state);
     }
