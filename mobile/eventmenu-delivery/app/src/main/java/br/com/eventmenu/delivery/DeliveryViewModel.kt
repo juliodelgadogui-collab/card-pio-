@@ -34,7 +34,8 @@ enum class MarketplaceLoadIssue { Offline, ServerUnavailable, Temporary }
 class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     private val deliveryApp=app as? DeliveryApplication
     private val session=deliveryApp?.sessionStore?:SecureSessionStore(app)
-    private val api=DeliveryApi{session.accessToken}\n    private val cartPersistence=CartPersistence(app)
+    private val api=DeliveryApi{session.accessToken}
+    private val cartPersistence=CartPersistence(app)
     var screen by mutableStateOf<Screen>(Screen.Home);private set
     var mainDestination by mutableStateOf(MainDestination.Home);private set
     var customer by mutableStateOf<Customer?>(null);private set
