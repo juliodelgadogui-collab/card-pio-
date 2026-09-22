@@ -7,6 +7,7 @@ const main = fs.readFileSync(path.join(root, 'node-runtime/main.js'), 'utf8');
 const worker = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventmenu/connect/ConnectWorkerService.kt'), 'utf8');
 const store = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventmenu/connect/SessionStore.kt'), 'utf8');
 const manifest = fs.readFileSync(path.join(root, 'app/src/main/AndroidManifest.xml'), 'utf8');
+const backgroundGuard = fs.readFileSync(path.join(root, 'app/src/main/java/br/com/eventmenu/connect/EventMenuConnectApplication.kt'), 'utf8');
 const network = fs.readFileSync(path.join(root, 'app/src/main/res/xml/network_security_config.xml'), 'utf8');
 
 function assert(condition, message) {
@@ -48,6 +49,12 @@ assert(store.includes('.remove("tenant_id")'), 'Logout do EventMenu não limpa a
 
 assert(manifest.includes('android:usesCleartextTraffic="false"'), 'Aplicativo ainda libera HTTP externo globalmente.');
 assert(manifest.includes('android:networkSecurityConfig="@xml/network_security_config"'), 'Network Security Config não está ativado.');
+assert(manifest.includes('android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'), 'Connect não pode solicitar liberação da otimização de bateria.');
+assert(manifest.includes('android:stopWithTask="false"'), 'Serviço ainda pode ser encerrado junto com a tela/tarefa.');
+assert(manifest.includes('android:name=".EventMenuConnectApplication"'), 'Guardião de pareamento em segundo plano não está ativado.');
+assert(backgroundGuard.includes('PowerManager.PARTIAL_WAKE_LOCK'), 'Pareamento não mantém CPU/socket acordados ao trocar de aplicativo.');
+assert(backgroundGuard.includes('lock.acquire(5 * 60 * 1000L)'), 'Wake lock de pareamento precisa ter timeout curto e explícito.');
+assert(backgroundGuard.includes('ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS'), 'App não oferece liberação de otimização de bateria.');
 assert(network.includes('cleartextTrafficPermitted="false"'), 'Configuração base ainda permite cleartext.');
 assert(network.includes('127.0.0.1'), 'Loopback interno do Node não foi preservado.');
 
