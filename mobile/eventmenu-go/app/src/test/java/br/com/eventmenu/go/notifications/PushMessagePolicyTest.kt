@@ -15,6 +15,11 @@ class PushMessagePolicyTest {
     fun futureOrMissingEpochIsAccepted() {
         assertFalse(PushMessagePolicy.isExpired("1001", nowEpochSeconds = 1000))
         assertFalse(PushMessagePolicy.isExpired(null, nowEpochSeconds = 1000))
-        assertFalse(PushMessagePolicy.isExpired("invalid", nowEpochSeconds = 1000))
+        assertFalse(PushMessagePolicy.isExpired("   ", nowEpochSeconds = 1000))
+    }
+
+    @Test
+    fun malformedExpiryIsRejected() {
+        assertTrue(PushMessagePolicy.isExpired("invalid", nowEpochSeconds = 1000))
     }
 }
