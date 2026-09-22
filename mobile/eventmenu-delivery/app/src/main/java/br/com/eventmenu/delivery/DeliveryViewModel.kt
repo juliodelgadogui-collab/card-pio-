@@ -34,7 +34,7 @@ enum class MarketplaceLoadIssue { Offline, ServerUnavailable, Temporary }
 class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     private val deliveryApp=app as? DeliveryApplication
     private val session=deliveryApp?.sessionStore?:SecureSessionStore(app)
-    private val api=DeliveryApi{session.accessToken}
+    private val api=DeliveryApi{session.accessToken}\n    private val cartPersistence=CartPersistence(app)
     var screen by mutableStateOf<Screen>(Screen.Home);private set
     var mainDestination by mutableStateOf(MainDestination.Home);private set
     var customer by mutableStateOf<Customer?>(null);private set
@@ -76,7 +76,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     val isAuthenticated:Boolean get()=!session.accessToken.isNullOrBlank()
     val canReturnFromProfile:Boolean get()=profileReturnScreen!=null
 
-    init{if(isAuthenticated){deliveryApp?.pushCoordinator?.syncAfterLogin();refreshSession()}}
+    init{restorePersistedCart();if(isAuthenticated){deliveryApp?.pushCoordinator?.syncAfterLogin();refreshSession()}}
     fun clearMessage(){message=null}
     fun navigate(value:Screen){screen=value;when(value){Screen.Home->mainDestination=MainDestination.Home;Screen.Orders->mainDestination=MainDestination.Orders;Screen.Profile->mainDestination=MainDestination.Profile;else->Unit}}
     fun navigateMain(value:MainDestination){
@@ -98,7 +98,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun registerWithCpf(name:String,cpf:String,email:String,phone:String,password:String,legalAccepted:Boolean=false)=action{if(!legalAccepted)error("Aceite os Termos de Uso e a Política de Privacidade para continuar.");val result=api.register(name.trim(),cpf.trim(),email.trim(),phone.trim(),password,legalAccepted);pendingEmail=result.email;screen=Screen.VerifyEmail;message=if(result.emailSent)"Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."}
     fun resendVerification()=action{api.resend(pendingEmail);message="Se o cadastro estiver pendente, um novo link foi enviado."}
     fun forgotPassword(email:String)=action{api.forgotPassword(email);message="Se a conta existir, você receberá um link para criar uma nova senha."}
-    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";profileReturnScreen=null;stores=api.stores();storeSearchQuery="";storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}
+    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();cartPersistence.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";profileReturnScreen=null;stores=api.stores();storeSearchQuery="";storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}
 
     fun loadHome(){loadStores();loadRecentOrdersForHome()}
     fun loadStores(query:String=""){
@@ -145,10 +145,19 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         recentOrdersJob=viewModelScope.launch{runCatching{api.orders()}.onSuccess{orders=it}}
     }
 
-    fun openStore(store:Store)=action{catalog=api.catalog(store.tenantId,store.unitId);cart.clear();clearCoupon(false);screen=Screen.Catalog;if(!store.acceptingOrders)message="Este restaurante está fechado para novos pedidos agora. Você ainda pode consultar o cardápio."}
+    fun openStore(store:Store)=action{
+        val loaded=api.catalog(store.tenantId,store.unitId)
+        val sameStore=catalog?.store?.let{it.tenantId==store.tenantId&&it.unitId==store.unitId}==true
+        if(!sameStore&&cart.isNotEmpty()){cart.clear();cartPersistence.clear();clearCoupon(false)}
+        catalog=loaded
+        revalidateCurrentCart()
+        screen=Screen.Catalog;if(!store.acceptingOrders)message="Este restaurante está fechado para novos pedidos agora. Você ainda pode consultar o cardápio."}
     fun toggleFavorite(store:Store){if(!isAuthenticated){screen=Screen.Login;message="Entre para salvar restaurantes nos favoritos.";return};action(showBusy=false){api.favorite(store.tenantId,!store.favorite);stores=stores.map{if(it.tenantId==store.tenantId&&it.unitId==store.unitId)it.copy(favorite=!store.favorite)else it};storeSearchResults=storeSearchResults.map{if(it.tenantId==store.tenantId&&it.unitId==store.unitId)it.copy(favorite=!store.favorite)else it}}}
-    fun addToCart(product:Product,quantity:Int=1,optionIds:Set<Int> = emptySet(),notes:String=""){if(!product.available)return;val index=cart.indexOfFirst{it.product.id==product.id&&it.optionIds==optionIds&&it.notes==notes};if(index>=0)cart[index]=cart[index].copy(quantity=(cart[index].quantity+quantity).coerceAtMost(99))else cart+=CartItem(product,quantity.coerceIn(1,99),optionIds,notes);invalidateCouponForCartChange();message="${product.name} adicionado."}
-    fun updateCart(index:Int,quantity:Int){if(index !in cart.indices)return;if(quantity<=0)cart.removeAt(index)else cart[index]=cart[index].copy(quantity=quantity.coerceAtMost(99));invalidateCouponForCartChange()}
+    fun addToCart(product:Product,quantity:Int=1,optionIds:Set<Int> = emptySet(),notes:String=""){if(!product.available)return;val index=cart.indexOfFirst{it.product.id==product.id&&it.optionIds==optionIds&&it.notes==notes};if(index>=0)cart[index]=cart[index].copy(quantity=(cart[index].quantity+quantity).coerceAtMost(99))else cart+=CartItem(product,quantity.coerceIn(1,99),optionIds,notes.take(500));invalidateCouponForCartChange();persistCart();message="${product.name} adicionado."}
+    fun updateCart(index:Int,quantity:Int){if(index !in cart.indices)return;if(quantity<=0)cart.removeAt(index)else cart[index]=cart[index].copy(quantity=quantity.coerceAtMost(99));invalidateCouponForCartChange();persistCart()}
+    fun removeCartItem(index:Int){if(index !in cart.indices)return;cart.removeAt(index);invalidateCouponForCartChange();persistCart()}
+    fun clearCart(){cart.clear();cartPersistence.clear();clearCoupon(false);message="Carrinho limpo."}
+    fun replaceCartItem(index:Int,quantity:Int,optionIds:Set<Int>,notes:String){if(index !in cart.indices)return;val product=cart[index].product;cart[index]=CartItem(product,quantity.coerceIn(1,99),optionIds,notes.take(500));invalidateCouponForCartChange();persistCart()}
     fun validateCoupon(code:String)=action{val cat=catalog?:error("Loja não carregada.");val normalized=code.trim().uppercase();if(normalized.isBlank())error("Digite o código do cupom.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<=0)error("Adicione itens ao carrinho antes de aplicar o cupom.");val quote=api.couponQuote(cat.store.tenantId,normalized,subtotal);couponCode=quote.code;couponQuote=quote;message="Cupom ${quote.code} aplicado: ${money(quote.discountCents)} de desconto."}
     fun clearCoupon(showMessage:Boolean=true){val had=couponQuote!=null||couponCode.isNotBlank();couponQuote=null;couponCode="";if(showMessage&&had)message="Cupom removido."}
     private fun invalidateCouponForCartChange(){if(couponQuote!=null||couponCode.isNotBlank()){couponQuote=null;couponCode="";message="O carrinho mudou. Aplique o cupom novamente."}}
@@ -158,7 +167,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
         action{
             val cat=catalog?:error("Loja não carregada.");if(!cat.store.acceptingOrders)error("Este restaurante pausou novos pedidos no momento.");if(cart.isEmpty())error("Seu carrinho está vazio.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<cat.store.minimumOrderCents)error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
             val appliedCoupon=couponCode;if(appliedCoupon.isNotBlank())couponQuote=api.couponQuote(cat.store.tenantId,appliedCoupon,subtotal)
-            val order=api.createOrder(cat,addressId,cart.toList(),appliedCoupon);selectedOrder=order;PaymentUiContext.updateAmount(order.totalCents);cart.clear();clearCoupon(false);paymentMethods=api.paymentMethods(order.orderNumber);pixPayment=null;paymentWaiting=false;payerCpf="";if(paymentMethods?.cards?.isNotEmpty()==true&&customer?.cpfConfigured==true)runCatching{api.paymentIdentification()}.onSuccess{payerCpf=it};screen=Screen.Checkout
+            val order=api.createOrder(cat,addressId,cart.toList(),appliedCoupon);selectedOrder=order;PaymentUiContext.updateAmount(order.totalCents);cart.clear();cartPersistence.clear();clearCoupon(false);paymentMethods=api.paymentMethods(order.orderNumber);pixPayment=null;paymentWaiting=false;payerCpf="";if(paymentMethods?.cards?.isNotEmpty()==true&&customer?.cpfConfigured==true)runCatching{api.paymentIdentification()}.onSuccess{payerCpf=it};screen=Screen.Checkout
         }
     }
     fun reloadPaymentMethods()=action(showBusy=false){val id=selectedOrder?.orderNumber?:return@action;paymentMethods=api.paymentMethods(id)}
@@ -170,7 +179,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshOrders()=action(showBusy=false){if(isAuthenticated)orders=api.orders()}
     fun openOrder(id:Int)=action{openOrderSuspend(id)}
     private suspend fun openOrderSuspend(id:Int){selectedOrder=api.order(id);screen=Screen.OrderDetail;startTracking()}
-    fun repeatOrder(id:Int)=action{val r=api.reorder(id);val s=r.getJSONObject("store");catalog=api.catalog(s.getInt("tenant_id"),s.getInt("unit_id"));if(catalog?.store?.acceptingOrders==false)error("Este restaurante pausou novos pedidos no momento.");cart.clear();clearCoupon(false);val items=r.optJSONArray("items");if(items!=null)for(i in 0 until items.length()){val row=items.getJSONObject(i);val product=catalog?.products?.firstOrNull{it.id==row.optInt("product_id")}?:continue;cart+=CartItem(product,row.optDouble("quantity",1.0).toInt().coerceAtLeast(1))};screen=Screen.Cart}
+    fun repeatOrder(id:Int)=action{val r=api.reorder(id);val s=r.getJSONObject("store");catalog=api.catalog(s.getInt("tenant_id"),s.getInt("unit_id"));if(catalog?.store?.acceptingOrders==false)error("Este restaurante pausou novos pedidos no momento.");cart.clear();clearCoupon(false);val items=r.optJSONArray("items");if(items!=null)for(i in 0 until items.length()){val row=items.getJSONObject(i);val product=catalog?.products?.firstOrNull{it.id==row.optInt("product_id")}?:continue;cart+=CartItem(product,row.optDouble("quantity",1.0).toInt().coerceAtLeast(1))};persistCart();screen=Screen.Cart}
     fun submitReview(orderId:Int,rating:Int,comment:String)=action{api.review(orderId,rating,comment);message="Obrigado pela avaliação!"}
     fun openProfile(){if(!isAuthenticated){screen=Screen.Login;message="Entre para acessar seu perfil, endereços e benefícios.";return};profileReturnScreen=if(screen==Screen.Checkout)Screen.Checkout else null;mainDestination=MainDestination.Profile;screen=Screen.Profile;action{customer=api.me()}}
     fun editAddress(address:Address?=null){if(!isAuthenticated){screen=Screen.Login;message="Entre para salvar um endereço.";return};editingAddress=address;screen=Screen.AddressEditor}
@@ -183,6 +192,44 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadStoresInternal(){stores=api.stores();if(storeSearchQuery.isBlank())storeSearchResults=stores}
     private fun startPaymentPolling(orderId:Int){paymentPollingJob?.cancel();paymentWaiting=true;paymentPollingJob=viewModelScope.launch{repeat(90){delay(if(it==0)2_500 else 5_000);val result=runCatching{api.paymentStatus(orderId)}.getOrNull()?:return@repeat;when(result.optString("payment_status").lowercase()){ "paid"->{paymentWaiting=false;pixPayment=null;payerCpf="";PaymentUiContext.clear();message="Pagamento confirmado.";runCatching{openOrderSuspend(orderId)}.onFailure{message=it.message?:"Pagamento confirmado. Atualize seus pedidos."};return@launch};"failed","cancelled"->{paymentWaiting=false;pixPayment=null;message="O pagamento não foi concluído. Você pode tentar novamente ou escolher outra forma.";return@launch}}};paymentWaiting=false;message="A confirmação ainda não chegou. O pedido continuará sendo atualizado pelo servidor."}}
     private fun startTracking(){trackingJob?.cancel();tracking=null;val token=selectedOrder?.trackingToken?:return;trackingJob=viewModelScope.launch{repeat(180){runCatching{api.tracking(token)}.onSuccess{tracking=it};if(tracking?.status=="completed"||tracking?.status=="cancelled")return@launch;delay(10_000)}}}
+    private fun persistCart(){cartPersistence.save(catalog,cart.toList())}
+    private fun restorePersistedCart(){
+        val saved=cartPersistence.load()?:return
+        viewModelScope.launch{
+            runCatching{api.catalog(saved.tenantId,saved.unitId)}.onSuccess{fresh->
+                catalog=fresh
+                val restored=saved.items.mapNotNull{savedItem->
+                    val product=fresh.products.firstOrNull{it.id==savedItem.productId&&it.available}?:return@mapNotNull null
+                    val validIds=product.modifierGroups.flatMap{it.options}.map{it.id}.toSet()
+                    val selected=savedItem.optionIds.intersect(validIds)
+                    val valid=product.modifierGroups.all{group->
+                        val count=group.options.count{it.id in selected}
+                        count>=group.minSelect.coerceAtLeast(if(group.required)1 else 0)&&count<=group.maxSelect.coerceAtLeast(1)
+                    }
+                    if(valid)CartItem(product,savedItem.quantity,selected,savedItem.notes)else null
+                }
+                cart.clear();cart.addAll(restored)
+                if(cart.isEmpty())cartPersistence.clear() else persistCart()
+            }.onFailure{cartPersistence.clear()}
+        }
+    }
+    private fun revalidateCurrentCart(){
+        val fresh=catalog?:return
+        if(cart.isEmpty())return
+        val validated=cart.mapNotNull{old->
+            val product=fresh.products.firstOrNull{it.id==old.product.id&&it.available}?:return@mapNotNull null
+            val validIds=product.modifierGroups.flatMap{it.options}.map{it.id}.toSet()
+            val selected=old.optionIds.intersect(validIds)
+            val valid=product.modifierGroups.all{group->
+                val count=group.options.count{it.id in selected}
+                count>=group.minSelect.coerceAtLeast(if(group.required)1 else 0)&&count<=group.maxSelect.coerceAtLeast(1)
+            }
+            if(valid)CartItem(product,old.quantity,selected,old.notes)else null
+        }
+        if(validated.size!=cart.size)message="Atualizamos seu carrinho porque alguns itens ou adicionais mudaram."
+        cart.clear();cart.addAll(validated);persistCart()
+    }
+
     private fun classifyMarketplaceIssue(t:Throwable):MarketplaceLoadIssue=when(t){is UnknownHostException,is ConnectException,is NoRouteToHostException->MarketplaceLoadIssue.Offline;is SocketTimeoutException->MarketplaceLoadIssue.Temporary;is ApiException->MarketplaceLoadIssue.ServerUnavailable;else->MarketplaceLoadIssue.Temporary}
     private fun action(showBusy:Boolean=true,block:suspend()->Unit){viewModelScope.launch{if(showBusy)busy=true;try{block()}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();customer=null;payerCpf="";screen=Screen.Login};message=e.message}catch(t:Throwable){message=t.message?:"Não foi possível concluir agora."}finally{if(showBusy)busy=false}}}
     override fun onCleared(){trackingJob?.cancel();paymentPollingJob?.cancel();marketplaceJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();payerCpf="";PaymentUiContext.clear();super.onCleared()}
