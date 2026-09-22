@@ -126,7 +126,11 @@ final class WhatsAppCustomerRegistrationService
     private function stateResult(PDO $pdo,int $tenantId,int $conversationId,string $state,array $context,string $reply,string $kind,array $extra=[]):array
     {
         $json=$context?json_encode($context,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR):null;
-        $pdo->prepare('UPDATE whatsapp_conversations SET state=?,context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$state,$json,$conversationId,$tenantId]);
+        if($state==='WELCOME'){
+            $pdo->prepare('UPDATE whatsapp_conversations SET state=?,context_json=?,resume_state=NULL,resume_context_json=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$state,$json,$conversationId,$tenantId]);
+        }else{
+            $pdo->prepare('UPDATE whatsapp_conversations SET state=?,context_json=?,resume_state=?,resume_context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$state,$json,$state,$json,$conversationId,$tenantId]);
+        }
         return ['handled'=>true,'state'=>$state,'reply'=>$reply,'kind'=>$kind]+$extra;
     }
 
