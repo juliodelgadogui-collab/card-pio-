@@ -1,6 +1,5 @@
 package br.com.eventmenu.delivery.ui
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -9,7 +8,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -20,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.delivery.DeliveryViewModel
@@ -123,12 +120,9 @@ private fun DelyvreCatalogProductScreen(
             state = listState,
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
         ) {
             item { DelyvreCatalogHero(catalog.store) { vm.navigate(Screen.Home) } }
-            item {
-                DelyvreCatalogStoreSummary(catalog.store)
-            }
+            item { DelyvreCatalogStoreSummary(catalog.store) }
             item {
                 OutlinedTextField(
                     value = search,
@@ -141,10 +135,19 @@ private fun DelyvreCatalogProductScreen(
                         }
                     },
                     placeholder = { Text("Buscar no cardápio") },
-                    supportingText = if (search.isNotBlank()) {{ Text("${filtered.size} ${if (filtered.size == 1) "resultado" else "resultados"}") }} else null,
                     singleLine = true,
                     shape = RoundedCornerShape(18.dp),
                 )
+            }
+            if (search.isNotBlank()) {
+                item {
+                    Text(
+                        "${filtered.size} ${if (filtered.size == 1) "resultado" else "resultados"}",
+                        modifier = Modifier.padding(horizontal = 18.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (catalog.categories.isNotEmpty()) {
                 item {
@@ -255,18 +258,14 @@ private fun DelyvreCatalogStoreSummary(store: Store) {
                 if (place.isNotBlank()) Text(place, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
-        if (store.description.isNotBlank()) {
-            Text(store.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        if (store.description.isNotBlank()) Text(store.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (store.deliveryEtaMinutes > 0) item { DelyvreCatalogPill(Icons.Default.Schedule, "${store.deliveryEtaMinutes}–${store.deliveryEtaMinutes + 15} min") }
             item { DelyvreCatalogPill(Icons.Default.LocalShipping, "Entrega ${delyvreDeliveryFeeLabel(store.deliveryFeeCents)}") }
             if (store.minimumOrderCents > 0) item { DelyvreCatalogPill(Icons.Default.ShoppingBag, "Mínimo ${money(store.minimumOrderCents)}") }
             if (store.pickupEnabled) item { DelyvreCatalogPill(Icons.Default.Storefront, "Retirada") }
         }
-        if (store.scheduleNote.isNotBlank()) {
-            Text(store.scheduleNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        if (store.scheduleNote.isNotBlank()) Text(store.scheduleNote, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (!store.acceptingOrders) {
             Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(16.dp)) {
                 Row(Modifier.fillMaxWidth().padding(13.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -392,11 +391,7 @@ private fun DelyvreProductSheet(
                 }
                 product.modifierGroups.forEach { group ->
                     item(key = "group-${group.id}") {
-                        DelyvreModifierGroupBlock(
-                            group = group,
-                            selected = selected,
-                            onToggle = { toggle(group, it) },
-                        )
+                        DelyvreModifierGroupBlock(group = group, selected = selected, onToggle = { toggle(group, it) })
                     }
                 }
                 item {
@@ -423,9 +418,7 @@ private fun DelyvreProductSheet(
                         }
                     }
                 }
-                if (selectionError != null) {
-                    item { DelyvreProductNotice(selectionError, error = false) }
-                }
+                if (selectionError != null) item { DelyvreProductNotice(selectionError, error = false) }
             }
             Surface(shadowElevation = 12.dp, tonalElevation = 2.dp) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
@@ -460,6 +453,7 @@ private fun DelyvreProductSheet(
 private fun DelyvreModifierGroupBlock(group: ModifierGroup, selected: Set<Int>, onToggle: (Int) -> Unit) {
     val groupIds = group.options.map { it.id }.toSet()
     val selectedCount = selected.count { it in groupIds }
+    val groupMax = group.maxSelect.coerceAtLeast(1)
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = CardDefaults.outlinedCardBorder()) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -475,7 +469,6 @@ private fun DelyvreModifierGroupBlock(group: ModifierGroup, selected: Set<Int>, 
             }
             group.options.forEach { option ->
                 val checked = option.id in selected
-                val groupMax = group.maxSelect.coerceAtLeast(1)
                 val maxReached = !checked && selectedCount >= groupMax
                 Surface(
                     modifier = Modifier.fillMaxWidth().clickable(enabled = !maxReached) { onToggle(option.id) },
@@ -490,8 +483,8 @@ private fun DelyvreModifierGroupBlock(group: ModifierGroup, selected: Set<Int>, 
                     }
                 }
             }
-            if (groupMaxReachedMessage(group, selectedCount) != null) {
-                Text(groupMaxReachedMessage(group, selectedCount).orEmpty(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            groupMaxReachedMessage(group, selectedCount)?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -546,10 +539,7 @@ private fun DelyvreCatalogEmpty(icon: androidx.compose.ui.graphics.vector.ImageV
 
 @Composable
 private fun DelyvreProductNotice(text: String, error: Boolean) {
-    Surface(
-        color = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
-        shape = RoundedCornerShape(15.dp),
-    ) {
+    Surface(color = if (error) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(15.dp)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (error) Icons.Default.Info else Icons.Default.Tune, null, tint = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
             Text(text, style = MaterialTheme.typography.bodySmall, color = if (error) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer)
