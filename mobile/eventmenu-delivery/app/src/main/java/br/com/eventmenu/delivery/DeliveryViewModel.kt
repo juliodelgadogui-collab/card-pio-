@@ -8,6 +8,7 @@ import br.com.eventmenu.delivery.data.*
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.net.ConnectException
 import java.net.NoRouteToHostException
@@ -62,6 +63,8 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     var pixPayment by mutableStateOf<PixPayment?>(null);private set
     var tracking by mutableStateOf<TrackingStatus?>(null);private set
     var paymentWaiting by mutableStateOf(false);private set
+    var paymentPhase by mutableStateOf(PaymentPhase.Idle);private set
+    var paymentSubmitting by mutableStateOf(false);private set
     var payerCpf by mutableStateOf("");private set
     var busy by mutableStateOf(false);private set
     var message by mutableStateOf<String?>(null);private set
@@ -99,7 +102,7 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun registerWithCpf(name:String,cpf:String,email:String,phone:String,password:String,legalAccepted:Boolean=false)=action{if(!legalAccepted)error("Aceite os Termos de Uso e a Política de Privacidade para continuar.");val result=api.register(name.trim(),cpf.trim(),email.trim(),phone.trim(),password,legalAccepted);pendingEmail=result.email;screen=Screen.VerifyEmail;message=if(result.emailSent)"Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."}
     fun resendVerification()=action{api.resend(pendingEmail);message="Se o cadastro estiver pendente, um novo link foi enviado."}
     fun forgotPassword(email:String)=action{api.forgotPassword(email);message="Se a conta existir, você receberá um link para criar uma nova senha."}
-    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();cartPersistence.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";profileReturnScreen=null;stores=api.stores();storeSearchQuery="";storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}
+    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();cartPersistence.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();paymentWaiting=false;paymentSubmitting=false;paymentPhase=PaymentPhase.Idle;pixPayment=null;payerCpf="";profileReturnScreen=null;stores=api.stores();storeSearchQuery="";storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}
 
     fun loadHome(){loadStores();loadRecentOrdersForHome()}
     fun loadStores(query:String=""){
@@ -171,14 +174,52 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
             revalidateCurrentCart()
             val cat=catalog?:error("Loja não carregada.");if(!cat.store.acceptingOrders)error("Este restaurante pausou novos pedidos no momento.");if(cart.isEmpty())error("Seu carrinho mudou e não há itens válidos para finalizar.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<cat.store.minimumOrderCents)error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
             val appliedCoupon=couponCode;if(appliedCoupon.isNotBlank())couponQuote=api.couponQuote(cat.store.tenantId,appliedCoupon,subtotal)
-            val order=api.createOrder(cat,addressId,cart.toList(),appliedCoupon);selectedOrder=order;PaymentUiContext.updateAmount(order.totalCents);cart.clear();cartPersistence.clear();clearCoupon(false);paymentMethods=api.paymentMethods(order.orderNumber);pixPayment=null;paymentWaiting=false;payerCpf="";if(paymentMethods?.cards?.isNotEmpty()==true&&customer?.cpfConfigured==true)runCatching{api.paymentIdentification()}.onSuccess{payerCpf=it};screen=Screen.Checkout
+            val order=api.createOrder(cat,addressId,cart.toList(),appliedCoupon);selectedOrder=order;PaymentUiContext.updateAmount(order.totalCents);cart.clear();cartPersistence.clear();clearCoupon(false);paymentMethods=api.paymentMethods(order.orderNumber);pixPayment=null;paymentWaiting=false;paymentSubmitting=false;paymentPhase=PaymentPhase.Idle;payerCpf="";if(paymentMethods?.cards?.isNotEmpty()==true&&customer?.cpfConfigured==true)runCatching{api.paymentIdentification()}.onSuccess{payerCpf=it};screen=Screen.Checkout
         }
     }
     fun reloadPaymentMethods()=action(showBusy=false){val id=selectedOrder?.orderNumber?:return@action;paymentMethods=api.paymentMethods(id)}
     fun prepareCardIdentification()=action(showBusy=false){if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para pagar com cartão.");payerCpf=api.paymentIdentification()}
-    fun payPix(provider:String,taxId:String)=action{if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para gerar o PIX.");val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");pixPayment=api.pix(id,provider,"");message="PIX gerado. Assim que o provedor confirmar, o pedido será atualizado automaticamente.";startPaymentPolling(id)}
-    fun payCash(changeForCents:Int?)=action{val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;api.cash(id,changeForCents);PaymentUiContext.clear();message="Pagamento em dinheiro registrado para a entrega.";openOrderSuspend(id)}
-    suspend fun payCardToken(token:String,paymentMethodId:String,paymentTypeId:String,installments:Int,taxId:String){if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para pagar com cartão.");val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");val status=api.card(id,token,paymentMethodId,paymentTypeId,installments,"");if(status=="paid"){paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";PaymentUiContext.clear();message=if(paymentTypeId=="debit_card")"Pagamento no débito aprovado." else "Pagamento no crédito aprovado.";openOrderSuspend(id)}else{pixPayment=null;message="Pagamento enviado. Aguardando confirmação do Mercado Pago.";startPaymentPolling(id)}}
+    fun payPix(provider:String,taxId:String){
+        if(paymentSubmitting||paymentWaiting){message="Já existe uma cobrança em andamento. Aguarde a confirmação antes de tentar novamente.";return}
+        paymentSubmitting=true
+        action{
+            try{
+                if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para gerar o PIX.")
+                val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.")
+                pixPayment=api.pix(id,provider,"")
+                paymentPhase=PaymentPhase.Waiting
+                message="PIX gerado. Assim que o provedor confirmar, o pedido será atualizado automaticamente."
+                startPaymentPolling(id)
+            }finally{paymentSubmitting=false}
+        }
+    }
+    fun payCash(changeForCents:Int?){
+        if(paymentSubmitting||paymentWaiting){message="Há uma cobrança eletrônica em andamento. Aguarde o resultado antes de trocar a forma de pagamento.";return}
+        paymentSubmitting=true
+        action{
+            try{
+                val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.")
+                paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null
+                api.cash(id,changeForCents)
+                paymentPhase=PaymentPhase.Confirmed
+                PaymentUiContext.clear();message="Pagamento em dinheiro registrado para a entrega.";openOrderSuspend(id)
+            }finally{paymentSubmitting=false}
+        }
+    }
+    suspend fun payCardToken(token:String,paymentMethodId:String,paymentTypeId:String,installments:Int,taxId:String){
+        if(paymentSubmitting||paymentWaiting){message="Já existe uma cobrança em andamento. Aguarde a confirmação antes de tentar novamente.";return}
+        paymentSubmitting=true
+        try{
+            if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para pagar com cartão.")
+            val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.")
+            val status=api.card(id,token,paymentMethodId,paymentTypeId,installments,"")
+            if(status=="paid"){
+                paymentPollingJob?.cancel();paymentWaiting=false;paymentPhase=PaymentPhase.Confirmed;pixPayment=null;payerCpf="";PaymentUiContext.clear();message=if(paymentTypeId=="debit_card")"Pagamento no débito aprovado." else "Pagamento no crédito aprovado.";openOrderSuspend(id)
+            }else{
+                pixPayment=null;paymentPhase=PaymentPhase.Waiting;message="Pagamento enviado. Aguardando confirmação do Mercado Pago.";startPaymentPolling(id)
+            }
+        }finally{paymentSubmitting=false}
+    }
     fun loadOrders(){if(!isAuthenticated){screen=Screen.Login;message="Entre para ver seus pedidos.";return};mainDestination=MainDestination.Orders;screen=Screen.Orders;action{orders=api.orders()}}
     fun refreshOrders()=action(showBusy=false){if(isAuthenticated)orders=api.orders()}
     fun openOrder(id:Int)=action{openOrderSuspend(id)}
@@ -194,8 +235,33 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshCurrentOrder(){selectedOrder?.orderNumber?.let(::openOrder)}
     private fun refreshSession()=action(showBusy=false){try{customer=api.me();if(customer?.cpfConfigured==true){mainDestination=MainDestination.Home;loadStoresInternal();screen=Screen.Home}else{mainDestination=MainDestination.Profile;screen=Screen.Profile;message="Complete seu CPF uma única vez para continuar."}}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();customer=null;stores=api.stores();storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}else throw e}}
     private suspend fun loadStoresInternal(){stores=api.stores();if(storeSearchQuery.isBlank())storeSearchResults=stores}
-    private fun startPaymentPolling(orderId:Int){paymentPollingJob?.cancel();paymentWaiting=true;paymentPollingJob=viewModelScope.launch{repeat(90){delay(if(it==0)2_500 else 5_000);val result=runCatching{api.paymentStatus(orderId)}.getOrNull()?:return@repeat;when(result.optString("payment_status").lowercase()){ "paid"->{paymentWaiting=false;pixPayment=null;payerCpf="";PaymentUiContext.clear();message="Pagamento confirmado.";runCatching{openOrderSuspend(orderId)}.onFailure{message=it.message?:"Pagamento confirmado. Atualize seus pedidos."};return@launch};"failed","cancelled"->{paymentWaiting=false;pixPayment=null;message="O pagamento não foi concluído. Você pode tentar novamente ou escolher outra forma.";return@launch}}};paymentWaiting=false;message="A confirmação ainda não chegou. O pedido continuará sendo atualizado pelo servidor."}}
-    private fun startTracking(){trackingJob?.cancel();tracking=null;val token=selectedOrder?.trackingToken?:return;trackingJob=viewModelScope.launch{repeat(180){runCatching{api.tracking(token)}.onSuccess{tracking=it};if(tracking?.status=="completed"||tracking?.status=="cancelled")return@launch;delay(10_000)}}}
+    private fun startPaymentPolling(orderId:Int){
+        paymentPollingJob?.cancel();paymentWaiting=true;paymentPhase=PaymentPhase.Waiting
+        paymentPollingJob=viewModelScope.launch{
+            var attempt=0
+            while(isActive&&selectedOrder?.orderNumber==orderId){
+                delay(paymentPollDelayMillis(attempt++))
+                val result=runCatching{api.paymentStatus(orderId)}.getOrNull()?:continue
+                when(val phase=paymentPhaseFor(result.optString("payment_status"))){
+                    PaymentPhase.Confirmed->{paymentWaiting=false;paymentPhase=phase;pixPayment=null;payerCpf="";PaymentUiContext.clear();message="Pagamento confirmado.";runCatching{openOrderSuspend(orderId)}.onFailure{message=it.message?:"Pagamento confirmado. Atualize seus pedidos."};return@launch}
+                    PaymentPhase.Expired->{paymentWaiting=false;paymentPhase=phase;pixPayment=null;message="A cobrança expirou. Você pode gerar uma nova forma de pagamento.";return@launch}
+                    PaymentPhase.Error->{paymentWaiting=false;paymentPhase=phase;pixPayment=null;message="O pagamento não foi concluído. Você pode tentar novamente ou escolher outra forma.";return@launch}
+                    else->{paymentWaiting=true;paymentPhase=PaymentPhase.Waiting}
+                }
+            }
+        }
+    }
+    private fun startTracking(){
+        trackingJob?.cancel();tracking=null;val token=selectedOrder?.trackingToken?:return
+        trackingJob=viewModelScope.launch{
+            var attempt=0
+            while(isActive&&selectedOrder?.trackingToken==token){
+                runCatching{api.tracking(token)}.onSuccess{tracking=it}
+                if(isTerminalOrderStatus(tracking?.status.orEmpty()))return@launch
+                delay(trackingPollDelayMillis(attempt++))
+            }
+        }
+    }
     private fun persistCart(){cartPersistence.save(catalog,cart.toList())}
     private fun restorePersistedCart(){
         val saved=cartPersistence.load()?:return
