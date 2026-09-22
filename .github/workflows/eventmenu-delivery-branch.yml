@@ -63,6 +63,27 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Restore stable DELYVRE debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: delyvre-debug-keystore-v1
+
+      - name: Ensure stable DELYVRE debug signing key exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=DELYVRE Development,O=EventMenu,C=BR" \
+              -keyalg RSA -keysize 2048 -validity 10000
+          fi
+
       - name: Stamp bounded debug version
         shell: bash
         run: |
