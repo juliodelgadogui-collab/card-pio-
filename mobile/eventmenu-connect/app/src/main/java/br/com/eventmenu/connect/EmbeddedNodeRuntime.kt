@@ -137,6 +137,18 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         return state()
     }
 
+    /**
+     * Reabre a sessão já existente sem apagar credenciais, filas ou vínculo.
+     * O runtime Node decide internamente se precisa realmente criar um novo socket;
+     * quando já está conectado esta chamada é um no-op seguro.
+     */
+    fun recover(): EmbeddedWhatsAppState {
+        ensureStarted()
+        request("start", "POST", JSONObject())
+        Thread.sleep(350)
+        return state()
+    }
+
     fun pair(phone: String, countryCode: String): EmbeddedWhatsAppState {
         ensureStarted()
         return stateFrom(
