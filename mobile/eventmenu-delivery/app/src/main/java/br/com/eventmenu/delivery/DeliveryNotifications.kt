@@ -16,6 +16,9 @@ import com.google.firebase.messaging.RemoteMessage
 
 object DeliveryNotifications {
     private const val CHANNEL_ID = "eventmenu_delivery_orders"
+    private const val PREFS = "eventmenu_delivery_notification_state"
+    private const val KEY_FINGERPRINT = "last_fingerprint"
+    private const val KEY_AT = "last_at"
 
     fun createChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -27,8 +30,13 @@ object DeliveryNotifications {
         }
     }
 
-    fun show(context: Context, orderId: Int, title: String, message: String) {
-        if (title.isBlank() || message.isBlank()) return
+    fun show(context: Context, orderId: Int, status: String, title: String, message: String) {
+        if (orderId < 1 || title.isBlank() || message.isBlank()) return
+
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val fingerprint = customerOrderPushFingerprint(orderId, status, title, message)
+        val now = System.currentTimeMillis()
+        if (shouldSuppressDuplicatePush(prefs.getString(KEY_FINGERPRINT, null), prefs.getLong(KEY_AT, 0L), fingerprint, now)) return
 
         if (
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -46,7 +54,7 @@ object DeliveryNotifications {
         }
         val pending = PendingIntent.getActivity(
             context,
-            orderId.coerceAtLeast(1),
+            orderId,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -61,9 +69,10 @@ object DeliveryNotifications {
             .build()
 
         try {
-            notificationManager.notify(50_000 + orderId.coerceAtLeast(1), notification)
+            notificationManager.notify(50_000 + orderId, notification)
+            prefs.edit().putString(KEY_FINGERPRINT, fingerprint).putLong(KEY_AT, now).apply()
         } catch (_: SecurityException) {
-            // The permission may be revoked between the explicit check above and notify().
+            // A permissão pode ser revogada entre a checagem explícita e o notify().
         }
     }
 }
@@ -77,10 +86,12 @@ class DeliveryFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
         val data = message.data
-        if (data["type"] != "customer.order.status") return
+        val type = data["type"].orEmpty()
+        val status = data["status"].orEmpty()
+        if (!isSupportedCustomerOrderPush(type, status)) return
         val orderId = data["order_id"]?.toIntOrNull() ?: return
         val title = data["title"].orEmpty().ifBlank { message.notification?.title.orEmpty() }
         val body = data["message"].orEmpty().ifBlank { message.notification?.body.orEmpty() }
-        DeliveryNotifications.show(this, orderId, title, body)
+        DeliveryNotifications.show(this, orderId, status, title, body)
     }
 }
