@@ -94,6 +94,7 @@ final class WhatsAppDesktopAgentService
         $externalMessageId=mb_substr(trim($externalMessageId),0,190);$pdo=Database::connection();
         $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'sent\',provider=?,sent_at=CURRENT_TIMESTAMP,locked_at=NULL,external_message_id=?,last_error=NULL,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=?');
         $s->execute([self::PROVIDER,$externalMessageId?:null,$id,$tenantId,$claimToken,$deviceHash]);if($s->rowCount()!==1)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
+        $this->syncCommunicationRecipient($pdo,$tenantId,$id,'sent');
         return['id'=>$id,'status'=>'sent','external_message_id'=>$externalMessageId?:null];
     }
 
@@ -105,8 +106,20 @@ final class WhatsAppDesktopAgentService
             $q=$pdo->prepare(Database::portableSql($pdo,'SELECT attempt_count,max_attempts FROM whatsapp_outbox WHERE id=? AND tenant_id=? AND status=\'desktop_sending\' AND claim_token=? AND claimed_by_device_hash=? LIMIT 1 FOR UPDATE'));$q->execute([$id,$tenantId,$claimToken,$deviceHash]);$row=$q->fetch(PDO::FETCH_ASSOC);if(!$row)throw new RuntimeException('A reserva desta mensagem expirou ou pertence a outro computador.');
             $attempt=(int)$row['attempt_count'];$delay=min(3600,30*(2**max(0,$attempt-1)));$available=gmdate('Y-m-d H:i:s',time()+$delay);
             $s=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_failed\',locked_at=NULL,available_at=?,last_error=?,claim_token=NULL,claimed_by_device_hash=NULL,claim_expires_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND claim_token=? AND claimed_by_device_hash=?');$s->execute([$available,$error,$id,$tenantId,$claimToken,$deviceHash]);
+            $this->syncCommunicationRecipient($pdo,$tenantId,$id,$attempt>=(int)$row['max_attempts']?'failed':'retrying');
             return['id'=>$id,'status'=>'desktop_failed','attempt_count'=>$attempt,'max_attempts'=>(int)$row['max_attempts'],'available_at'=>$available];
         });
+    }
+
+    private function syncCommunicationRecipient(PDO $pdo,int $tenantId,int $outboxId,string $status):void
+    {
+        try{
+            $u=$pdo->prepare('UPDATE whatsapp_communication_recipients SET status=? WHERE tenant_id=? AND outbox_id=?');$u->execute([$status,$tenantId,$outboxId]);if($u->rowCount()<1)return;
+            $q=$pdo->prepare('SELECT communication_id FROM whatsapp_communication_recipients WHERE tenant_id=? AND outbox_id=? LIMIT 1');$q->execute([$tenantId,$outboxId]);$communicationId=(int)$q->fetchColumn();if($communicationId<1)return;
+            $counts=$pdo->prepare('SELECT COUNT(*) total,SUM(CASE WHEN status=\'sent\' THEN 1 ELSE 0 END) sent,SUM(CASE WHEN status=\'failed\' THEN 1 ELSE 0 END) failed,SUM(CASE WHEN status IN (\'queued\',\'retrying\') THEN 1 ELSE 0 END) pending FROM whatsapp_communication_recipients WHERE tenant_id=? AND communication_id=?');$counts->execute([$tenantId,$communicationId]);$row=$counts->fetch(PDO::FETCH_ASSOC)?:[];
+            $total=(int)($row['total']??0);$sent=(int)($row['sent']??0);$failed=(int)($row['failed']??0);$pending=(int)($row['pending']??0);$campaignStatus=$pending>0?'sending':($failed>0&&$sent===0?'failed':($failed>0?'partial':'sent'));
+            $pdo->prepare('UPDATE whatsapp_communications SET status=?,recipient_count=?,queued_count=?,sent_count=?,failed_count=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$campaignStatus,$total,$pending,$sent,$failed,$communicationId,$tenantId]);
+        }catch(\Throwable $e){error_log('[whatsapp-communication-sync] '.$e::class.': '.$e->getMessage());}
     }
 
     /** @return array<string,string> */
