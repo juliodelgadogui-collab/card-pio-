@@ -73,7 +73,7 @@ final class WhatsAppCommercePaymentService
             try{
                 $pdo->prepare("INSERT INTO whatsapp_outbox (tenant_id,order_id,event_type,recipient,message_text,status,attempt_count,max_attempts,available_at,idempotency_key) VALUES (?,?,'commerce_auto',?,?,'desktop_queued',0,5,CURRENT_TIMESTAMP,?)")->execute([$tenantId,$orderId,$phone,$message,$key]);$outboxId=(int)$pdo->lastInsertId();
                 $pdo->prepare("INSERT INTO whatsapp_messages (tenant_id,conversation_id,outbox_id,direction,message_type,message_text,status) VALUES (?,?,?,'outbound','text',?,'queued')")->execute([$tenantId,$conversationId,$outboxId,$message]);$queued++;
-            }catch(\PDOException){/* idempotência: a confirmação pode ter sido enfileirada por outro heartbeat */}
+            }catch(\PDOException $e){$exists=$pdo->prepare('SELECT id FROM whatsapp_outbox WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$exists->execute([$tenantId,$key]);if(!$exists->fetchColumn())throw $e;}
             $json=json_encode(['order_id'=>$orderId,'payment_status'=>'paid'],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);$pdo->prepare("UPDATE whatsapp_conversations SET state='ORDER_ACTIVE',context_json=?,last_outbound_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND state='CHOOSING_PAYMENT'")->execute([$json,$conversationId,$tenantId]);
             $this->audit('payment_confirmed',$orderId,['conversation_id'=>$conversationId,'source'=>'connect_sync']);
         }
