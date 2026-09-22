@@ -104,11 +104,16 @@ class ConnectWorkerService : Service() {
 
                 val now = System.currentTimeMillis()
                 if (now - lastHeartbeat > 30_000) {
-                    val heartbeat = api.heartbeat(local.status, local.phone, local.error)
+                    val inboundDiagnostic = when {
+                        local.inboundUnresolved > 0 -> "${local.inboundUnresolved} mensagem(ns) recebida(s) aguardando resolução segura do número WhatsApp."
+                        local.lastInboundError.isNotBlank() -> local.lastInboundError
+                        else -> local.error
+                    }
+                    val heartbeat = api.heartbeat(local.status, local.phone, inboundDiagnostic)
                     store.setRuntime(
                         status = local.status,
                         pending = heartbeat.optInt("pending", store.runtimePending()),
-                        error = local.error,
+                        error = inboundDiagnostic,
                         phone = local.phone,
                         pairingCode = local.pairingCode,
                         qr = local.qr,
@@ -125,6 +130,8 @@ class ConnectWorkerService : Service() {
                     val processed = received + acknowledged + sent
                     promote(
                         when {
+                            local.inboundUnresolved > 0 -> "WhatsApp conectado • ${local.inboundUnresolved} recebida(s) aguardando identificação"
+                            local.inboundPending > 0 -> "WhatsApp conectado • enviando recebidas ao servidor"
                             hasPendingAck -> "WhatsApp conectado • confirmando envio com o servidor"
                             local.phone.isBlank() -> "WhatsApp conectado • EventMenu ativo"
                             else -> "WhatsApp ${formatPhone(local.phone)} • EventMenu ativo"
