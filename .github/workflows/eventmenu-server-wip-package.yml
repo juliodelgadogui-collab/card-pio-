@@ -54,6 +54,7 @@ jobs:
           rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
           php scripts/ci-db-smoke.php
           php scripts/ci-whatsapp-commerce-smoke.php
+          php scripts/ci-whatsapp-registration-smoke.php
           php scripts/ci-whatsapp-commerce-order-smoke.php
           php scripts/ci-whatsapp-commerce-fulfillment-smoke.php
           php scripts/ci-whatsapp-commerce-payment-smoke.php
@@ -103,6 +104,7 @@ jobs:
           test -f src/Services/WhatsAppDesktopAgentService.php
           test -f src/Services/WhatsAppOrderReceivedSyncService.php
           test -f src/Services/WhatsAppCommerceService.php
+          test -f src/Services/WhatsAppCustomerRegistrationService.php
           test -f src/Services/WhatsAppCommerceOrderService.php
           test -f src/Services/WhatsAppCommerceFulfillmentService.php
           test -f src/Services/WhatsAppCommercePaymentService.php
@@ -113,6 +115,7 @@ jobs:
           test -f src/Services/ProductionPrintPolicyService.php
           test -f app/routes/support.php
           test -f public/support.php
+          test -f scripts/ci-whatsapp-registration-smoke.php
           test -f scripts/ci-whatsapp-support-smoke.php
           test -f scripts/ci-whatsapp-connect-hardening-smoke.php
           test ! -e integrations/whatsapp-worker/server.js
@@ -134,6 +137,7 @@ jobs:
           test -f "$PACKAGE/src/Services/WhatsAppDesktopAgentService.php"
           test -f "$PACKAGE/src/Services/WhatsAppOrderReceivedSyncService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCustomerRegistrationService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceOrderService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceFulfillmentService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommercePaymentService.php"
