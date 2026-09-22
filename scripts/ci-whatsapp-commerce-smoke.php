@@ -81,11 +81,16 @@ $q = $pdo->prepare('SELECT COUNT(*) FROM whatsapp_messages WHERE tenant_id=? AND
 $q->execute([$tenantId, $offId]);
 commerce_assert((int)$q->fetchColumn() === 1, 'Mensagem duplicada foi persistida mais de uma vez.');
 
+// Este smoke cobre o fluxo normal de um cliente já cadastrado. O primeiro cadastro
+// (nome + CPF + confirmação) é coberto separadamente por ci-whatsapp-registration-smoke.php.
+$pdo->prepare('INSERT INTO customers (tenant_id,name,phone,phone_normalized,document) VALUES (?,?,?,?,?)')
+    ->execute([$tenantId,'Cliente CI',$phone,'11999988776','52998224725']);
+
 // ON: MENU deve mudar para WELCOME e produzir exatamente uma resposta idempotente.
 $pdo->prepare('UPDATE whatsapp_connections SET commerce_enabled=1 WHERE tenant_id=?')->execute([$tenantId]);
 $menuId = 'CI.MENU.' . bin2hex(random_bytes(8));
 $menu = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $menuId, 'text' => 'MENU']);
-commerce_assert(($menu['state'] ?? '') === 'WELCOME', 'Comando MENU não levou a WELCOME.');
+commerce_assert(($menu['state'] ?? '') === 'WELCOME', 'Comando MENU não levou a WELCOME para cliente cadastrado.');
 commerce_assert(!empty($menu['reply_queued']), 'Comando MENU não enfileirou resposta.');
 $outboxCount->execute([$tenantId]);
 commerce_assert((int)$outboxCount->fetchColumn() === 1, 'MENU deveria gerar uma única resposta automática.');
