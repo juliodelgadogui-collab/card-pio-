@@ -6,6 +6,8 @@ plugins {
 fun envValue(primary: String, fallback: String? = null): String =
     System.getenv(primary)?.trim().orEmpty().ifBlank { fallback?.let { System.getenv(it)?.trim().orEmpty() }.orEmpty() }
 
+fun envRaw(name: String): String = System.getenv(name).orEmpty()
+
 fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 val apiBase = envValue("EVENTMENU_API_BASE_URL")
@@ -15,12 +17,16 @@ if (!apiBase.startsWith("https://", ignoreCase = true)) {
     throw GradleException("EVENTMENU_API_BASE_URL precisa usar HTTPS.")
 }
 
-// GITHUB_RUN_NUMBER is scoped to a workflow. It previously made different GO
-// workflows/build histories appear to reuse the same public version. RUN_ID is
-// globally increasing and is injected by CI as EVENTMENU_VERSION_CODE.
-val ciVersionCode = envValue("EVENTMENU_VERSION_CODE").toLongOrNull()?.coerceAtMost(Int.MAX_VALUE.toLong())?.toInt()
+// Android versionCode must be positive and must not exceed the Play/Android limit.
+// Never clamp an oversized CI identifier: clamping made multiple builds receive the
+// same versionCode and prevented reliable upgrades. CI now injects a bounded,
+// monotonically increasing code instead of GITHUB_RUN_ID.
+val requestedVersionCode = envValue("EVENTMENU_VERSION_CODE").toLongOrNull()
+if (requestedVersionCode != null && requestedVersionCode !in 1L..2_100_000_000L) {
+    throw GradleException("EVENTMENU_VERSION_CODE deve estar entre 1 e 2100000000.")
+}
+val appVersionCode = requestedVersionCode?.toInt() ?: 256
 val ciVersionName = envValue("EVENTMENU_VERSION_NAME")
-val appVersionCode = ciVersionCode ?: 256
 val appVersionName = ciVersionName.ifBlank { "0.2.56-dev" }
 
 val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
@@ -48,6 +54,37 @@ if (firebaseRequired && !firebaseEnabled) {
         "Firebase Cloud Messaging é obrigatório neste build. Configure EVENTMENU_FIREBASE_PROJECT_ID, " +
             "EVENTMENU_FIREBASE_APP_ID, EVENTMENU_FIREBASE_API_KEY e EVENTMENU_FIREBASE_SENDER_ID."
     )
+}
+
+// Production signing is supplied only by the build environment/GitHub Secrets.
+// No keystore or password belongs in source control.
+val releaseKeystorePath = envValue("EVENTMENU_RELEASE_KEYSTORE_PATH")
+val releaseStorePassword = envRaw("EVENTMENU_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = envValue("EVENTMENU_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = envRaw("EVENTMENU_RELEASE_KEY_PASSWORD")
+val releaseSigningConfig = linkedMapOf(
+    "EVENTMENU_RELEASE_KEYSTORE_PATH" to releaseKeystorePath,
+    "EVENTMENU_RELEASE_STORE_PASSWORD" to releaseStorePassword,
+    "EVENTMENU_RELEASE_KEY_ALIAS" to releaseKeyAlias,
+    "EVENTMENU_RELEASE_KEY_PASSWORD" to releaseKeyPassword,
+)
+val releaseSigningCount = releaseSigningConfig.values.count { it.isNotEmpty() }
+val releaseSigningConfigured = releaseSigningCount == releaseSigningConfig.size
+val releaseSigningPartial = releaseSigningCount in 1 until releaseSigningConfig.size
+val releaseSigningRequired = releaseRequested || envValue("EVENTMENU_REQUIRE_RELEASE_SIGNING").equals("true", ignoreCase = true)
+
+if (releaseSigningPartial) {
+    val missing = releaseSigningConfig.filterValues { it.isEmpty() }.keys.joinToString(", ")
+    throw GradleException("Configuração de assinatura release incompleta. Faltando: $missing")
+}
+if (releaseSigningRequired && !releaseSigningConfigured) {
+    throw GradleException(
+        "Assinatura release é obrigatória. Configure EVENTMENU_RELEASE_KEYSTORE_PATH, " +
+            "EVENTMENU_RELEASE_STORE_PASSWORD, EVENTMENU_RELEASE_KEY_ALIAS e EVENTMENU_RELEASE_KEY_PASSWORD."
+    )
+}
+if (releaseSigningConfigured && !file(releaseKeystorePath).isFile) {
+    throw GradleException("Keystore release não encontrado em EVENTMENU_RELEASE_KEYSTORE_PATH.")
 }
 
 android {
@@ -78,11 +115,25 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseSigningConfigured) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }

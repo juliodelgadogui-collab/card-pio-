@@ -96,6 +96,11 @@ class OperationNotificationWorker(
     override suspend fun doWork(): Result {
         val app = applicationContext as? EventMenuGoApplication ?: return Result.success()
         return try {
+            // If login happened while the device was temporarily offline, retry the
+            // FCM registration whenever the normal notification poll gets network.
+            // The coordinator still refuses registration when no authenticated
+            // session exists, so this is safe after logout/session expiry.
+            app.pushCoordinator.syncCurrentToken()
             val inbox = app.notificationRepository.inbox(80)
             OperationNotificationScheduler.showUnread(applicationContext, inbox.items)
             Result.success()
