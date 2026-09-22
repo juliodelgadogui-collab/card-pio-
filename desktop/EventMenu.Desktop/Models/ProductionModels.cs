@@ -119,6 +119,16 @@ public sealed class ProductionPrintQueue
     [JsonPropertyName("customer_phone")] public string? CustomerPhone { get; set; }
     [JsonPropertyName("order_notes")] public string? OrderNotes { get; set; }
     [JsonPropertyName("order_created_at")] public string? OrderCreatedAt { get; set; }
+    [JsonPropertyName("delivery_address")] public string? DeliveryAddress { get; set; }
+    [JsonPropertyName("subtotal_cents")] public int SubtotalCents { get; set; }
+    [JsonPropertyName("discount_cents")] public int DiscountCents { get; set; }
+    [JsonPropertyName("delivery_fee_cents")] public int DeliveryFeeCents { get; set; }
+    [JsonPropertyName("total_cents")] public int TotalCents { get; set; }
+    [JsonPropertyName("queue_type")] public string QueueType { get; set; } = "auto";
+    [JsonPropertyName("trigger_event")] public string? TriggerEvent { get; set; }
+    [JsonPropertyName("print_scope")] public string PrintScope { get; set; } = "station";
+    [JsonPropertyName("reprint_of")] public int? ReprintOf { get; set; }
+    [JsonPropertyName("reason")] public string? Reason { get; set; }
     [JsonPropertyName("attempts")] public int Attempts { get; set; }
 }
 
@@ -129,6 +139,9 @@ public sealed class ProductionPrintLine
     [JsonPropertyName("description")] public string Description { get; set; } = "";
     [JsonPropertyName("quantity")] public decimal Quantity { get; set; }
     [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("notes")] public string? Notes { get; set; }
+    [JsonPropertyName("unit_price_cents")] public int UnitPriceCents { get; set; }
+    [JsonPropertyName("total_cents")] public int TotalCents { get; set; }
 }
 
 public sealed class ProductionMutationResponse
