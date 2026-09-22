@@ -16,6 +16,7 @@ final class WhatsAppCommerceService
     private const MESSAGE_TYPES=['text','image','audio','video','document','sticker','contact','location','unknown'];
     private const HUMAN_COMMANDS=['atendente','humano','falar com atendente','quero falar com atendente','falar com humano','quero falar com humano'];
     private const MENU_COMMANDS=['menu','inicio','início','ajuda'];
+    private const ORDER_COMMANDS=['meu pedido','acompanhar pedido','acompanhar meu pedido'];
 
     /** @return array<string,mixed> */
     public function receiveInbound(string $deviceId,array $input):array
@@ -51,9 +52,7 @@ final class WhatsAppCommerceService
             if(!$conversation){
                 try{
                     $pdo->prepare('INSERT INTO whatsapp_conversations (tenant_id,phone,mode,state,last_inbound_at,last_activity_at) VALUES (?,?,\'auto\',\'IDLE\',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)')->execute([$tenantId,$phone]);
-                }catch(\PDOException){
-                    // Another worker may have created the conversation between SELECT and INSERT.
-                }
+                }catch(\PDOException){}
                 $conversation=$this->lockConversation($pdo,$tenantId,$phone);
                 if(!$conversation)throw new RuntimeException('Não foi possível abrir a conversa.');
             }
@@ -87,6 +86,12 @@ final class WhatsAppCommerceService
                 return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'waiting_human','state'=>'WAITING_HUMAN','reply_queued'=>$replyQueued,'commerce_enabled'=>true];
             }
 
+            if(in_array($normalized,self::ORDER_COMMANDS,true)){
+                $reply=$this->orderCommandMessage($pdo,$tenantId,$conversation);
+                $queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'order_lookup',$reply);
+                return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($conversation['state']??'WELCOME'),'reply_queued'=>$queued,'commerce_enabled'=>true];
+            }
+
             if(in_array($normalized,self::MENU_COMMANDS,true)||$normalized==='cancelar'||(string)($conversation['state']??'IDLE')==='IDLE'){
                 $pdo->prepare('UPDATE whatsapp_conversations SET state=\'WELCOME\',context_json=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$conversationId,$tenantId]);
                 $reply=$this->welcomeMessage($name);
@@ -96,6 +101,32 @@ final class WhatsAppCommerceService
 
             $queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'fallback',"Não consegui entender sua resposta.\n\nDigite *MENU* para voltar ao início ou *ATENDENTE* para falar com uma pessoa.");
             return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($conversation['state']??'WELCOME'),'reply_queued'=>$queued,'commerce_enabled'=>true];
+        });
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    public function humanQueue(PDO $pdo,int $tenantId,int $limit=50):array
+    {
+        $limit=max(1,min(100,$limit));
+        $sql='SELECT c.id,c.phone,c.mode,c.state,c.assigned_user_id,c.last_inbound_at,c.last_activity_at,u.name assigned_user_name,(SELECT m.message_text FROM whatsapp_messages m WHERE m.tenant_id=c.tenant_id AND m.conversation_id=c.id AND m.direction=\'inbound\' ORDER BY m.id DESC LIMIT 1) last_message FROM whatsapp_conversations c LEFT JOIN users u ON u.id=c.assigned_user_id AND u.tenant_id=c.tenant_id WHERE c.tenant_id=? AND c.mode IN (\'waiting_human\',\'human\') ORDER BY CASE WHEN c.mode=\'waiting_human\' THEN 0 ELSE 1 END,c.last_activity_at DESC LIMIT '.$limit;
+        $q=$pdo->prepare($sql);$q->execute([$tenantId]);return $q->fetchAll(PDO::FETCH_ASSOC)?:[];
+    }
+
+    /** @return array<string,mixed> */
+    public function setHumanMode(PDO $pdo,int $tenantId,int $conversationId,string $mode,?int $userId):array
+    {
+        if($tenantId<1||$conversationId<1)throw new RuntimeException('Conversa inválida.');
+        if(!in_array($mode,['human','auto'],true))throw new RuntimeException('Modo de atendimento inválido.');
+        return Database::transaction(function(PDO $tx)use($tenantId,$conversationId,$mode,$userId):array{
+            $sql=Database::portableSql($tx,'SELECT * FROM whatsapp_conversations WHERE id=? AND tenant_id=? LIMIT 1 FOR UPDATE');
+            $q=$tx->prepare($sql);$q->execute([$conversationId,$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);if(!$row)throw new RuntimeException('Conversa não encontrada.');
+            if($mode==='human'){
+                if(!$userId)throw new RuntimeException('Usuário responsável inválido.');
+                $tx->prepare('UPDATE whatsapp_conversations SET mode=\'human\',state=\'HUMAN\',assigned_user_id=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$userId,$conversationId,$tenantId]);
+            }else{
+                $tx->prepare('UPDATE whatsapp_conversations SET mode=\'auto\',state=\'WELCOME\',context_json=NULL,assigned_user_id=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$conversationId,$tenantId]);
+            }
+            return ['id'=>$conversationId,'mode'=>$mode,'previous_mode'=>(string)$row['mode']];
         });
     }
 
@@ -128,6 +159,25 @@ final class WhatsAppCommerceService
             if($q->fetchColumn())return false;
             throw $e;
         }
+    }
+
+    private function orderCommandMessage(PDO $pdo,int $tenantId,array $conversation):string
+    {
+        $orderId=(int)($conversation['active_order_id']??0);if($orderId<1)$orderId=(int)($conversation['draft_order_id']??0);
+        if($orderId<1)return "Ainda não há um pedido vinculado a esta conversa.\n\nDigite *MENU* para voltar ao início ou *ATENDENTE* para falar com uma pessoa.";
+        $q=$pdo->prepare('SELECT id,status,payment_status FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$orderId,$tenantId]);$order=$q->fetch(PDO::FETCH_ASSOC);
+        if(!$order)return "Não encontrei o pedido vinculado a esta conversa.\n\nDigite *MENU* para voltar ao início.";
+        return 'Pedido #'.(int)$order['id']."\nStatus: ".$this->friendlyOrderStatus((string)$order['status'])."\nPagamento: ".$this->friendlyPaymentStatus((string)$order['payment_status'])."\n\nDigite *MENU* para voltar ao início.";
+    }
+
+    private function friendlyOrderStatus(string $status):string
+    {
+        return match($status){'draft'=>'montando pedido','pending'=>'recebido','confirmed'=>'confirmado','preparing'=>'em preparação','ready'=>'pronto','served'=>'servido','out_for_delivery'=>'saiu para entrega','completed'=>'entregue/concluído','cancelled'=>'cancelado',default=>$status?:'desconhecido'};
+    }
+
+    private function friendlyPaymentStatus(string $status):string
+    {
+        return match($status){'paid'=>'confirmado','pending'=>'aguardando confirmação','unpaid'=>'não pago','failed'=>'falhou','refunded'=>'estornado',default=>$status?:'não informado'};
     }
 
     private function welcomeMessage(string $name):string
