@@ -65,10 +65,11 @@ commerce_assert(empty($off['duplicate']), 'Primeira mensagem foi marcada como du
 commerce_assert(($off['commerce_enabled'] ?? null) === false, 'Commerce desligado não foi respeitado.');
 commerce_assert(empty($off['reply_queued']), 'Commerce desligado enfileirou resposta automática.');
 
-$q = $pdo->prepare('SELECT mode,state FROM whatsapp_conversations WHERE tenant_id=? AND phone=? LIMIT 1');
+$q = $pdo->prepare('SELECT id,mode,state,assigned_user_id FROM whatsapp_conversations WHERE tenant_id=? AND phone=? LIMIT 1');
 $q->execute([$tenantId, $phone]);
 $conversation = $q->fetch(PDO::FETCH_ASSOC);
 commerce_assert(is_array($conversation), 'Conversa não foi persistida.');
+$conversationId = (int)$conversation['id'];
 commerce_assert($conversation['mode'] === 'auto' && $conversation['state'] === 'IDLE', 'Commerce desligado alterou estado ou modo da conversa.');
 commerce_assert((int)$pdo->query('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=' . $tenantId)->fetchColumn() === 0, 'Commerce desligado criou outbox.');
 
@@ -104,19 +105,45 @@ commerce_assert((int)$q->fetchColumn() === 2, 'Transferência humana deveria ger
 
 $pausedId = 'CI.PAUSED.' . bin2hex(random_bytes(8));
 $paused = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $pausedId, 'text' => 'menu']);
-commerce_assert(($paused['mode'] ?? '') === 'waiting_human', 'Mensagem durante atendimento humano reativou o bot.');
+commerce_assert(($paused['mode'] ?? '') === 'waiting_human', 'Mensagem enquanto aguardava atendente reativou o bot.');
 commerce_assert(empty($paused['reply_queued']), 'Bot respondeu enquanto aguardava atendimento humano.');
 $q->execute([$tenantId]);
 commerce_assert((int)$q->fetchColumn() === 2, 'Modo humano criou resposta automática indevida.');
 
+$queue = $commerce->humanQueue($pdo, $tenantId);
+commerce_assert(count($queue) === 1 && (int)$queue[0]['id'] === $conversationId, 'Conversa não apareceu na fila humana básica.');
+$assumed = $commerce->setHumanMode($pdo, $tenantId, $conversationId, 'human', $userId);
+commerce_assert(($assumed['mode'] ?? '') === 'human', 'Funcionário não conseguiu assumir a conversa.');
+$q = $pdo->prepare('SELECT mode,state,assigned_user_id FROM whatsapp_conversations WHERE id=? AND tenant_id=?');
+$q->execute([$conversationId, $tenantId]);
+$humanRow = $q->fetch(PDO::FETCH_ASSOC);
+commerce_assert($humanRow && $humanRow['mode'] === 'human' && $humanRow['state'] === 'HUMAN' && (int)$humanRow['assigned_user_id'] === $userId, 'Assumir atendimento não persistiu responsável e modo humano.');
+
+$humanMessageId = 'CI.HUMAN.ACTIVE.' . bin2hex(random_bytes(8));
+$humanMessage = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $humanMessageId, 'text' => 'Vocês receberam?']);
+commerce_assert(($humanMessage['mode'] ?? '') === 'human' && empty($humanMessage['reply_queued']), 'Bot respondeu enquanto funcionário estava atendendo.');
+
+$resumed = $commerce->setHumanMode($pdo, $tenantId, $conversationId, 'auto', null);
+commerce_assert(($resumed['mode'] ?? '') === 'auto', 'Conversa não voltou ao modo automático.');
+$q->execute([$conversationId, $tenantId]);
+$autoRow = $q->fetch(PDO::FETCH_ASSOC);
+commerce_assert($autoRow && $autoRow['mode'] === 'auto' && $autoRow['state'] === 'WELCOME' && $autoRow['assigned_user_id'] === null, 'Voltar ao automático não limpou responsável/estado humano.');
+
+// Comando global de acompanhamento deve ser reconhecido mesmo antes da etapa de criação de pedidos.
+$orderCommandId = 'CI.ORDER.' . bin2hex(random_bytes(8));
+$orderCommand = $commerce->receiveInbound($deviceId, $base + ['provider_message_id' => $orderCommandId, 'text' => 'acompanhar pedido']);
+commerce_assert(!empty($orderCommand['reply_queued']), 'Comando global acompanhar pedido não foi reconhecido.');
+$q->execute([$tenantId]);
+commerce_assert((int)$q->fetchColumn() === 3, 'Comando de acompanhamento deveria gerar apenas uma resposta adicional.');
+
 $q = $pdo->prepare('SELECT COUNT(*) FROM whatsapp_messages WHERE tenant_id=? AND direction="inbound"');
 $q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 4, 'Histórico inbound não preservou exatamente as mensagens únicas.');
+commerce_assert((int)$q->fetchColumn() === 6, 'Histórico inbound não preservou exatamente as mensagens únicas.');
 
 // A fila de saída da conversa deve acompanhar claim/ACK do mesmo EventMenu Connect.
 $desktop = new WhatsAppDesktopAgentService();
 $claimed = $desktop->claim($deviceId, 5);
-commerce_assert(count($claimed) === 2, 'EventMenu Connect não recebeu as duas respostas automáticas esperadas.');
+commerce_assert(count($claimed) === 3, 'EventMenu Connect não recebeu as três respostas automáticas esperadas.');
 foreach ($claimed as $index => $row) {
     commerce_assert(($row['event_type'] ?? '') === 'commerce_auto', 'Claim retornou evento inesperado.');
     commerce_assert(!empty($row['claim_token']), 'Claim sem token de reserva.');
@@ -124,10 +151,10 @@ foreach ($claimed as $index => $row) {
 }
 $q = $pdo->prepare('SELECT COUNT(*) FROM whatsapp_messages WHERE tenant_id=? AND direction="outbound" AND status="sent"');
 $q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 2, 'ACK do Connect não atualizou o histórico outbound.');
+commerce_assert((int)$q->fetchColumn() === 3, 'ACK do Connect não atualizou o histórico outbound.');
 
 $q = $pdo->prepare('SELECT COUNT(*) FROM whatsapp_messages WHERE tenant_id=?');
 $q->execute([$tenantId]);
-commerce_assert((int)$q->fetchColumn() === 6, 'Quantidade final de mensagens persistidas divergiu.');
+commerce_assert((int)$q->fetchColumn() === 9, 'Quantidade final de mensagens persistidas divergiu.');
 
 echo "WhatsApp Commerce inbound smoke: OK\n";
