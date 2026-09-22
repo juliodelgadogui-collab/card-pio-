@@ -156,6 +156,26 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         return EmbeddedSendResult(jsonText(result, "message_id"))
     }
 
+    fun sendMedia(
+        phone: String,
+        message: String,
+        mediaType: String,
+        mediaUrl: String,
+        filename: String = "",
+        mimeType: String = "",
+    ): EmbeddedSendResult {
+        ensureStarted()
+        val body = JSONObject()
+            .put("phone", phone)
+            .put("message", message)
+            .put("media_type", mediaType)
+            .put("media_url", mediaUrl)
+            .put("media_filename", filename)
+            .put("media_mime", mimeType)
+        val result = request("send", "POST", body)
+        return EmbeddedSendResult(jsonText(result, "message_id"))
+    }
+
     private fun stateFrom(json: JSONObject): EmbeddedWhatsAppState = EmbeddedWhatsAppState(
         status = jsonText(json, "status", "disconnected"),
         qr = jsonText(json, "qr"),
@@ -173,7 +193,7 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         val connection = (URL(base + path).openConnection() as HttpURLConnection).apply {
             requestMethod = method
             connectTimeout = 4_000
-            readTimeout = if (path == "pair") 25_000 else 12_000
+            readTimeout = if (path == "pair") 25_000 else 45_000
             useCaches = false
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Authorization", "Bearer ${store.engineSecret()}")
