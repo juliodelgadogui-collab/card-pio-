@@ -10,8 +10,6 @@ use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\TicketWhatsAppQueueService;
 use EventMenu\Services\WhatsAppCommerceService;
 use EventMenu\Services\WhatsAppDesktopAgentService;
-use RuntimeException;
-use Throwable;
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
