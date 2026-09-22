@@ -90,6 +90,9 @@ jobs:
           test -s app/src/main/assets/nodejs-project.zip
           unzip -tq app/src/main/assets/nodejs-project.zip >/dev/null
 
+      - name: Validate embedded Node runtime
+        run: node --check node-runtime/main.js
+
       - name: Restore stable EventMenu Connect debug key
         uses: actions/cache@v4
         with:
