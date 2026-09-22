@@ -84,8 +84,8 @@ final class WhatsAppCommercePaymentService
     private function beginPix(PDO $pdo,int $tenantId,int $conversationId,array $order):array
     {
         $token=(string)$order['public_token'];$service=new PublicOrderPaymentService();$profile=$service->currentProfile($pdo,$token);$email=trim((string)($profile['email']??''));
-        if(!filter_var($email,FILTER_VALIDATE_EMAIL))return $this->stateResult($pdo,$tenantId,$conversationId,['order_id'=>(int)$order['id'],'payment_step'=>'profile_email','payment_method'=>'pix'],"Para gerar o PIX, informe seu *e-mail*.\n\nEle será usado somente no cadastro do pagamento deste pedido.",'payment_profile_email');
-        if(empty($profile['document_configured']))return $this->stateResult($pdo,$tenantId,$conversationId,['order_id'=>(int)$order['id'],'payment_step'=>'profile_document','payment_method'=>'pix','payment_email'=>$email],"Agora informe o *CPF ou CNPJ* do pagador.\n\nEnvie apenas os números ou com pontuação.",'payment_profile_document');
+        if(!filter_var($email,FILTER_VALIDATE_EMAIL))return $this->stateResult($pdo,$tenantId,$conversationId,['order_id'=>(int)$order['id'],'payment_step'=>'profile_email','payment_method'=>'pix'],"Para gerar o PIX, informe seu *e-mail*.\n\nSeu CPF já fica salvo no cadastro do EventMenu e não será solicitado novamente quando estiver válido.",'payment_profile_email');
+        if(empty($profile['document_configured']))return $this->stateResult($pdo,$tenantId,$conversationId,['order_id'=>(int)$order['id'],'payment_step'=>'profile_document','payment_method'=>'pix','payment_email'=>$email],"Não encontrei um CPF válido no cadastro.\n\nInforme o *CPF ou CNPJ* do pagador para continuar.",'payment_profile_document');
         return $this->createPix($pdo,$tenantId,$conversationId,$order);
     }
 
@@ -93,8 +93,12 @@ final class WhatsAppCommercePaymentService
     private function collectEmail(PDO $pdo,int $tenantId,int $conversationId,array $order,array $context,string $text):array
     {
         $email=mb_strtolower(trim($text));if(!filter_var($email,FILTER_VALIDATE_EMAIL))return $this->stateResult($pdo,$tenantId,$conversationId,$context,"E-mail inválido. Envie um endereço como nome@exemplo.com.",'payment_profile_email_invalid');
+        $service=new PublicOrderPaymentService();$token=(string)$order['public_token'];$profileOrder=$service->order($pdo,$token);$document=trim((string)($profileOrder['customer_document']??''));
+        if($document!==''){
+            try{$service->profile($pdo,$token,$email,$document);return $this->createPix($pdo,$tenantId,$conversationId,$order);}catch(RuntimeException){}
+        }
         $context['payment_step']='profile_document';$context['payment_email']=$email;
-        return $this->stateResult($pdo,$tenantId,$conversationId,$context,"Agora informe o *CPF ou CNPJ* do pagador.\n\nEnvie apenas os números ou com pontuação.",'payment_profile_document');
+        return $this->stateResult($pdo,$tenantId,$conversationId,$context,"Não encontrei um CPF válido no cadastro.\n\nInforme o *CPF ou CNPJ* do pagador para continuar.",'payment_profile_document');
     }
 
     /** @return array<string,mixed> */
