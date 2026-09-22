@@ -85,6 +85,10 @@ jobs:
           fi
           DEBUG_CERT="$(keytool -exportcert -rfc -keystore "$HOME/.android/debug.keystore" -storepass android -alias androiddebugkey | openssl x509 -noout -fingerprint -sha256 | cut -d= -f2 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
           test -n "$DEBUG_CERT"
+          echo "DELYVRE_DEBUG_KEYSTORE_PATH=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
+          echo "DELYVRE_DEBUG_STORE_PASSWORD=android" >> "$GITHUB_ENV"
+          echo "DELYVRE_DEBUG_KEY_ALIAS=androiddebugkey" >> "$GITHUB_ENV"
+          echo "DELYVRE_DEBUG_KEY_PASSWORD=android" >> "$GITHUB_ENV"
           echo "DELYVRE_DEBUG_CERT_SHA256=$DEBUG_CERT" >> "$GITHUB_ENV"
           echo "Stable DELYVRE debug certificate SHA-256: $DEBUG_CERT"
 
