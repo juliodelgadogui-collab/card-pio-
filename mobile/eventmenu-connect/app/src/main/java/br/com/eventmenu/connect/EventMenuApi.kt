@@ -91,7 +91,7 @@ class EventMenuApi(context: Context) {
             val nextRefresh = result.optString("refresh_token")
             if (token.length < 32 || nextRefresh.length < 32) false
             else {
-                store.updateTokens(token, nextRefresh)
+                store.updateTokens(token, nextRefresh, result.optJSONObject("user"))
                 true
             }
         } catch (_: Exception) {
