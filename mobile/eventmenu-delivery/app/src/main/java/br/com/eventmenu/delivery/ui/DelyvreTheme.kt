@@ -1,6 +1,5 @@
 package br.com.eventmenu.delivery.ui
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -90,7 +89,7 @@ private val DelyvreTypography = Typography().let { base ->
 
 @Composable
 fun DelyvreTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     MaterialTheme(
