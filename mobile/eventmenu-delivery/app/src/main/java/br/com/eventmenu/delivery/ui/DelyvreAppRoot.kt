@@ -1,13 +1,20 @@
 package br.com.eventmenu.delivery.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -17,11 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import br.com.eventmenu.delivery.BuildConfig
 import br.com.eventmenu.delivery.DeliveryViewModel
 import br.com.eventmenu.delivery.Screen
 import br.com.eventmenu.delivery.data.ModifierGroup
@@ -29,6 +38,8 @@ import br.com.eventmenu.delivery.data.Product
 import br.com.eventmenu.delivery.data.Store
 import br.com.eventmenu.delivery.money
 import coil3.compose.AsyncImage
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
 
 @Composable
 fun DelyvreAppRoot(vm: DeliveryViewModel) {
@@ -424,9 +435,15 @@ private fun DelyvreProductDialog(product: Product, onDismiss: () -> Unit, onAdd:
         title = { Text(product.name) },
         text = {
             Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                DelyvreRemoteImage(
+                    url = product.imageUrl,
+                    contentDescription = product.name,
+                    modifier = Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(18.dp)),
+                    icon = Icons.Default.Fastfood,
+                )
                 if (product.description.isNotBlank()) Text(product.description, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 product.modifierGroups.forEach { group ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -524,17 +541,56 @@ private fun DelyvreCompactStoreCard(store: Store, onOpen: () -> Unit) {
     }
 }
 
+private enum class DelyvreImageState { Loading, Success, Error }
+
 @Composable
-private fun DelyvreRemoteImage(url: String, contentDescription: String?, modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+internal fun DelyvreRemoteImage(url: String, contentDescription: String?, modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    val context = LocalContext.current
+    val resolvedUrl = remember(url, BuildConfig.API_BASE_URL) { resolveDelyvreImageUrl(url, BuildConfig.API_BASE_URL) }
+    var imageState by remember(resolvedUrl) { mutableStateOf(if (resolvedUrl == null) DelyvreImageState.Error else DelyvreImageState.Loading) }
+    val pulse = rememberInfiniteTransition(label = "delyvre-image-loading")
+    val skeletonAlpha by pulse.animateFloat(
+        initialValue = .42f,
+        targetValue = .82f,
+        animationSpec = infiniteRepeatable(animation = tween(750), repeatMode = RepeatMode.Reverse),
+        label = "delyvre-image-loading-alpha",
+    )
+
     Box(modifier.background(DelyvreSurfaceMuted), contentAlignment = Alignment.Center) {
-        Icon(icon, contentDescription = null, tint = DelyvreMuted.copy(alpha = .55f), modifier = Modifier.size(30.dp))
-        if (isSafeDelyvreImageUrl(url)) {
+        if (resolvedUrl != null) {
+            val request = remember(resolvedUrl) {
+                ImageRequest.Builder(context)
+                    .data(resolvedUrl)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+                    .networkCachePolicy(CachePolicy.ENABLED)
+                    .build()
+            }
             AsyncImage(
-                model = url,
+                model = request,
                 contentDescription = contentDescription,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
+                onLoading = { imageState = DelyvreImageState.Loading },
+                onSuccess = { imageState = DelyvreImageState.Success },
+                onError = { imageState = DelyvreImageState.Error },
             )
+        }
+
+        when (imageState) {
+            DelyvreImageState.Loading -> Box(
+                Modifier.fillMaxSize().background(DelyvreLine.copy(alpha = skeletonAlpha)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(icon, contentDescription = null, tint = DelyvreMuted.copy(alpha = .34f), modifier = Modifier.size(30.dp))
+            }
+            DelyvreImageState.Error -> Icon(
+                icon,
+                contentDescription = null,
+                tint = DelyvreMuted.copy(alpha = .55f),
+                modifier = Modifier.size(30.dp),
+            )
+            DelyvreImageState.Success -> Unit
         }
     }
 }

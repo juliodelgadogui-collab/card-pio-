@@ -2,12 +2,13 @@ package br.com.eventmenu.delivery.ui
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DelyvreUiRulesTest {
     @Test
-    fun `remote images accept valid https only`() {
+    fun `remote images accept valid absolute https only`() {
         assertTrue(isSafeDelyvreImageUrl("https://cdn.exemplo.com/produto.jpg"))
         assertTrue(isSafeDelyvreImageUrl("HTTPS://cdn.exemplo.com/capa.webp"))
         assertFalse(isSafeDelyvreImageUrl("http://cdn.exemplo.com/produto.jpg"))
@@ -16,6 +17,37 @@ class DelyvreUiRulesTest {
         assertFalse(isSafeDelyvreImageUrl("https:///sem-host.png"))
         assertFalse(isSafeDelyvreImageUrl("https://"))
         assertFalse(isSafeDelyvreImageUrl("https://usuario@cdn.exemplo.com/produto.jpg"))
+    }
+
+    @Test
+    fun `image resolver keeps absolute https and normalizes EventMenu relative paths`() {
+        val base = "https://go.gestao2.store/1/"
+        assertEquals(
+            "https://cdn.exemplo.com/produto.jpg",
+            resolveDelyvreImageUrl("https://cdn.exemplo.com/produto.jpg", base),
+        )
+        assertEquals(
+            "https://go.gestao2.store/1/uploads/produto.jpg",
+            resolveDelyvreImageUrl("/uploads/produto.jpg", base),
+        )
+        assertEquals(
+            "https://go.gestao2.store/1/uploads/cardapio/lanche%20especial.jpg",
+            resolveDelyvreImageUrl("uploads/cardapio/lanche especial.jpg", base),
+        )
+        assertEquals(
+            "https://go.gestao2.store/1/uploads/cardapio/a%C3%A7a%C3%AD.webp",
+            resolveDelyvreImageUrl("uploads/cardapio/açaí.webp", base),
+        )
+    }
+
+    @Test
+    fun `image resolver never downgrades or accepts hostile schemes`() {
+        val base = "https://go.gestao2.store/1/"
+        assertNull(resolveDelyvreImageUrl("http://cdn.exemplo.com/produto.jpg", base))
+        assertNull(resolveDelyvreImageUrl("//malicioso.exemplo/foto.jpg", base))
+        assertNull(resolveDelyvreImageUrl("javascript:alert(1)", base))
+        assertNull(resolveDelyvreImageUrl("data:image/png;base64,abc", base))
+        assertNull(resolveDelyvreImageUrl("uploads/foto.jpg", "http://go.gestao2.store/1/"))
     }
 
     @Test
