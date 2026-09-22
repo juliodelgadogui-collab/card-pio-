@@ -166,7 +166,10 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun checkoutCart(addressId:Int){
         if(!isAuthenticated){screen=Screen.Login;message="Entre para escolher o endereço e finalizar seu pedido.";return}
         action{
-            val cat=catalog?:error("Loja não carregada.");if(!cat.store.acceptingOrders)error("Este restaurante pausou novos pedidos no momento.");if(cart.isEmpty())error("Seu carrinho está vazio.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<cat.store.minimumOrderCents)error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
+            val current=catalog?:error("Loja não carregada.")
+            catalog=api.catalog(current.store.tenantId,current.store.unitId)
+            revalidateCurrentCart()
+            val cat=catalog?:error("Loja não carregada.");if(!cat.store.acceptingOrders)error("Este restaurante pausou novos pedidos no momento.");if(cart.isEmpty())error("Seu carrinho mudou e não há itens válidos para finalizar.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<cat.store.minimumOrderCents)error("O pedido mínimo é ${money(cat.store.minimumOrderCents)}.")
             val appliedCoupon=couponCode;if(appliedCoupon.isNotBlank())couponQuote=api.couponQuote(cat.store.tenantId,appliedCoupon,subtotal)
             val order=api.createOrder(cat,addressId,cart.toList(),appliedCoupon);selectedOrder=order;PaymentUiContext.updateAmount(order.totalCents);cart.clear();cartPersistence.clear();clearCoupon(false);paymentMethods=api.paymentMethods(order.orderNumber);pixPayment=null;paymentWaiting=false;payerCpf="";if(paymentMethods?.cards?.isNotEmpty()==true&&customer?.cpfConfigured==true)runCatching{api.paymentIdentification()}.onSuccess{payerCpf=it};screen=Screen.Checkout
         }
@@ -196,22 +199,14 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     private fun persistCart(){cartPersistence.save(catalog,cart.toList())}
     private fun restorePersistedCart(){
         val saved=cartPersistence.load()?:return
+        val products=saved.items.map{it.product}.distinctBy{it.id}
+        catalog=Catalog(saved.store,emptyList(),products,"")
+        cart.clear();cart.addAll(saved.items)
         viewModelScope.launch{
-            runCatching{api.catalog(saved.tenantId,saved.unitId)}.onSuccess{fresh->
+            runCatching{api.catalog(saved.store.tenantId,saved.store.unitId)}.onSuccess{fresh->
                 catalog=fresh
-                val restored=saved.items.mapNotNull{savedItem->
-                    val product=fresh.products.firstOrNull{it.id==savedItem.productId&&it.available}?:return@mapNotNull null
-                    val validIds=product.modifierGroups.flatMap{it.options}.map{it.id}.toSet()
-                    val selected=savedItem.optionIds.intersect(validIds)
-                    val valid=product.modifierGroups.all{group->
-                        val count=group.options.count{it.id in selected}
-                        count>=group.minSelect.coerceAtLeast(if(group.required)1 else 0)&&count<=group.maxSelect.coerceAtLeast(1)
-                    }
-                    if(valid)CartItem(product,savedItem.quantity,selected,savedItem.notes)else null
-                }
-                cart.clear();cart.addAll(restored)
-                if(cart.isEmpty())cartPersistence.clear() else persistCart()
-            }.onFailure{cartPersistence.clear()}
+                revalidateCurrentCart()
+            }
         }
     }
     private fun revalidateCurrentCart(){
