@@ -162,9 +162,16 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         request("inbound/ack", "POST", JSONObject().put("ids", JSONArray().put(providerMessageId.take(190))))
     }
 
-    fun send(phone: String, message: String): EmbeddedSendResult {
+    fun send(phone: String, message: String, idempotencyKey: String): EmbeddedSendResult {
         ensureStarted()
-        val result = request("send", "POST", JSONObject().put("phone", phone).put("message", message))
+        val result = request(
+            "send",
+            "POST",
+            JSONObject()
+                .put("phone", phone)
+                .put("message", message)
+                .put("idempotency_key", idempotencyKey),
+        )
         return EmbeddedSendResult(jsonText(result, "message_id"))
     }
 
@@ -175,6 +182,7 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
         mediaUrl: String,
         filename: String = "",
         mimeType: String = "",
+        idempotencyKey: String,
     ): EmbeddedSendResult {
         ensureStarted()
         val body = JSONObject()
@@ -184,6 +192,7 @@ class EmbeddedWhatsAppEngine(private val context: Context) {
             .put("media_url", mediaUrl)
             .put("media_filename", filename)
             .put("media_mime", mimeType)
+            .put("idempotency_key", idempotencyKey)
         val result = request("send", "POST", body)
         return EmbeddedSendResult(jsonText(result, "message_id"))
     }
