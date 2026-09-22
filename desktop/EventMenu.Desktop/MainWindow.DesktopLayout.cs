@@ -157,6 +157,9 @@ public partial class MainWindow
         if (cashCards is not null)
             cashCards.Columns = ultraCompact ? 1 : compact ? 2 : 3;
 
+        ApplyOrdersFooterLayout(ultraCompact);
+        ApplyTablesFooterLayout(ultraCompact, compact);
+
         // Vertical density follows the actual monitor/work area instead of a fixed web page height.
         CartGrid.Height = height < 620 ? 82 : height < 700 ? 102 : height < 780 ? 124 : height < 860 ? 148 : 174;
 
@@ -171,6 +174,45 @@ public partial class MainWindow
         ApplyOperationalCardDensity(OrdersView, compact ? 8 : 10);
         ApplyOperationalCardDensity(TablesView, compact ? 8 : 10);
         ApplyOperationalCardDensity(CashView, compact ? 8 : 10);
+    }
+
+    private void ApplyOrdersFooterLayout(bool ultraCompact)
+    {
+        var footer = OrdersView.Children.OfType<Grid>().FirstOrDefault(x => Grid.GetRow(x) == 2);
+        if (footer is null) return;
+
+        var hint = footer.Children.OfType<TextBlock>().FirstOrDefault(x => Grid.GetColumn(x) == 0);
+        if (hint is not null)
+            hint.Visibility = ultraCompact ? Visibility.Collapsed : Visibility.Visible;
+
+        var actions = footer.Children.OfType<StackPanel>().FirstOrDefault(x => Grid.GetColumn(x) == 1);
+        if (actions is null) return;
+        foreach (var button in actions.Children.OfType<Button>())
+        {
+            button.FontSize = ultraCompact ? 11 : 12;
+            button.Padding = ultraCompact ? new Thickness(9, 7, 9, 7) : new Thickness(14, 9, 14, 9);
+        }
+    }
+
+    private void ApplyTablesFooterLayout(bool ultraCompact, bool compact)
+    {
+        var footerCard = TablesView.Children.OfType<Border>().FirstOrDefault(x => Grid.GetRow(x) == 2);
+        if (footerCard?.Child is not Grid footer || footer.ColumnDefinitions.Count < 4) return;
+
+        var label = footer.Children.OfType<TextBlock>().FirstOrDefault(x => Grid.GetColumn(x) == 0);
+        if (label is not null)
+            label.Visibility = ultraCompact ? Visibility.Collapsed : Visibility.Visible;
+
+        footer.ColumnDefinitions[0].Width = ultraCompact ? new GridLength(0) : GridLength.Auto;
+        footer.ColumnDefinitions[1].Width = new GridLength(ultraCompact ? 150 : compact ? 190 : 230);
+
+        var actions = footer.Children.OfType<StackPanel>().FirstOrDefault(x => Grid.GetColumn(x) == 3);
+        if (actions is null) return;
+        foreach (var button in actions.Children.OfType<Button>())
+        {
+            button.FontSize = ultraCompact ? 11 : 12;
+            button.Padding = ultraCompact ? new Thickness(9, 7, 9, 7) : new Thickness(14, 9, 14, 9);
+        }
     }
 
     private static void ApplyPageHeaderMargin(Grid view, bool shortScreen)
