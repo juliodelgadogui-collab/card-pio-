@@ -1,5 +1,7 @@
 package br.com.eventmenu.delivery.ui
 
+import br.com.eventmenu.delivery.data.Address
+import br.com.eventmenu.delivery.data.Store
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -57,5 +59,39 @@ class DelyvreUiRulesTest {
         assertEquals("Grátis", delyvreDeliveryFeeLabel(0))
         assertEquals("Grátis", delyvreDeliveryFeeLabel(-1))
         assertEquals("R$ 5,90", delyvreDeliveryFeeLabel(590))
+    }
+
+    @Test
+    fun `home address uses useful customer facing summary`() {
+        assertEquals("Informe onde deseja receber", delyvreAddressSummary(null))
+        assertEquals(
+            "Rua das Flores, 25 · Centro · Bom Jesus",
+            delyvreAddressSummary(Address(label = "Casa", street = "Rua das Flores", number = "25", neighborhood = "Centro", city = "Bom Jesus")),
+        )
+        assertEquals("Trabalho", delyvreAddressSummary(Address(label = "Trabalho")))
+    }
+
+    @Test
+    fun `home filters only use real store capabilities`() {
+        val store = Store(
+            tenantId = 1,
+            unitId = 2,
+            name = "Lanches",
+            description = "",
+            city = "",
+            state = "",
+            logoUrl = "",
+            coverUrl = "",
+            deliveryFeeCents = 0,
+            minimumOrderCents = 0,
+            favorite = false,
+            acceptingOrders = true,
+            pickupEnabled = true,
+            categories = listOf("Hambúrguer", "Lanches"),
+        )
+        assertTrue(delyvreMatchesHomeFilters(store, openOnly = true, freeOnly = true, pickupOnly = true, category = "hambúrguer"))
+        assertFalse(delyvreMatchesHomeFilters(store.copy(acceptingOrders = false), openOnly = true, freeOnly = false, pickupOnly = false, category = null))
+        assertFalse(delyvreMatchesHomeFilters(store.copy(deliveryFeeCents = 500), openOnly = false, freeOnly = true, pickupOnly = false, category = null))
+        assertFalse(delyvreMatchesHomeFilters(store, openOnly = false, freeOnly = false, pickupOnly = false, category = "Pizza"))
     }
 }
