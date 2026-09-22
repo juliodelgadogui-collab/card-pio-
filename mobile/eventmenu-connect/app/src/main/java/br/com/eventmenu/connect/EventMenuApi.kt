@@ -45,6 +45,11 @@ class EventMenuApi(context: Context) {
         return agentRequest("heartbeat", "POST", body)
     }
 
+    fun inbound(message: JSONObject): JSONObject {
+        val body = JSONObject(message.toString()).put("device_id", store.deviceId())
+        return agentRequest("inbound", "POST", body)
+    }
+
     fun claim(limit: Int = 1): JSONArray {
         val body = JSONObject().put("device_id", store.deviceId()).put("limit", limit.coerceIn(1, 5))
         return agentRequest("claim", "POST", body).optJSONArray("messages") ?: JSONArray()
