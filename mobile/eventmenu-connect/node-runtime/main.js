@@ -45,6 +45,9 @@ const state = {
   qr: null,
   pairingCode: null,
   pairingExpiresAt: 0,
+  pairingPhone: '',
+  pairingStartedAt: 0,
+  pairingLastFailureCode: 0,
   countryCode: String(config.country_code || 'BR').toUpperCase(),
   phone: '',
   error: '',
@@ -58,8 +61,20 @@ const state = {
   lastInboundAt: '',
   lastInboundError: '',
 };
+let pairingRequest = null;
+let pairingRequestPhone = '';
 
 function touch() { state.updatedAt = new Date().toISOString(); }
+function hasActivePairingCode() {
+  return Boolean(state.pairingCode && state.pairingExpiresAt && Date.now() < state.pairingExpiresAt);
+}
+function clearPairingRuntime({ keepFailure = false } = {}) {
+  state.pairingCode = null;
+  state.pairingExpiresAt = 0;
+  state.pairingPhone = '';
+  state.pairingStartedAt = 0;
+  if (!keepFailure) state.pairingLastFailureCode = 0;
+}
 function readJsonArray(file) {
   try {
     const raw = fs.readFileSync(file, 'utf8');
@@ -168,8 +183,7 @@ function inboundBatch(limit = 20) {
 }
 function expirePairingCodeIfNeeded() {
   if (state.pairingCode && state.pairingExpiresAt && Date.now() >= state.pairingExpiresAt) {
-    state.pairingCode = null;
-    state.pairingExpiresAt = 0;
+    clearPairingRuntime();
     if (state.status === 'pairing') state.status = 'disconnected';
     if (!state.error) state.error = 'O código expirou. Gere um novo código de conexão.';
     touch();
@@ -183,6 +197,10 @@ function publicState() {
     qr: state.qr,
     pairing_code: state.pairingCode,
     pairing_expires_at: state.pairingExpiresAt || null,
+    pairing_active: Boolean(pairingRequest) || hasActivePairingCode(),
+    pairing_phone_suffix: (state.pairingPhone || pairingRequestPhone) ? String(state.pairingPhone || pairingRequestPhone).slice(-4) : null,
+    pairing_started_at: state.pairingStartedAt || null,
+    pairing_last_failure_code: state.pairingLastFailureCode || null,
     country_code: state.countryCode,
     phone: state.phone,
     error: state.error || null,
@@ -334,12 +352,13 @@ function cancelReconnect() {
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
 }
-function scheduleReconnect(delayOverride = null) {
+function scheduleReconnect(delayOverride = null, countAttempt = true) {
   if (state.manualStop || state.starting || state.reconnectTimer) return;
-  state.reconnectAttempt = Math.min(state.reconnectAttempt + 1, 8);
+  if (countAttempt) state.reconnectAttempt = Math.min(state.reconnectAttempt + 1, 8);
+  const attempt = Math.max(1, state.reconnectAttempt || 1);
   const delay = delayOverride == null
-    ? Math.min(60000, 2000 * (2 ** (state.reconnectAttempt - 1)))
-    : delayOverride;
+    ? Math.min(60000, 2000 * (2 ** (attempt - 1)))
+    : Math.max(0, Number(delayOverride) || 0);
   state.status = 'reconnecting';
   touch();
   state.reconnectTimer = setTimeout(() => {
@@ -352,6 +371,12 @@ async function removeSessionFiles() {
   await fs.promises.mkdir(SESSION_ROOT, { recursive: true, mode: 0o700 });
 }
 async function resolveWhatsAppVersion() {
+  // Primeiro prefere a versão conhecida pela própria versão do Baileys.
+  // Usar uma versão Web mais nova que a biblioteca pode quebrar o handshake de pareamento.
+  try {
+    const supported = await fetchLatestBaileysVersion({ timeout: 12000 });
+    if (Array.isArray(supported?.version)) return supported.version;
+  } catch (_) {}
   try {
     const live = await fetchLatestWaWebVersion({
       headers: {
@@ -360,11 +385,7 @@ async function resolveWhatsAppVersion() {
       },
       timeout: 12000,
     });
-    if (live?.isLatest && Array.isArray(live.version)) return live.version;
-  } catch (_) {}
-  try {
-    const fallback = await fetchLatestBaileysVersion({ timeout: 12000 });
-    if (Array.isArray(fallback?.version)) return fallback.version;
+    if (Array.isArray(live?.version)) return live.version;
   } catch (_) {}
   return undefined;
 }
@@ -382,8 +403,7 @@ async function resetForFreshPairing() {
   // que o servidor ainda não confirmou. O logout completo continua limpando-a abaixo.
   state.status = 'disconnected';
   state.qr = null;
-  state.pairingCode = null;
-  state.pairingExpiresAt = 0;
+  clearPairingRuntime();
   state.phone = '';
   state.error = '';
   state.lastDisconnectCode = 0;
@@ -408,10 +428,11 @@ async function startSession() {
   if (state.socket && ['connected', 'starting', 'qr', 'pairing', 'reconnecting'].includes(state.status)) return state;
   if (state.starting) return state.starting;
 
-  state.status = state.reconnectAttempt > 0 ? 'reconnecting' : 'starting';
+  const preservePairingCode = hasActivePairingCode();
+  state.status = state.reconnectAttempt > 0 || preservePairingCode ? 'reconnecting' : 'starting';
   state.error = '';
   state.qr = null;
-  if (state.status !== 'pairing') {
+  if (!preservePairingCode) {
     state.pairingCode = null;
     state.pairingExpiresAt = 0;
   }
@@ -429,7 +450,7 @@ async function startSession() {
       countryCode: state.countryCode,
       logger,
       printQRInTerminal: false,
-      markOnlineOnConnect: false,
+      markOnlineOnConnect: true,
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       browser: Browsers.windows('Chrome'),
@@ -439,11 +460,19 @@ async function startSession() {
     });
     state.socket = socket;
 
+    // O WhatsApp normalmente envia creds.update e, logo depois do pair-success,
+    // encerra o primeiro socket com 515. O novo socket só pode abrir depois que
+    // essas credenciais terminaram de ser persistidas.
+    let credsSaveChain = Promise.resolve();
     socket.ev.on('creds.update', () => {
-      saveCreds().catch((error) => {
-        state.error = String(error?.message || 'Falha ao salvar a sessão.').slice(0, 400);
-        touch();
-      });
+      credsSaveChain = credsSaveChain
+        .catch(() => {})
+        .then(() => saveCreds())
+        .catch((error) => {
+          state.error = String(error?.message || 'Falha ao salvar a sessão.').slice(0, 400);
+          touch();
+          throw error;
+        });
     });
 
     socket.ev.on('lid-mapping.update', (mapping) => {
@@ -467,7 +496,7 @@ async function startSession() {
       }
     });
 
-    socket.ev.on('connection.update', (update) => {
+    socket.ev.on('connection.update', async (update) => {
       const { connection, qr, lastDisconnect } = update;
       if (qr) {
         state.qr = qr;
@@ -475,15 +504,19 @@ async function startSession() {
         state.error = '';
         touch();
       }
+      if (update?.isNewLogin && state.pairingPhone) {
+        state.status = 'reconnecting';
+        state.error = '';
+        touch();
+      }
       if (connection === 'connecting' && !['qr', 'pairing'].includes(state.status)) {
-        state.status = state.reconnectAttempt > 0 ? 'reconnecting' : 'starting';
+        state.status = state.reconnectAttempt > 0 || hasActivePairingCode() ? 'reconnecting' : 'starting';
         touch();
       }
       if (connection === 'open') {
         state.status = 'connected';
         state.qr = null;
-        state.pairingCode = null;
-        state.pairingExpiresAt = 0;
+        clearPairingRuntime();
         state.error = '';
         state.lastDisconnectCode = 0;
         state.reconnectAttempt = 0;
@@ -496,6 +529,7 @@ async function startSession() {
         state.qr = null;
         const code = disconnectCode(lastDisconnect);
         state.lastDisconnectCode = code;
+        const wasPairing = hasActivePairingCode() || Boolean(state.pairingPhone);
         const loggedOut = code === DisconnectReason.loggedOut;
         const restartRequired = code === DisconnectReason.restartRequired || code === 515;
         const transientDisconnect = [
@@ -512,37 +546,57 @@ async function startSession() {
         ].includes(code);
         if (state.manualStop) {
           state.status = 'disconnected';
-          state.pairingCode = null;
-          state.pairingExpiresAt = 0;
+          clearPairingRuntime();
           state.error = '';
           touch();
+          return;
+        }
+        if (restartRequired) {
+          // 515 após pair-success é o fluxo normal do WhatsApp. Espere a gravação
+          // das novas chaves e reabra imediatamente; não apague a sessão/código.
+          try { await credsSaveChain; } catch (_) {}
+          state.status = 'reconnecting';
+          state.error = '';
+          state.pairingLastFailureCode = 0;
+          touch();
+          scheduleReconnect(0, false);
           return;
         }
         if (loggedOut) {
           state.status = 'disconnected';
-          state.pairingCode = null;
-          state.pairingExpiresAt = 0;
           state.phone = '';
-          state.error = 'Sessão encerrada pelo WhatsApp. Gere um novo código.';
           state.reconnectAttempt = 0;
+          if (wasPairing) {
+            state.pairingLastFailureCode = code || 401;
+            state.error = `O WhatsApp recusou a conclusão do vínculo (código ${code || 401}). Tente novamente; se repetir, use o QR Code.`;
+            clearPairingRuntime({ keepFailure: true });
+          } else {
+            clearPairingRuntime();
+            state.error = `Sessão encerrada pelo WhatsApp${code ? ` (código ${code})` : ''}. Gere um novo vínculo.`;
+          }
           touch();
           removeSessionFiles().catch(() => {});
           return;
         }
-        if (restartRequired || transientDisconnect) {
+        if (transientDisconnect) {
           state.status = 'reconnecting';
           state.pairingCode = null;
           state.pairingExpiresAt = 0;
-          state.error = '';
+          if (wasPairing) {
+            state.pairingLastFailureCode = code || 408;
+            state.error = `A conexão foi interrompida durante o vínculo (código ${code || 408}). O Connect tentará recuperar; se o código não aparecer novamente, gere outro ou use QR Code.`;
+          } else {
+            state.error = '';
+          }
           touch();
-          scheduleReconnect(restartRequired ? 350 : null);
+          scheduleReconnect();
           return;
         }
-        state.pairingCode = null;
-        state.pairingExpiresAt = 0;
+        clearPairingRuntime({ keepFailure: true });
+        state.pairingLastFailureCode = code || 0;
         state.status = 'error';
         state.error = code === 405
-          ? 'O WhatsApp recusou a versão do cliente (405). Gere um novo código; o Connect atualizará a versão Web automaticamente.'
+          ? 'O WhatsApp recusou a versão do cliente (código 405). Gere um novo código; o Connect atualizará a versão Web automaticamente.'
           : `Conexão com o WhatsApp encerrada${code ? ` (código ${code})` : ''}. O Connect tentará recuperar a sessão automaticamente.`;
         touch();
         if (code !== 405) scheduleReconnect();
@@ -568,24 +622,57 @@ async function startSession() {
 
 async function requestPairingCode(phone, countryCode) {
   phone = normalizePairPhone(phone);
+  expirePairingCodeIfNeeded();
   if (state.status === 'connected') return publicState();
 
-  state.countryCode = normalizeCountryCode(countryCode || state.countryCode);
-  await resetForFreshPairing();
-  await startSession();
-  if (!state.socket) throw new Error('Mecanismo do WhatsApp ainda não iniciou. Tente novamente.');
-  await waitUntilPairingReady();
+  if (hasActivePairingCode()) {
+    if (state.pairingPhone === phone) return publicState();
+    throw new Error('Já existe um código de conexão ativo para outro número. Cancele a tentativa atual antes de gerar outro.');
+  }
+  if (pairingRequest) {
+    if (pairingRequestPhone === phone) return pairingRequest;
+    throw new Error('Uma geração de código já está em andamento. Aguarde a conclusão antes de tentar outro número.');
+  }
 
-  const code = await state.socket.requestPairingCode(phone);
-  if (!code) throw new Error('O WhatsApp não retornou o código de conexão.');
-  state.pairingCode = String(code).replace(/\s+/g, '');
-  state.pairingExpiresAt = Date.now() + 120_000;
-  state.qr = null;
-  state.status = 'pairing';
-  state.error = '';
-  state.lastDisconnectCode = 0;
-  touch();
-  return publicState();
+  state.countryCode = normalizeCountryCode(countryCode || state.countryCode);
+  pairingRequestPhone = phone;
+  pairingRequest = (async () => {
+    await resetForFreshPairing();
+    state.pairingPhone = phone;
+    state.pairingStartedAt = Date.now();
+    state.pairingLastFailureCode = 0;
+    touch();
+
+    await startSession();
+    if (!state.socket) throw new Error('Mecanismo do WhatsApp ainda não iniciou. Tente novamente.');
+    await waitUntilPairingReady();
+
+    const code = await state.socket.requestPairingCode(phone);
+    if (!code) throw new Error('O WhatsApp não retornou o código de conexão.');
+    state.pairingCode = String(code).replace(/\s+/g, '');
+    state.pairingExpiresAt = Date.now() + 120_000;
+    state.qr = null;
+    state.status = 'pairing';
+    state.error = '';
+    state.lastDisconnectCode = 0;
+    touch();
+    return publicState();
+  })();
+
+  try {
+    return await pairingRequest;
+  } catch (error) {
+    state.pairingLastFailureCode = state.lastDisconnectCode || state.pairingLastFailureCode || 0;
+    if (!state.error) state.error = String(error?.message || 'Não foi possível gerar o código de conexão.').slice(0, 400);
+    clearPairingRuntime({ keepFailure: true });
+    state.status = 'error';
+    touch();
+    throw error;
+  } finally {
+    pairingRequest = null;
+    pairingRequestPhone = '';
+    touch();
+  }
 }
 
 async function logoutSession() {
@@ -603,8 +690,7 @@ async function logoutSession() {
     clearInboundQueue();
     state.status = 'disconnected';
     state.qr = null;
-    state.pairingCode = null;
-    state.pairingExpiresAt = 0;
+    clearPairingRuntime();
     state.phone = '';
     state.error = '';
     state.lastDisconnectCode = 0;
