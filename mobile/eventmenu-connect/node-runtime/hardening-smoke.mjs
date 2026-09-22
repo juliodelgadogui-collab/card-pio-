@@ -42,3 +42,9 @@ assert(network.includes('cleartextTrafficPermitted="false"'), 'Configuração ba
 assert(network.includes('127.0.0.1'), 'Loopback interno do Node não foi preservado.');
 
 console.log('EventMenu Connect hardening smoke OK');
+
+// Inbound LID hardening: modern WhatsApp may deliver an opaque @lid before PN metadata.
+assert.match(source, /lid-mapping\.update/, 'runtime must consume Baileys LID→PN mapping updates');
+assert.match(source, /eventmenu-whatsapp-inbound-unresolved\.json/, 'LID-only inbound must be durably preserved instead of discarded');
+assert.match(source, /inbound_unresolved/, 'runtime state must expose unresolved inbound diagnostics');
+assert.match(source, /remoteJidAlt/, 'runtime must prefer alternate phone JID metadata when available');
