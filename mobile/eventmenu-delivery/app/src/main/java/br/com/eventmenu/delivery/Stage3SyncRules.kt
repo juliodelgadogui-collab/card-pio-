@@ -18,6 +18,12 @@ internal fun paymentPollDelayMillis(attempt: Int): Long = when {
     else -> 30_000L
 }
 
+internal fun orderPollDelayMillis(attempt: Int): Long = when {
+    attempt < 6 -> 5_000L
+    attempt < 18 -> 10_000L
+    else -> 30_000L
+}
+
 internal fun trackingPollDelayMillis(attempt: Int): Long = when {
     attempt < 6 -> 10_000L
     attempt < 18 -> 15_000L
