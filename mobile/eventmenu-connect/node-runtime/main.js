@@ -25,6 +25,8 @@ const MAX_BODY = 64 * 1024;
 const MAX_MEDIA = 20 * 1024 * 1024;
 const MEDIA_TIMEOUT = 30_000;
 const MAX_REDIRECTS = 4;
+const MAX_INBOUND_QUEUE = 5000;
+const INBOUND_FILE = path.join(path.dirname(SESSION_ROOT), 'eventmenu-whatsapp-inbound.json');
 const logger = pino({ level: 'silent' });
 
 if (!SECRET || SECRET.length < 48) throw new Error('Segredo local inválido.');
@@ -51,6 +53,52 @@ const state = {
 };
 
 function touch() { state.updatedAt = new Date().toISOString(); }
+function readInboundQueue() {
+  try {
+    const raw = fs.readFileSync(INBOUND_FILE, 'utf8');
+    const rows = JSON.parse(raw);
+    return Array.isArray(rows) ? rows.filter((row) => row && typeof row === 'object') : [];
+  } catch (_) {
+    return [];
+  }
+}
+function writeInboundQueue(rows) {
+  const directory = path.dirname(INBOUND_FILE);
+  fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const temporary = `${INBOUND_FILE}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(rows), { encoding: 'utf8', mode: 0o600 });
+  fs.renameSync(temporary, INBOUND_FILE);
+}
+function clearInboundQueue() {
+  try { fs.rmSync(INBOUND_FILE, { force: true }); } catch (_) {}
+  try { fs.rmSync(`${INBOUND_FILE}.tmp`, { force: true }); } catch (_) {}
+}
+function enqueueInbound(row) {
+  const id = String(row?.provider_message_id || '').trim();
+  if (!id) return false;
+  const rows = readInboundQueue();
+  if (rows.some((item) => String(item?.provider_message_id || '') === id)) return false;
+  if (rows.length >= MAX_INBOUND_QUEUE) {
+    state.error = 'A fila local de mensagens recebidas atingiu o limite de segurança.';
+    touch();
+    return false;
+  }
+  rows.push(row);
+  writeInboundQueue(rows);
+  return true;
+}
+function acknowledgeInbound(ids) {
+  const accepted = new Set((Array.isArray(ids) ? ids : []).map((id) => String(id || '').trim()).filter(Boolean));
+  if (!accepted.size) return 0;
+  const rows = readInboundQueue();
+  const next = rows.filter((row) => !accepted.has(String(row?.provider_message_id || '')));
+  if (next.length !== rows.length) writeInboundQueue(next);
+  return rows.length - next.length;
+}
+function inboundBatch(limit = 20) {
+  const safe = Math.max(1, Math.min(50, Number(limit) || 20));
+  return readInboundQueue().slice(0, safe);
+}
 function expirePairingCodeIfNeeded() {
   if (state.pairingCode && state.pairingExpiresAt && Date.now() >= state.pairingExpiresAt) {
     state.pairingCode = null;
@@ -72,6 +120,7 @@ function publicState() {
     phone: state.phone,
     error: state.error || null,
     disconnect_code: state.lastDisconnectCode || null,
+    inbound_pending: readInboundQueue().length,
     updated_at: state.updatedAt,
   };
 }
@@ -115,6 +164,66 @@ function phoneFromSocket(socket) {
   const left = raw.split('@')[0].split(':')[0];
   const phone = left.replace(/\D+/g, '');
   return /^\d{8,15}$/.test(phone) ? phone : '';
+}
+function phoneFromMessageKey(key) {
+  const primary = String(key?.remoteJid || '');
+  if (primary.endsWith('@g.us') || primary.endsWith('@broadcast') || primary === 'status@broadcast') return '';
+  const candidates = [key?.remoteJidAlt, key?.remoteJid, key?.participantAlt, key?.participant];
+  for (const raw of candidates) {
+    const jid = String(raw || '');
+    if (!jid.endsWith('@s.whatsapp.net')) continue;
+    let digits = jid.split('@')[0].split(':')[0].replace(/\D+/g, '').replace(/^0+/, '');
+    if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
+    if (/^\d{10,15}$/.test(digits)) return digits;
+  }
+  return '';
+}
+function unwrapMessage(message) {
+  let value = message && typeof message === 'object' ? message : {};
+  for (let i = 0; i < 4; i += 1) {
+    const next = value?.ephemeralMessage?.message
+      || value?.viewOnceMessage?.message
+      || value?.viewOnceMessageV2?.message
+      || value?.viewOnceMessageV2Extension?.message;
+    if (!next || typeof next !== 'object') break;
+    value = next;
+  }
+  return value;
+}
+function parseInboundMessage(message) {
+  const value = unwrapMessage(message);
+  if (typeof value.conversation === 'string') return { message_type: 'text', text: value.conversation, payload: {} };
+  if (value.extendedTextMessage) return { message_type: 'text', text: String(value.extendedTextMessage.text || ''), payload: {} };
+  if (value.buttonsResponseMessage) return { message_type: 'text', text: String(value.buttonsResponseMessage.selectedDisplayText || value.buttonsResponseMessage.selectedButtonId || ''), payload: { interactive: true } };
+  if (value.listResponseMessage) return { message_type: 'text', text: String(value.listResponseMessage.title || value.listResponseMessage.singleSelectReply?.selectedRowId || ''), payload: { interactive: true } };
+  if (value.templateButtonReplyMessage) return { message_type: 'text', text: String(value.templateButtonReplyMessage.selectedDisplayText || value.templateButtonReplyMessage.selectedId || ''), payload: { interactive: true } };
+  if (value.imageMessage) return { message_type: 'image', text: String(value.imageMessage.caption || ''), payload: { mimetype: String(value.imageMessage.mimetype || '') } };
+  if (value.videoMessage) return { message_type: 'video', text: String(value.videoMessage.caption || ''), payload: { mimetype: String(value.videoMessage.mimetype || '') } };
+  if (value.audioMessage) return { message_type: 'audio', text: '', payload: { mimetype: String(value.audioMessage.mimetype || ''), seconds: Number(value.audioMessage.seconds || 0) } };
+  if (value.documentMessage) return { message_type: 'document', text: String(value.documentMessage.caption || ''), payload: { mimetype: String(value.documentMessage.mimetype || ''), file_name: String(value.documentMessage.fileName || '').slice(0, 180) } };
+  if (value.stickerMessage) return { message_type: 'sticker', text: '', payload: { mimetype: String(value.stickerMessage.mimetype || '') } };
+  if (value.contactMessage || value.contactsArrayMessage) return { message_type: 'contact', text: String(value.contactMessage?.displayName || ''), payload: {} };
+  if (value.locationMessage) return { message_type: 'location', text: String(value.locationMessage.name || value.locationMessage.address || ''), payload: { latitude: Number(value.locationMessage.degreesLatitude || 0), longitude: Number(value.locationMessage.degreesLongitude || 0) } };
+  return { message_type: 'unknown', text: '', payload: { keys: Object.keys(value).slice(0, 12) } };
+}
+function captureInbound(message) {
+  const key = message?.key || {};
+  if (key.fromMe) return false;
+  const providerId = String(key.id || '').trim();
+  const phone = phoneFromMessageKey(key);
+  if (!providerId || !phone) return false;
+  const parsed = parseInboundMessage(message?.message);
+  const rawTimestamp = message?.messageTimestamp;
+  const timestamp = Number(typeof rawTimestamp === 'number' ? rawTimestamp : rawTimestamp?.toString?.() || 0);
+  return enqueueInbound({
+    provider_message_id: providerId.slice(0, 190),
+    phone,
+    name: String(message?.pushName || '').trim().slice(0, 180),
+    message_type: parsed.message_type,
+    text: String(parsed.text || '').trim().slice(0, 4000),
+    timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Math.floor(Date.now() / 1000),
+    payload: parsed.payload || {},
+  });
 }
 function normalizePairPhone(value) {
   const digits = String(value || '').replace(/\D+/g, '').replace(/^0+/, '');
@@ -190,6 +299,7 @@ async function resetForFreshPairing() {
   }
   await new Promise((resolve) => setTimeout(resolve, 350));
   await removeSessionFiles();
+  clearInboundQueue();
   state.status = 'disconnected';
   state.qr = null;
   state.pairingCode = null;
@@ -254,6 +364,17 @@ async function startSession() {
         state.error = String(error?.message || 'Falha ao salvar a sessão.').slice(0, 400);
         touch();
       });
+    });
+
+    socket.ev.on('messages.upsert', (event) => {
+      if (event?.type !== 'notify' || !Array.isArray(event?.messages)) return;
+      for (const message of event.messages) {
+        try { captureInbound(message); }
+        catch (error) {
+          state.error = String(error?.message || 'Falha ao registrar mensagem recebida.').slice(0, 400);
+          touch();
+        }
+      }
     });
 
     socket.ev.on('connection.update', (update) => {
@@ -375,6 +496,7 @@ async function logoutSession() {
     }
   } finally {
     await removeSessionFiles().catch(() => {});
+    clearInboundQueue();
     state.status = 'disconnected';
     state.qr = null;
     state.pairingCode = null;
@@ -492,9 +614,14 @@ const server = http.createServer(async (req, res) => {
     if (!authorized(req)) return json(res, 401, { ok: false, error: 'Não autorizado.' });
     const url = new URL(req.url || '/', `http://${HOST}:${PORT}`);
     if (req.method === 'GET' && url.pathname === '/health') {
-      return json(res, 200, { ok: true, engine: 'baileys-embedded', node: process.version, status: state.status });
+      return json(res, 200, { ok: true, engine: 'baileys-embedded', node: process.version, status: state.status, inbound_pending: readInboundQueue().length });
     }
     if (req.method === 'GET' && url.pathname === '/state') return json(res, 200, publicState());
+    if (req.method === 'GET' && url.pathname === '/inbound') return json(res, 200, { ok: true, messages: inboundBatch(url.searchParams.get('limit')) });
+    if (req.method === 'POST' && url.pathname === '/inbound/ack') {
+      const body = await readBody(req);
+      return json(res, 200, { ok: true, acknowledged: acknowledgeInbound(body.ids) });
+    }
     if (req.method === 'POST' && url.pathname === '/start') {
       startSession().catch(() => {});
       return json(res, 202, publicState());
