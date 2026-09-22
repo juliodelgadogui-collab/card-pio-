@@ -118,7 +118,9 @@ class ConnectWorkerService : Service() {
 
                 consecutiveFailures = 0
                 if (local.status.equals("connected", ignoreCase = true)) {
-                    val processed = processQueue()
+                    val received = processInbound()
+                    val sent = processQueue()
+                    val processed = received + sent
                     promote(if (local.phone.isBlank()) "WhatsApp conectado • EventMenu ativo" else "WhatsApp ${formatPhone(local.phone)} • EventMenu ativo")
                     delay(if (processed > 0) 1_500 else 8_000)
                 } else {
@@ -144,6 +146,36 @@ class ConnectWorkerService : Service() {
                 delay(backoff)
             }
         }
+    }
+
+    private fun processInbound(): Int {
+        val messages = engine.inbound(10)
+        if (messages.length() == 0) return 0
+        var processed = 0
+        for (index in 0 until messages.length()) {
+            val message = messages.optJSONObject(index) ?: continue
+            val providerMessageId = message.optString("provider_message_id").trim()
+            if (providerMessageId.isBlank()) continue
+            try {
+                api.inbound(message)
+                engine.acknowledgeInbound(providerMessageId)
+                processed++
+                store.setRuntime("connected", error = "")
+            } catch (e: ApiException) {
+                if (e.status in 400..499 && e.status != 401 && e.status != 429) {
+                    runCatching { engine.acknowledgeInbound(providerMessageId) }
+                    processed++
+                    store.setRuntime("connected", error = "Uma mensagem recebida inválida foi descartada com segurança.")
+                    continue
+                }
+                store.setRuntime("connected", error = "O servidor ainda não confirmou uma mensagem recebida. Ela continuará na fila local.")
+                break
+            } catch (_: Exception) {
+                store.setRuntime("connected", error = "O servidor ainda não confirmou uma mensagem recebida. Ela continuará na fila local.")
+                break
+            }
+        }
+        return processed
     }
 
     private fun processQueue(): Int {
