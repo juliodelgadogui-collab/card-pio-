@@ -133,7 +133,7 @@ final class WhatsAppCommerceFulfillmentService
     /** @return array<string,mixed> */
     private function operationalize(PDO $pdo,int $tenantId,int $conversationId,array $conversation,int $draftId,array $context):array
     {
-        $savepoint='wa_stage2';$pdo->exec('SAVEPOINT '.$savepoint);
+        $savepoint='wa_stage2';$pdo->exec('SAVEPOINT '.$savepoint);$total=0;
         try{
             $lock=$pdo->prepare(Database::portableSql($pdo,"SELECT * FROM orders WHERE id=? AND tenant_id=? AND status='draft' AND order_source='WHATSAPP' LIMIT 1 FOR UPDATE"));$lock->execute([$draftId,$tenantId]);$draft=$lock->fetch(PDO::FETCH_ASSOC);if(!$draft)throw new RuntimeException('Este carrinho já foi finalizado ou cancelado.');
             $settings=$this->settings($pdo,$tenantId);$this->assertAcceptingOrders($settings);$fulfillment=(string)($context['fulfillment']??'');if(!in_array($fulfillment,['delivery','pickup'],true))throw new RuntimeException('Escolha entrega ou retirada.');if($fulfillment==='pickup'&&empty($settings['delivery_pickup_enabled']))throw new RuntimeException('A retirada no local não está disponível agora.');
@@ -148,10 +148,16 @@ final class WhatsAppCommerceFulfillmentService
             $pdo->prepare("UPDATE whatsapp_conversations SET draft_order_id=NULL,active_order_id=?,state='CHOOSING_PAYMENT',context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$draftId,$json,$conversationId,$tenantId]);
             $this->audit('order_operational',$draftId,['customer_id'=>$customerId,'channel'=>$fulfillment,'delivery_fee_cents'=>$fee,'total_cents'=>$total]);
             $pdo->exec('RELEASE SAVEPOINT '.$savepoint);
-            $payment=(new WhatsAppCommercePaymentService())->prompt($pdo,$tenantId,$conversationId,$draftId);$payment['draft_order_id']=null;$payment['active_order_id']=$draftId;return $payment;
         }catch(Throwable $e){
             try{$pdo->exec('ROLLBACK TO SAVEPOINT '.$savepoint);$pdo->exec('RELEASE SAVEPOINT '.$savepoint);}catch(Throwable){}
             return $this->stateResult($pdo,$tenantId,$conversationId,'CONFIRMING_FULFILLMENT',$context,"⚠️ Não foi possível confirmar o pedido: ".$e->getMessage()."\n\nRevise o carrinho ou tente novamente.\n1 - Tentar confirmar novamente\n0 - Voltar",'fulfillment_failed');
+        }
+
+        try{
+            $payment=(new WhatsAppCommercePaymentService())->prompt($pdo,$tenantId,$conversationId,$draftId);$payment['draft_order_id']=null;$payment['active_order_id']=$draftId;return $payment;
+        }catch(Throwable $e){
+            error_log('[whatsapp-commerce-payment-menu] '.$e::class.': '.$e->getMessage());$fallback=['order_id'=>$draftId,'payment_step'=>'unavailable'];$json=json_encode($fallback,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);$pdo->prepare("UPDATE whatsapp_conversations SET draft_order_id=NULL,active_order_id=?,state='CHOOSING_PAYMENT',context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$draftId,$json,$conversationId,$tenantId]);$this->audit('payment_menu_unavailable',$draftId,['error_class'=>$e::class]);
+            return ['handled'=>true,'state'=>'CHOOSING_PAYMENT','context'=>$fallback,'draft_order_id'=>null,'active_order_id'=>$draftId,'reply'=>"Pedido #{$draftId} recebido. ✅\nTotal: *".$this->money($total)."*\n\nNão foi possível carregar as formas de pagamento agora. Seu pedido continua válido. Digite *FORMAS* para tentar novamente ou *ATENDENTE* para falar com a equipe.",'kind'=>'payment_menu_unavailable'];
         }
     }
 
