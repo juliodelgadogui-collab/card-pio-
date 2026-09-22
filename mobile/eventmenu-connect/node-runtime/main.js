@@ -30,6 +30,8 @@ const MAX_SENT_LEDGER = 5000;
 const DATA_ROOT = path.dirname(SESSION_ROOT);
 const INBOUND_FILE = path.join(DATA_ROOT, 'eventmenu-whatsapp-inbound.json');
 const SENT_FILE = path.join(DATA_ROOT, 'eventmenu-whatsapp-sent.json');
+const LID_MAP_FILE = path.join(DATA_ROOT, 'eventmenu-whatsapp-lid-map.json');
+const UNRESOLVED_FILE = path.join(DATA_ROOT, 'eventmenu-whatsapp-inbound-unresolved.json');
 const logger = pino({ level: 'silent' });
 
 if (!SECRET || SECRET.length < 48) throw new Error('Segredo local inválido.');
@@ -53,6 +55,8 @@ const state = {
   reconnectAttempt: 0,
   manualStop: false,
   updatedAt: new Date().toISOString(),
+  lastInboundAt: '',
+  lastInboundError: '',
 };
 
 function touch() { state.updatedAt = new Date().toISOString(); }
@@ -77,6 +81,46 @@ function writeInboundQueue(rows) { writeJsonArray(INBOUND_FILE, rows); }
 function clearInboundQueue() {
   try { fs.rmSync(INBOUND_FILE, { force: true }); } catch (_) {}
   try { fs.rmSync(`${INBOUND_FILE}.tmp`, { force: true }); } catch (_) {}
+}
+function readLidMap() {
+  const rows = readJsonArray(LID_MAP_FILE);
+  return new Map(rows.map((row) => [String(row?.lid || ''), String(row?.pn || '')]).filter(([lid, pn]) => lid.endsWith('@lid') && pn.endsWith('@s.whatsapp.net')));
+}
+function rememberLidMapping(lid, pn) {
+  lid = String(lid || '').trim(); pn = String(pn || '').trim();
+  if (!lid.endsWith('@lid') || !pn.endsWith('@s.whatsapp.net')) return false;
+  const rows = readJsonArray(LID_MAP_FILE).filter((row) => String(row?.lid || '') !== lid);
+  rows.push({ lid, pn, updated_at: Date.now() });
+  writeJsonArray(LID_MAP_FILE, rows.slice(-5000));
+  retryUnresolvedInbound();
+  return true;
+}
+function unresolvedInboundCount() { return readJsonArray(UNRESOLVED_FILE).length; }
+function queueUnresolvedInbound(message) {
+  const id = String(message?.key?.id || '').trim();
+  if (!id) return false;
+  const rows = readJsonArray(UNRESOLVED_FILE);
+  if (rows.some((row) => String(row?.key?.id || '') === id)) return false;
+  rows.push(message);
+  writeJsonArray(UNRESOLVED_FILE, rows.slice(-MAX_INBOUND_QUEUE));
+  state.lastInboundError = 'Mensagem recebida por LID aguardando resolução segura do número.';
+  touch();
+  return true;
+}
+function retryUnresolvedInbound() {
+  const rows = readJsonArray(UNRESOLVED_FILE);
+  if (!rows.length) return 0;
+  const pending=[]; let resolved=0;
+  for (const message of rows) {
+    try {
+      if (captureInbound(message, false)) resolved += 1;
+      else pending.push(message);
+    } catch (_) { pending.push(message); }
+  }
+  writeJsonArray(UNRESOLVED_FILE, pending);
+  if (!pending.length) state.lastInboundError = '';
+  touch();
+  return resolved;
 }
 function readSentLedger() { return readJsonArray(SENT_FILE); }
 function writeSentLedger(rows) { writeJsonArray(SENT_FILE, rows.slice(-MAX_SENT_LEDGER)); }
@@ -144,6 +188,9 @@ function publicState() {
     error: state.error || null,
     disconnect_code: state.lastDisconnectCode || null,
     inbound_pending: readInboundQueue().length,
+    inbound_unresolved: unresolvedInboundCount(),
+    last_inbound_at: state.lastInboundAt || null,
+    last_inbound_error: state.lastInboundError || null,
     updated_at: state.updatedAt,
   };
 }
@@ -191,9 +238,11 @@ function phoneFromSocket(socket) {
 function phoneFromMessageKey(key) {
   const primary = String(key?.remoteJid || '');
   if (primary.endsWith('@g.us') || primary.endsWith('@broadcast') || primary === 'status@broadcast') return '';
-  const candidates = [key?.remoteJidAlt, key?.remoteJid, key?.participantAlt, key?.participant];
+  const candidates = [key?.remoteJidAlt, key?.senderPn, key?.participantPn, key?.remoteJid, key?.participantAlt, key?.participant];
+  const lidMap = readLidMap();
   for (const raw of candidates) {
-    const jid = String(raw || '');
+    let jid = String(raw || '');
+    if (jid.endsWith('@lid')) jid = lidMap.get(jid) || '';
     if (!jid.endsWith('@s.whatsapp.net')) continue;
     let digits = jid.split('@')[0].split(':')[0].replace(/\D+/g, '').replace(/^0+/, '');
     if (digits.length === 10 || digits.length === 11) digits = `55${digits}`;
@@ -229,16 +278,21 @@ function parseInboundMessage(message) {
   if (value.locationMessage) return { message_type: 'location', text: String(value.locationMessage.name || value.locationMessage.address || ''), payload: { latitude: Number(value.locationMessage.degreesLatitude || 0), longitude: Number(value.locationMessage.degreesLongitude || 0) } };
   return { message_type: 'unknown', text: '', payload: { keys: Object.keys(value).slice(0, 12) } };
 }
-function captureInbound(message) {
+function captureInbound(message, allowUnresolved = true) {
   const key = message?.key || {};
   if (key.fromMe) return false;
   const providerId = String(key.id || '').trim();
   const phone = phoneFromMessageKey(key);
-  if (!providerId || !phone) return false;
+  if (!providerId) return false;
+  if (!phone) {
+    const jid = String(key.remoteJid || key.participant || '');
+    if (allowUnresolved && jid.endsWith('@lid')) return queueUnresolvedInbound(message);
+    return false;
+  }
   const parsed = parseInboundMessage(message?.message);
   const rawTimestamp = message?.messageTimestamp;
   const timestamp = Number(typeof rawTimestamp === 'number' ? rawTimestamp : rawTimestamp?.toString?.() || 0);
-  return enqueueInbound({
+  const queued = enqueueInbound({
     provider_message_id: providerId.slice(0, 190),
     phone,
     name: String(message?.pushName || '').trim().slice(0, 180),
@@ -247,6 +301,8 @@ function captureInbound(message) {
     timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Math.floor(Date.now() / 1000),
     payload: parsed.payload || {},
   });
+  if (queued) { state.lastInboundAt = new Date().toISOString(); state.lastInboundError = ''; touch(); }
+  return queued;
 }
 function normalizePairPhone(value) {
   const digits = String(value || '').replace(/\D+/g, '').replace(/^0+/, '');
@@ -388,6 +444,16 @@ async function startSession() {
         state.error = String(error?.message || 'Falha ao salvar a sessão.').slice(0, 400);
         touch();
       });
+    });
+
+    socket.ev.on('lid-mapping.update', (mapping) => {
+      try { rememberLidMapping(mapping?.lid, mapping?.pn); }
+      catch (error) { state.lastInboundError = String(error?.message || 'Falha ao salvar vínculo LID.').slice(0, 400); touch(); }
+    });
+    socket.ev.on('messaging-history.set', (event) => {
+      for (const mapping of (Array.isArray(event?.lidPnMappings) ? event.lidPnMappings : [])) {
+        try { rememberLidMapping(mapping?.lid, mapping?.pn); } catch (_) {}
+      }
     });
 
     socket.ev.on('messages.upsert', (event) => {
@@ -670,6 +736,9 @@ const server = http.createServer(async (req, res) => {
         status: state.status,
         inbound_pending: readInboundQueue().length,
         sent_ledger: readSentLedger().length,
+        inbound_unresolved: unresolvedInboundCount(),
+        last_inbound_at: state.lastInboundAt || null,
+        last_inbound_error: state.lastInboundError || null,
       });
     }
     if (req.method === 'GET' && url.pathname === '/state') return json(res, 200, publicState());
