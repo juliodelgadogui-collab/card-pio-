@@ -32,7 +32,7 @@ final class WhatsAppCommerceFulfillmentService
         $conversationId=(int)$conversation['id'];
         $draftId=$this->draftId($pdo,$tenantId,$conversation);
 
-        if($state==='CHOOSING_PAYMENT')return $this->paymentBoundary($pdo,$tenantId,$conversationId,$conversation,$normalized);
+        if($state==='CHOOSING_PAYMENT')return (new WhatsAppCommercePaymentService())->handle($pdo,$tenantId,$conversation,$text);
         if($draftId<1)throw new RuntimeException('O carrinho não está mais disponível para finalizar.');
 
         if($normalized==='cancelar')return $this->cancelDraft($pdo,$tenantId,$conversationId,$draftId);
@@ -148,21 +148,11 @@ final class WhatsAppCommerceFulfillmentService
             $pdo->prepare("UPDATE whatsapp_conversations SET draft_order_id=NULL,active_order_id=?,state='CHOOSING_PAYMENT',context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$draftId,$json,$conversationId,$tenantId]);
             $this->audit('order_operational',$draftId,['customer_id'=>$customerId,'channel'=>$fulfillment,'delivery_fee_cents'=>$fee,'total_cents'=>$total]);
             $pdo->exec('RELEASE SAVEPOINT '.$savepoint);
-            $reply="Pedido #{$draftId} recebido. ✅\n\n".($fulfillment==='delivery'?"Entrega\nTaxa: ".$this->money($fee)."\n":'Retirada no local'."\n")."Total: *".$this->money($total)."*\n\nOs itens foram reservados no estoque. A escolha da forma de pagamento será liberada na próxima etapa.";
-            return ['handled'=>true,'state'=>'CHOOSING_PAYMENT','context'=>$nextContext,'draft_order_id'=>null,'active_order_id'=>$draftId,'reply'=>$reply,'kind'=>'order_operational'];
+            $payment=(new WhatsAppCommercePaymentService())->prompt($pdo,$tenantId,$conversationId,$draftId);$payment['draft_order_id']=null;$payment['active_order_id']=$draftId;return $payment;
         }catch(Throwable $e){
             try{$pdo->exec('ROLLBACK TO SAVEPOINT '.$savepoint);$pdo->exec('RELEASE SAVEPOINT '.$savepoint);}catch(Throwable){}
             return $this->stateResult($pdo,$tenantId,$conversationId,'CONFIRMING_FULFILLMENT',$context,"⚠️ Não foi possível confirmar o pedido: ".$e->getMessage()."\n\nRevise o carrinho ou tente novamente.\n1 - Tentar confirmar novamente\n0 - Voltar",'fulfillment_failed');
         }
-    }
-
-    /** @return array<string,mixed> */
-    private function paymentBoundary(PDO $pdo,int $tenantId,int $conversationId,array $conversation,string $normalized):array
-    {
-        $orderId=(int)($conversation['active_order_id']??0);if($orderId<1)throw new RuntimeException('Pedido ativo não encontrado.');
-        if($normalized==='cancelar')return $this->stateResult($pdo,$tenantId,$conversationId,'CHOOSING_PAYMENT',['order_id'=>$orderId],"O pedido #{$orderId} já foi confirmado e o estoque está reservado.\n\nO cancelamento operacional será tratado junto das regras de pagamento. Digite *ATENDENTE* se precisar de ajuda agora.",'operational_cancel_boundary');
-        $q=$pdo->prepare('SELECT channel,total_cents,payment_status FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$orderId,$tenantId]);$order=$q->fetch(PDO::FETCH_ASSOC);if(!$order)throw new RuntimeException('Pedido ativo não encontrado.');
-        return $this->stateResult($pdo,$tenantId,$conversationId,'CHOOSING_PAYMENT',['order_id'=>$orderId,'fulfillment'=>(string)$order['channel'],'total_cents'=>(int)$order['total_cents']],"Pedido #{$orderId}\nTotal: *".$this->money((int)$order['total_cents'])."*\n\nA escolha da forma de pagamento será habilitada na ETAPA 3.\nDigite *ATENDENTE* se precisar falar com a equipe.",'payment_boundary');
     }
 
     /** @return array<string,mixed> */
