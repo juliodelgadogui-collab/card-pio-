@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -21,6 +22,9 @@ const PORT = Number(config.port || 21567);
 const SECRET = String(config.secret || '');
 const SESSION_ROOT = path.resolve(String(config.session_root || ''));
 const MAX_BODY = 64 * 1024;
+const MAX_MEDIA = 20 * 1024 * 1024;
+const MEDIA_TIMEOUT = 30_000;
+const MAX_REDIRECTS = 4;
 const logger = pino({ level: 'silent' });
 
 if (!SECRET || SECRET.length < 48) throw new Error('Segredo local inválido.');
@@ -126,6 +130,17 @@ function normalizeRecipient(value) {
 function normalizeCountryCode(value) {
   const code = String(value || '').trim().toUpperCase();
   return /^[A-Z]{2}$/.test(code) ? code : 'BR';
+}
+function normalizeMediaType(value) {
+  const type = String(value || '').trim().toLowerCase();
+  if (type === 'pdf') return 'document';
+  if (type === 'image' || type === 'document') return type;
+  return '';
+}
+function safeFilename(value, fallback = 'documento.pdf') {
+  const raw = String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  const name = path.basename(raw).slice(0, 180);
+  return name || fallback;
 }
 function cancelReconnect() {
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
@@ -373,12 +388,102 @@ async function logoutSession() {
   return publicState();
 }
 
+async function downloadMedia(value, redirects = 0) {
+  if (redirects > MAX_REDIRECTS) throw new Error('A mídia excedeu o limite de redirecionamentos.');
+  let parsed;
+  try { parsed = new URL(String(value || '')); }
+  catch (_) { throw new Error('Endereço da mídia inválido.'); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('A mídia precisa usar HTTP ou HTTPS.');
+
+  return new Promise((resolve, reject) => {
+    const transport = parsed.protocol === 'https:' ? https : http;
+    const request = transport.get(parsed, {
+      headers: {
+        'User-Agent': 'EventMenu-Connect-Android/1.0',
+        'Accept': '*/*',
+      },
+    }, (response) => {
+      const status = Number(response.statusCode || 0);
+      if (status >= 300 && status < 400 && response.headers.location) {
+        const next = new URL(response.headers.location, parsed).toString();
+        response.resume();
+        downloadMedia(next, redirects + 1).then(resolve, reject);
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        response.resume();
+        reject(new Error(`Não foi possível baixar a mídia (HTTP ${status || 0}).`));
+        return;
+      }
+
+      const declared = Number(response.headers['content-length'] || 0);
+      if (declared > MAX_MEDIA) {
+        response.resume();
+        reject(new Error('A mídia ultrapassa o limite de 20 MB.'));
+        return;
+      }
+
+      const chunks = [];
+      let size = 0;
+      response.on('data', (chunk) => {
+        size += chunk.length;
+        if (size > MAX_MEDIA) {
+          response.destroy(new Error('A mídia ultrapassa o limite de 20 MB.'));
+          return;
+        }
+        chunks.push(chunk);
+      });
+      response.on('end', () => {
+        if (!size) {
+          reject(new Error('A mídia recebida está vazia.'));
+          return;
+        }
+        const headerMime = String(response.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+        resolve({ buffer: Buffer.concat(chunks), mime: headerMime });
+      });
+      response.on('error', reject);
+    });
+    request.setTimeout(MEDIA_TIMEOUT, () => request.destroy(new Error('O download da mídia excedeu o tempo limite.')));
+    request.on('error', reject);
+  });
+}
+
 async function sendMessage(body) {
   if (!state.socket || state.status !== 'connected') throw new Error('WhatsApp não conectado.');
   const phone = normalizeRecipient(body.phone);
   const message = String(body.message || '').trim();
-  if (!message || message.length > 4000) throw new Error('Mensagem inválida.');
-  const result = await state.socket.sendMessage(`${phone}@s.whatsapp.net`, { text: message });
+  if (message.length > 4000) throw new Error('Mensagem grande demais.');
+
+  const mediaType = normalizeMediaType(body.media_type);
+  const mediaUrl = String(body.media_url || '').trim();
+  let result;
+
+  if (!mediaType && !mediaUrl) {
+    if (!message) throw new Error('Mensagem inválida.');
+    result = await state.socket.sendMessage(`${phone}@s.whatsapp.net`, { text: message });
+  } else {
+    if (!mediaType) throw new Error('Tipo de mídia não suportado.');
+    if (!mediaUrl) throw new Error('Endereço da mídia não informado.');
+    const downloaded = await downloadMedia(mediaUrl);
+    const requestedMime = String(body.media_mime || '').trim().toLowerCase();
+    const mime = requestedMime || downloaded.mime;
+
+    if (mediaType === 'image') {
+      const payload = { image: downloaded.buffer };
+      if (message) payload.caption = message;
+      if (mime && mime.startsWith('image/')) payload.mimetype = mime;
+      result = await state.socket.sendMessage(`${phone}@s.whatsapp.net`, payload);
+    } else {
+      const payload = {
+        document: downloaded.buffer,
+        mimetype: mime || 'application/pdf',
+        fileName: safeFilename(body.media_filename, 'documento.pdf'),
+      };
+      if (message) payload.caption = message;
+      result = await state.socket.sendMessage(`${phone}@s.whatsapp.net`, payload);
+    }
+  }
+
   return { ok: true, message_id: String(result?.key?.id || '') };
 }
 
