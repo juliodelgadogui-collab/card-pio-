@@ -41,8 +41,8 @@ public partial class MainWindow
 
         var workArea = SystemParameters.WorkArea;
         const double safeMargin = 16;
-        var availableWidth = Math.Max(760, workArea.Width - safeMargin);
-        var availableHeight = Math.Max(520, workArea.Height - safeMargin);
+        var availableWidth = Math.Max(320, workArea.Width - safeMargin);
+        var availableHeight = Math.Max(300, workArea.Height - safeMargin);
 
         MinWidth = Math.Min(MinWidth, availableWidth);
         MinHeight = Math.Min(MinHeight, availableHeight);
@@ -151,20 +151,33 @@ public partial class MainWindow
         if (metrics is not null)
             metrics.Columns = ultraCompact ? 2 : 4;
 
+        // Cash cards are already inside a ScrollViewer, so stacking them on small
+        // screens is safer than forcing three narrow forms side by side.
+        var cashCards = DesktopDescendants<UniformGrid>(CashView).FirstOrDefault();
+        if (cashCards is not null)
+            cashCards.Columns = ultraCompact ? 1 : compact ? 2 : 3;
+
         // Vertical density follows the actual monitor/work area instead of a fixed web page height.
         CartGrid.Height = height < 620 ? 82 : height < 700 ? 102 : height < 780 ? 124 : height < 860 ? 148 : 174;
 
-        var pageHeaderMargin = shortScreen ? new Thickness(0, 0, 0, 10) : new Thickness(0, 0, 0, 18);
-        foreach (var dock in DesktopDescendants<DockPanel>(ShellPanel))
-        {
-            if (dock.Margin.Bottom >= 16 && dock.Margin.Top == 0)
-                dock.Margin = pageHeaderMargin;
-        }
+        ApplyPageHeaderMargin(DashboardView, shortScreen);
+        ApplyPageHeaderMargin(PosView, shortScreen);
+        ApplyPageHeaderMargin(OrdersView, shortScreen);
+        ApplyPageHeaderMargin(TablesView, shortScreen);
+        ApplyPageHeaderMargin(CashView, shortScreen);
 
         // Native Windows feel: operational surfaces are flatter and denser than website cards.
         ApplyOperationalCardDensity(PosView, compact ? 8 : 10);
         ApplyOperationalCardDensity(OrdersView, compact ? 8 : 10);
         ApplyOperationalCardDensity(TablesView, compact ? 8 : 10);
+        ApplyOperationalCardDensity(CashView, compact ? 8 : 10);
+    }
+
+    private static void ApplyPageHeaderMargin(Grid view, bool shortScreen)
+    {
+        var header = view.Children.OfType<DockPanel>().FirstOrDefault(x => Grid.GetRow(x) == 0);
+        if (header is not null)
+            header.Margin = shortScreen ? new Thickness(0, 0, 0, 10) : new Thickness(0, 0, 0, 18);
     }
 
     private static T? DesktopAncestor<T>(DependencyObject? start) where T : DependencyObject
