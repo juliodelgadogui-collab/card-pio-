@@ -42,6 +42,7 @@ class SessionStore(context: Context) {
         prefs.edit()
             .putString("token", token)
             .putString("refresh_token", refresh)
+            .putInt("tenant_id", user.optInt("tenant_id", 0).coerceAtLeast(0))
             .putString("user_name", user.optString("name"))
             .putString("tenant_name", user.optString("tenant_name"))
             .apply()
@@ -53,6 +54,7 @@ class SessionStore(context: Context) {
 
     fun token(): String = prefs.getString("token", "").orEmpty()
     fun refreshToken(): String = prefs.getString("refresh_token", "").orEmpty()
+    fun tenantId(): Int = prefs.getInt("tenant_id", 0).coerceAtLeast(0)
     fun tenantName(): String = prefs.getString("tenant_name", "").orEmpty()
     fun hasSession(): Boolean = token().length >= 32 && refreshToken().length >= 32
 
@@ -70,6 +72,7 @@ class SessionStore(context: Context) {
         prefs.edit()
             .remove("token")
             .remove("refresh_token")
+            .remove("tenant_id")
             .remove("user_name")
             .remove("tenant_name")
             .remove("runtime_status")
