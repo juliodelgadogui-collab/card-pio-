@@ -62,5 +62,6 @@ $legacyEventId=(int)$pdo->lastInsertId();
 if(TenantFeatures::routeEnabled('products',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos recebeu catálogo de restaurante.');
 if(!TenantFeatures::routeEnabled('events',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos perdeu módulo de eventos.');
 if(!TenantFeatures::routeEnabled('payments',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos perdeu pagamentos.');
+if(!TenantFeatures::routeEnabled('receipt',$legacyEventId))super_fail('Compatibilidade legada: rota central de impressão foi bloqueada.');
 
 echo "CI Super ADM smoke OK\n";
