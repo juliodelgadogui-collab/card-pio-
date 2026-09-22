@@ -60,7 +60,7 @@ em_header('WhatsApp','whatsapp');
 ?>
 <section class="page-hero">
   <div><span class="eyebrow">EVENTMENU CONNECT</span><h2>WhatsApp da empresa</h2><p>O servidor organiza conversas e filas. Pareamento, sessão, reconexão e envio real ficam exclusivamente no aplicativo EventMenu Connect.</p></div>
-  <div class="hero-actions"><a class="button secondary" href="<?=Security::e(app_url('support.php'))?>">Central de Atendimento</a><a class="button secondary" href="<?=Security::e(app_url('?route=settings'))?>">Voltar</a></div>
+  <div class="hero-actions"><a class="button primary" href="<?=Security::e(app_url('support.php?list=1'))?>">Atender / iniciar conversa</a><a class="button secondary" href="<?=Security::e(app_url('support.php'))?>">Central de Atendimento</a><a class="button secondary" href="<?=Security::e(app_url('?route=settings'))?>">Voltar</a></div>
 </section>
 
 <div class="settings-layout"><div class="settings-main">
@@ -79,7 +79,7 @@ em_header('WhatsApp','whatsapp');
 <section class="card">
   <div class="section-head"><div><span class="eyebrow">WHATSAPP COMMERCE</span><h2>Pedidos e conversas automáticas</h2></div><span class="badge status-<?=$commerceEnabled?'success':'muted'?>"><?=$commerceEnabled?'Ativo':'Pausado'?></span></div>
   <p class="muted">Quando ativo, mensagens recebidas pelo Baileys embarcado no EventMenu Connect entram no servidor, seguem o fluxo de cardápio/pedido e as respostas voltam pela mesma fila segura.</p>
-  <form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="action" value="save_commerce"><label class="checkbox span-2"><input type="checkbox" name="commerce_enabled"<?=em_checked($commerceEnabled)?>> Ativar WhatsApp Commerce nesta empresa</label><div class="span-2 actions"><button class="primary" type="submit">Salvar WhatsApp Commerce</button></div></form>
+  <form method="post" class="form-grid" id="commerceForm"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="action" value="save_commerce"><label class="checkbox span-2"><input type="checkbox" name="commerce_enabled"<?=em_checked($commerceEnabled)?>> Ativar WhatsApp Commerce nesta empresa</label><div class="span-2"><span class="badge status-warning" id="commerceUnsaved" hidden>Alteração não salva</span></div><div class="span-2 actions"><button class="primary" type="submit">Salvar WhatsApp Commerce</button></div></form>
 </section>
 
 <section class="card">
@@ -95,5 +95,6 @@ em_header('WhatsApp','whatsapp');
   <section class="card"><span class="eyebrow">FILA SEGURA</span><h3>ACK e novas tentativas</h3><p class="muted">O Connect reivindica mensagens com lease, confirma o envio por ACK e o servidor controla novas tentativas sem duplicar mensagens.</p></section>
 </aside></div>
 
+<script>(()=>{const commerce=document.getElementById('commerceForm'),dirty=document.getElementById('commerceUnsaved');commerce?.querySelector('input[name="commerce_enabled"]')?.addEventListener('change',()=>{if(dirty)dirty.hidden=false});})();</script>
 <script>(()=>{const endpoint=<?=$pollUrl?>,root=document.querySelector('[data-wa-panel]');if(!root)return;const label={connected:'Conectado',starting:'Iniciando',qr:'Aguardando pareamento no Connect',reconnecting:'Reconectando',error:'Precisa de atenção',disconnected:'Desconectado'},tone={connected:'success',starting:'warning',qr:'warning',reconnecting:'warning',error:'danger',disconnected:'muted'};async function refresh(){try{const r=await fetch(endpoint,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}}),p=await r.json();if(!r.ok||!p.ok)return;const d=p.data||{},s=d.status||'disconnected',badge=root.querySelector('[data-wa-status]');if(badge){badge.textContent=label[s]||'Desconectado';badge.className='badge status-'+(tone[s]||'muted')}const phone=root.querySelector('[data-wa-phone]');if(phone)phone.textContent=d.phone_number||'—';const last=root.querySelector('[data-wa-last]');if(last)last.textContent=d.last_seen_at||'—';const pending=root.querySelector('[data-wa-pending]');if(pending)pending.textContent=String(d.pending||0);const device=root.querySelector('[data-wa-device]');if(device)device.textContent=(d.agent&&d.agent.device_label)||'—';const err=root.querySelector('[data-wa-error]');if(err)err.textContent=d.last_error||(d.agent&&d.agent.last_error)||'';}catch(e){}}refresh();setInterval(refresh,10000);})();</script>
 <?php em_footer(); ?>
