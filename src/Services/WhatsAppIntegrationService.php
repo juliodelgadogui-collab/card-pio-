@@ -82,13 +82,9 @@ final class WhatsAppIntegrationService
     public function status(PDO $pdo,int $tenantId,bool $refreshBridge=true):array
     {
         $row=$this->ensureConnection($pdo,$tenantId);$snapshot=$this->publicConnection($row);
-        $snapshot['provider']=(string)($row['provider']??'eventmenu_connect');
-        $snapshot['bridge_enabled']=false;$snapshot['qr']=null;
-        $a=$pdo->prepare('SELECT device_label,status,phone_number,last_seen_at,last_error,engine FROM whatsapp_desktop_agents WHERE tenant_id=? ORDER BY last_seen_at DESC,id DESC LIMIT 1');
-        try{$a->execute([$tenantId]);$agent=$a->fetch(PDO::FETCH_ASSOC)?:null;}catch(Throwable){$agent=null;}
-        $snapshot['agent']=$agent;
-        $p=$pdo->prepare('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=? AND status IN ("queued","failed","desktop_queued","desktop_failed") AND attempt_count<max_attempts');
-        try{$p->execute([$tenantId]);$snapshot['pending']=(int)$p->fetchColumn();}catch(Throwable){$snapshot['pending']=0;}
+        $snapshot['provider']=(string)($row['provider']??'eventmenu_connect');$snapshot['bridge_enabled']=false;$snapshot['qr']=null;
+        try{$a=$pdo->prepare('SELECT device_label,status,phone_number,last_seen_at,last_error,engine FROM whatsapp_desktop_agents WHERE tenant_id=? ORDER BY last_seen_at DESC,id DESC LIMIT 1');$a->execute([$tenantId]);$snapshot['agent']=$a->fetch(PDO::FETCH_ASSOC)?:null;}catch(Throwable){$snapshot['agent']=null;}
+        try{$p=$pdo->prepare('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=? AND status IN ("queued","failed","desktop_queued","desktop_failed") AND attempt_count<max_attempts');$p->execute([$tenantId]);$snapshot['pending']=(int)$p->fetchColumn();}catch(Throwable){$snapshot['pending']=0;}
         return$snapshot;
     }
 
@@ -132,12 +128,8 @@ final class WhatsAppIntegrationService
         $message=$this->render((string)$template['message_template'],$context);
         $stableSuffix=($orderId!==null&&in_array($eventType,self::ORDER_LIFECYCLE_EVENTS,true))?'':$dedupeSuffix;
         $key=hash('sha256',implode('|',[$tenantId,$orderId??0,$eventType,$phone,$stableSuffix]));
-        try{
-            $pdo->prepare('INSERT INTO whatsapp_outbox (tenant_id,order_id,event_type,recipient,message_text,status,idempotency_key) VALUES (?,?,?,?,?,"desktop_queued",?)')->execute([$tenantId,$orderId,$eventType,$phone,$message,$key]);
-            return(int)$pdo->lastInsertId();
-        }catch(Throwable$e){
-            $q=$pdo->prepare('SELECT id FROM whatsapp_outbox WHERE idempotency_key=? LIMIT 1');$q->execute([$key]);$existing=$q->fetchColumn();if($existing!==false)return(int)$existing;throw$e;
-        }
+        try{$pdo->prepare('INSERT INTO whatsapp_outbox (tenant_id,order_id,event_type,recipient,message_text,status,idempotency_key) VALUES (?,?,?,?,?,"desktop_queued",?)')->execute([$tenantId,$orderId,$eventType,$phone,$message,$key]);return(int)$pdo->lastInsertId();}
+        catch(Throwable$e){$q=$pdo->prepare('SELECT id FROM whatsapp_outbox WHERE idempotency_key=? LIMIT 1');$q->execute([$key]);$existing=$q->fetchColumn();if($existing!==false)return(int)$existing;throw$e;}
     }
 
     public function syncPaymentEvents(PDO $pdo,int $limit=100):int
@@ -150,35 +142,17 @@ final class WhatsAppIntegrationService
     }
 
     /** @return array{processed:int,sent:int,failed:int,disabled:bool,reason:string} */
-    public function processOutbox(PDO $pdo,int $limit=20):array
-    {
-        return['processed'=>0,'sent'=>0,'failed'=>0,'disabled'=>true,'reason'=>'server_sending_disabled_use_eventmenu_connect'];
-    }
+    public function processOutbox(PDO $pdo,int $limit=20):array{return['processed'=>0,'sent'=>0,'failed'=>0,'disabled'=>true,'reason'=>'server_sending_disabled_use_eventmenu_connect'];}
 
-    public function render(string$template,array$context):string
-    {
-        $values=[];foreach(self::VARIABLES as$name)$values['{'.$name.'}']=trim((string)($context[$name]??''));
-        return trim(preg_replace('/[ \t]+\n/',"\n",strtr($template,$values))??strtr($template,$values));
-    }
-
-    public function normalizePhone(string$value):string
-    {
-        $digits=preg_replace('/\D+/','',$value)??'';$digits=ltrim($digits,'0');
-        if(strlen($digits)===10||strlen($digits)===11)$digits='55'.$digits;
-        if(!preg_match('/^\d{12,15}$/',$digits))return'';
-        return$digits;
-    }
-
+    public function render(string$template,array$context):string{$values=[];foreach(self::VARIABLES as$name)$values['{'.$name.'}']=trim((string)($context[$name]??''));return trim(preg_replace('/[ \t]+\n/',"\n",strtr($template,$values))??strtr($template,$values));}
+    public function normalizePhone(string$value):string{$digits=preg_replace('/\D+/','',$value)??'';$digits=ltrim($digits,'0');if(strlen($digits)===10||strlen($digits)===11)$digits='55'.$digits;if(!preg_match('/^\d{12,15}$/',$digits))return'';return$digits;}
     /** Legacy compatibility: server-side WhatsApp bridge is intentionally disabled. */
     public function bridgeConfigured():bool{return false;}
 
     private function readyForecast(PDO $pdo,int $tenantId,int $orderId):string
     {
         if(!$this->hasColumn($pdo,'orders','estimated_ready_at'))return'';
-        try{
-            $p=$pdo->prepare('SELECT estimated_ready_at FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$p->execute([$orderId,$tenantId]);$raw=$p->fetchColumn();
-            if(!is_string($raw)||trim($raw)==='')return'';$time=strtotime($raw);return$time===false?'':'Previsão: '.date('H:i',$time).'.';
-        }catch(Throwable){return'';}
+        try{$p=$pdo->prepare('SELECT estimated_ready_at FROM orders WHERE id=? AND tenant_id=? LIMIT 1');$p->execute([$orderId,$tenantId]);$raw=$p->fetchColumn();if(!is_string($raw)||trim($raw)==='')return'';$time=strtotime($raw);return$time===false?'':'Previsão: '.date('H:i',$time).'.';}catch(Throwable){return'';}
     }
 
     private function friendlyStatus(string$value):string{return match(strtolower(trim($value))){'pending'=>'Pedido recebido','confirmed'=>'Confirmado','preparing'=>'Em preparo','ready'=>'Pronto','out_for_delivery'=>'Saiu para entrega','completed'=>'Entregue','cancelled'=>'Cancelado',default=>'Em andamento'};}
@@ -186,22 +160,10 @@ final class WhatsAppIntegrationService
 
     private function hasColumn(PDO$pdo,string$table,string$column):bool
     {
-        try{
-            $driver=strtolower((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME));
-            if($driver==='sqlite'){$q=$pdo->query('PRAGMA table_info('.$table.')');foreach($q->fetchAll(PDO::FETCH_ASSOC)?:[] as$row)if(strtolower((string)($row['name']??''))===strtolower($column))return true;return false;}
-            $q=$pdo->query("SHOW COLUMNS FROM `{$table}` LIKE ".$pdo->quote($column));return(bool)$q->fetch(PDO::FETCH_ASSOC);
-        }catch(Throwable){return false;}
+        try{$driver=strtolower((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME));if($driver==='sqlite'){$q=$pdo->query('PRAGMA table_info('.$table.')');foreach($q->fetchAll(PDO::FETCH_ASSOC)?:[] as$row)if(strtolower((string)($row['name']??''))===strtolower($column))return true;return false;}$q=$pdo->query("SHOW COLUMNS FROM `{$table}` LIKE ".$pdo->quote($column));return(bool)$q->fetch(PDO::FETCH_ASSOC);}catch(Throwable){return false;}
     }
 
-    private function assertTemplateVariables(string$template):void
-    {
-        preg_match_all('/\{([a-z_]+)\}/i',$template,$matches);
-        foreach(($matches[1]??[])as$name)if(!in_array(strtolower((string)$name),self::VARIABLES,true))throw new RuntimeException('Variável não permitida no modelo: {'.$name.'}.');
-    }
-
+    private function assertTemplateVariables(string$template):void{preg_match_all('/\{([a-z_]+)\}/i',$template,$matches);foreach(($matches[1]??[])as$name)if(!in_array(strtolower((string)$name),self::VARIABLES,true))throw new RuntimeException('Variável não permitida no modelo: {'.$name.'}.');}
     /** @return array<string,mixed> */
-    private function publicConnection(array$row):array
-    {
-        return['status'=>(string)($row['status']??'disconnected'),'phone_number'=>(string)($row['phone_number']??''),'automation_enabled'=>(int)($row['automation_enabled']??0)===1,'last_connected_at'=>$row['last_connected_at']??null,'last_seen_at'=>$row['last_seen_at']??null,'last_error'=>$row['last_error']??null];
-    }
+    private function publicConnection(array$row):array{return['status'=>(string)($row['status']??'disconnected'),'phone_number'=>(string)($row['phone_number']??''),'automation_enabled'=>(int)($row['automation_enabled']??0)===1,'last_connected_at'=>$row['last_connected_at']??null,'last_seen_at'=>$row['last_seen_at']??null,'last_error'=>$row['last_error']??null];}
 }
