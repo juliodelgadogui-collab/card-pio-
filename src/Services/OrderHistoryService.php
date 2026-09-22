@@ -29,11 +29,18 @@ final class OrderHistoryService
 
         try{
             $normalized=strtolower(trim($toStatus));
-            $event=$fromStatus===null?'order_received':match($normalized){
-                'preparing'=>'preparing','ready'=>'ready','out_for_delivery'=>'out_for_delivery','completed'=>'delivered','cancelled'=>'cancelled',default=>null,
+            $event=match($normalized){
+                'pending'=>'order_received',
+                'confirmed'=>'order_confirmed',
+                'preparing'=>'preparing',
+                'ready'=>'ready',
+                'out_for_delivery'=>'out_for_delivery',
+                'completed'=>'delivered',
+                'cancelled'=>'cancelled',
+                default=>$fromStatus===null?'order_received':null,
             };
             if($event!==null)(new WhatsAppIntegrationService())->queueOrderEvent($pdo,$tenantId,$orderId,$event,'history:'.$historyId);
-        }catch(\Throwable){/* WhatsApp beta nunca bloqueia a transação principal */}
+        }catch(\Throwable){/* WhatsApp nunca bloqueia a transação principal */}
     }
 
     public function timeline(int $orderId):array
