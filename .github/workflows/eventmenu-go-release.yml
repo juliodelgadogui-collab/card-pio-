@@ -1,0 +1,186 @@
+name: EventMenu GO Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Versão pública (ex.: 1.0.0)'
+        required: true
+        default: '1.0.0'
+      version_code:
+        description: 'Version code Android. Vazio usa 300000000 + run number.'
+        required: false
+        default: ''
+      api_base_url:
+        description: 'URL HTTPS oficial da API'
+        required: true
+        default: 'https://go.gestao2.store/1/'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eventmenu-go-production-release
+  cancel-in-progress: false
+
+jobs:
+  android-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile/eventmenu-go
+    env:
+      EVENTMENU_API_BASE_URL: ${{ inputs.api_base_url }}
+      EVENTMENU_VERSION_NAME: ${{ inputs.version_name }}
+      EVENTMENU_FIREBASE_PROJECT_ID: ${{ secrets.EVENTMENU_FIREBASE_PROJECT_ID }}
+      EVENTMENU_FIREBASE_APP_ID: ${{ secrets.EVENTMENU_FIREBASE_APP_ID }}
+      EVENTMENU_FIREBASE_API_KEY: ${{ secrets.EVENTMENU_FIREBASE_API_KEY }}
+      EVENTMENU_FIREBASE_SENDER_ID: ${{ secrets.EVENTMENU_FIREBASE_SENDER_ID }}
+      EVENTMENU_RELEASE_STORE_PASSWORD: ${{ secrets.EVENTMENU_ANDROID_KEYSTORE_PASSWORD }}
+      EVENTMENU_RELEASE_KEY_ALIAS: ${{ secrets.EVENTMENU_ANDROID_KEY_ALIAS }}
+      EVENTMENU_RELEASE_KEY_PASSWORD: ${{ secrets.EVENTMENU_ANDROID_KEY_PASSWORD }}
+      EVENTMENU_REQUIRE_FCM: 'true'
+      EVENTMENU_REQUIRE_RELEASE_SIGNING: 'true'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configure Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Validate production configuration
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.EVENTMENU_ANDROID_KEYSTORE_BASE64 }}
+          VERSION_CODE_INPUT: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "${KEYSTORE_BASE64:-}" ] || missing+=(EVENTMENU_ANDROID_KEYSTORE_BASE64)
+          [ -n "${EVENTMENU_RELEASE_STORE_PASSWORD:-}" ] || missing+=(EVENTMENU_ANDROID_KEYSTORE_PASSWORD)
+          [ -n "${EVENTMENU_RELEASE_KEY_ALIAS:-}" ] || missing+=(EVENTMENU_ANDROID_KEY_ALIAS)
+          [ -n "${EVENTMENU_RELEASE_KEY_PASSWORD:-}" ] || missing+=(EVENTMENU_ANDROID_KEY_PASSWORD)
+          [ -n "${EVENTMENU_FIREBASE_PROJECT_ID:-}" ] || missing+=(EVENTMENU_FIREBASE_PROJECT_ID)
+          [ -n "${EVENTMENU_FIREBASE_APP_ID:-}" ] || missing+=(EVENTMENU_FIREBASE_APP_ID)
+          [ -n "${EVENTMENU_FIREBASE_API_KEY:-}" ] || missing+=(EVENTMENU_FIREBASE_API_KEY)
+          [ -n "${EVENTMENU_FIREBASE_SENDER_ID:-}" ] || missing+=(EVENTMENU_FIREBASE_SENDER_ID)
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Missing GitHub Secrets for production release: %s\n' "${missing[*]}"
+            exit 1
+          fi
+
+          if ! printf '%s' "$EVENTMENU_VERSION_NAME" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$'; then
+            echo "::error::Invalid version_name: $EVENTMENU_VERSION_NAME"
+            exit 1
+          fi
+          if ! printf '%s' "$EVENTMENU_API_BASE_URL" | grep -Eq '^https://'; then
+            echo "::error::API base URL must use HTTPS"
+            exit 1
+          fi
+
+          version_code="$VERSION_CODE_INPUT"
+          if [ -z "$version_code" ]; then version_code=$((300000000 + GITHUB_RUN_NUMBER)); fi
+          if ! printf '%s' "$version_code" | grep -Eq '^[1-9][0-9]*$'; then
+            echo "::error::version_code must be a positive integer"
+            exit 1
+          fi
+          if [ "$version_code" -gt 2100000000 ]; then
+            echo "::error::version_code exceeds Android limit"
+            exit 1
+          fi
+          echo "EVENTMENU_VERSION_CODE=$version_code" >> "$GITHUB_ENV"
+
+      - name: Restore permanent production keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.EVENTMENU_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/eventmenu-go-release.jks"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          test -s "$KEYSTORE"
+          echo "EVENTMENU_RELEASE_KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+
+      - name: Validate keystore identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          keytool -list \
+            -keystore "$EVENTMENU_RELEASE_KEYSTORE_PATH" \
+            -storepass "$EVENTMENU_RELEASE_STORE_PASSWORD" \
+            -alias "$EVENTMENU_RELEASE_KEY_ALIAS" >/dev/null
+
+      - name: Release unit tests
+        run: gradle :app:testReleaseUnitTest --stacktrace --no-daemon
+
+      - name: Build signed APK and AAB
+        run: gradle :app:assembleRelease :app:bundleRelease --stacktrace --no-daemon
+
+      - name: Verify release signatures and metadata
+        shell: bash
+        env:
+          EXPECTED_CERT_SHA256: ${{ secrets.EVENTMENU_ANDROID_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          test -s "$APK"
+          test -s "$AAB"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner-release.txt"
+          jarsigner -verify -strict "$AAB" >/dev/null
+          "$AAPT" dump badging "$APK" | head -n 3
+
+          ACTUAL_CERT="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$RUNNER_TEMP/apksigner-release.txt" | head -n1 | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+          test -n "$ACTUAL_CERT"
+          if [ -n "${EXPECTED_CERT_SHA256:-}" ]; then
+            EXPECTED="$(printf '%s' "$EXPECTED_CERT_SHA256" | tr -d ':' | tr '[:upper:]' '[:lower:]')"
+            if [ "$ACTUAL_CERT" != "$EXPECTED" ]; then
+              echo "::error::Production certificate does not match EVENTMENU_ANDROID_CERT_SHA256"
+              exit 1
+            fi
+          fi
+
+      - name: Prepare immutable release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/eventmenu-go-release"
+          mkdir -p "$OUT"
+          cp app/build/outputs/apk/release/app-release.apk "$OUT/EventMenu-GO-${EVENTMENU_VERSION_NAME}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "$OUT/EventMenu-GO-${EVENTMENU_VERSION_NAME}.aab"
+          cat > "$OUT/RELEASE.txt" <<EOF
+          EventMenu GO ${EVENTMENU_VERSION_NAME}
+          versionCode=${EVENTMENU_VERSION_CODE}
+          commit=${GITHUB_SHA}
+          api=${EVENTMENU_API_BASE_URL}
+          workflow_run=${GITHUB_RUN_ID}
+          EOF
+          (cd "$OUT" && sha256sum EventMenu-GO-* RELEASE.txt > SHA256SUMS.txt)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-GO-Release-${{ inputs.version_name }}
+          path: ${{ runner.temp }}/eventmenu-go-release
+          if-no-files-found: error
+          retention-days: 30
