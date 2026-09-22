@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Documents;
 using System.Windows.Media;
@@ -7,11 +8,18 @@ namespace EventMenu.Desktop;
 /// <summary>
 /// Applies safe, DPI-friendly defaults to secondary WPF windows.
 /// It intentionally does not scale the visual tree: text stays sharp and controls
-/// keep their native size. Oversized windows are clamped to the Windows work area,
-/// allowing existing star-sized grids and ScrollViewers to do the adaptation.
+/// keep their native size. Oversized windows are clamped to the work area of the
+/// monitor that actually contains the window.
 /// </summary>
 internal static class ResponsiveWindowBehavior
 {
+    private sealed class ResponsiveState
+    {
+        public bool HooksReady;
+        public bool Adjusting;
+    }
+
+    private static readonly ConditionalWeakTable<Window, ResponsiveState> States = new();
     private static bool _enabled;
 
     public static void Enable()
@@ -35,43 +43,88 @@ internal static class ResponsiveWindowBehavior
         TextOptions.SetTextHintingMode(window, TextHintingMode.Fixed);
         TextElement.SetFontFamily(window, new FontFamily("Segoe UI"));
 
-        FitToWorkArea(window);
+        var state = States.GetOrCreateValue(window);
+        if (!state.HooksReady)
+        {
+            state.HooksReady = true;
+            window.LocationChanged += SecondaryWindow_LocationChanged;
+            window.DpiChanged += SecondaryWindow_DpiChanged;
+        }
+
+        // On first display, owned dialogs belong on the owner's monitor. After that,
+        // moving a window between monitors uses the window's own current monitor.
+        FitToWorkArea(window, center: true, preferOwnerMonitor: true);
     }
 
-    private static void FitToWorkArea(Window window)
+    private static void SecondaryWindow_LocationChanged(object? sender, EventArgs e)
+    {
+        if (sender is Window window)
+            FitToWorkArea(window, center: false, preferOwnerMonitor: false);
+    }
+
+    private static void SecondaryWindow_DpiChanged(object? sender, DpiChangedEventArgs e)
+    {
+        if (sender is not Window window) return;
+        window.Dispatcher.BeginInvoke(new Action(() =>
+            FitToWorkArea(window, center: false, preferOwnerMonitor: false)));
+    }
+
+    private static void FitToWorkArea(Window window, bool center, bool preferOwnerMonitor)
     {
         if (window.WindowState != WindowState.Normal) return;
 
-        var workArea = SystemParameters.WorkArea;
-        const double safeMargin = 20;
-        var availableWidth = Math.Max(320, workArea.Width - safeMargin);
-        var availableHeight = Math.Max(280, workArea.Height - safeMargin);
+        var state = States.GetOrCreateValue(window);
+        if (state.Adjusting) return;
+        state.Adjusting = true;
 
-        // A MinWidth/MinHeight larger than the logical work area is common when
-        // Windows is at 125% or 150% scaling. Lower only the minimum necessary.
-        if (window.MinWidth > availableWidth) window.MinWidth = availableWidth;
-        if (window.MinHeight > availableHeight) window.MinHeight = availableHeight;
+        try
+        {
+            var monitorReference = preferOwnerMonitor && window.Owner is { IsVisible: true } owner
+                ? owner
+                : window;
+            var workArea = MonitorWorkArea.Get(monitorReference);
+            const double safeMargin = 20;
+            var availableWidth = Math.Max(320, workArea.Width - safeMargin);
+            var availableHeight = Math.Max(280, workArea.Height - safeMargin);
 
-        var width = double.IsNaN(window.Width) || window.Width <= 0
-            ? Math.Min(900, availableWidth)
-            : Math.Min(window.Width, availableWidth);
-        var height = double.IsNaN(window.Height) || window.Height <= 0
-            ? Math.Min(700, availableHeight)
-            : Math.Min(window.Height, availableHeight);
+            // A MinWidth/MinHeight larger than the logical work area is common when
+            // Windows is at 125% or 150% scaling. Lower only the minimum necessary.
+            if (window.MinWidth > availableWidth) window.MinWidth = availableWidth;
+            if (window.MinHeight > availableHeight) window.MinHeight = availableHeight;
 
-        window.Width = Math.Max(window.MinWidth, width);
-        window.Height = Math.Max(window.MinHeight, height);
+            var width = double.IsNaN(window.Width) || window.Width <= 0
+                ? Math.Min(900, availableWidth)
+                : Math.Min(window.Width, availableWidth);
+            var height = double.IsNaN(window.Height) || window.Height <= 0
+                ? Math.Min(700, availableHeight)
+                : Math.Min(window.Height, availableHeight);
 
-        // Re-center after changing the dimensions, but never place any edge
-        // outside the Windows work area.
-        var desiredLeft = window.Owner is { IsVisible: true } owner
-            ? owner.Left + ((owner.ActualWidth > 0 ? owner.ActualWidth : owner.Width) - window.Width) / 2
-            : workArea.Left + (workArea.Width - window.Width) / 2;
-        var desiredTop = window.Owner is { IsVisible: true } visibleOwner
-            ? visibleOwner.Top + ((visibleOwner.ActualHeight > 0 ? visibleOwner.ActualHeight : visibleOwner.Height) - window.Height) / 2
-            : workArea.Top + (workArea.Height - window.Height) / 2;
+            window.Width = Math.Max(window.MinWidth, width);
+            window.Height = Math.Max(window.MinHeight, height);
 
-        window.Left = Math.Max(workArea.Left, Math.Min(desiredLeft, workArea.Right - window.Width));
-        window.Top = Math.Max(workArea.Top, Math.Min(desiredTop, workArea.Bottom - window.Height));
+            double desiredLeft;
+            double desiredTop;
+            if (center)
+            {
+                desiredLeft = window.Owner is { IsVisible: true } visibleOwner
+                    ? visibleOwner.Left + ((visibleOwner.ActualWidth > 0 ? visibleOwner.ActualWidth : visibleOwner.Width) - window.Width) / 2
+                    : workArea.Left + (workArea.Width - window.Width) / 2;
+                desiredTop = window.Owner is { IsVisible: true } ownerForTop
+                    ? ownerForTop.Top + ((ownerForTop.ActualHeight > 0 ? ownerForTop.ActualHeight : ownerForTop.Height) - window.Height) / 2
+                    : workArea.Top + (workArea.Height - window.Height) / 2;
+            }
+            else
+            {
+                desiredLeft = window.Left;
+                desiredTop = window.Top;
+            }
+
+            window.Left = Math.Max(workArea.Left, Math.Min(desiredLeft, workArea.Right - window.Width));
+            window.Top = Math.Max(workArea.Top, Math.Min(desiredTop, workArea.Bottom - window.Height));
+        }
+        finally
+        {
+            state.Adjusting = false;
+        }
     }
 }
