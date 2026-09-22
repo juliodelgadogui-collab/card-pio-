@@ -24,7 +24,6 @@ if(Auth::tenantId()!==null)super_fail('Super ADM iniciou com tenant indevido.');
 
 Auth::actAsTenant($tenantId);
 if(Auth::tenantId()!==$tenantId||Auth::actingTenantId()!==$tenantId)super_fail('Contexto de tenant não foi aplicado.');
-
 Auth::clearTenantContext();
 if(Auth::tenantId()!==null)super_fail('Contexto de tenant não foi removido.');
 
@@ -45,6 +44,10 @@ $moduleSettings=json_encode([
         'customers'=>true,
         'payments'=>true,
         'events'=>true,
+        'whatsapp'=>false,
+        'reports'=>false,
+        'units'=>true,
+        'printing'=>false,
     ],
 ],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
 $pdo->prepare('INSERT INTO tenants (name,slug,plan,status,settings) VALUES (?,?,"premium","active",?)')->execute(['Module Override CI',$moduleSlug,$moduleSettings]);
@@ -53,7 +56,28 @@ if(!TenantFeatures::routeEnabled('products',$moduleTenantId))super_fail('Módulo
 if(TenantFeatures::routeEnabled('delivery',$moduleTenantId))super_fail('Módulo delivery desativado continuou acessível.');
 if(TenantFeatures::routeEnabled('inventory',$moduleTenantId))super_fail('Módulo estoque desativado continuou acessível.');
 if(!TenantFeatures::routeEnabled('events',$moduleTenantId))super_fail('Módulo eventos ativo foi bloqueado.');
+if(TenantFeatures::moduleEnabled('whatsapp',$moduleTenantId))super_fail('Módulo WhatsApp desativado continuou ativo.');
+if(TenantFeatures::routeEnabled('reports',$moduleTenantId))super_fail('Relatórios desativados continuaram acessíveis.');
+if(!TenantFeatures::routeEnabled('units',$moduleTenantId))super_fail('Múltiplas unidades ativas foram bloqueadas.');
+if(TenantFeatures::routeEnabled('receipt-settings',$moduleTenantId))super_fail('Configuração de impressão desativada continuou acessível.');
+if(!TenantFeatures::routeEnabled('receipt',$moduleTenantId))super_fail('Visualização central de recibo não deve depender do módulo de configuração de impressão.');
 if(!TenantFeatures::routeEnabled('orders',$moduleTenantId))super_fail('Rota central de pedidos não deve ser bloqueada por módulo.');
+
+/* Compatibility: tenants saved before the new module keys must inherit safe defaults. */
+$oldOverrideSlug='super-old-modules-'.bin2hex(random_bytes(3));
+$oldOverrideSettings=json_encode([
+    'business_type'=>'menu',
+    'modules'=>[
+        'catalog'=>true,'pos'=>true,'kitchen'=>true,'restaurant'=>true,'delivery'=>true,
+        'inventory'=>true,'customers'=>true,'payments'=>true,'events'=>false,
+    ],
+],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
+$pdo->prepare('INSERT INTO tenants (name,slug,plan,status,settings) VALUES (?,?,"premium","active",?)')->execute(['Old Override CI',$oldOverrideSlug,$oldOverrideSettings]);
+$oldOverrideId=(int)$pdo->lastInsertId();
+if(!TenantFeatures::moduleEnabled('whatsapp',$oldOverrideId))super_fail('Compatibilidade: tenant restaurante antigo perdeu WhatsApp ao adicionar novos módulos.');
+if(!TenantFeatures::routeEnabled('reports',$oldOverrideId))super_fail('Compatibilidade: tenant restaurante antigo perdeu relatórios.');
+if(!TenantFeatures::routeEnabled('units',$oldOverrideId))super_fail('Compatibilidade: tenant restaurante antigo perdeu unidades.');
+if(!TenantFeatures::routeEnabled('receipt-settings',$oldOverrideId))super_fail('Compatibilidade: tenant restaurante antigo perdeu configuração de impressão.');
 
 $legacyEventSlug='super-legacy-event-'.bin2hex(random_bytes(3));
 $legacyEventSettings=json_encode(['business_type'=>'event'],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR);
@@ -62,6 +86,8 @@ $legacyEventId=(int)$pdo->lastInsertId();
 if(TenantFeatures::routeEnabled('products',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos recebeu catálogo de restaurante.');
 if(!TenantFeatures::routeEnabled('events',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos perdeu módulo de eventos.');
 if(!TenantFeatures::routeEnabled('payments',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos perdeu pagamentos.');
+if(!TenantFeatures::moduleEnabled('whatsapp',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos perdeu WhatsApp.');
+if(!TenantFeatures::routeEnabled('reports',$legacyEventId))super_fail('Compatibilidade legada: empresa de eventos perdeu relatórios.');
 if(!TenantFeatures::routeEnabled('receipt',$legacyEventId))super_fail('Compatibilidade legada: rota central de impressão foi bloqueada.');
 
 echo "CI Super ADM smoke OK\n";
