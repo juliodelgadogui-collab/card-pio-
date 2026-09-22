@@ -22,27 +22,29 @@ final class VerifiedBackupService
 
     public function run(): array
     {
-        $runtime=new RuntimeStatusService();$file=null;
+        $runtime=new RuntimeStatusService();$file=null;$localVerified=false;$localMeta=[];
         try{
             $result=(new BackupService())->run();
             $file=$this->backupFile((string)($result['file']??''));
             $verification=$this->verify((string)($result['driver']??''),$file);
+            $localMeta=$result+$verification+['verified'=>true];$localVerified=true;
+            $runtime->set('backup.last_verification','ok','Integridade do backup confirmada.',$localMeta);
+            $runtime->set('backup.last_verified','ok','Último backup verificado e disponível.',$localMeta);
+
             $mirror=$this->mirror($file,$verification['sha256']);
-            $meta=$result+$verification+$mirror+['verified'=>true];
-            $runtime->set('backup.last_verification','ok','Integridade do backup confirmada.',$meta);
-            $runtime->set('backup.last_verified','ok','Último backup verificado e disponível.',$meta);
             if(!empty($mirror['mirror_configured']))$runtime->set('backup.last_mirror','ok','Segunda cópia do backup verificada.',$mirror);
             else $runtime->set('backup.last_mirror','warning','Backup secundário não configurado.',['mirror_configured'=>false]);
-            return $meta;
+            return $localMeta+$mirror;
         }catch(Throwable $e){
-            if($file!==null&&!str_contains($e->getMessage(),'cópia secundária')){
+            if($localVerified){
+                $runtime->set('backup.last_mirror','error','Falha ao manter a segunda cópia do backup.',['mirror_configured'=>true,'local_backup_preserved'=>true,'file'=>$file!==null?basename($file):null,'error'=>$this->safe($e->getMessage())]);
+                throw $e;
+            }
+            if($file!==null){
                 @unlink($file.'.sha256');@unlink($file);
                 $runtime->set('backup.last_run','error','Backup descartado por falha na verificação.',['file'=>basename($file),'verified'=>false,'error'=>$this->safe($e->getMessage())]);
             }
-            if(str_contains(mb_strtolower($e->getMessage()),'cópia secundária')||str_contains(mb_strtolower($e->getMessage()),'backup secundário')){
-                $runtime->set('backup.last_mirror','error','Falha ao manter a segunda cópia do backup.',['mirror_configured'=>true,'error'=>$this->safe($e->getMessage())]);
-            }
-            $runtime->set('backup.last_verification','error',$file!==null?'O backup não passou por todas as verificações obrigatórias.':'O backup falhou antes da etapa de verificação.',['verified'=>false,'error'=>$this->safe($e->getMessage())]);
+            $runtime->set('backup.last_verification','error',$file!==null?'O backup não passou na verificação e foi descartado.':'O backup falhou antes da etapa de verificação.',['verified'=>false,'error'=>$this->safe($e->getMessage())]);
             throw $e;
         }
     }
