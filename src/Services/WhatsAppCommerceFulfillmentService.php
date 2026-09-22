@@ -14,13 +14,13 @@ final class WhatsAppCommerceFulfillmentService
 {
     private CustomerIdentityService $identity;
     private CustomerAddressService $addresses;
-    private WhatsAppCommerceOrderService $orders;
+    private WhatsAppCommerceDraftCheckoutService $checkout;
 
     public function __construct()
     {
         $this->identity=new CustomerIdentityService();
         $this->addresses=new CustomerAddressService();
-        $this->orders=new WhatsAppCommerceOrderService();
+        $this->checkout=new WhatsAppCommerceDraftCheckoutService();
     }
 
     /** @return array<string,mixed> */
@@ -52,7 +52,7 @@ final class WhatsAppCommerceFulfillmentService
             $name=mb_substr(trim($text),0,160);if(mb_strlen($name)<2)return $this->stateResult($pdo,$tenantId,$conversationId,'ASKING_CUSTOMER_NAME',$context,'Informe seu nome para continuar o pedido.','customer_name_invalid');
             $phone=(string)$conversation['phone'];$customer=$this->identity->findOrCreate($pdo,$tenantId,$name,$phone);$customerId=(int)$customer['id'];
             $pdo->prepare('UPDATE whatsapp_conversations SET customer_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$customerId,$conversationId,$tenantId]);
-            $pdo->prepare('UPDATE orders SET customer_id=? WHERE id=? AND tenant_id=? AND status="draft" AND order_source="WHATSAPP"')->execute([$customerId,$draftId,$tenantId]);
+            $pdo->prepare("UPDATE orders SET customer_id=? WHERE id=? AND tenant_id=? AND status='draft' AND order_source='WHATSAPP'")->execute([$customerId,$draftId,$tenantId]);
             $this->audit('customer_identified',$draftId,['customer_id'=>$customerId]);
             $context['customer_id']=$customerId;
             if(($context['fulfillment']??'')==='delivery')return $this->addressesResult($pdo,$tenantId,$conversationId,$draftId,$customerId,$context);
@@ -124,7 +124,7 @@ final class WhatsAppCommerceFulfillmentService
         $settings=$this->settings($pdo,$tenantId);$this->assertAcceptingOrders($settings);$fulfillment=(string)($context['fulfillment']??'');if(!in_array($fulfillment,['delivery','pickup'],true))return $this->fulfillmentPrompt($pdo,$tenantId,$conversationId,$draftId,$settings);
         if($fulfillment==='pickup'&&empty($settings['delivery_pickup_enabled']))return $this->fulfillmentPrompt($pdo,$tenantId,$conversationId,$draftId,$settings,'A retirada no local foi desativada.');
         $customerId=$this->customerId($pdo,$tenantId,['id'=>$conversationId,'customer_id'=>$context['customer_id']??null],$draftId);if($customerId<1)return $this->askCustomerName($pdo,$tenantId,$conversationId,$draftId,$fulfillment);$context['customer_id']=$customerId;
-        $order=$this->orders->validateDraftForCheckout($pdo,$tenantId,$draftId);$subtotal=(int)$order['subtotal_cents'];$fee=$fulfillment==='delivery'?max(0,(int)($settings['delivery_fee_cents']??0)):0;$minimum=max(0,(int)($settings['min_delivery_order_cents']??0));if($fulfillment==='delivery'&&$subtotal<$minimum)throw new RuntimeException('Pedido mínimo para entrega: '.$this->money($minimum).'.');
+        $order=$this->checkout->validateAndRefresh($pdo,$tenantId,$draftId);$subtotal=(int)$order['subtotal_cents'];$fee=$fulfillment==='delivery'?max(0,(int)($settings['delivery_fee_cents']??0)):0;$minimum=max(0,(int)($settings['min_delivery_order_cents']??0));if($fulfillment==='delivery'&&$subtotal<$minimum)throw new RuntimeException('Pedido mínimo para entrega: '.$this->money($minimum).'.');
         $address='';if($fulfillment==='delivery'){$address=trim((string)($context['address_text']??''));if($address===''&&!empty($context['address_id'])){$saved=$this->addresses->get($pdo,$tenantId,$customerId,(int)$context['address_id']);$address=(string)$saved['address_text'];}$address=mb_substr(trim($address),0,1000);if($address==='')return $this->addressesResult($pdo,$tenantId,$conversationId,$draftId,$customerId,$context);$context['address_text']=$address;}
         $total=$subtotal+$fee;$lines=[];if($prefix!=='')$lines[]='⚠️ '.$prefix;$lines[]='';$lines[]='✅ *CONFIRMAR PEDIDO*';$lines[]='';$lines[]='Recebimento: '.($fulfillment==='delivery'?'Entrega':'Retirada no local');if($address!=='')$lines[]='Endereço: '.$address;$lines[]='Subtotal: '.$this->money($subtotal);if($fulfillment==='delivery')$lines[]='Taxa de entrega: '.$this->money($fee);$lines[]='*Total: '.$this->money($total).'*';$lines[]='';$lines[]='1 - Confirmar pedido';$lines[]='0 - Voltar';$context['draft_order_id']=$draftId;$context['fulfillment']=$fulfillment;$context['quoted_subtotal_cents']=$subtotal;$context['quoted_delivery_fee_cents']=$fee;$context['quoted_total_cents']=$total;
         return $this->stateResult($pdo,$tenantId,$conversationId,'CONFIRMING_FULFILLMENT',$context,trim(implode("\n",$lines)),'fulfillment_confirmation');
@@ -135,17 +135,17 @@ final class WhatsAppCommerceFulfillmentService
     {
         $savepoint='wa_stage2';$pdo->exec('SAVEPOINT '.$savepoint);
         try{
-            $lock=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? AND status="draft" AND order_source="WHATSAPP" LIMIT 1 FOR UPDATE'));$lock->execute([$draftId,$tenantId]);$draft=$lock->fetch(PDO::FETCH_ASSOC);if(!$draft)throw new RuntimeException('Este carrinho já foi finalizado ou cancelado.');
+            $lock=$pdo->prepare(Database::portableSql($pdo,"SELECT * FROM orders WHERE id=? AND tenant_id=? AND status='draft' AND order_source='WHATSAPP' LIMIT 1 FOR UPDATE"));$lock->execute([$draftId,$tenantId]);$draft=$lock->fetch(PDO::FETCH_ASSOC);if(!$draft)throw new RuntimeException('Este carrinho já foi finalizado ou cancelado.');
             $settings=$this->settings($pdo,$tenantId);$this->assertAcceptingOrders($settings);$fulfillment=(string)($context['fulfillment']??'');if(!in_array($fulfillment,['delivery','pickup'],true))throw new RuntimeException('Escolha entrega ou retirada.');if($fulfillment==='pickup'&&empty($settings['delivery_pickup_enabled']))throw new RuntimeException('A retirada no local não está disponível agora.');
             $customerId=$this->customerId($pdo,$tenantId,$conversation,$draftId);if($customerId<1)throw new RuntimeException('Informe seu nome antes de confirmar o pedido.');
-            $order=$this->orders->validateDraftForCheckout($pdo,$tenantId,$draftId);$subtotal=(int)$order['subtotal_cents'];$minimum=max(0,(int)($settings['min_delivery_order_cents']??0));if($fulfillment==='delivery'&&$subtotal<$minimum)throw new RuntimeException('Pedido mínimo para entrega: '.$this->money($minimum).'.');
+            $order=$this->checkout->validateAndRefresh($pdo,$tenantId,$draftId);$subtotal=(int)$order['subtotal_cents'];$minimum=max(0,(int)($settings['min_delivery_order_cents']??0));if($fulfillment==='delivery'&&$subtotal<$minimum)throw new RuntimeException('Pedido mínimo para entrega: '.$this->money($minimum).'.');
             $fee=$fulfillment==='delivery'?max(0,(int)($settings['delivery_fee_cents']??0)):0;$total=$subtotal+$fee;$address=null;
             if($fulfillment==='delivery'){$address=mb_substr(trim((string)($context['address_text']??'')),0,1000);if($address==='')throw new RuntimeException('Escolha um endereço de entrega.');}
-            $pdo->prepare('UPDATE orders SET customer_id=?,channel=?,delivery_address=?,delivery_fee_cents=?,total_cents=?,status="pending",payment_status="unpaid",updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="draft" AND order_source="WHATSAPP"')->execute([$customerId,$fulfillment,$address,$fee,$total,$draftId,$tenantId]);
+            $pdo->prepare("UPDATE orders SET customer_id=?,channel=?,delivery_address=?,delivery_fee_cents=?,total_cents=?,status='pending',payment_status='unpaid',updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status='draft' AND order_source='WHATSAPP'")->execute([$customerId,$fulfillment,$address,$fee,$total,$draftId,$tenantId]);
             $expires=(new \DateTimeImmutable('+30 minutes'))->format('Y-m-d H:i:s');(new StockReservationService())->reserve($pdo,$tenantId,$draftId,[],$expires);
             (new OrderHistoryService())->record($pdo,$tenantId,$draftId,'draft','pending','whatsapp',$fulfillment==='delivery'?'Pedido do WhatsApp confirmado para entrega.':'Pedido do WhatsApp confirmado para retirada.');
             $nextContext=['order_id'=>$draftId,'fulfillment'=>$fulfillment,'total_cents'=>$total,'stock_reserved_until'=>$expires];$json=json_encode($nextContext,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR);
-            $pdo->prepare('UPDATE whatsapp_conversations SET draft_order_id=NULL,active_order_id=?,state="CHOOSING_PAYMENT",context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$draftId,$json,$conversationId,$tenantId]);
+            $pdo->prepare("UPDATE whatsapp_conversations SET draft_order_id=NULL,active_order_id=?,state='CHOOSING_PAYMENT',context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$draftId,$json,$conversationId,$tenantId]);
             $this->audit('order_operational',$draftId,['customer_id'=>$customerId,'channel'=>$fulfillment,'delivery_fee_cents'=>$fee,'total_cents'=>$total]);
             $pdo->exec('RELEASE SAVEPOINT '.$savepoint);
             $reply="Pedido #{$draftId} recebido. ✅\n\n".($fulfillment==='delivery'?"Entrega\nTaxa: ".$this->money($fee)."\n":'Retirada no local'."\n")."Total: *".$this->money($total)."*\n\nOs itens foram reservados no estoque. A escolha da forma de pagamento será liberada na próxima etapa.";
@@ -168,7 +168,7 @@ final class WhatsAppCommerceFulfillmentService
     /** @return array<string,mixed> */
     private function cancelDraft(PDO $pdo,int $tenantId,int $conversationId,int $draftId):array
     {
-        $pdo->prepare('UPDATE orders SET status="cancelled",updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="draft" AND order_source="WHATSAPP"')->execute([$draftId,$tenantId]);$pdo->prepare('UPDATE whatsapp_conversations SET draft_order_id=NULL,state="WELCOME",context_json=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$conversationId,$tenantId]);$this->audit('draft_cancelled',$draftId,[]);
+        $pdo->prepare("UPDATE orders SET status='cancelled',updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status='draft' AND order_source='WHATSAPP'")->execute([$draftId,$tenantId]);$pdo->prepare("UPDATE whatsapp_conversations SET draft_order_id=NULL,state='WELCOME',context_json=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$conversationId,$tenantId]);$this->audit('draft_cancelled',$draftId,[]);
         return ['handled'=>true,'state'=>'WELCOME','context'=>[],'draft_order_id'=>null,'reply'=>"Pedido em montagem cancelado.\n\n1 - Fazer um pedido\n3 - Acompanhar pedido\n4 - Falar com atendente",'kind'=>'cart_cancelled'];
     }
 
@@ -179,7 +179,7 @@ final class WhatsAppCommerceFulfillmentService
 
     private function draftId(PDO $pdo,int $tenantId,array $conversation):int
     {
-        $id=(int)($conversation['draft_order_id']??0);if($id<1)return 0;$q=$pdo->prepare('SELECT id FROM orders WHERE id=? AND tenant_id=? AND status="draft" AND order_source="WHATSAPP" LIMIT 1');$q->execute([$id,$tenantId]);return $q->fetchColumn()?$id:0;
+        $id=(int)($conversation['draft_order_id']??0);if($id<1)return 0;$q=$pdo->prepare("SELECT id FROM orders WHERE id=? AND tenant_id=? AND status='draft' AND order_source='WHATSAPP' LIMIT 1");$q->execute([$id,$tenantId]);return $q->fetchColumn()?$id:0;
     }
 
     /** @return array<string,mixed> */
