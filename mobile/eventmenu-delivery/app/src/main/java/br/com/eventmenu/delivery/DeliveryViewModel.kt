@@ -5,9 +5,14 @@ import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import br.com.eventmenu.delivery.data.*
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 
 sealed interface Screen {
     data object Login : Screen
@@ -23,13 +28,29 @@ sealed interface Screen {
     data object AddressEditor : Screen
 }
 
+enum class MainDestination { Home, Search, Orders, Profile }
+enum class MarketplaceLoadIssue { Offline, ServerUnavailable, Temporary }
+
 class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     private val deliveryApp=app as? DeliveryApplication
     private val session=deliveryApp?.sessionStore?:SecureSessionStore(app)
     private val api=DeliveryApi{session.accessToken}
     var screen by mutableStateOf<Screen>(Screen.Home);private set
+    var mainDestination by mutableStateOf(MainDestination.Home);private set
     var customer by mutableStateOf<Customer?>(null);private set
     var stores by mutableStateOf<List<Store>>(emptyList());private set
+    var marketplaceLoading by mutableStateOf(false);private set
+    var marketplaceIssue by mutableStateOf<MarketplaceLoadIssue?>(null);private set
+    var storeSearchQuery by mutableStateOf("");private set
+    var storeSearchResults by mutableStateOf<List<Store>>(emptyList());private set
+    var storeSearchLoading by mutableStateOf(false);private set
+    var storeSearchIssue by mutableStateOf<MarketplaceLoadIssue?>(null);private set
+    var homeOpenOnly by mutableStateOf(false);private set
+    var homeFreeOnly by mutableStateOf(false);private set
+    var homePickupOnly by mutableStateOf(false);private set
+    var homeCategory by mutableStateOf<String?>(null);private set
+    var homeScrollIndex by mutableIntStateOf(0);private set
+    var homeScrollOffset by mutableIntStateOf(0);private set
     var catalog by mutableStateOf<Catalog?>(null);private set
     val cart=mutableStateListOf<CartItem>()
     var couponQuote by mutableStateOf<CouponQuote?>(null);private set
@@ -45,28 +66,87 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     var message by mutableStateOf<String?>(null);private set
     var pendingEmail by mutableStateOf("");private set
     var editingAddress by mutableStateOf<Address?>(null);private set
+    private var profileReturnScreen:Screen?=null
     private var trackingJob:Job?=null
     private var paymentPollingJob:Job?=null
+    private var marketplaceJob:Job?=null
+    private var storeSearchJob:Job?=null
+    private var recentOrdersJob:Job?=null
 
     val isAuthenticated:Boolean get()=!session.accessToken.isNullOrBlank()
+    val canReturnFromProfile:Boolean get()=profileReturnScreen!=null
 
     init{if(isAuthenticated){deliveryApp?.pushCoordinator?.syncAfterLogin();refreshSession()}}
     fun clearMessage(){message=null}
-    fun navigate(value:Screen){screen=value}
-    fun emailConfirmed(){session.accessToken=null;PaymentUiContext.clear();customer=null;payerCpf="";screen=Screen.Login;message="E-mail confirmado. Entre com sua conta."}
+    fun navigate(value:Screen){screen=value;when(value){Screen.Home->mainDestination=MainDestination.Home;Screen.Orders->mainDestination=MainDestination.Orders;Screen.Profile->mainDestination=MainDestination.Profile;else->Unit}}
+    fun navigateMain(value:MainDestination){
+        when(value){
+            MainDestination.Home->{mainDestination=value;screen=Screen.Home;if(stores.isEmpty()&&!marketplaceLoading)loadStores()}
+            MainDestination.Search->{mainDestination=value;screen=Screen.Home;if(storeSearchQuery.isBlank())storeSearchResults=stores}
+            MainDestination.Orders->{mainDestination=value;loadOrders()}
+            MainDestination.Profile->{mainDestination=value;openProfile()}
+        }
+    }
+    fun returnFromProfile(){val target=profileReturnScreen;profileReturnScreen=null;if(target!=null)screen=target else navigateMain(MainDestination.Home)}
+    fun emailConfirmed(){session.accessToken=null;PaymentUiContext.clear();customer=null;payerCpf="";mainDestination=MainDestination.Home;screen=Screen.Login;message="E-mail confirmado. Entre com sua conta."}
 
     fun login(email:String,password:String)=action{
         val result=api.login(email.trim(),password);session.accessToken=result.token;customer=result.customer;deliveryApp?.pushCoordinator?.syncAfterLogin()
-        if(result.customer.cpfConfigured){screen=if(cart.isNotEmpty()&&catalog!=null)Screen.Cart else Screen.Home;loadStoresInternal()}else{screen=Screen.Profile;message="Complete seu CPF uma única vez para usar todos os meios de pagamento."}
+        if(result.customer.cpfConfigured){mainDestination=MainDestination.Home;screen=if(cart.isNotEmpty()&&catalog!=null)Screen.Cart else Screen.Home;loadStoresInternal()}else{mainDestination=MainDestination.Profile;screen=Screen.Profile;message="Complete seu CPF uma única vez para usar todos os meios de pagamento."}
     }
     fun register(name:String,email:String,phone:String,password:String,legalAccepted:Boolean=false)=action{if(!legalAccepted)error("Aceite os Termos de Uso e a Política de Privacidade para continuar.");val result=api.register(name.trim(),email.trim(),phone.trim(),password,legalAccepted);pendingEmail=result.email;screen=Screen.VerifyEmail;message=if(result.emailSent)"Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."}
     fun registerWithCpf(name:String,cpf:String,email:String,phone:String,password:String,legalAccepted:Boolean=false)=action{if(!legalAccepted)error("Aceite os Termos de Uso e a Política de Privacidade para continuar.");val result=api.register(name.trim(),cpf.trim(),email.trim(),phone.trim(),password,legalAccepted);pendingEmail=result.email;screen=Screen.VerifyEmail;message=if(result.emailSent)"Enviamos o link de confirmação para ${result.email}." else "Cadastro criado. O servidor de e-mail precisa ser configurado para enviar a confirmação."}
     fun resendVerification()=action{api.resend(pendingEmail);message="Se o cadastro estiver pendente, um novo link foi enviado."}
     fun forgotPassword(email:String)=action{api.forgotPassword(email);message="Se a conta existir, você receberá um link para criar uma nova senha."}
-    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";stores=api.stores();screen=Screen.Home}
-    fun loadStores(query:String="")=action(showBusy=false){stores=api.stores(query)}
+    fun logout()=action{val push=session.pushToken.orEmpty();runCatching{api.logout(push)};session.clear();PaymentUiContext.clear();customer=null;cart.clear();clearCoupon(false);trackingJob?.cancel();paymentPollingJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";profileReturnScreen=null;stores=api.stores();storeSearchQuery="";storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}
+
+    fun loadHome(){loadStores();loadRecentOrdersForHome()}
+    fun loadStores(query:String=""){
+        if(query.isNotBlank()){updateMarketplaceSearch(query);return}
+        marketplaceJob?.cancel()
+        marketplaceJob=viewModelScope.launch{
+            marketplaceLoading=true;marketplaceIssue=null
+            try{
+                stores=api.stores()
+                if(storeSearchQuery.isBlank())storeSearchResults=stores
+                if(homeCategory!=null&&stores.none{store->store.categories.any{it.equals(homeCategory,true)}})homeCategory=null
+            }catch(c:CancellationException){throw c}catch(t:Throwable){marketplaceIssue=classifyMarketplaceIssue(t)}finally{marketplaceLoading=false}
+        }
+    }
+    fun retryMarketplace(){loadStores()}
+    fun updateMarketplaceSearch(value:String){
+        val query=value.take(120)
+        storeSearchQuery=query
+        storeSearchJob?.cancel()
+        storeSearchIssue=null
+        if(query.isBlank()){
+            storeSearchLoading=false
+            storeSearchResults=stores
+            return
+        }
+        storeSearchLoading=true
+        storeSearchJob=viewModelScope.launch{
+            delay(350)
+            try{storeSearchResults=api.stores(query.trim())}
+            catch(c:CancellationException){throw c}
+            catch(t:Throwable){storeSearchIssue=classifyMarketplaceIssue(t)}
+            finally{if(storeSearchQuery==query)storeSearchLoading=false}
+        }
+    }
+    fun clearMarketplaceSearch(){updateMarketplaceSearch("")}
+    fun retryMarketplaceSearch(){updateMarketplaceSearch(storeSearchQuery)}
+    fun toggleHomeOpenOnly(){homeOpenOnly=!homeOpenOnly}
+    fun toggleHomeFreeOnly(){homeFreeOnly=!homeFreeOnly}
+    fun toggleHomePickupOnly(){homePickupOnly=!homePickupOnly}
+    fun selectHomeCategory(value:String?){homeCategory=if(value!=null&&homeCategory?.equals(value,true)==true)null else value}
+    fun rememberHomeScroll(index:Int,offset:Int){homeScrollIndex=index.coerceAtLeast(0);homeScrollOffset=offset.coerceAtLeast(0)}
+    private fun loadRecentOrdersForHome(){
+        if(!isAuthenticated||orders.isNotEmpty()||recentOrdersJob?.isActive==true)return
+        recentOrdersJob=viewModelScope.launch{runCatching{api.orders()}.onSuccess{orders=it}}
+    }
+
     fun openStore(store:Store)=action{catalog=api.catalog(store.tenantId,store.unitId);cart.clear();clearCoupon(false);screen=Screen.Catalog;if(!store.acceptingOrders)message="Este restaurante está fechado para novos pedidos agora. Você ainda pode consultar o cardápio."}
-    fun toggleFavorite(store:Store){if(!isAuthenticated){screen=Screen.Login;message="Entre para salvar restaurantes nos favoritos.";return};action(showBusy=false){api.favorite(store.tenantId,!store.favorite);stores=stores.map{if(it.tenantId==store.tenantId&&it.unitId==store.unitId)it.copy(favorite=!store.favorite)else it}}}
+    fun toggleFavorite(store:Store){if(!isAuthenticated){screen=Screen.Login;message="Entre para salvar restaurantes nos favoritos.";return};action(showBusy=false){api.favorite(store.tenantId,!store.favorite);stores=stores.map{if(it.tenantId==store.tenantId&&it.unitId==store.unitId)it.copy(favorite=!store.favorite)else it};storeSearchResults=storeSearchResults.map{if(it.tenantId==store.tenantId&&it.unitId==store.unitId)it.copy(favorite=!store.favorite)else it}}}
     fun addToCart(product:Product,quantity:Int=1,optionIds:Set<Int> = emptySet(),notes:String=""){if(!product.available)return;val index=cart.indexOfFirst{it.product.id==product.id&&it.optionIds==optionIds&&it.notes==notes};if(index>=0)cart[index]=cart[index].copy(quantity=(cart[index].quantity+quantity).coerceAtMost(99))else cart+=CartItem(product,quantity.coerceIn(1,99),optionIds,notes);invalidateCouponForCartChange();message="${product.name} adicionado."}
     fun updateCart(index:Int,quantity:Int){if(index !in cart.indices)return;if(quantity<=0)cart.removeAt(index)else cart[index]=cart[index].copy(quantity=quantity.coerceAtMost(99));invalidateCouponForCartChange()}
     fun validateCoupon(code:String)=action{val cat=catalog?:error("Loja não carregada.");val normalized=code.trim().uppercase();if(normalized.isBlank())error("Digite o código do cupom.");val subtotal=cart.sumOf{it.totalCents()};if(subtotal<=0)error("Adicione itens ao carrinho antes de aplicar o cupom.");val quote=api.couponQuote(cat.store.tenantId,normalized,subtotal);couponCode=quote.code;couponQuote=quote;message="Cupom ${quote.code} aplicado: ${money(quote.discountCents)} de desconto."}
@@ -86,24 +166,26 @@ class DeliveryViewModel(app: Application) : AndroidViewModel(app) {
     fun payPix(provider:String,taxId:String)=action{if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para gerar o PIX.");val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");pixPayment=api.pix(id,provider,"");message="PIX gerado. Assim que o provedor confirmar, o pedido será atualizado automaticamente.";startPaymentPolling(id)}
     fun payCash(changeForCents:Int?)=action{val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;api.cash(id,changeForCents);PaymentUiContext.clear();message="Pagamento em dinheiro registrado para a entrega.";openOrderSuspend(id)}
     suspend fun payCardToken(token:String,paymentMethodId:String,paymentTypeId:String,installments:Int,taxId:String){if(customer?.cpfConfigured!=true)error("Complete seu CPF no perfil para pagar com cartão.");val id=selectedOrder?.orderNumber?:error("Pedido não encontrado.");val status=api.card(id,token,paymentMethodId,paymentTypeId,installments,"");if(status=="paid"){paymentPollingJob?.cancel();paymentWaiting=false;pixPayment=null;payerCpf="";PaymentUiContext.clear();message=if(paymentTypeId=="debit_card")"Pagamento no débito aprovado." else "Pagamento no crédito aprovado.";openOrderSuspend(id)}else{pixPayment=null;message="Pagamento enviado. Aguardando confirmação do Mercado Pago.";startPaymentPolling(id)}}
-    fun loadOrders(){if(!isAuthenticated){screen=Screen.Login;message="Entre para ver seus pedidos.";return};action{orders=api.orders();screen=Screen.Orders}}
+    fun loadOrders(){if(!isAuthenticated){screen=Screen.Login;message="Entre para ver seus pedidos.";return};mainDestination=MainDestination.Orders;screen=Screen.Orders;action{orders=api.orders()}}
+    fun refreshOrders()=action(showBusy=false){if(isAuthenticated)orders=api.orders()}
     fun openOrder(id:Int)=action{openOrderSuspend(id)}
     private suspend fun openOrderSuspend(id:Int){selectedOrder=api.order(id);screen=Screen.OrderDetail;startTracking()}
     fun repeatOrder(id:Int)=action{val r=api.reorder(id);val s=r.getJSONObject("store");catalog=api.catalog(s.getInt("tenant_id"),s.getInt("unit_id"));if(catalog?.store?.acceptingOrders==false)error("Este restaurante pausou novos pedidos no momento.");cart.clear();clearCoupon(false);val items=r.optJSONArray("items");if(items!=null)for(i in 0 until items.length()){val row=items.getJSONObject(i);val product=catalog?.products?.firstOrNull{it.id==row.optInt("product_id")}?:continue;cart+=CartItem(product,row.optDouble("quantity",1.0).toInt().coerceAtLeast(1))};screen=Screen.Cart}
     fun submitReview(orderId:Int,rating:Int,comment:String)=action{api.review(orderId,rating,comment);message="Obrigado pela avaliação!"}
-    fun openProfile(){if(!isAuthenticated){screen=Screen.Login;message="Entre para acessar seu perfil, endereços e benefícios.";return};action{customer=api.me();screen=Screen.Profile}}
+    fun openProfile(){if(!isAuthenticated){screen=Screen.Login;message="Entre para acessar seu perfil, endereços e benefícios.";return};profileReturnScreen=if(screen==Screen.Checkout)Screen.Checkout else null;mainDestination=MainDestination.Profile;screen=Screen.Profile;action{customer=api.me()}}
     fun editAddress(address:Address?=null){if(!isAuthenticated){screen=Screen.Login;message="Entre para salvar um endereço.";return};editingAddress=address;screen=Screen.AddressEditor}
-    fun saveAddress(address:Address)=action{api.saveAddress(address);customer=api.me();editingAddress=null;screen=Screen.Profile;message="Endereço salvo."}
+    fun saveAddress(address:Address)=action{api.saveAddress(address);customer=api.me();editingAddress=null;mainDestination=MainDestination.Profile;screen=Screen.Profile;message="Endereço salvo."}
     fun deleteAddress(id:Int)=action{api.deleteAddress(id);customer=api.me();message="Endereço removido."}
     fun saveProfile(name:String,phone:String)=action{customer=api.saveProfile(name,phone);message="Perfil atualizado."}
     fun saveProfile(name:String,phone:String,cpf:String)=action{customer=api.saveProfile(name,phone,cpf);payerCpf="";message="Perfil atualizado.";if(cart.isNotEmpty()&&catalog!=null)screen=Screen.Cart}
     fun refreshCurrentOrder(){selectedOrder?.orderNumber?.let(::openOrder)}
-    private fun refreshSession()=action(showBusy=false){try{customer=api.me();if(customer?.cpfConfigured==true){loadStoresInternal();screen=Screen.Home}else{screen=Screen.Profile;message="Complete seu CPF uma única vez para continuar."}}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();customer=null;stores=api.stores();screen=Screen.Home}else throw e}}
-    private suspend fun loadStoresInternal(){stores=api.stores()}
+    private fun refreshSession()=action(showBusy=false){try{customer=api.me();if(customer?.cpfConfigured==true){mainDestination=MainDestination.Home;loadStoresInternal();screen=Screen.Home}else{mainDestination=MainDestination.Profile;screen=Screen.Profile;message="Complete seu CPF uma única vez para continuar."}}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();customer=null;stores=api.stores();storeSearchResults=stores;mainDestination=MainDestination.Home;screen=Screen.Home}else throw e}}
+    private suspend fun loadStoresInternal(){stores=api.stores();if(storeSearchQuery.isBlank())storeSearchResults=stores}
     private fun startPaymentPolling(orderId:Int){paymentPollingJob?.cancel();paymentWaiting=true;paymentPollingJob=viewModelScope.launch{repeat(90){delay(if(it==0)2_500 else 5_000);val result=runCatching{api.paymentStatus(orderId)}.getOrNull()?:return@repeat;when(result.optString("payment_status").lowercase()){ "paid"->{paymentWaiting=false;pixPayment=null;payerCpf="";PaymentUiContext.clear();message="Pagamento confirmado.";runCatching{openOrderSuspend(orderId)}.onFailure{message=it.message?:"Pagamento confirmado. Atualize seus pedidos."};return@launch};"failed","cancelled"->{paymentWaiting=false;pixPayment=null;message="O pagamento não foi concluído. Você pode tentar novamente ou escolher outra forma.";return@launch}}};paymentWaiting=false;message="A confirmação ainda não chegou. O pedido continuará sendo atualizado pelo servidor."}}
     private fun startTracking(){trackingJob?.cancel();tracking=null;val token=selectedOrder?.trackingToken?:return;trackingJob=viewModelScope.launch{repeat(180){runCatching{api.tracking(token)}.onSuccess{tracking=it};if(tracking?.status=="completed"||tracking?.status=="cancelled")return@launch;delay(10_000)}}}
+    private fun classifyMarketplaceIssue(t:Throwable):MarketplaceLoadIssue=when(t){is UnknownHostException,is ConnectException,is NoRouteToHostException->MarketplaceLoadIssue.Offline;is SocketTimeoutException->MarketplaceLoadIssue.Temporary;is ApiException->MarketplaceLoadIssue.ServerUnavailable;else->MarketplaceLoadIssue.Temporary}
     private fun action(showBusy:Boolean=true,block:suspend()->Unit){viewModelScope.launch{if(showBusy)busy=true;try{block()}catch(e:ApiException){if(e.code=="UNAUTHENTICATED"){session.accessToken=null;PaymentUiContext.clear();customer=null;payerCpf="";screen=Screen.Login};message=e.message}catch(t:Throwable){message=t.message?:"Não foi possível concluir agora."}finally{if(showBusy)busy=false}}}
-    override fun onCleared(){trackingJob?.cancel();paymentPollingJob?.cancel();payerCpf="";PaymentUiContext.clear();super.onCleared()}
+    override fun onCleared(){trackingJob?.cancel();paymentPollingJob?.cancel();marketplaceJob?.cancel();storeSearchJob?.cancel();recentOrdersJob?.cancel();payerCpf="";PaymentUiContext.clear();super.onCleared()}
 }
 
 fun money(cents:Int):String=java.text.NumberFormat.getCurrencyInstance(java.util.Locale("pt","BR")).format(cents/100.0)
