@@ -43,7 +43,7 @@ function write_file(string $path, string $contents): void
 remove_tree($destination);
 mkdir($destination, 0775, true);
 
-foreach (['app', 'src', 'database', 'public', 'vendor', 'integrations'] as $directory) {
+foreach (['app', 'src', 'database', 'public', 'vendor'] as $directory) {
     copy_tree($root . '/' . $directory, $destination . '/' . $directory);
 }
 
@@ -71,7 +71,7 @@ foreach (['manifest.webmanifest', 'sw.js'] as $file) {
 $deny = <<<'HTACCESS'
 Require all denied
 HTACCESS;
-foreach (['app', 'src', 'database', 'storage', 'vendor', 'public', 'integrations'] as $directory) {
+foreach (['app', 'src', 'database', 'storage', 'vendor', 'public'] as $directory) {
     write_file($destination . '/' . $directory . '/.htaccess', $deny . "\n");
 }
 
@@ -81,7 +81,7 @@ DirectoryIndex index.php
 
 <IfModule mod_rewrite.c>
 RewriteEngine On
-RewriteRule ^(?:app|src|database|storage|vendor|public|integrations)(?:/|$) - [F,L,NC]
+RewriteRule ^(?:app|src|database|storage|vendor|public)(?:/|$) - [F,L,NC]
 </IfModule>
 
 <FilesMatch "^(?:\.env|composer\.(?:json|lock))$">
@@ -102,7 +102,7 @@ REQUISITOS DO SERVIDOR
 - HTTPS recomendado desde a primeira instalação.
 - Apache/LiteSpeed com .htaccess habilitado, ou regras equivalentes no Nginx.
 - Permissão de escrita para a pasta do sistema durante a instalação e para storage depois.
-- Opcional para WhatsApp Beta: Node.js 22+, Chrome/Chromium e o worker em integrations/whatsapp-worker.
+- WhatsApp: NÃO requer Node.js, WPPConnect, Chrome/Chromium ou Baileys na hospedagem.
 
 INSTALAÇÃO DO ZERO
 1. Crie/abra a pasta /1 no domínio.
@@ -127,18 +127,18 @@ INSTALAÇÃO DO ZERO
 
 12. Entre como Super ADM, abra "Saúde do sistema" e confirme que Cron e Worker aparecem como OK.
 
-WHATSAPP BETA (OPCIONAL)
-- Leia integrations/whatsapp-worker/README.md.
-- Instale as dependências Node com npm install --omit=dev.
-- Execute a bridge vinculada a 127.0.0.1 ou a uma rede privada protegida.
-- Use o mesmo segredo em EVENTMENU_WHATSAPP_BRIDGE_SECRET no worker e WHATSAPP_BRIDGE_SECRET no .env do PHP.
-- Defina WHATSAPP_BRIDGE_ENABLED=true somente depois de a bridge estar saudável.
-- Não exponha integrations/, arquivos de sessão ou a porta da bridge diretamente na internet.
-- Esta integração usa WhatsApp Web não oficial e deve permanecer Beta até validação controlada com conta real.
+WHATSAPP / EVENTMENU CONNECT
+- O servidor NÃO executa Node.js, WPPConnect ou Baileys.
+- Instale e configure o aplicativo EventMenu Connect no aparelho responsável.
+- Pareamento, sessão, reconexão e envio real do WhatsApp acontecem dentro do EventMenu Connect.
+- O servidor mantém somente filas, conversas, automações, leases e ACKs consumidos pela API do Connect.
+- No painel do EventMenu, abra Configurações > WhatsApp para ativar automações e acompanhar o estado do Connect.
+- Use a Central de Atendimento para conversas humanas. O navegador nunca acessa diretamente o Baileys.
 
 CRON / MANUTENÇÃO AUTOMÁTICA
 - O cron é obrigatório em produção e deve executar a cada minuto.
-- Ele processa a fila assíncrona, notificações push, WhatsApp Beta, expirações, limpezas e o agendamento do backup automático.
+- Ele processa filas assíncronas, notificações push, expirações, limpezas e o agendamento do backup automático.
+- O envio de WhatsApp NÃO é executado pelo cron: o EventMenu Connect consome a fila pela API autenticada.
 - Prefira a execução CLI acima: ela NÃO precisa expor o CRON_SECRET.
 - Se o seu provedor só aceitar chamada HTTP, o endpoint cron.php exige o cabeçalho X-Cron-Secret com o valor protegido do .env.
 - O painel Super ADM > Saúde do sistema mostra o caminho real do cron.php e informa se Cron/Worker estão atrasados.
@@ -156,7 +156,7 @@ ATUALIZAÇÕES
 - NUNCA substitua storage/eventmenu.sqlite por um arquivo vazio durante atualização.
 
 SEGURANÇA
-- O .htaccess do pacote bloqueia .env, app, src, database, storage, vendor, public e integrations em Apache/LiteSpeed.
+- O .htaccess do pacote bloqueia .env, app, src, database, storage, vendor e public em Apache/LiteSpeed.
 - Em Nginx, replique esses bloqueios no virtual host.
 - SESSION_SECURE é ativado automaticamente quando a URL informada usa HTTPS.
 - Depois de instalado, install.php é bloqueado por installed.lock e pela existência do Super ADM.
