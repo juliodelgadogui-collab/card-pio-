@@ -60,7 +60,45 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
     private suspend fun requestUnit(path:String,method:String="GET",body:JSONObject?=null){request(path,method,body){Unit}}
     private suspend fun <T> request(path:String,method:String="GET",body:JSONObject?=null,parser:(JSONObject)->T):T=withContext(Dispatchers.IO){execute(path,method,body,tokenProvider(),parser)}
     private suspend fun <T> requestPublic(path:String,parser:(JSONObject)->T):T=withContext(Dispatchers.IO){execute(path,"GET",null,null,parser)}
-    private fun <T> execute(path:String,method:String,body:JSONObject?,token:String?,parser:(JSONObject)->T):T{val connection=(URL(base+path).openConnection()as HttpURLConnection).apply{requestMethod=method;connectTimeout=10_000;readTimeout=25_000;useCaches=false;setRequestProperty("Accept","application/json");setRequestProperty("Content-Type","application/json; charset=utf-8");if(!token.isNullOrBlank())setRequestProperty("Authorization","Bearer $token");if(body!=null){doOutput=true;outputStream.use{it.write(body.toString().toByteArray(Charsets.UTF_8))}}};try{val status=connection.responseCode;val text=(if(status in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty();val root=runCatching{JSONObject(text)}.getOrElse{throw ApiException("Resposta inválida do servidor.","INVALID_RESPONSE")};if(status !in 200..299||!root.optBoolean("ok",true))throw ApiException(root.optString("message",root.optString("error","Não foi possível concluir.")),root.optString("code"));return parser(root)}finally{connection.disconnect()}}
+
+    private fun <T> execute(path:String,method:String,body:JSONObject?,token:String?,parser:(JSONObject)->T):T {
+        var attempt = 0
+        while (true) {
+            try {
+                return executeOnce(path, method, body, token, parser)
+            } catch (t: Throwable) {
+                if (!isDeliveryNetworkFailure(t)) throw t
+                if (shouldRetryDeliveryRequest(method, attempt, t)) {
+                    Thread.sleep(retryDelayMillis(attempt))
+                    attempt++
+                    continue
+                }
+                throw friendlyNetworkException(t)
+            }
+        }
+    }
+
+    private fun <T> executeOnce(path:String,method:String,body:JSONObject?,token:String?,parser:(JSONObject)->T):T {
+        val connection=(URL(base+path).openConnection()as HttpURLConnection).apply{
+            requestMethod=method
+            connectTimeout=10_000
+            readTimeout=25_000
+            useCaches=false
+            setRequestProperty("Accept","application/json")
+            setRequestProperty("Content-Type","application/json; charset=utf-8")
+            if(!token.isNullOrBlank())setRequestProperty("Authorization","Bearer $token")
+            if(body!=null){doOutput=true;outputStream.use{it.write(body.toString().toByteArray(Charsets.UTF_8))}}
+        }
+        try {
+            val status=connection.responseCode
+            val text=(if(status in 200..299)connection.inputStream else connection.errorStream)?.bufferedReader()?.use{it.readText()}.orEmpty()
+            val root=runCatching{JSONObject(text)}.getOrElse{throw ApiException("Resposta inválida do servidor.","INVALID_RESPONSE")}
+            if(status !in 200..299||!root.optBoolean("ok",true))throw ApiException(root.optString("message",root.optString("error","Não foi possível concluir.")),root.optString("code"))
+            return parser(root)
+        } finally {
+            connection.disconnect()
+        }
+    }
 
     private fun customer(o:JSONObject):Customer=Customer(id=o.getInt("id"),name=o.optString("name"),email=o.optString("email"),phone=o.optString("phone"),emailVerified=o.optBoolean("email_verified"),cpfConfigured=o.optBoolean("cpf_configured"),cpfMasked=o.optString("cpf_masked"),addresses=o.optJSONArray("addresses").toObjects(::address))
     private fun address(o:JSONObject):Address=Address(o.optInt("id"),o.optString("label","Casa"),o.optString("street"),o.optString("number"),o.optString("complement"),o.optString("neighborhood"),o.optString("city"),o.optString("state"),o.optString("postal_code"),o.optString("reference"),o.optString("phone"),o.optDoubleOrNull("latitude"),o.optDoubleOrNull("longitude"),o.optBoolean("is_default"))
