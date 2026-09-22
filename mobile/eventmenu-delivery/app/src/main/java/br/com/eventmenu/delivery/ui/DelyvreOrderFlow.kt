@@ -58,6 +58,20 @@ private fun DelyvreCartScreen(vm: DeliveryViewModel) {
     val storeOpen = store?.acceptingOrders != false
     var couponInput by remember(store?.tenantId, vm.couponCode) { mutableStateOf(vm.couponCode) }
     var selectedAddress by remember(customer) { mutableIntStateOf(customer?.addresses?.firstOrNull { it.isDefault }?.id ?: customer?.addresses?.firstOrNull()?.id ?: 0) }
+    var editingIndex by remember { mutableStateOf<Int?>(null) }
+    editingIndex?.let { index ->
+        vm.cart.getOrNull(index)?.let { item ->
+            DelyvreProductSheet(
+                product = item.product,
+                storeOpen = storeOpen,
+                onDismiss = { editingIndex = null },
+                onAdd = { quantity, options, notes -> vm.replaceCartItem(index, quantity, options, notes); editingIndex = null },
+                initialQuantity = item.quantity,
+                initialOptionIds = item.optionIds,
+                initialNotes = item.notes,
+            )
+        } ?: run { editingIndex = null }
+    }
     val snack = remember { SnackbarHostState() }
     DelyvreMessages(vm, snack)
 
@@ -74,10 +88,23 @@ private fun DelyvreCartScreen(vm: DeliveryViewModel) {
                             if (item.notes.isNotBlank()) Text("Obs.: ${item.notes}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(money(item.totalCents()), fontWeight = FontWeight.Black)
                         }
-                        IconButton({ vm.updateCart(index, item.quantity - 1) }) { Icon(Icons.Default.Remove, "Diminuir") }
-                        Text(item.quantity.toString(), fontWeight = FontWeight.Bold)
-                        IconButton({ vm.updateCart(index, item.quantity + 1) }) { Icon(Icons.Default.Add, "Aumentar") }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                IconButton({ vm.updateCart(index, item.quantity - 1) }) { Icon(Icons.Default.Remove, "Diminuir") }
+                                Text(item.quantity.toString(), fontWeight = FontWeight.Bold)
+                                IconButton({ vm.updateCart(index, item.quantity + 1) }) { Icon(Icons.Default.Add, "Aumentar") }
+                            }
+                            Row {
+                                TextButton({ editingIndex = index }) { Icon(Icons.Default.Edit, null); Spacer(Modifier.width(4.dp)); Text("Editar") }
+                                IconButton({ vm.removeCartItem(index) }) { Icon(Icons.Default.DeleteOutline, "Remover") }
+                            }
+                        }
                     }
+                }
+            }
+            if (vm.cart.isNotEmpty()) item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(vm::clearCart) { Icon(Icons.Default.DeleteSweep, null); Spacer(Modifier.width(6.dp)); Text("Limpar carrinho") }
                 }
             }
             item {
@@ -120,8 +147,16 @@ private fun DelyvreCartScreen(vm: DeliveryViewModel) {
             }
             if (!storeOpen) item { DelyvreFlowNotice(Icons.Default.Storefront, "Restaurante fechado", "Novos pedidos estão pausados agora. Seu carrinho continua salvo.") }
             if (subtotal < minimum) item { DelyvreFlowNotice(Icons.Default.Info, "Pedido mínimo", "Adicione ${money(minimum - subtotal)} para atingir o mínimo de ${money(minimum)}.") }
+            item {
+                Text("Como você quer receber?", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = true, onClick = {}, label = { Text("Entrega") }, leadingIcon = { Icon(Icons.Default.DeliveryDining, null) })
+                    if (store?.pickupEnabled == true) FilterChip(selected = false, onClick = {}, enabled = false, label = { Text("Retirada") }, leadingIcon = { Icon(Icons.Default.Storefront, null) })
+                }
+                if (store?.pickupEnabled == true) Text("A loja informa que aceita retirada, mas o endpoint atual do DELYVRE ainda exige endereço de entrega. A retirada ficará bloqueada até o servidor expor esse contrato com segurança.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (vm.isAuthenticated) {
-                item { Text("Entrega", style = MaterialTheme.typography.titleLarge) }
+                item { Text("Endereço de entrega", style = MaterialTheme.typography.titleLarge) }
                 if (customer?.addresses.isNullOrEmpty()) {
                     item { DelyvreFlowNotice(Icons.Default.LocationOn, "Cadastre um endereço", "Precisamos saber onde entregar antes de finalizar."); Button({ vm.editAddress() }, Modifier.fillMaxWidth()) { Text("Adicionar endereço") } }
                 } else {
