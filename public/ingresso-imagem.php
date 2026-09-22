@@ -10,7 +10,7 @@ $pdo=Database::connection();
 $s=$pdo->prepare('SELECT t.code,t.status,e.name event_name,e.starts_at,e.venue,e.address,e.primary_color,b.name batch_name,c.name customer_name,tt.name ticket_type_name,tt.access_area FROM tickets t JOIN events e ON e.id=t.event_id JOIN ticket_batches b ON b.id=t.batch_id LEFT JOIN customers c ON c.id=t.customer_id LEFT JOIN ticket_types tt ON tt.id=b.ticket_type_id WHERE t.qr_token=? LIMIT 1');
 $s->execute([$token]);$t=$s->fetch(PDO::FETCH_ASSOC);
 if(!$t||!in_array((string)$t['status'],['paid','checked_in'],true)){http_response_code(404);exit;}
-if(!function_exists('imagecreatetruecolor')||!class_exists('Endroid\\QrCode\\QrCode')){http_response_code(503);exit;}
+if(!function_exists('imagecreatetruecolor')||!class_exists('Endroid\\QrCode\\QrCode')||!class_exists('Endroid\\QrCode\\Writer\\PngWriter')){http_response_code(503);exit;}
 
 $hex=function(string$v,string$f):string{$v=strtolower(trim($v));return preg_match('/^#[0-9a-f]{6}$/',$v)?$v:$f;};
 $brand=(new TenantBrandService())->defaults();$primary=$hex((string)($t['primary_color']??''),(string)($brand['primary_color']??'#6d28d9'));
