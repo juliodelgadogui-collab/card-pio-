@@ -38,8 +38,8 @@ final class CustomerAddressService
         if(mb_strlen($address)<8)throw new RuntimeException('Informe um endereço mais completo para entrega.');
         if($makeDefault)$pdo->prepare('UPDATE customer_addresses SET is_default=0,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND customer_id=?')->execute([$tenantId,$customerId]);
         $existing=$pdo->prepare('SELECT id FROM customer_addresses WHERE tenant_id=? AND customer_id=? AND address_text=? LIMIT 1');$existing->execute([$tenantId,$customerId,$address]);$id=(int)($existing->fetchColumn()?:0);
-        if($id>0)$pdo->prepare('UPDATE customer_addresses SET label=?,is_default=?,source="whatsapp",updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND customer_id=?')->execute([$label,$makeDefault?1:0,$id,$tenantId,$customerId]);
-        else{$pdo->prepare('INSERT INTO customer_addresses (tenant_id,customer_id,label,address_text,is_default,source) VALUES (?,?,?,?,?,"whatsapp")')->execute([$tenantId,$customerId,$label,$address,$makeDefault?1:0]);$id=(int)$pdo->lastInsertId();}
+        if($id>0)$pdo->prepare("UPDATE customer_addresses SET label=?,is_default=?,source='whatsapp',updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND customer_id=?")->execute([$label,$makeDefault?1:0,$id,$tenantId,$customerId]);
+        else{$pdo->prepare("INSERT INTO customer_addresses (tenant_id,customer_id,label,address_text,is_default,source) VALUES (?,?,?,?,?,'whatsapp')")->execute([$tenantId,$customerId,$label,$address,$makeDefault?1:0]);$id=(int)$pdo->lastInsertId();}
         if($makeDefault)$pdo->prepare('UPDATE customers SET default_address=? WHERE id=? AND tenant_id=?')->execute([$address,$customerId,$tenantId]);
         return $this->get($pdo,$tenantId,$customerId,$id);
     }
@@ -48,7 +48,7 @@ final class CustomerAddressService
     {
         $count=$pdo->prepare('SELECT COUNT(*) FROM customer_addresses WHERE tenant_id=? AND customer_id=?');$count->execute([$tenantId,$customerId]);if((int)$count->fetchColumn()>0)return;
         $q=$pdo->prepare('SELECT default_address FROM customers WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$customerId,$tenantId]);$address=$this->sanitize((string)($q->fetchColumn()?:''));if($address==='')return;
-        $pdo->prepare('INSERT INTO customer_addresses (tenant_id,customer_id,label,address_text,is_default,source) VALUES (?,?,"Principal",?,1,"legacy")')->execute([$tenantId,$customerId,$address]);
+        $pdo->prepare("INSERT INTO customer_addresses (tenant_id,customer_id,label,address_text,is_default,source) VALUES (?,?,'Principal',?,1,'legacy')")->execute([$tenantId,$customerId,$address]);
     }
 
     private function sanitize(string $value):string
