@@ -66,7 +66,38 @@ class DeliveryApi(private val tokenProvider: () -> String?) {
     private fun address(o:JSONObject):Address=Address(o.optInt("id"),o.optString("label","Casa"),o.optString("street"),o.optString("number"),o.optString("complement"),o.optString("neighborhood"),o.optString("city"),o.optString("state"),o.optString("postal_code"),o.optString("reference"),o.optString("phone"),o.optDoubleOrNull("latitude"),o.optDoubleOrNull("longitude"),o.optBoolean("is_default"))
     private fun store(o:JSONObject):Store=Store(tenantId=o.optInt("tenant_id"),unitId=o.optInt("unit_id"),name=o.optString("name"),description=o.optString("description"),city=o.optString("city"),state=o.optString("state"),logoUrl=o.optString("logo_url"),coverUrl=o.optString("cover_url"),deliveryFeeCents=o.optInt("delivery_fee_cents"),minimumOrderCents=o.optInt("minimum_order_cents"),favorite=o.optBoolean("favorite"),acceptingOrders=o.optBoolean("accepting_orders",true),deliveryEtaMinutes=o.optInt("delivery_eta_minutes",45),deliveryRadiusKm=o.optDouble("delivery_radius_km",0.0),pickupEnabled=o.optBoolean("pickup_enabled"),scheduleNote=o.optString("schedule_note"),categories=categoryNames(o.optJSONArray("categories")))
     private fun product(o:JSONObject):Product=Product(o.getInt("id"),if(o.isNull("category_id"))null else o.optInt("category_id"),o.optString("name"),o.optString("description"),o.optInt("price_cents"),o.optString("image_url"),o.optBoolean("available",true),o.optJSONArray("modifier_groups").toObjects{g->ModifierGroup(g.getInt("id"),g.optString("name"),g.optBoolean("required"),g.optInt("min_select"),g.optInt("max_select",1),g.optJSONArray("options").toObjects{x->ModifierOption(x.getInt("id"),x.optString("name"),x.optInt("price_delta_cents"))})})
-    private fun order(o:JSONObject):OrderSummary{val tracking=o.optJSONObject("tracking");return OrderSummary(o.optInt("order_number"),o.optString("public_token"),o.optString("store_name"),o.optString("status"),o.optString("status_label"),o.optString("payment_status"),o.optInt("total_cents"),tracking?.optString("token")?.takeIf{it.isNotBlank()})}
+    private fun order(o:JSONObject):OrderSummary{
+        val tracking=o.optJSONObject("tracking")
+        val items=o.optJSONArray("items").toObjects{item->
+            OrderItemSummary(
+                id=item.optInt("id"),
+                name=item.optString("name_snapshot"),
+                unitPriceCents=item.optInt("unit_price_cents"),
+                quantity=item.optDouble("quantity",1.0),
+                totalCents=item.optInt("total_cents"),
+                notes=item.optString("notes"),
+                modifiers=item.optJSONArray("modifiers").toObjects{modifier->OrderModifierSummary(modifier.optString("group"),modifier.optString("name"),modifier.optInt("price_delta_cents"))},
+            )
+        }
+        val timeline=o.optJSONArray("timeline").toObjects{step->OrderTimelineStep(step.optString("key"),step.optString("label"),step.optBoolean("done"),step.optBoolean("current"))}
+        return OrderSummary(
+            orderNumber=o.optInt("order_number"),
+            publicToken=o.optString("public_token"),
+            storeName=o.optString("store_name"),
+            status=o.optString("status"),
+            statusLabel=o.optString("status_label"),
+            paymentStatus=o.optString("payment_status"),
+            totalCents=o.optInt("total_cents"),
+            trackingToken=tracking?.optString("token")?.takeIf{it.isNotBlank()},
+            paymentStatusLabel=o.optString("payment_status_label"),
+            subtotalCents=o.optInt("subtotal_cents"),
+            discountCents=o.optInt("discount_cents"),
+            deliveryFeeCents=o.optInt("delivery_fee_cents"),
+            createdAt=o.optString("created_at"),
+            items=items,
+            timeline=timeline,
+        )
+    }
     private fun encode(v:String):String=java.net.URLEncoder.encode(v,"UTF-8")
 }
 
