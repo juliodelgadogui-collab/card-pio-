@@ -31,7 +31,7 @@ final class WhatsAppIntegrationService
     {
         if($tenantId<1)throw new RuntimeException('Empresa inválida.');
         $q=$pdo->prepare('SELECT * FROM whatsapp_connections WHERE tenant_id=? LIMIT 1');$q->execute([$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);
-        if(!$row){$sessionKey=bin2hex(random_bytes(32));$pdo->prepare('INSERT INTO whatsapp_connections (tenant_id,provider,session_key,status,automation_enabled) VALUES (?,"wppconnect",?,"disconnected",0)')->execute([$tenantId,$sessionKey]);$q->execute([$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);}
+        if(!$row){$sessionKey=bin2hex(random_bytes(32));$pdo->prepare('INSERT INTO whatsapp_connections (tenant_id,provider,session_key,status,automation_enabled) VALUES (?,"eventmenu_connect",?,"disconnected",0)')->execute([$tenantId,$sessionKey]);$q->execute([$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);}
         $this->ensureTemplates($pdo,$tenantId);return is_array($row)?$row:[];
     }
 
