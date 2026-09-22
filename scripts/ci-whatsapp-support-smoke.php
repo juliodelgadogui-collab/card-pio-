@@ -32,8 +32,14 @@ $pdo->prepare("INSERT INTO whatsapp_messages (tenant_id,conversation_id,provider
 // Outro tenant nunca pode vazar para a caixa de entrada.
 $uid2='sup'.bin2hex(random_bytes(4));$pdo->prepare('INSERT INTO tenants (name,slug,plan,status,settings) VALUES (?,?,"premium","active","{}")')->execute(['Support Other',$uid2]);$otherTenant=(int)$pdo->lastInsertId();$pdo->prepare("INSERT INTO whatsapp_conversations (tenant_id,phone,mode,state,last_activity_at) VALUES (?,'5522999990000','waiting_human','WAITING_HUMAN',CURRENT_TIMESTAMP)")->execute([$otherTenant]);
 
-$service=new WhatsAppSupportService();$inbox=$service->inbox($pdo,$tenantId,'all','',50);sup_assert(count($inbox)===1&&(int)$inbox[0]['id']===$conversationId,'Inbox não isolou a empresa ou não retornou a conversa.');sup_assert((int)$inbox[0]['unread_count']===1,'Mensagem recebida não apareceu como não lida.');
-$unread=$service->inbox($pdo,$tenantId,'unread','',50);sup_assert(count($unread)===1,'Filtro de não lidas não retornou a conversa.');
+$service=new WhatsAppSupportService();
+$started=$service->startConversation($pdo,$tenantId,$userId,'(22) 99888-7766','Olá! Atendimento iniciado pela Central.');
+sup_assert((int)$started['id']>0&&$started['mode']==='human','Central não conseguiu iniciar conversa manual.');
+$q=$pdo->prepare('SELECT phone,mode,assigned_user_id FROM whatsapp_conversations WHERE id=? AND tenant_id=?');$q->execute([(int)$started['id'],$tenantId]);$startedRow=$q->fetch(PDO::FETCH_ASSOC);
+sup_assert($startedRow&&$startedRow['phone']==='5522998887766'&&$startedRow['mode']==='human'&&(int)$startedRow['assigned_user_id']===$userId,'Nova conversa não normalizou telefone/atribuição.');
+$q=$pdo->prepare("SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=? AND recipient='5522998887766' AND event_type='support_manual'");$q->execute([$tenantId]);sup_assert((int)$q->fetchColumn()===1,'Primeira mensagem da nova conversa não entrou na outbox.');
+$inbox=$service->inbox($pdo,$tenantId,'all','',50);sup_assert(count($inbox)===2,'Inbox não isolou a empresa ou não retornou as duas conversas esperadas.');sup_assert((int)$inbox[0]['unread_count']===1,'Mensagem recebida não apareceu como não lida.');
+$unread=$service->inbox($pdo,$tenantId,'unread','',50);sup_assert(count($unread)===1&&(int)$unread[0]['id']===$conversationId,'Filtro de não lidas não retornou a conversa correta.');
 $detail=$service->conversation($pdo,$tenantId,$conversationId);sup_assert((int)$detail['conversation']['customer_id']===$customerId,'Painel lateral não trouxe cliente.');sup_assert((int)$detail['active_order']['id']===$orderId&&count($detail['active_order_items'])===1,'Painel lateral não trouxe pedido/itens.');sup_assert(count($detail['addresses'])>=1,'Painel lateral não trouxe endereço.');
 $service->markRead($pdo,$tenantId,$conversationId);$unread=$service->inbox($pdo,$tenantId,'unread','',50);sup_assert(count($unread)===0,'Marcação como lida não atualizou a fila.');
 
