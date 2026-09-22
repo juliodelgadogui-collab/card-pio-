@@ -17,7 +17,7 @@ final class TenantFeatures
         ],
         'pos' => [
             'label' => 'PDV, caixa e retirada',
-            'routes' => ['pos', 'cash', 'pickup', 'receipt', 'receipt-settings'],
+            'routes' => ['pos', 'cash', 'pickup'],
         ],
         'kitchen' => [
             'label' => 'Cozinha e produção',
