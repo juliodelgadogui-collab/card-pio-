@@ -59,6 +59,7 @@ jobs:
           php scripts/ci-whatsapp-commerce-smoke.php
           php scripts/ci-whatsapp-commerce-order-smoke.php
           php scripts/ci-whatsapp-commerce-fulfillment-smoke.php
+          php scripts/ci-whatsapp-commerce-payment-smoke.php
           php scripts/ci-whatsapp-history-smoke.php
           php scripts/ci-sqlite-legacy-upgrade-smoke.php
           php scripts/ci-db-repair-page-smoke.php
@@ -105,11 +106,13 @@ jobs:
           test -f src/Services/WhatsAppCommerceService.php
           test -f src/Services/WhatsAppCommerceOrderService.php
           test -f src/Services/WhatsAppCommerceFulfillmentService.php
+          test -f src/Services/WhatsAppCommercePaymentService.php
           test -f src/Services/WhatsAppCommerceDraftCheckoutService.php
           test -f src/Services/CustomerAddressService.php
           test -f scripts/ci-whatsapp-commerce-smoke.php
           test -f scripts/ci-whatsapp-commerce-order-smoke.php
           test -f scripts/ci-whatsapp-commerce-fulfillment-smoke.php
+          test -f scripts/ci-whatsapp-commerce-payment-smoke.php
           test -f scripts/ci-whatsapp-history-smoke.php
       - name: Build SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
@@ -126,6 +129,7 @@ jobs:
           test -f "$PACKAGE/src/Services/WhatsAppCommerceService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceOrderService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceFulfillmentService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommercePaymentService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceDraftCheckoutService.php"
           test -f "$PACKAGE/src/Services/CustomerAddressService.php"
           test -f "$PACKAGE/src/Services/TicketCounterSaleService.php"
