@@ -1,8 +1,15 @@
 (()=>{
 'use strict';
 const d=document;
+
+/* Premium v5 is intentionally loaded after the legacy layers. This keeps old screens
+   compatible while making this file the single visual override for the admin UI. */
+const v5=d.createElement('link');v5.rel='stylesheet';v5.href=new URL('assets/premium-v5.css',location.href).toString();d.head.appendChild(v5);
+
 const params=new URLSearchParams(location.search);
-const route=params.get('route')||'dashboard';
+const path=(location.pathname.split('/').pop()||'').toLowerCase();
+const directRoute=path==='whatsapp.php'?'whatsapp':path==='support.php'?'support':'';
+const route=directRoute||params.get('route')||'dashboard';
 d.body.classList.add('route-'+route.replace(/[^a-z0-9_-]/gi,'-'));
 
 const normalizeText=s=>(s||'').trim().toLowerCase();
@@ -31,7 +38,7 @@ function enhanceStatuses(root=d){
 }
 function enhanceTables(root=d){
  nodesIncludingRoot(root,'.table-wrap').forEach(wrap=>{
-   if(wrap.classList.contains('no-mobile-cards')||wrap.classList.contains('responsive-table'))return;
+   if(wrap.classList.contains('no-mobile-cards'))return;
    const table=wrap.querySelector('table');if(!table)return;
    const headers=[...table.querySelectorAll('thead th')].map(th=>th.textContent.trim());if(!headers.length)return;
    [...table.querySelectorAll('tbody tr')].forEach(row=>[...row.children].forEach((cell,i)=>{if(cell.tagName==='TD'&&!cell.dataset.label)cell.dataset.label=headers[i]||''}));
@@ -66,7 +73,7 @@ async function enhancePlatformCockpit(){
      cockpitCard('EventMenu Delivery',String(x.delivery_active||0),'Empresas ativas no marketplace',(x.delivery_active||0)>0?'success':'muted',link('marketplace-finance','companies')),
      cockpitCard('Comissões',money(x.commissions_due_cents),'A receber / faturadas',(x.commissions_due_cents||0)>0?'warning':'success',link('marketplace-finance')),
      cockpitCard('Campanhas',String(x.campaigns_active||0),'Campanhas ativas no Delivery',(x.campaigns_active||0)>0?'info':'muted',link('marketplace-campaigns')),
-     cockpitCard('Cupons Delivery','%', 'Criar descontos para clientes do app','info',link('marketplace-coupons')),
+     cockpitCard('Cupons Delivery','%','Criar descontos para clientes do app','info',link('marketplace-coupons')),
      cockpitCard('Impulsiona',money(x.impulsiona_balance_cents),`${x.impulsiona_companies||0} empresa(s) participante(s)`,(x.impulsiona_companies||0)>0?'info':'muted',link('marketplace-finance')),
      cockpitCard('Faturas em aberto',String(x.invoices_open||0),`${x.invoices_overdue||0} vencida(s)`,(x.invoices_overdue||0)>0?'danger':(x.invoices_open||0)>0?'warning':'success',link('marketplace-finance','invoices')),
      cockpitCard('Saúde do sistema',String(x.health_warnings||0),'Alertas que precisam de revisão',x.health==='error'?'danger':x.health==='warning'?'warning':'success',link('system-health'))
@@ -77,6 +84,43 @@ async function enhancePlatformCockpit(){
    const oldMetrics=host.nextElementSibling;if(oldMetrics?.classList.contains('metric-grid'))oldMetrics.hidden=true;
  }catch(e){console.warn('Cockpit indisponível no momento.',e)}
 }
-ensurePlatformCouponNav();enhanceStatuses();enhanceTables();enhancePlatformCockpit();
+
+async function applyCapabilities(){
+ if(d.body.classList.contains('em-platform'))return;
+ try{
+   const endpoint=new URL('api-ui-capabilities.php',location.href);const r=await fetch(endpoint,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)return;const body=await r.json();if(!body.ok||!body.data)return;
+   const disabled=new Set(body.data.disabled_routes||[]);
+   d.querySelectorAll('.nav a[data-route]').forEach(a=>{if(disabled.has(a.dataset.route||''))a.closest('a')?.remove()});
+   d.querySelectorAll('.nav-group').forEach(g=>{if(!g.querySelector('a'))g.remove()});
+   const modules=body.data.modules||{};
+   const hideByHref=[['whatsapp.php','whatsapp'],['support.php','whatsapp'],['receipt-settings','printing'],['route=reports','reports'],['route=units','units']];
+   d.querySelectorAll('a[href]').forEach(a=>{for(const [needle,module] of hideByHref){if(modules[module]===false&&a.getAttribute('href')?.includes(needle)){const card=a.closest('.card');(card||a).hidden=true;break}}});
+ }catch(e){}
+}
+
+function enhanceSettingsHub(){
+ if(route!=='settings')return;
+ const grid=d.querySelector('.metric-grid');if(!grid||grid.dataset.v5Grouped)return;grid.dataset.v5Grouped='1';
+ const cards=[...grid.children].filter(el=>el.matches('a.card'));
+ const search=d.createElement('div');search.className='em-settings-search';search.innerHTML='<input type="search" aria-label="Buscar configuração" placeholder="Buscar configuração, WhatsApp, PIX, impressão..."><span class="em-live-indicator">Configurações da empresa</span>';grid.before(search);
+ const categoryFor=card=>{const tag=normalizeText(card.querySelector('.eyebrow')?.textContent);if(/whatsapp|atendimento|e-mail/.test(tag))return['Comunicação','WhatsApp, atendimento e mensagens'];if(/pagamentos|pix/.test(tag))return['Pagamentos','Gateways e recebimentos'];if(/delivery|fidelidade|impressão/.test(tag))return['Operação','Venda, entrega e experiência'];return['Empresa','Identidade e configurações gerais']};
+ const groups=new Map();for(const card of cards){const [name,desc]=categoryFor(card);if(!groups.has(name))groups.set(name,{desc,cards:[]});groups.get(name).cards.push(card)}
+ grid.hidden=true;for(const [name,g] of groups){const section=d.createElement('section');section.className='em-settings-group';section.dataset.settingsGroup=name;section.innerHTML=`<div class="em-settings-group-title"><div><span class="eyebrow">${name.toUpperCase()}</span><h2>${name}</h2></div><span class="muted">${g.desc}</span></div><div class="em-settings-group-grid"></div>`;const host=section.querySelector('.em-settings-group-grid');g.cards.forEach(c=>host.appendChild(c));grid.before(section)}
+ const input=search.querySelector('input');input?.addEventListener('input',()=>{const q=normalizeText(input.value);d.querySelectorAll('.em-settings-group').forEach(group=>{let shown=0;group.querySelectorAll('.card').forEach(card=>{const ok=!q||normalizeText(card.textContent).includes(q);card.hidden=!ok;if(ok)shown++});group.hidden=shown===0})});
+}
+
+function dashboardLiveRefresh(){
+ if(route!=='dashboard')return;
+ const section=d.querySelector('section[aria-label="Atenção agora"]');if(!section)return;
+ const info=section.querySelector('.section-head .muted');if(info){info.className='em-live-indicator';info.textContent='Atualizado agora'}
+ const selectors=['.attention-grid','.dashboard-metrics','.dashboard-grid','.responsive-table'];let last=Date.now(),busy=false;
+ const mark=()=>{if(!info)return;const sec=Math.max(0,Math.floor((Date.now()-last)/1000));info.textContent=sec<5?'Atualizado agora':`Atualizado há ${sec}s`;info.classList.toggle('is-stale',sec>45)};setInterval(mark,5000);
+ async function refresh(){if(busy||d.hidden)return;busy=true;try{const r=await fetch(location.href,{credentials:'same-origin',cache:'no-store',headers:{'X-EventMenu-Refresh':'dashboard'}});if(!r.ok)return;const html=await r.text(),doc=new DOMParser().parseFromString(html,'text/html');for(const sel of selectors){const current=d.querySelector(sel),next=doc.querySelector(sel);if(current&&next){current.replaceWith(next);enhanceStatuses(next);enhanceTables(next)}}last=Date.now();mark()}catch(e){if(info)info.classList.add('is-stale')}finally{busy=false}}
+ setInterval(refresh,20000);d.addEventListener('visibilitychange',()=>{if(!d.hidden&&Date.now()-last>20000)refresh()});
+}
+
+function improveDialogs(){d.querySelectorAll('dialog').forEach(dialog=>{dialog.addEventListener('click',e=>{const rect=dialog.getBoundingClientRect();if(e.clientX<rect.left||e.clientX>rect.right||e.clientY<rect.top||e.clientY>rect.bottom)dialog.close()})})}
+
+ensurePlatformCouponNav();enhanceStatuses();enhanceTables();enhanceSettingsHub();enhancePlatformCockpit();applyCapabilities();dashboardLiveRefresh();improveDialogs();
 const observer=new MutationObserver(mutations=>{for(const m of mutations)for(const n of m.addedNodes)if(n.nodeType===1){enhanceStatuses(n);enhanceTables(n)}});observer.observe(d.body,{childList:true,subtree:true});
 })();
