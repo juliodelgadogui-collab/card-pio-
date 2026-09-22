@@ -13,6 +13,12 @@ final class WhatsAppCommunicationService
         $s=$pdo->prepare('SELECT * FROM whatsapp_communications WHERE tenant_id=? ORDER BY id DESC LIMIT 100');$s->execute([$tenantId]);return $s->fetchAll();
     }
 
+    public function detail(PDO $pdo,int $tenantId,int $id):?array
+    {
+        $s=$pdo->prepare('SELECT * FROM whatsapp_communications WHERE id=? AND tenant_id=? LIMIT 1');$s->execute([$id,$tenantId]);$campaign=$s->fetch();if(!$campaign)return null;
+        $r=$pdo->prepare('SELECT r.*,o.attempt_count,o.max_attempts,o.last_error,o.sent_at,o.external_message_id FROM whatsapp_communication_recipients r LEFT JOIN whatsapp_outbox o ON o.id=r.outbox_id AND o.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.communication_id=? ORDER BY r.id DESC LIMIT 1000');$r->execute([$tenantId,$id]);$campaign['recipients']=$r->fetchAll();return $campaign;
+    }
+
     public function events(PDO $pdo,int $tenantId):array
     {
         $s=$pdo->prepare('SELECT id,name,starts_at FROM events WHERE tenant_id=? ORDER BY starts_at DESC,id DESC LIMIT 200');$s->execute([$tenantId]);return $s->fetchAll();
@@ -43,7 +49,7 @@ final class WhatsAppCommunicationService
     private function resolveRecipients(PDO $pdo,int $tenantId,array $data):array
     {
         $type=(string)($data['audience_type']??'manual');$rows=[];
-        if($type==='customers'){$s=$pdo->prepare('SELECT id customer_id,name,phone FROM customers WHERE tenant_id=? AND phone IS NOT NULL AND TRIM(phone)<>"" ORDER BY id DESC LIMIT 5000');$s->execute([$tenantId]);$rows=$s->fetchAll();}
+        if($type==='customers'){$sql='SELECT id customer_id,name,phone FROM customers WHERE tenant_id=? AND phone IS NOT NULL AND TRIM(phone)<>""';$args=[$tenantId];$q=trim((string)($data['customer_filter']??''));if($q!==''){$sql.=' AND (name LIKE ? OR phone LIKE ? OR email LIKE ?)';$like='%'.$q.'%';array_push($args,$like,$like,$like);}$sql.=' ORDER BY id DESC LIMIT 5000';$s=$pdo->prepare($sql);$s->execute($args);$rows=$s->fetchAll();}
         elseif($type==='event_buyers'){$eventId=(int)($data['event_id']??0);if($eventId<1)throw new RuntimeException('Selecione o evento.');$s=$pdo->prepare('SELECT DISTINCT c.id customer_id,c.name,c.phone FROM orders o JOIN tickets t ON t.order_id=o.id AND t.tenant_id=o.tenant_id LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id WHERE o.tenant_id=? AND t.event_id=? AND o.payment_status="paid" AND c.phone IS NOT NULL AND TRIM(c.phone)<>"" ORDER BY c.id DESC LIMIT 5000');$s->execute([$tenantId,$eventId]);$rows=$s->fetchAll();}
         else{$raw=preg_split('/[\r\n,;]+/',(string)($data['manual_recipients']??''))?:[];foreach($raw as$value)$rows[]=['customer_id'=>null,'name'=>null,'phone'=>$value];}
         $out=[];foreach($rows as$row){$phone=$this->normalizePhone((string)($row['phone']??''));if($phone==='')continue;$out[$phone]=['phone'=>$phone,'name'=>(string)($row['name']??''),'customer_id'=>isset($row['customer_id'])?(int)$row['customer_id']:null];}return array_values($out);
