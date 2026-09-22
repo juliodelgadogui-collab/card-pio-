@@ -1,4 +1,4 @@
-CREATE TABLE delivery_customer_order_requests (
+CREATE TABLE IF NOT EXISTS delivery_customer_order_requests (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   account_id INTEGER NOT NULL,
   tenant_id INTEGER NOT NULL,
@@ -12,4 +12,4 @@ CREATE TABLE delivery_customer_order_requests (
   FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
   UNIQUE (account_id,idempotency_key)
 );
-CREATE INDEX idx_delivery_order_request_order ON delivery_customer_order_requests (tenant_id,order_id);
+CREATE INDEX IF NOT EXISTS idx_delivery_order_request_order ON delivery_customer_order_requests (tenant_id,order_id);
