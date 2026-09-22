@@ -119,10 +119,18 @@ class ConnectWorkerService : Service() {
                 consecutiveFailures = 0
                 if (local.status.equals("connected", ignoreCase = true)) {
                     val received = processInbound()
-                    val sent = processQueue()
-                    val processed = received + sent
-                    promote(if (local.phone.isBlank()) "WhatsApp conectado • EventMenu ativo" else "WhatsApp ${formatPhone(local.phone)} • EventMenu ativo")
-                    delay(if (processed > 0) 1_500 else 8_000)
+                    val acknowledged = flushPendingAcks()
+                    val hasPendingAck = store.pendingOutboundAcks().isNotEmpty()
+                    val sent = if (hasPendingAck) 0 else processQueue()
+                    val processed = received + acknowledged + sent
+                    promote(
+                        when {
+                            hasPendingAck -> "WhatsApp conectado • confirmando envio com o servidor"
+                            local.phone.isBlank() -> "WhatsApp conectado • EventMenu ativo"
+                            else -> "WhatsApp ${formatPhone(local.phone)} • EventMenu ativo"
+                        }
+                    )
+                    delay(if (processed > 0) 1_500 else if (hasPendingAck) 3_000 else 8_000)
                 } else {
                     promote(
                         when (local.status.lowercase()) {
@@ -162,14 +170,44 @@ class ConnectWorkerService : Service() {
                 processed++
                 store.setRuntime("connected", error = "")
             } catch (_: Exception) {
-                // Regra de durabilidade: o Connect só remove a mensagem local depois que
-                // o servidor a confirmou com sucesso. Qualquer falha HTTP, autenticação,
-                // migração pendente, rate limit ou rede mantém a mensagem para retry.
                 store.setRuntime("connected", error = "O servidor ainda não confirmou uma mensagem recebida. Ela continuará na fila local.")
                 break
             }
         }
         return processed
+    }
+
+    private fun flushPendingAcks(): Int {
+        val receipts = store.pendingOutboundAcks()
+        if (receipts.isEmpty()) return 0
+        var confirmed = 0
+        for (receipt in receipts) {
+            try {
+                api.ack(receipt.id, receipt.claimToken, receipt.externalMessageId)
+                store.removePendingOutboundAck(receipt.id)
+                confirmed++
+                store.setRuntime(
+                    "connected",
+                    pending = (store.runtimePending() - 1).coerceAtLeast(0),
+                    error = "",
+                )
+            } catch (e: ApiException) {
+                if (e.status == 422) {
+                    // O lease antigo expirou ou foi reaberto no servidor. Liberamos o recibo
+                    // local para que a mesma outbox seja reivindicada novamente. O runtime
+                    // Node guarda a idempotência por ID da outbox e não reenviará no WhatsApp.
+                    store.removePendingOutboundAck(receipt.id)
+                    store.setRuntime("connected", error = "Confirmação antiga expirou. O Connect reconciliará o envio sem duplicar a mensagem.")
+                    continue
+                }
+                store.setRuntime("connected", error = "Mensagem já enviada ao WhatsApp e aguardando confirmação do servidor. Ela não será reenviada.")
+                break
+            } catch (_: Exception) {
+                store.setRuntime("connected", error = "Mensagem já enviada ao WhatsApp e aguardando confirmação do servidor. Ela não será reenviada.")
+                break
+            }
+        }
+        return confirmed
     }
 
     private fun processQueue(): Int {
@@ -186,20 +224,33 @@ class ConnectWorkerService : Service() {
             val mediaUrl = message.optString("media_url").trim()
             val mediaFilename = message.optString("media_filename").trim()
             val mediaMime = message.optString("media_mime").trim()
-            try {
-                val sent = when {
-                    mediaType.isBlank() && mediaUrl.isBlank() -> engine.send(recipient, text)
+            val idempotencyKey = "eventmenu-outbox-$id"
+
+            val sent = try {
+                when {
+                    mediaType.isBlank() && mediaUrl.isBlank() -> engine.send(recipient, text, idempotencyKey)
                     mediaUrl.isBlank() -> throw IllegalArgumentException("A mídia da mensagem está sem endereço para download.")
-                    mediaType == "image" -> engine.sendMedia(recipient, text, "image", mediaUrl, mediaFilename, mediaMime)
-                    mediaType == "document" || mediaType == "pdf" -> engine.sendMedia(recipient, text, "document", mediaUrl, mediaFilename, mediaMime)
+                    mediaType == "image" -> engine.sendMedia(recipient, text, "image", mediaUrl, mediaFilename, mediaMime, idempotencyKey)
+                    mediaType == "document" || mediaType == "pdf" -> engine.sendMedia(recipient, text, "document", mediaUrl, mediaFilename, mediaMime, idempotencyKey)
                     else -> throw IllegalArgumentException("Tipo de mídia não suportado: $mediaType")
                 }
-                api.ack(id, claimToken, sent.messageId)
-                processed++
-                store.setRuntime("connected", pending = (store.runtimePending() - 1).coerceAtLeast(0), error = "")
             } catch (e: Exception) {
                 runCatching { api.fail(id, claimToken, e.message ?: "Falha no envio local") }
                 store.setRuntime("connected", error = "Uma mensagem não pôde ser enviada agora. O sistema tentará novamente.")
+                continue
+            }
+
+            // O envio ao WhatsApp já aconteceu. A partir daqui NUNCA chamamos fail().
+            // Persistimos o recibo antes do ACK HTTP para sobreviver a perda de rede/processo.
+            store.savePendingOutboundAck(id, claimToken, sent.messageId)
+            try {
+                api.ack(id, claimToken, sent.messageId)
+                store.removePendingOutboundAck(id)
+                processed++
+                store.setRuntime("connected", pending = (store.runtimePending() - 1).coerceAtLeast(0), error = "")
+            } catch (_: Exception) {
+                store.setRuntime("connected", error = "Mensagem enviada ao WhatsApp. Falta apenas confirmar com o servidor; ela não será reenviada.")
+                break
             }
         }
         return processed
@@ -259,7 +310,8 @@ class ConnectWorkerService : Service() {
         val manager = getSystemService(ConnectivityManager::class.java) ?: return true
         val network = manager.activeNetwork ?: return false
         val caps = manager.getNetworkCapabilities(network) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
     }
 
     private fun createNotificationChannel() {
