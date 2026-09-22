@@ -17,6 +17,30 @@ final class CustomerIdentityService
         return substr($digits,0,20);
     }
 
+    public function normalizeCpf(string $value):string
+    {
+        return substr(preg_replace('/\D+/','',trim($value))??'',0,11);
+    }
+
+    public function isValidCpf(string $value):bool
+    {
+        $cpf=$this->normalizeCpf($value);
+        if(strlen($cpf)!==11||preg_match('/^(\d)\1{10}$/',$cpf))return false;
+        for($t=9;$t<11;$t++){
+            $sum=0;
+            for($i=0;$i<$t;$i++)$sum+=(int)$cpf[$i]*(($t+1)-$i);
+            $digit=(10*($sum%11))%11;if($digit===10)$digit=0;
+            if((int)$cpf[$t]!==$digit)return false;
+        }
+        return true;
+    }
+
+    public function maskCpf(string $value):string
+    {
+        $cpf=$this->normalizeCpf($value);
+        return strlen($cpf)===11?'***.***.***-'.substr($cpf,-2):'';
+    }
+
     public function findByPhone(PDO $pdo,int $tenantId,string $phone):?array
     {
         $normalized=$this->normalizePhone($phone);if($normalized==='')return null;
