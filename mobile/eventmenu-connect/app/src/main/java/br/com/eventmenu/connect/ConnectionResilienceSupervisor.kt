@@ -137,20 +137,24 @@ class ConnectionResilienceSupervisor(context: Context) {
         }
     }
 
+    private fun isTerminal(local: EmbeddedWhatsAppState): Boolean {
+        return local.error.contains("sessão encerrada", ignoreCase = true) ||
+            local.error.contains("recusou", ignoreCase = true) ||
+            local.error.contains("novo vínculo", ignoreCase = true)
+    }
+
     private fun shouldRecover(local: EmbeddedWhatsAppState): Boolean {
         val normalized = local.status.lowercase()
         val now = System.currentTimeMillis()
         val stuckFor = now - observedStatusSince
-        val friendlyTerminal = local.error.contains("sessão encerrada", ignoreCase = true) ||
-            local.error.contains("recusou", ignoreCase = true) ||
-            local.error.contains("novo vínculo", ignoreCase = true)
 
-        if (friendlyTerminal) return false
+        if (isTerminal(local)) return false
 
         return when (normalized) {
             "reconnecting", "starting" -> stuckFor >= 90_000
             "error" -> stuckFor >= 20_000
-            "disconnected" -> local.error.isBlank() && stuckFor >= 30_000
+            // "disconnected" com erro vazio pode significar uma desconexão manual.
+            // Não reabre QR/pareamento sem ação do usuário.
             else -> false
         }
     }
@@ -159,7 +163,8 @@ class ConnectionResilienceSupervisor(context: Context) {
         if (!store.hasSession() || !hasValidatedNetwork()) return
 
         val now = System.currentTimeMillis()
-        val cooldown = min(5 * 60_000L, 15_000L * (1L shl recoveryFailures.coerceIn(0, 4)))
+        val factor = 1L shl recoveryFailures.coerceIn(0, 4)
+        val cooldown = min(5 * 60_000L, 15_000L * factor)
         if (!force && now - lastRecoveryAt < cooldown) return
         lastRecoveryAt = now
 
@@ -169,7 +174,12 @@ class ConnectionResilienceSupervisor(context: Context) {
             val current = engine.state()
             val status = current.status.lowercase()
             val activePairing = current.qr.isNotBlank() || current.pairingCode.isNotBlank() || status == "pairing" || status == "qr"
+
             if (activePairing || status == "connected") return@runCatching true
+            if (status == "disconnected" || isTerminal(current)) {
+                releaseTransitionWakeLock()
+                return@runCatching true
+            }
 
             // /start reaproveita as credenciais existentes. Não apaga sessão nem filas.
             engine.startQr()
