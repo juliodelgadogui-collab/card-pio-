@@ -161,16 +161,10 @@ class ConnectWorkerService : Service() {
                 engine.acknowledgeInbound(providerMessageId)
                 processed++
                 store.setRuntime("connected", error = "")
-            } catch (e: ApiException) {
-                if (e.status in 400..499 && e.status != 401 && e.status != 429) {
-                    runCatching { engine.acknowledgeInbound(providerMessageId) }
-                    processed++
-                    store.setRuntime("connected", error = "Uma mensagem recebida inválida foi descartada com segurança.")
-                    continue
-                }
-                store.setRuntime("connected", error = "O servidor ainda não confirmou uma mensagem recebida. Ela continuará na fila local.")
-                break
             } catch (_: Exception) {
+                // Regra de durabilidade: o Connect só remove a mensagem local depois que
+                // o servidor a confirmou com sucesso. Qualquer falha HTTP, autenticação,
+                // migração pendente, rate limit ou rede mantém a mensagem para retry.
                 store.setRuntime("connected", error = "O servidor ainda não confirmou uma mensagem recebida. Ela continuará na fila local.")
                 break
             }
