@@ -76,9 +76,9 @@ final class WhatsAppDesktopAgentService
                 $token=bin2hex(random_bytes(32));$expires=gmdate('Y-m-d H:i:s',time()+120);
                 $u=$pdo->prepare('UPDATE whatsapp_outbox SET status=\'desktop_sending\',attempt_count=attempt_count+1,locked_at=CURRENT_TIMESTAMP,claim_token=?,claimed_by_device_hash=?,claim_expires_at=?,last_error=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status IN (\'queued\',\'failed\',\'desktop_queued\',\'desktop_failed\')');
                 $u->execute([$token,$deviceHash,$expires,$id,$tenantId]);if($u->rowCount()!==1)continue;
-                $this->syncConversationMessage($pdo,$tenantId,$id,'sending');
                 $q=$pdo->prepare('SELECT id,order_id,event_type,recipient,message_text,payload_json,attempt_count,max_attempts,claim_token,claim_expires_at,created_at FROM whatsapp_outbox WHERE id=? AND tenant_id=? LIMIT 1');$q->execute([$id,$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);
                 if($row){
+                    $this->ensureConversationMessage($pdo,$tenantId,$row,'sending');
                     $media=$this->mediaFromPayload($row['payload_json']??null);
                     unset($row['payload_json']);
                     $out[]=array_merge($row,$media);
@@ -112,6 +112,24 @@ final class WhatsAppDesktopAgentService
             $this->syncConversationMessage($pdo,$tenantId,$id,$terminal?'failed':'retrying');
             return['id'=>$id,'status'=>'desktop_failed','attempt_count'=>$attempt,'max_attempts'=>(int)$row['max_attempts'],'available_at'=>$available];
         });
+    }
+
+    private function ensureConversationMessage(PDO $pdo,int $tenantId,array $outbox,string $status):void
+    {
+        try{
+            $outboxId=(int)($outbox['id']??0);if($outboxId<1)return;
+            $existing=$pdo->prepare('SELECT id FROM whatsapp_messages WHERE tenant_id=? AND outbox_id=? LIMIT 1');$existing->execute([$tenantId,$outboxId]);
+            if($existing->fetchColumn()){$this->syncConversationMessage($pdo,$tenantId,$outboxId,$status);return;}
+            $phone=$this->normalizePhone((string)($outbox['recipient']??''));if($phone==='')return;
+            $find=$pdo->prepare('SELECT id FROM whatsapp_conversations WHERE tenant_id=? AND phone=? LIMIT 1');$find->execute([$tenantId,$phone]);$conversationId=(int)($find->fetchColumn()?:0);
+            if($conversationId<1){
+                try{$pdo->prepare('INSERT INTO whatsapp_conversations (tenant_id,phone,mode,state,last_outbound_at,last_activity_at) VALUES (?,?,\'auto\',\'IDLE\',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)')->execute([$tenantId,$phone]);$conversationId=(int)$pdo->lastInsertId();}catch(\PDOException){$find->execute([$tenantId,$phone]);$conversationId=(int)($find->fetchColumn()?:0);}
+            }
+            if($conversationId<1)return;
+            $meta=json_encode(['event_type'=>(string)($outbox['event_type']??''),'order_id'=>isset($outbox['order_id'])?(int)$outbox['order_id']:null],JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+            try{$pdo->prepare('INSERT INTO whatsapp_messages (tenant_id,conversation_id,outbox_id,direction,message_type,message_text,payload_json,status) VALUES (?,?,?,\'outbound\',\'text\',?,?,?)')->execute([$tenantId,$conversationId,$outboxId,(string)($outbox['message_text']??''),$meta,$status]);}catch(\PDOException){$this->syncConversationMessage($pdo,$tenantId,$outboxId,$status);}
+            $pdo->prepare('UPDATE whatsapp_conversations SET last_outbound_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$conversationId,$tenantId]);
+        }catch(\Throwable $e){error_log('[whatsapp-history-link] '.$e::class.': '.$e->getMessage());}
     }
 
     private function syncConversationMessage(PDO $pdo,int $tenantId,int $outboxId,string $status,string $providerMessageId=''):void
