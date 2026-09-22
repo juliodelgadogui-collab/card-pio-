@@ -48,8 +48,17 @@ class SessionStore(context: Context) {
             .apply()
     }
 
-    fun updateTokens(token: String, refresh: String) {
-        prefs.edit().putString("token", token).putString("refresh_token", refresh).apply()
+    fun updateTokens(token: String, refresh: String, user: JSONObject? = null) {
+        val editor = prefs.edit()
+            .putString("token", token)
+            .putString("refresh_token", refresh)
+        if (user != null) {
+            val tenantId = user.optInt("tenant_id", tenantId()).coerceAtLeast(0)
+            editor.putInt("tenant_id", tenantId)
+            if (user.has("name")) editor.putString("user_name", user.optString("name"))
+            if (user.has("tenant_name")) editor.putString("tenant_name", user.optString("tenant_name"))
+        }
+        editor.apply()
     }
 
     fun token(): String = prefs.getString("token", "").orEmpty()
