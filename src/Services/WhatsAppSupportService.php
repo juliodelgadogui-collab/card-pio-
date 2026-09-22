@@ -79,6 +79,31 @@ final class WhatsAppSupportService
     }
 
     /** @return array<string,mixed> */
+    public function startConversation(PDO $pdo,int $tenantId,int $userId,string $phone,string $firstMessage=''):array
+    {
+        if($tenantId<1||$userId<1)throw new RuntimeException('Atendimento inválido.');
+        $phone=$this->normalizePhone($phone);if($phone==='')throw new RuntimeException('Informe um WhatsApp válido com DDD.');
+        $result=Database::transaction(function(PDO $tx)use($tenantId,$userId,$phone):array{
+            $q=$tx->prepare(Database::portableSql($tx,'SELECT * FROM whatsapp_conversations WHERE tenant_id=? AND phone=? LIMIT 1 FOR UPDATE'));$q->execute([$tenantId,$phone]);$row=$q->fetch(PDO::FETCH_ASSOC);
+            if($row){
+                $assigned=(int)($row['assigned_user_id']??0);
+                if((string)$row['mode']==='human'&&$assigned>0&&$assigned!==$userId&&!Auth::can('settings.manage'))throw new RuntimeException('Este número já está em atendimento com outra pessoa.');
+                $resumeState=trim((string)($row['resume_state']??''));if($resumeState==='')$resumeState=$this->inferResumeState($row);
+                $tx->prepare("UPDATE whatsapp_conversations SET resume_state=?,resume_context_json=COALESCE(resume_context_json,context_json),mode='human',state='HUMAN',assigned_user_id=?,assigned_at=CURRENT_TIMESTAMP,last_read_at=CURRENT_TIMESTAMP,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$resumeState,$userId,(int)$row['id'],$tenantId]);
+                $id=(int)$row['id'];
+            }else{
+                $customer=(new CustomerIdentityService())->findByPhone($tx,$tenantId,$phone);$customerId=(int)($customer['id']??0);
+                $tx->prepare("INSERT INTO whatsapp_conversations (tenant_id,phone,customer_id,mode,state,context_json,resume_state,resume_context_json,assigned_user_id,assigned_at,last_read_at,last_activity_at) VALUES (?,?,?,'human','HUMAN',NULL,'WELCOME',NULL,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)")->execute([$tenantId,$phone,$customerId>0?$customerId:null,$userId]);
+                $id=(int)$tx->lastInsertId();
+            }
+            Auth::audit('whatsapp.support_conversation_started','whatsapp_conversation',(string)$id,['phone_suffix'=>substr($phone,-4)]);
+            return['id'=>$id,'mode'=>'human','assigned_user_id'=>$userId];
+        });
+        if(trim($firstMessage)!=='')$this->sendManual($pdo,$tenantId,(int)$result['id'],$userId,$firstMessage);
+        return$result;
+    }
+
+    /** @return array<string,mixed> */
     public function sendManual(PDO $pdo,int $tenantId,int $conversationId,int $userId,string $text):array
     {
         $text=trim($text);if($tenantId<1||$conversationId<1||$userId<1)throw new RuntimeException('Atendimento inválido.');if($text==='')throw new RuntimeException('Digite uma mensagem antes de enviar.');if(mb_strlen($text)>4000)throw new RuntimeException('A mensagem deve ter no máximo 4.000 caracteres.');
