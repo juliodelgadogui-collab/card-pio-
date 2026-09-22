@@ -1,6 +1,6 @@
 CREATE TABLE IF NOT EXISTS whatsapp_connections (
   tenant_id INTEGER PRIMARY KEY,
-  provider TEXT NOT NULL DEFAULT 'wppconnect',
+  provider TEXT NOT NULL DEFAULT 'eventmenu_connect',
   session_key TEXT NOT NULL UNIQUE,
   status TEXT NOT NULL DEFAULT 'disconnected',
   phone_number TEXT NULL,
