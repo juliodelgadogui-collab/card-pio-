@@ -5,6 +5,8 @@ declare(strict_types=1);
 require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
+use EventMenu\Services\ApiRateLimitExceededException;
+use EventMenu\Services\ApiRateLimitService;
 use EventMenu\Services\TicketWhatsAppQueueService;
 use EventMenu\Services\WhatsAppCommerceService;
 use EventMenu\Services\WhatsAppDesktopAgentService;
@@ -50,6 +52,7 @@ try{
     if($action==='inbound'){
         whatsapp_desktop_method('POST');
         $body=whatsapp_desktop_body();$reported=whatsapp_desktop_device($deviceId,$body);
+        (new ApiRateLimitService())->assertAllowed('whatsapp.inbound','device:'.hash('sha256',$reported),600,60,'Muitas mensagens recebidas em pouco tempo.');
         $message=(new WhatsAppCommerceService())->receiveInbound($reported,$body);
         whatsapp_desktop_out(['ok'=>true,'message'=>$message]);
     }
@@ -76,4 +79,4 @@ try{
     }
 
     whatsapp_desktop_out(['ok'=>false,'error'=>'Endpoint do WhatsApp Desktop não encontrado.'],404);
-}catch(RuntimeException $e){whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],500);whatsapp_desktop_out(['ok'=>false,'error'=>'Erro interno.'],500);}
+}catch(ApiRateLimitExceededException $e){whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],429);}catch(RuntimeException $e){whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],422);}catch(Throwable $e){if(filter_var(env('APP_DEBUG','false'),FILTER_VALIDATE_BOOL))whatsapp_desktop_out(['ok'=>false,'error'=>$e->getMessage()],500);whatsapp_desktop_out(['ok'=>false,'error'=>'Erro interno.'],500);}
