@@ -32,7 +32,7 @@ final class WhatsAppSupportService
     public function conversation(PDO $pdo,int $tenantId,int $conversationId,int $messageLimit=250):array
     {
         if($tenantId<1||$conversationId<1)throw new RuntimeException('Conversa inválida.');$messageLimit=max(20,min(500,$messageLimit));
-        $q=$pdo->prepare('SELECT c.*,cu.name customer_name,cu.email customer_email,cu.phone customer_phone,cu.default_address,u.name assigned_user_name FROM whatsapp_conversations c LEFT JOIN customers cu ON cu.id=c.customer_id AND cu.tenant_id=c.tenant_id LEFT JOIN users u ON u.id=c.assigned_user_id AND u.tenant_id=c.tenant_id WHERE c.id=? AND c.tenant_id=? LIMIT 1');$q->execute([$conversationId,$tenantId]);$conversation=$q->fetch(PDO::FETCH_ASSOC);if(!$conversation)throw new RuntimeException('Conversa não encontrada.');
+        $q=$pdo->prepare('SELECT c.*,cu.name customer_name,cu.email customer_email,cu.phone customer_phone,cu.document customer_document,cu.default_address,u.name assigned_user_name FROM whatsapp_conversations c LEFT JOIN customers cu ON cu.id=c.customer_id AND cu.tenant_id=c.tenant_id LEFT JOIN users u ON u.id=c.assigned_user_id AND u.tenant_id=c.tenant_id WHERE c.id=? AND c.tenant_id=? LIMIT 1');$q->execute([$conversationId,$tenantId]);$conversation=$q->fetch(PDO::FETCH_ASSOC);if(!$conversation)throw new RuntimeException('Conversa não encontrada.');
         $m=$pdo->prepare('SELECT * FROM (SELECT id,provider_message_id,outbox_id,direction,message_type,message_text,payload_json,status,provider_created_at,created_at,updated_at FROM whatsapp_messages WHERE tenant_id=? AND conversation_id=? ORDER BY id DESC LIMIT '.$messageLimit.') recent ORDER BY id ASC');$m->execute([$tenantId,$conversationId]);$messages=$m->fetchAll(PDO::FETCH_ASSOC)?:[];foreach($messages as&$message)$message['media']=$this->media($message['payload_json']??null);unset($message);
         $customerId=(int)($conversation['customer_id']??0);$orders=[];$addresses=[];
         if($customerId>0){
@@ -101,6 +101,21 @@ final class WhatsAppSupportService
         });
         if(trim($firstMessage)!=='')$this->sendManual($pdo,$tenantId,(int)$result['id'],$userId,$firstMessage);
         return$result;
+    }
+
+    /** @return array<string,mixed> */
+    public function updateCustomerProfile(PDO $pdo,int $tenantId,int $conversationId,int $userId,string $name,string $cpf,string $address):array
+    {
+        if($tenantId<1||$conversationId<1||$userId<1)throw new RuntimeException('Atendimento inválido.');
+        $name=mb_substr(trim($name),0,160);if(mb_strlen($name)<2)throw new RuntimeException('Informe o nome do cliente.');$address=mb_substr(trim($address),0,1000);
+        return Database::transaction(function(PDO $tx)use($tenantId,$conversationId,$userId,$name,$cpf,$address):array{
+            $q=$tx->prepare(Database::portableSql($tx,'SELECT c.customer_id,cu.document,cu.default_address FROM whatsapp_conversations c LEFT JOIN customers cu ON cu.id=c.customer_id AND cu.tenant_id=c.tenant_id WHERE c.id=? AND c.tenant_id=? LIMIT 1 FOR UPDATE'));$q->execute([$conversationId,$tenantId]);$row=$q->fetch(PDO::FETCH_ASSOC);if(!$row)throw new RuntimeException('Conversa não encontrada.');$customerId=(int)($row['customer_id']??0);if($customerId<1)throw new RuntimeException('Esta conversa ainda não possui cliente cadastrado.');
+            $identity=new CustomerIdentityService();$document=trim($cpf)!==''?$identity->normalizeCpf($cpf):(string)($row['document']??'');if(!$identity->isValidCpf($document))throw new RuntimeException('Informe um CPF válido para o cliente.');
+            $tx->prepare('UPDATE customers SET name=?,document=? WHERE id=? AND tenant_id=?')->execute([$name,$document,$customerId,$tenantId]);
+            if($address!=='')$saved=(new CustomerAddressService())->saveText($tx,$tenantId,$customerId,$address,'Principal',true);else $saved=null;
+            Auth::audit('whatsapp.support_customer_updated','customer',(string)$customerId,['conversation_id'=>$conversationId,'user_id'=>$userId,'address_updated'=>$saved!==null]);
+            return['customer_id'=>$customerId,'name'=>$name,'document_masked'=>$identity->maskCpf($document),'default_address'=>$saved['address_text']??(string)($row['default_address']??'')];
+        });
     }
 
     /** @return array<string,mixed> */
