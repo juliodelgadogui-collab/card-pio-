@@ -76,20 +76,16 @@ final class WhatsAppCommerceService
             if(!in_array($mode,self::MODES,true))$mode='auto';
             if($mode==='human'||$mode==='waiting_human')return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>$mode,'reply_queued'=>false];
 
-            $normalized=$this->normalizeCommand($text);
             $commerceEnabled=$this->commerceEnabled($pdo,$tenantId);
+            if(!$commerceEnabled)return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($conversation['state']??'IDLE'),'reply_queued'=>false,'commerce_enabled'=>false];
 
+            $normalized=$this->normalizeCommand($text);
             if(in_array($normalized,self::HUMAN_COMMANDS,true)){
                 $pdo->prepare('UPDATE whatsapp_conversations SET mode=\'waiting_human\',state=\'WAITING_HUMAN\',assigned_user_id=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$conversationId,$tenantId]);
-                $replyQueued=false;
-                if($commerceEnabled){
-                    $replyQueued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'human_transfer','Certo! 👤 Seu atendimento foi encaminhado para a equipe. O atendimento automático ficará pausado enquanto você aguarda.');
-                }
+                $replyQueued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'human_transfer','Certo! 👤 Seu atendimento foi encaminhado para a equipe. O atendimento automático ficará pausado enquanto você aguarda.');
                 try{Auth::audit('whatsapp.conversation_waiting_human','whatsapp_conversation',(string)$conversationId,['phone_suffix'=>substr($phone,-4)]);}catch(Throwable){}
-                return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'waiting_human','state'=>'WAITING_HUMAN','reply_queued'=>$replyQueued];
+                return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'waiting_human','state'=>'WAITING_HUMAN','reply_queued'=>$replyQueued,'commerce_enabled'=>true];
             }
-
-            if(!$commerceEnabled)return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($conversation['state']??'IDLE'),'reply_queued'=>false,'commerce_enabled'=>false];
 
             if(in_array($normalized,self::MENU_COMMANDS,true)||$normalized==='cancelar'||(string)($conversation['state']??'IDLE')==='IDLE'){
                 $pdo->prepare('UPDATE whatsapp_conversations SET state=\'WELCOME\',context_json=NULL,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$conversationId,$tenantId]);
