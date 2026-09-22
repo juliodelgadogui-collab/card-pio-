@@ -26,7 +26,7 @@ final class WhatsAppCommercePaymentService
         $cards=(array)($methods['card']??[]);
         if($cards){$types=(array)($cards[0]['payment_types']??[]);$caption=[];if(in_array('credit_card',$types,true))$caption[]='crédito';if(in_array('debit_card',$types,true))$caption[]='débito';$options[(string)$n]=['method'=>'card','provider'=>'mercadopago'];$labels[]=$n.' - 💳 Cartão'.($caption?' ('.implode(' / ',$caption).')':'');$n++;}
         if(!empty($methods['cash'])){$options[(string)$n]=['method'=>'cash','provider'=>null];$labels[]=$n.' - 💵 Dinheiro';}
-        if(!$options)throw new RuntimeException('Nenhuma forma de pagamento está disponível para este pedido.');
+        if(!$options)return $this->stateResult($pdo,$tenantId,$conversationId,['order_id'=>$orderId,'payment_step'=>'unavailable'],"⚠️ Nenhuma forma de pagamento está habilitada para este estabelecimento.\n\nO pedido #{$orderId} foi recebido e o estoque está reservado temporariamente. Digite *ATENDENTE* para a equipe orientar o pagamento.",'payment_unavailable');
 
         $lines=[];if($prefix!=='')$lines[]='⚠️ '.$prefix;$lines[]='';$lines[]='💰 *FORMA DE PAGAMENTO*';$lines[]='Pedido #'.$orderId.' · '.$this->money((int)$order['total_cents']);$lines[]='';foreach($labels as$label)$lines[]=$label;$lines[]='';$lines[]='Digite o número da forma desejada.';$lines[]='Para acompanhar o pedido, digite *MEU PEDIDO*.';
         return $this->stateResult($pdo,$tenantId,$conversationId,['order_id'=>$orderId,'payment_step'=>'menu','payment_options'=>$options],trim(implode("\n",$lines)),'payment_menu');
@@ -51,6 +51,7 @@ final class WhatsAppCommercePaymentService
             return $this->awaitingResult($pdo,$tenantId,$conversationId,$order,$context);
         }
         if($step==='cash_selected')return $this->cashSelectedResult($pdo,$tenantId,$conversationId,$order,$context);
+        if($step==='unavailable')return $this->prompt($pdo,$tenantId,$conversationId,$orderId);
 
         $options=is_array($context['payment_options']??null)?$context['payment_options']:[];
         if(!$options)return $this->prompt($pdo,$tenantId,$conversationId,$orderId);
@@ -108,7 +109,7 @@ final class WhatsAppCommercePaymentService
     private function createPix(PDO $pdo,int $tenantId,int $conversationId,array $order):array
     {
         $service=new PublicOrderPaymentService();$payment=$service->pix($pdo,(string)$order['public_token'],'');$provider=(string)($payment['provider']??'');if($provider!=='')(new OrderPaymentPreferenceService())->set($pdo,$tenantId,(int)$order['id'],'pix',$provider,null,'whatsapp');
-        $copy=trim((string)($payment['copy_paste']??''));if($copy==='')throw new RuntimeException('O provedor não retornou o PIX Copia e Cola.');$expires=trim((string)($payment['expires_at']??''));$lines=['⚡ *PIX GERADO*','Pedido #'.(int)$order['id'].' · '.$this->money((int)$payment['amount_cents'],'BRL'),'','Copie o código abaixo e pague no seu banco:','',$copy,''];if($expires!=='')$lines[]='Validade da cobrança: '.$this->friendlyDate($expires);$lines[]='';$lines[]='Assim que o pagamento for confirmado, eu aviso por aqui automaticamente.';$lines[]='Se quiser conferir antes, digite *PAGUEI*.';
+        $copy=trim((string)($payment['copy_paste']??''));if($copy==='')throw new RuntimeException('O provedor não retornou o PIX Copia e Cola.');$expires=trim((string)($payment['expires_at']??''));$lines=['⚡ *PIX GERADO*','Pedido #'.(int)$order['id'].' · '.$this->money((int)$payment['amount_cents']),'','Copie o código abaixo e pague no seu banco:','',$copy,''];if($expires!=='')$lines[]='Validade da cobrança: '.$this->friendlyDate($expires);$lines[]='';$lines[]='Assim que o pagamento for confirmado, eu aviso por aqui automaticamente.';$lines[]='Se quiser conferir antes, digite *PAGUEI*.';
         $context=['order_id'=>(int)$order['id'],'payment_step'=>'awaiting_payment','payment_method'=>'pix','payment_provider'=>$provider,'payment_id'=>(int)($payment['payment_id']??0)];$this->audit('pix_created',(int)$order['id'],['payment_id'=>(int)($payment['payment_id']??0),'provider'=>$provider]);
         return $this->stateResult($pdo,$tenantId,$conversationId,$context,implode("\n",$lines),'pix_created');
     }
@@ -139,7 +140,7 @@ final class WhatsAppCommercePaymentService
     private function checkStatus(PDO $pdo,int $tenantId,int $conversationId,array $order):array
     {
         $status=(new PublicOrderPaymentService())->status($pdo,(string)$order['public_token']);$fresh=$this->order($pdo,$tenantId,(int)$order['id']);if((string)$fresh['payment_status']==='paid'||(string)($status['payment_status']??'')==='paid')return $this->paidResult($pdo,$tenantId,$conversationId,$fresh);
-        $context=['order_id'=>(int)$order['id'],'payment_step'=>'awaiting_payment','payment_method'=>(string)((new OrderPaymentPreferenceService())->get($pdo,$tenantId,(int)$order['id'])['method']??'')];
+        $preference=(new OrderPaymentPreferenceService())->get($pdo,$tenantId,(int)$order['id']);$context=['order_id'=>(int)$order['id'],'payment_step'=>'awaiting_payment','payment_method'=>(string)($preference['method']??'')];
         return $this->stateResult($pdo,$tenantId,$conversationId,$context,"⏳ O pagamento do pedido #".(int)$order['id']." ainda não foi confirmado.\n\nSe você acabou de pagar, aguarde alguns instantes. O EventMenu também confirma automaticamente pelo webhook/reconciliação do provedor.",'payment_pending');
     }
 
@@ -185,7 +186,7 @@ final class WhatsAppCommercePaymentService
     }
     private function context(mixed $raw):array{if(is_array($raw))return$raw;if(!is_string($raw)||trim($raw)==='')return[];$d=json_decode($raw,true);return is_array($d)?$d:[];}
     private function normalize(string $value):string{$value=mb_strtolower(trim($value));$value=preg_replace('/\s+/u',' ',$value)??$value;return trim($value," \t\n\r\0\x0B.!?,;:");}
-    private function money(int $cents,string $currency='BRL'):string{return ($currency==='BRL'?'R$ ':'').number_format($cents/100,2,',','.');}
+    private function money(int $cents):string{return 'R$ '.number_format($cents/100,2,',','.');}
     private function friendlyDate(string $value):string{$ts=strtotime($value);return $ts===false?$value:date('d/m/Y H:i',$ts);}
     private function audit(string $event,int $orderId,array $metadata):void{try{Auth::audit('whatsapp.commerce.'.$event,'order',(string)$orderId,$metadata);}catch(Throwable){}}
 }
