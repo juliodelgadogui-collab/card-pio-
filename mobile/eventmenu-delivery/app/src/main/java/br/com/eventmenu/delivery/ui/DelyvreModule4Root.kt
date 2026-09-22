@@ -338,15 +338,18 @@ private fun DelyvreProductCardV4(product: Product, onOpen: () -> Unit) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DelyvreProductSheet(
+internal fun DelyvreProductSheet(
     product: Product,
     storeOpen: Boolean,
     onDismiss: () -> Unit,
     onAdd: (Int, Set<Int>, String) -> Unit,
+    initialQuantity: Int = 1,
+    initialOptionIds: Set<Int> = emptySet(),
+    initialNotes: String = "",
 ) {
-    var quantity by remember(product.id) { mutableIntStateOf(1) }
-    var selected by remember(product.id) { mutableStateOf(emptySet<Int>()) }
-    var notes by remember(product.id) { mutableStateOf("") }
+    var quantity by remember(product.id, initialQuantity) { mutableIntStateOf(initialQuantity.coerceIn(1, 99)) }
+    var selected by remember(product.id, initialOptionIds) { mutableStateOf(initialOptionIds) }
+    var notes by remember(product.id, initialNotes) { mutableStateOf(initialNotes) }
     val selectionError = remember(product, selected) { delyvreModifierSelectionError(product, selected) }
     val unitTotal = remember(product, selected) { delyvreProductUnitTotalCents(product, selected) }
     val total = unitTotal * quantity
