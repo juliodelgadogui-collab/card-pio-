@@ -6,6 +6,7 @@ require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\TicketWhatsAppQueueService;
+use EventMenu\Services\WhatsAppCommerceService;
 use EventMenu\Services\WhatsAppDesktopAgentService;
 use RuntimeException;
 use Throwable;
@@ -44,6 +45,13 @@ try{
         $sync=whatsapp_desktop_sync_tickets();
         $state=$service->heartbeat($reported,(string)($body['device_label']??''),(string)($body['status']??'disconnected'),(string)($body['phone']??''),(string)($body['error']??''));
         whatsapp_desktop_out(['ok'=>true]+$sync+$state);
+    }
+
+    if($action==='inbound'){
+        whatsapp_desktop_method('POST');
+        $body=whatsapp_desktop_body();$reported=whatsapp_desktop_device($deviceId,$body);
+        $message=(new WhatsAppCommerceService())->receiveInbound($reported,$body);
+        whatsapp_desktop_out(['ok'=>true,'message'=>$message]);
     }
 
     if($action==='claim'){
