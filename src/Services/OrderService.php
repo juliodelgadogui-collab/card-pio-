@@ -44,6 +44,7 @@ final class OrderService
         });
         $this->publishOperationalNotification($result,$target);
         $this->publishCustomerNotification($result,$target,$source);
+        $this->queueCustomerWhatsApp($result,$target);
         return$result;
     }
 
@@ -57,6 +58,25 @@ final class OrderService
     private function publishOperationalNotification(array$order,string$target):void
     {
         if(!in_array((string)($order['channel']??''),['counter','table','delivery','pickup'],true))return;try{$notifications=new NotificationService();$id=(int)$order['id'];$unitId=!empty($order['unit_id'])?(int)$order['unit_id']:null;$expires=gmdate('Y-m-d H:i:s',time()+86400);if($target==='confirmed')$notifications->publishToPermission('orders.kitchen','operation','order.new','Novo pedido #'.$id,'Um novo pedido confirmado entrou na fila da cozinha.','order',(string)$id,'order:'.$id.':kitchen-confirmed','info',$expires,$unitId);if($target==='ready')$notifications->publishToPermission('orders.dispatch','operation','order.ready','Pedido #'.$id.' pronto','A cozinha marcou o pedido como pronto para despacho.','order',(string)$id,'order:'.$id.':ready-dispatch','success',$expires,$unitId);}catch(\Throwable){}
+    }
+
+    private function queueCustomerWhatsApp(array$order,string$target):void
+    {
+        if(!in_array((string)($order['channel']??''),['delivery','pickup','counter'],true))return;
+        $event=match($target){
+            'confirmed'=>'order_confirmed',
+            'preparing'=>'preparing',
+            'ready'=>'ready',
+            'out_for_delivery'=>'out_for_delivery',
+            'completed'=>'delivered',
+            'cancelled'=>'cancelled',
+            default=>null,
+        };
+        if($event===null)return;
+        try{
+            $pdo=Database::connection();$tenantId=(int)($order['tenant_id']??Auth::tenantId()??0);$orderId=(int)($order['id']??0);
+            if($tenantId>0&&$orderId>0)(new WhatsAppIntegrationService())->queueOrderEvent($pdo,$tenantId,$orderId,$event,'status:'.$target);
+        }catch(\Throwable $e){error_log('[order-whatsapp] '.$e::class.': '.$e->getMessage());}
     }
 
     private function publishCustomerNotification(array$order,string$target,string$source):void
