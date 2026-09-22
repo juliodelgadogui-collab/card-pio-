@@ -11,10 +11,12 @@ import android.provider.Settings
 class EventMenuConnectApplication : Application(), Application.ActivityLifecycleCallbacks {
     private var pairingGuard: PowerManager.WakeLock? = null
     private var batteryDialogShownThisProcess = false
+    private var resilienceSupervisor: ConnectionResilienceSupervisor? = null
 
     override fun onCreate() {
         super.onCreate()
         registerActivityLifecycleCallbacks(this)
+        resilienceSupervisor = ConnectionResilienceSupervisor(this).also { it.start() }
     }
 
     override fun onActivityResumed(activity: Activity) {
@@ -55,6 +57,8 @@ class EventMenuConnectApplication : Application(), Application.ActivityLifecycle
     }
 
     override fun onTerminate() {
+        resilienceSupervisor?.stop()
+        resilienceSupervisor = null
         pairingGuard?.let { lock -> if (lock.isHeld) runCatching { lock.release() } }
         pairingGuard = null
         unregisterActivityLifecycleCallbacks(this)
