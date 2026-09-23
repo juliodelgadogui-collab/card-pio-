@@ -1,9 +1,11 @@
-const CACHE_NAME = 'eventmenu-static-v5';
+const CACHE_NAME = 'eventmenu-static-v6';
 const MANIFEST_URL = './manifest.webmanifest';
 const STATIC_SUFFIXES = [
   '/assets/app.css',
   '/assets/premium-v4.css',
   '/assets/premium-v4.js',
+  '/assets/premium-v5.css',
+  '/assets/premium-v5-runtime.css',
   '/assets/menu-premium-v5.css',
   '/assets/menu-premium-v5.js',
   '/assets/order-premium-v5.css',
@@ -39,8 +41,7 @@ self.addEventListener('fetch', event => {
   if (!isStatic && !isManifest) return;
 
   if (isStatic) {
-    // Network-first prevents an old visual bundle from surviving a deployment,
-    // while still allowing the shell to load during a temporary connection loss.
+    // Network-first impede que um bundle visual antigo sobreviva a um deploy.
     event.respondWith(
       fetch(request, { cache: 'no-cache' })
         .then(response => {
