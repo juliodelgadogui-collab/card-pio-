@@ -41,7 +41,7 @@ final class WhatsAppCommerceService
             $mode=(string)($conversation['mode']??'auto');if(!in_array($mode,self::MODES,true))$mode='auto';if($mode==='human'||$mode==='waiting_human')return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>$mode,'reply_queued'=>false];
             if(!$this->commerceEnabled($pdo,$tenantId))return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($conversation['state']??'IDLE'),'reply_queued'=>false,'commerce_enabled'=>false];
 
-            $assistant=new WhatsAppCommerceAssistantService();$assistantSettings=$assistant->settings($pdo,$tenantId);
+            $assistant=new WhatsAppCommerceAssistantService();$assistantSettings=$assistant->settings($pdo,$tenantId);$conversion=new WhatsAppCommerceConversionService();$conversion->settings($pdo,$tenantId);
             $normalized=$this->normalizeCommand($text);$state=(string)($conversation['state']??'IDLE');
             if($assistant->shouldTransfer($text,$assistantSettings)||($state==='WELCOME'&&$normalized==='4'))return$this->transferToHuman($pdo,$tenantId,$conversationId,$phone,$providerId,$assistantSettings);
             if(in_array($normalized,self::TRACK_COMMANDS,true)||($normalized==='meu pedido'&&(int)($conversation['draft_order_id']??0)<1)||($state==='WELCOME'&&$normalized==='3')){$reply=$this->orderCommandMessage($pdo,$tenantId,$conversation);$queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'order_lookup',$reply);return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>$state,'reply_queued'=>$queued,'commerce_enabled'=>true];}
@@ -66,12 +66,15 @@ final class WhatsAppCommerceService
                 $pdo->prepare("UPDATE whatsapp_conversations SET state='WELCOME',last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$conversationId,$tenantId]);$queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'assistant_unknown',$assistant->unknown($assistantSettings));return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>'WELCOME','reply_queued'=>$queued,'commerce_enabled'=>true,'assistant'=>true,'unknown'=>true];
             }
 
-            if($state==='WELCOME'&&$normalized==='2'){$queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'repeat_soon',"🔁 Repetir último pedido será liberado na etapa avançada do WhatsApp Commerce.\n\nPor enquanto escolha:\n1 - Fazer um pedido\n3 - Acompanhar pedido\n4 - Falar com atendente");return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>'WELCOME','reply_queued'=>$queued,'commerce_enabled'=>true];}
-
-            $stage2=in_array($state,self::FULFILLMENT_STATES,true);
-            try{$result=$stage2?(new WhatsAppCommerceFulfillmentService())->handle($pdo,$tenantId,$conversation,$text):(new WhatsAppCommerceOrderService())->handle($pdo,$tenantId,$conversation,$text,$name);}
+            $stage2=in_array($state,self::FULFILLMENT_STATES,true);$conversionFlow=false;
+            try{
+                if($state==='WELCOME'&&$normalized==='2'){$conversionFlow=true;$result=$conversion->repeatLastOrder($pdo,$tenantId,$conversation);}
+                elseif($state==='UPSELL'){$conversionFlow=true;$result=$conversion->handleUpsell($pdo,$tenantId,$conversation,$text);}
+                elseif($state==='CART'&&$normalized==='4'){$conversionFlow=true;$result=$conversion->beginUpsell($pdo,$tenantId,$conversation);}
+                else{$result=$stage2?(new WhatsAppCommerceFulfillmentService())->handle($pdo,$tenantId,$conversation,$text):(new WhatsAppCommerceOrderService())->handle($pdo,$tenantId,$conversation,$text,$name);}
+            }
             catch(RuntimeException $e){try{Auth::audit('whatsapp.commerce_validation_error','whatsapp_conversation',(string)$conversationId,['state'=>$state,'error'=>mb_substr($e->getMessage(),0,300)]);}catch(Throwable){}$queued=$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,'commerce_validation',"⚠️ ".$e->getMessage()."\n\nDigite *MENU* para voltar ao início ou *ATENDENTE* para falar com uma pessoa.");return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>$state,'reply_queued'=>$queued,'commerce_enabled'=>true,'validation_error'=>true];}
-            if(!empty($result['handled'])){if(!$stage2)$this->auditStage1Transition($pdo,$tenantId,$conversation,$result);$reply=(string)($result['reply']??'');$kind=(string)($result['kind']??'commerce');$queued=$reply!==''?$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,$kind,$reply):false;return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($result['state']??$state),'reply_queued'=>$queued,'commerce_enabled'=>true,'draft_order_id'=>$result['draft_order_id']??null,'active_order_id'=>$result['active_order_id']??null];}
+            if(!empty($result['handled'])){if(!$stage2&&!$conversionFlow)$this->auditStage1Transition($pdo,$tenantId,$conversation,$result);$reply=(string)($result['reply']??'');$kind=(string)($result['kind']??'commerce');$queued=$reply!==''?$this->queueReply($pdo,$tenantId,$conversationId,$phone,$providerId,$kind,$reply):false;return ['duplicate'=>false,'conversation_id'=>$conversationId,'mode'=>'auto','state'=>(string)($result['state']??$state),'reply_queued'=>$queued,'commerce_enabled'=>true,'draft_order_id'=>$result['draft_order_id']??null,'active_order_id'=>$result['active_order_id']??null,'conversion'=>$conversionFlow];}
 
             if($state==='WELCOME'){
                 $knowledge=$assistant->answer($pdo,$tenantId,$text);
