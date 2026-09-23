@@ -1,5 +1,11 @@
 package br.com.eventmenu.go.ui.screens
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -283,12 +289,24 @@ private fun PosPaymentScreen(
     val context = LocalContext.current
     val app = context.applicationContext as EventMenuGoApplication
     val scope = rememberCoroutineScope()
+    var shareBusy by remember(order.id) { mutableStateOf(false) }
     val canRedeemLoyalty = "loyalty_redeem" in state.session?.permissions.orEmpty()
     var loyalty by remember(order.id) { mutableStateOf<LoyaltyOrderSummary?>(null) }
     var loyaltyLoaded by remember(order.id) { mutableStateOf(false) }
     var loyaltyBusy by remember(order.id) { mutableStateOf(false) }
     var loyaltyError by remember(order.id) { mutableStateOf<String?>(null) }
     var loyaltyPointsText by remember(order.id) { mutableStateOf("") }
+
+    fun shareOrderOnWhatsApp() {
+        if (shareBusy) return
+        shareBusy = true
+        scope.launch {
+            runCatching { app.receiptRepository.shareText(app.receiptRepository.order(order.id)) }
+                .onSuccess { text -> sendTextToWhatsApp(context, text) }
+                .onFailure { error -> Toast.makeText(context, OperationalText.friendlyApiMessage(error.message), Toast.LENGTH_LONG).show() }
+            shareBusy = false
+        }
+    }
 
     fun refreshLoyalty() {
         if (!canRedeemLoyalty || loyaltyBusy) return
@@ -461,12 +479,65 @@ private fun PosPaymentScreen(
                         Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.small) {
                             Text("✓ Pagamento confirmado", modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.onSecondaryContainer, fontWeight = FontWeight.Bold)
                         }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { onReceipt(order.id) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) { Text("Enviar recibo") }
-                            OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) { Text("Imprimir") }
-                        }
                         Button(onClick = onFinishFlow, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.ActionHeight)) { Text(if (state.posReturnScreen == AppScreen.TABLE_ACCOUNT) "Voltar à conta" else "Novo pedido") }
                     }
+                }
+            }
+        }
+
+        state.pixCharge?.takeIf { it.orderId == order.id && remaining > 0 }?.let { charge ->
+            item {
+                val pixMessage = "PIX EventMenu · Pedido #${order.id}\nValor: ${posMoney(charge.amountCents)}\n\n${charge.copyPaste}" + if (charge.expiresAt.isNotBlank()) "\n\nValidade: ${charge.expiresAt}" else ""
+                Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+                    Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("PIX gerado", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                                Text(posMoney(charge.amountCents), color = MaterialTheme.colorScheme.onPrimaryContainer, fontWeight = FontWeight.Bold)
+                            }
+                            Icon(Icons.Default.QrCode2, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                        }
+                        OutlinedTextField(value = charge.copyPaste, onValueChange = {}, readOnly = true, label = { Text("PIX Copia e Cola") }, maxLines = 4, modifier = Modifier.fillMaxWidth())
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { copyText(context, "PIX Copia e Cola", charge.copyPaste) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) {
+                                Icon(Icons.Default.ContentCopy, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("Copiar")
+                            }
+                            Button(onClick = { sendTextToWhatsApp(context, pixMessage) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) {
+                                Icon(Icons.Default.Send, contentDescription = null)
+                                Spacer(Modifier.width(6.dp))
+                                Text("WhatsApp")
+                            }
+                        }
+                        OutlinedButton(onClick = onRefresh, modifier = Modifier.fillMaxWidth().heightIn(min = EventMenuUi.TouchTarget)) {
+                            Icon(Icons.Default.Refresh, contentDescription = null)
+                            Spacer(Modifier.width(7.dp))
+                            Text("Verificar pagamento")
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                    Text(if (remaining > 0) "Enviar ou imprimir pedido" else "Comprovante", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Text(if (remaining > 0) "O documento será identificado como pedido em aberto e mostrará o saldo pendente." else "Pagamento confirmado. Envie ou imprima o comprovante.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = ::shareOrderOnWhatsApp, enabled = !shareBusy, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) {
+                            Icon(Icons.Default.Send, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (shareBusy) "Abrindo…" else "WhatsApp")
+                        }
+                        OutlinedButton(onClick = { onPrintReceipt(order.id) }, modifier = Modifier.weight(1f).heightIn(min = EventMenuUi.TouchTarget)) {
+                            Icon(Icons.Default.Print, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Imprimir")
+                        }
+                    }
+                    if (remaining <= 0) TextButton(onClick = { onReceipt(order.id) }, modifier = Modifier.fillMaxWidth()) { Text("Compartilhar por outro aplicativo") }
                 }
             }
         }
@@ -508,14 +579,39 @@ private fun PosPaymentScreen(
             title = { Text("PIX · ${posMoney(amount)}") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("CPF/CNPJ é opcional. Se ficar vazio, o EventMenu usa os dados disponíveis ou o documento padrão configurado pela empresa.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ (opcional)") }, singleLine = true)
+                    Text("Se deixar vazio, o EventMenu usa o CPF/CNPJ do cliente cadastrado. Se o pedido não tiver documento do cliente, informe aqui.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(taxId, { taxId = it.filter(Char::isDigit).take(14) }, label = { Text("CPF ou CNPJ do pagador") }, singleLine = true)
                     if (taxId.isNotEmpty() && !taxIdValid) Text("Informe 11 dígitos para CPF ou 14 para CNPJ.", color = MaterialTheme.colorScheme.error)
                 }
             },
             confirmButton = { Button(onClick = { pixTaxDialog = false; onPix(amount, taxId) }, enabled = taxIdValid) { Text("Gerar PIX") } },
             dismissButton = { TextButton(onClick = { pixTaxDialog = false }) { Text("Cancelar") } },
         )
+    }
+}
+
+private fun copyText(context: Context, label: String, text: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+    Toast.makeText(context, "$label copiado.", Toast.LENGTH_SHORT).show()
+}
+
+private fun sendTextToWhatsApp(context: Context, text: String) {
+    val base = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    for (pkg in listOf("com.whatsapp", "com.whatsapp.w4b")) {
+        try {
+            context.startActivity(Intent(base).setPackage(pkg))
+            return
+        } catch (_: ActivityNotFoundException) {
+        }
+    }
+    try {
+        context.startActivity(Intent.createChooser(base, "Enviar pedido"))
+    } catch (_: ActivityNotFoundException) {
+        Toast.makeText(context, "Nenhum aplicativo de compartilhamento disponível.", Toast.LENGTH_LONG).show()
     }
 }
 
