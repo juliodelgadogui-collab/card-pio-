@@ -54,6 +54,26 @@ class EventOperationsRepository(baseUrl: String, deviceId: String, private val s
         }
     }
 
+    suspend fun ticketCheckIn(eventId: Int, value: String): JSONObject {
+        if (eventId < 1) throw ApiException("Selecione o evento antes de validar o ingresso.")
+        if (value.isBlank()) throw ApiException("Código do ingresso vazio.")
+        return api.postEvents(
+            "ticket-checkin",
+            requireToken(),
+            JSONObject().put("event_id", eventId).put("token", value.trim()),
+        )
+    }
+
+    suspend fun guestCheckIn(eventId: Int, value: String): JSONObject {
+        if (eventId < 1) throw ApiException("Selecione o evento antes de validar o convidado.")
+        if (value.isBlank()) throw ApiException("Código do convidado vazio.")
+        return api.postEvents(
+            "guest-checkin",
+            requireToken(),
+            JSONObject().put("event_id", eventId).put("code", value.trim()),
+        )
+    }
+
     suspend fun resolveBarOrder(eventId: Int, value: String): EventPickupOrder {
         if (eventId < 1) throw ApiException("Selecione o evento antes de ler o pedido.")
         if (value.isBlank()) throw ApiException("QR do pedido vazio.")
