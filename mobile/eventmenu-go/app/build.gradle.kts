@@ -17,9 +17,17 @@ if (!apiBase.startsWith("https://", ignoreCase = true)) {
     throw GradleException("EVENTMENU_API_BASE_URL precisa usar HTTPS.")
 }
 
+val explicitVersionCode = envValue("EVENTMENU_VERSION_CODE").toIntOrNull()
+val explicitVersionName = envValue("EVENTMENU_VERSION_NAME")
 val ciBuildNumber = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
-val appVersionCode = ciBuildNumber ?: 3
-val appVersionName = if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0"
+val appVersionCode = explicitVersionCode ?: ciBuildNumber ?: 3
+val appVersionName = explicitVersionName.ifBlank { if (ciBuildNumber != null) "0.2.$ciBuildNumber" else "0.2.0" }
+if (appVersionCode < 1) {
+    throw GradleException("EVENTMENU_VERSION_CODE precisa ser maior que zero.")
+}
+if (!Regex("^[0-9]+(?:\\.[0-9]+){1,3}(?:[-+][A-Za-z0-9.-]+)?$").matches(appVersionName)) {
+    throw GradleException("EVENTMENU_VERSION_NAME possui formato inválido.")
+}
 
 val firebaseProjectId = envValue("EVENTMENU_FIREBASE_PROJECT_ID", "FCM_PROJECT_ID")
 val firebaseAppId = envValue("EVENTMENU_FIREBASE_APP_ID")
@@ -46,6 +54,28 @@ if (firebaseRequired && !firebaseEnabled) {
         "Firebase Cloud Messaging é obrigatório neste build. Configure EVENTMENU_FIREBASE_PROJECT_ID, " +
             "EVENTMENU_FIREBASE_APP_ID, EVENTMENU_FIREBASE_API_KEY e EVENTMENU_FIREBASE_SENDER_ID."
     )
+}
+
+val releaseStoreFile = envValue("EVENTMENU_RELEASE_STORE_FILE")
+val releaseStorePassword = envValue("EVENTMENU_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = envValue("EVENTMENU_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = envValue("EVENTMENU_RELEASE_KEY_PASSWORD")
+val releaseSigning = linkedMapOf(
+    "EVENTMENU_RELEASE_STORE_FILE" to releaseStoreFile,
+    "EVENTMENU_RELEASE_STORE_PASSWORD" to releaseStorePassword,
+    "EVENTMENU_RELEASE_KEY_ALIAS" to releaseKeyAlias,
+    "EVENTMENU_RELEASE_KEY_PASSWORD" to releaseKeyPassword,
+)
+val releaseSigningCount = releaseSigning.values.count { it.isNotBlank() }
+if (releaseSigningCount in 1 until releaseSigning.size) {
+    val missing = releaseSigning.filterValues { it.isBlank() }.keys.joinToString(", ")
+    throw GradleException("Assinatura de release incompleta. Faltando: $missing")
+}
+if (releaseRequested && releaseSigningCount != releaseSigning.size) {
+    throw GradleException("Build de release exige keystore e credenciais de assinatura oficiais.")
+}
+if (releaseSigningCount == releaseSigning.size && !file(releaseStoreFile).isFile) {
+    throw GradleException("EVENTMENU_RELEASE_STORE_FILE não aponta para um keystore válido.")
 }
 
 android {
@@ -76,10 +106,24 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    signingConfigs {
+        if (releaseSigningCount == releaseSigning.size) {
+            create("release") {
+                storeFile = file(releaseStoreFile)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (releaseSigningCount == releaseSigning.size) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
