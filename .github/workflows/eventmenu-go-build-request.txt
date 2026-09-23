@@ -1,2 +1,0 @@
-Build trigger for EventMenu GO validation.
-Requested after static audit and POS/customer/Pix fixes.

@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -32,10 +33,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import br.com.eventmenu.go.EventBarState
+import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
 
 @Composable
@@ -103,6 +106,14 @@ fun EventBarScreen(
         items(visible, key = { it.id }) { product ->
             Card(Modifier.fillMaxWidth()) {
                 Row(Modifier.fillMaxWidth().padding(15.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+                    if (product.imageUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = product.imageUrl,
+                            contentDescription = "Foto de ${product.name}",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(82.dp).padding(end = 12.dp),
+                        )
+                    }
                     Column(Modifier.weight(1f)) {
                         Text(product.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         Text(product.categoryName, color = MaterialTheme.colorScheme.onSurfaceVariant)

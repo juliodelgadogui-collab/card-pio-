@@ -1,0 +1,71 @@
+name: EventMenu Desktop Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feature/eventmenu-desktop
+      - wip/eventmenu-delivery-customer-auth-payments
+    paths:
+      - 'desktop/**'
+      - 'integrations/whatsapp-worker/**'
+      - '.github/workflows/desktop-windows.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'integrations/whatsapp-worker/**'
+      - '.github/workflows/desktop-windows.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build EventMenu Desktop + WhatsApp Connect
+        shell: pwsh
+        run: ./desktop/build-windows.ps1
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup não foi encontrado após a instalação."
+          }
+          & $iscc "desktop\installer\EventMenu.iss"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload portable Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Desktop-win-x64
+          path: desktop/artifacts/EventMenu-Desktop-win-x64/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Desktop-Setup
+          path: artifacts/EventMenu-Desktop-installer/*.exe
+          if-no-files-found: error
+          retention-days: 14

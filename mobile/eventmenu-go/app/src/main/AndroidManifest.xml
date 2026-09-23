@@ -23,11 +23,13 @@
         android:roundIcon="@drawable/ic_eventmenu_logo"
         android:label="EventMenu GO"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
-
         <meta-data
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="barcode_ui" />
-
+        <service
+            android:name=".delivery.DeliveryLocationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
         <service
             android:name=".notifications.EventMenuFirebaseMessagingService"
             android:exported="false">
@@ -35,18 +37,6 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
-
-        <service
-            android:name=".location.DeliveryLocationService"
-            android:exported="false"
-            android:foregroundServiceType="location"
-            android:stopWithTask="false" />
-
-        <activity
-            android:name=".location.LocationPermissionActivity"
-            android:exported="false"
-            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
-
         <activity
             android:name=".MainActivity"
             android:exported="true"

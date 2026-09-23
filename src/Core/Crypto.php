@@ -25,6 +25,11 @@ final class Crypto
         return base64_encode($iv . $tag . $cipher);
     }
 
+    public static function encryptJson(array $value): string
+    {
+        return self::encrypt($value);
+    }
+
     public static function decrypt(?string $value): string
     {
         if (!$value) return '';

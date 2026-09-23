@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-require __DIR__ . '/../app/bootstrap.php';
+require __DIR__.'/../app/bootstrap.php';
 
 use EventMenu\Services\DeliveryPublicTrackingService;
 
@@ -10,15 +10,13 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private, max-age=0');
 header('X-Content-Type-Options: nosniff');
 header('Referrer-Policy: no-referrer');
-header('X-Robots-Tag: noindex, nofollow');
-header('Cross-Origin-Resource-Policy: same-origin');
+header('Access-Control-Allow-Methods: GET');
 
-$token = strtolower(trim((string)($_GET['t'] ?? '')));
-$tracking = (new DeliveryPublicTrackingService())->snapshot($token);
-if (!$tracking) {
-    http_response_code(404);
-    echo json_encode(['ok' => false, 'error' => 'Rastreamento indisponível.'], JSON_UNESCAPED_UNICODE);
-    exit;
-}
+function delivery_track_out(array$data,int$status=200):never{http_response_code($status);echo json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);exit;}
 
-echo json_encode(['ok' => true, 'tracking' => $tracking], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+if($_SERVER['REQUEST_METHOD']!=='GET')delivery_track_out(['ok'=>false,'error'=>'Método não permitido.'],405);
+try{
+    $token=trim((string)($_GET['token']??''));
+    $tracking=(new DeliveryPublicTrackingService())->publicStatus($token);
+    delivery_track_out(['ok'=>true,'tracking'=>$tracking]);
+}catch(RuntimeException){delivery_track_out(['ok'=>false,'error'=>'Acompanhamento indisponível ou expirado.'],404);}catch(Throwable){delivery_track_out(['ok'=>false,'error'=>'Não foi possível atualizar a entrega.'],500);}

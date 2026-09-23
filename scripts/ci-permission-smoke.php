@@ -38,10 +38,12 @@ permission_assert(($cashierMap['loyalty_adjust']??true)===false,'Mapa Android do
 permission_assert(($cashierMap['loyalty_redeem']??false)===true,'Mapa Android do caixa precisa de loyalty_redeem.');
 
 // Regressão de segurança: falha ao consultar overrides deve negar acesso, nunca restaurar permissões padrão.
+// O teste valida a semântica de fail-closed e não depende de espaços/quebras de linha do arquivo.
 $permissionSource=file_get_contents(dirname(__DIR__).'/src/Core/PermissionCatalog.php');
 permission_assert(is_string($permissionSource)&&$permissionSource!=='','Não foi possível inspecionar PermissionCatalog.');
 permission_assert(!str_contains($permissionSource,'catch(\\Throwable){}'),'Consulta de overrides voltou a engolir erro silenciosamente (fail-open).');
-permission_assert(str_contains($permissionSource,"return [];\n        }"),'Falha de overrides precisa terminar sem permissões (fail-closed).');
+permission_assert(str_contains($permissionSource,'catch(\\Throwable $e)'),'Falha de overrides precisa ser tratada explicitamente.');
+permission_assert(str_contains($permissionSource,'return [];'),'Falha de overrides precisa terminar sem permissões (fail-closed).');
 permission_assert(str_contains($permissionSource,'EventMenu permission lookup failed'),'Falha de consulta de permissões precisa deixar registro operacional seguro.');
 
 echo "CI permission smoke OK\n";

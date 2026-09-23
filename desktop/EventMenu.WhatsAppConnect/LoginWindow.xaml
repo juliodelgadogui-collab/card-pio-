@@ -1,0 +1,39 @@
+<Window x:Class="EventMenu.WhatsAppConnect.LoginWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Entrar no EventMenu Connect"
+        Width="430" Height="500" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        Background="#F8FAFC">
+    <Grid Margin="34">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <StackPanel>
+            <Border Width="56" Height="56" CornerRadius="16" Background="#16A34A" HorizontalAlignment="Left">
+                <TextBlock Text="W" Foreground="White" FontSize="25" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+            </Border>
+            <TextBlock Text="EventMenu Connect" FontSize="25" FontWeight="SemiBold" Foreground="#0F172A" Margin="0,16,0,0" />
+            <TextBlock Text="Entre com a conta do seu estabelecimento. Você não precisa abrir o EventMenu Desktop para conectar o WhatsApp." Foreground="#64748B" TextWrapping="Wrap" LineHeight="20" Margin="0,7,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="1" VerticalAlignment="Center">
+            <TextBlock Text="E-mail" Foreground="#334155" FontWeight="SemiBold" Margin="0,0,0,6" />
+            <TextBox x:Name="EmailBox" Height="42" Padding="11,8" FontSize="14" />
+
+            <TextBlock Text="Senha" Foreground="#334155" FontWeight="SemiBold" Margin="0,18,0,6" />
+            <PasswordBox x:Name="PasswordBox" Height="42" Padding="11,8" FontSize="14" KeyDown="PasswordBox_KeyDown" />
+
+            <TextBlock x:Name="StatusText" Foreground="#B91C1C" TextWrapping="Wrap" Margin="0,12,0,0" />
+        </StackPanel>
+
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <Button Content="Cancelar" Click="CancelButton_Click" Background="#E2E8F0" Foreground="#334155" BorderThickness="0" Padding="18,10" Margin="0,0,10,0" HorizontalAlignment="Right" />
+            <Button Grid.Column="1" x:Name="LoginButton" Content="Entrar" Click="LoginButton_Click" Background="#16A34A" Foreground="White" BorderThickness="0" Padding="24,10" />
+        </Grid>
+    </Grid>
+</Window>

@@ -177,8 +177,8 @@ class MainViewModel(
     fun resolveQr(value:String)=launchBusy{_state.update{it.copy(qr=repo.resolveQr(value))}}
     fun clearQr()=_state.update{it.copy(qr=null)}
     fun processCurrentQr(){val qr=_state.value.qr?:return;launchBusy{when(qr.type){
-        "ticket"->{repo.ticketCheckIn(qr.raw);if(_state.value.workShift?.mode=="events")refreshEventsInternal()}
-        "guest"->{repo.guestCheckIn(qr.raw);if(_state.value.workShift?.mode=="events")refreshEventsInternal()}
+        "ticket"->{val eventId=_state.value.selectedEventId?:throw IllegalStateException("Selecione o evento antes de validar a entrada.");eventRepo.ticketCheckIn(eventId,qr.raw);if(_state.value.workShift?.mode=="events")refreshEventsInternal()}
+        "guest"->{val eventId=_state.value.selectedEventId?:throw IllegalStateException("Selecione o evento antes de validar a entrada.");eventRepo.guestCheckIn(eventId,qr.raw);if(_state.value.workShift?.mode=="events")refreshEventsInternal()}
         "delivery_handoff"->{repo.confirmDeliveryHandoff(qr.raw);refreshCashInternal();if("reports" in (_state.value.session?.permissions?:emptySet()))runCatching{refreshManagerInternal()}}
         "order"->{val id=qr.orderId?:throw IllegalStateException("Pedido não identificado.");if(qr.status!="ready"){_state.update{it.copy(qr=null,message="Pedido #$id: ${orderStatusName(qr.status)}.")};return@launchBusy};refreshOrdersInternal();if("delivery_assign" in (_state.value.session?.permissions?:emptySet()))refreshDeliveryUsersInternal();_state.update{it.copy(qr=null,screen=AppScreen.DISPATCH,dispatchFocusOrderId=id,message="Pedido #$id localizado.")};return@launchBusy}
         else->throw IllegalStateException("Este QR não possui uma ação disponível para seu acesso.")

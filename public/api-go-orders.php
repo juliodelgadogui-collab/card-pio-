@@ -10,6 +10,7 @@ use EventMenu\Services\ApiAuthService;
 use EventMenu\Services\ApiRateLimitExceededException;
 use EventMenu\Services\LoyaltyPointsService;
 use EventMenu\Services\OrderHistoryService;
+use EventMenu\Services\OrderPaymentPreferenceService;
 use EventMenu\Services\OrderService;
 use EventMenu\Services\SensitiveApiRateLimitService;
 use EventMenu\Services\WorkShiftService;
@@ -52,6 +53,24 @@ try{
     $user=$auth->authenticate($token,$deviceId);$tenantId=(int)$user['tenant_id'];$action=(string)($_GET['action']??'detail');$shift=(new WorkShiftService())->current();
     if(!$shift)throw new RuntimeException('Inicie seu turno antes de consultar pedidos.');
 
+    if($action==='source-meta'){
+        goo_method('GET');
+        $allowed=Auth::can('orders.view')||Auth::can('orders.create')||Auth::can('orders.kitchen')||Auth::can('orders.dispatch')||Auth::can('orders.delivery')||Auth::can('payments.manage');
+        if(!$allowed)throw new RuntimeException('Acesso negado aos pedidos.');
+        $raw=trim((string)($_GET['ids']??''));
+        $ids=array_values(array_unique(array_filter(array_map('intval',preg_split('/[^0-9]+/',$raw)?:[]),static fn(int$id):bool=>$id>0)));
+        if(!$ids)goo_out(['ok'=>true,'orders'=>[]]);
+        if(count($ids)>200)throw new RuntimeException('Limite de pedidos excedido.');
+        $marks=implode(',',array_fill(0,count($ids),'?'));
+        $sql='SELECT o.id,o.order_source,opp.method payment_method,opp.provider payment_provider,opp.change_for_cents FROM orders o LEFT JOIN order_payment_preferences opp ON opp.order_id=o.id AND opp.tenant_id=o.tenant_id WHERE o.tenant_id=? AND o.id IN ('.$marks.')';
+        $args=array_merge([$tenantId],$ids);
+        $unitId=goo_unit($shift);if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}
+        if((string)$shift['mode']==='delivery'){$sql.=' AND o.channel="delivery" AND o.assigned_delivery_user_id=?';$args[]=(int)$user['id'];}
+        $sql.=' ORDER BY o.id DESC';$s=Database::connection()->prepare($sql);$s->execute($args);$meta=[];
+        foreach($s->fetchAll()as$row){$source=strtoupper(trim((string)($row['order_source']??'EVENTMENU_OWN')));$meta[]=['order_id'=>(int)$row['id'],'order_source'=>$source==='EVENTMENU_DELIVERY'?'EVENTMENU_DELIVERY':'EVENTMENU_OWN','payment_method'=>$row['payment_method']!==null?(string)$row['payment_method']:null,'payment_provider'=>$row['payment_provider']!==null?(string)$row['payment_provider']:null,'change_for_cents'=>$row['change_for_cents']!==null?(int)$row['change_for_cents']:null];}
+        goo_out(['ok'=>true,'orders'=>$meta]);
+    }
+
     if($action==='accept'){
         goo_method('POST');if($shift['mode']!=='operation')throw new RuntimeException('Aceitação de pedido é feita no turno de Operação.');if(!Auth::can('orders.dispatch')&&!Auth::can('orders.manage'))throw new RuntimeException('Sua função não pode aceitar pedidos.');
         $body=goo_body();$orderId=(int)($body['order_id']??0);$order=goo_assert_unit($tenantId,$orderId,$shift);if($order['status']!=='pending')throw new RuntimeException('Somente pedido novo pendente pode ser aceito.');
@@ -80,8 +99,8 @@ try{
         if(!$allowed&&Auth::can('orders.delivery')&&(int)($order['assigned_delivery_user_id']??0)===(int)$user['id'])$allowed=true;if(!$allowed)throw new RuntimeException('Acesso negado ao pedido.');
         $pdo=Database::connection();$items=$pdo->prepare('SELECT id,name_snapshot,quantity,unit_price_cents,total_cents,notes FROM order_items WHERE order_id=? ORDER BY id');$items->execute([$orderId]);
         $customer=null;if($order['customer_id']){$c=$pdo->prepare('SELECT id,name,phone,email FROM customers WHERE id=? AND tenant_id=? LIMIT 1');$c->execute([$order['customer_id'],$tenantId]);$customer=$c->fetch()?:null;}
-        $timeline=(new OrderHistoryService())->timeline($orderId);
-        goo_out(['ok'=>true,'detail'=>['order'=>$order,'customer'=>$customer,'items'=>$items->fetchAll(),'timeline'=>$timeline,'loyalty'=>goo_loyalty($pdo,$tenantId,$order)]]);
+        $timeline=(new OrderHistoryService())->timeline($orderId);$paymentPreference=(new OrderPaymentPreferenceService())->get($pdo,$tenantId,$orderId);
+        goo_out(['ok'=>true,'detail'=>['order'=>$order,'customer'=>$customer,'items'=>$items->fetchAll(),'timeline'=>$timeline,'loyalty'=>goo_loyalty($pdo,$tenantId,$order),'payment_preference'=>$paymentPreference]]);
     }
 
     goo_out(['ok'=>false,'error'=>'Endpoint operacional de pedido não encontrado.'],404);

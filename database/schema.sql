@@ -167,7 +167,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 CREATE TABLE IF NOT EXISTS payment_gateways (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   tenant_id BIGINT UNSIGNED NOT NULL,
-  provider ENUM('stripe','pagbank','mercadopago','manual') NOT NULL,
+  provider ENUM('stripe','pagbank','mercadopago','manual','efi','inter') NOT NULL,
   account_reference VARCHAR(190) NULL,
   config_encrypted LONGTEXT NULL,
   active TINYINT(1) NOT NULL DEFAULT 0,
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS payments (
   id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   tenant_id BIGINT UNSIGNED NOT NULL,
   order_id BIGINT UNSIGNED NOT NULL,
-  provider ENUM('stripe','pagbank','mercadopago','manual') NOT NULL,
+  provider ENUM('stripe','pagbank','mercadopago','manual','tef','efi','inter') NOT NULL,
   provider_payment_id VARCHAR(190) NULL,
   idempotency_key VARCHAR(190) NOT NULL,
   amount_cents INT UNSIGNED NOT NULL,
