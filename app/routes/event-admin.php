@@ -137,6 +137,13 @@ $editTypeId=max(0,(int)($_GET['edit_type']??0));
 $editType=null;
 foreach($types as $candidate)if((int)$candidate['id']===$editTypeId){$editType=$candidate;break;}
 $dtValue=static fn(?string $value):string=>$value?date('Y-m-d\TH:i',strtotime($value)):'';
+$scheduleStmt=$pdo->prepare('SELECT * FROM event_schedule_items WHERE tenant_id=? AND event_id=? ORDER BY starts_at,sort_order,id');
+$scheduleStmt->execute([$tenantId,$eventId]);
+$scheduleItems=$scheduleStmt->fetchAll();
+$editScheduleId=max(0,(int)($_GET['edit_schedule']??0));
+$editSchedule=null;
+foreach($scheduleItems as $candidate)if((int)$candidate['id']===$editScheduleId){$editSchedule=$candidate;break;}
+
 
 em_header('Evento · '.$event['name'],'events');
 ?>
