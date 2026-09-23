@@ -91,6 +91,32 @@ try{
     $s=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status="duplicate_paid"');$s->execute([$tenantId,$orderId]);
     payment_invariant_assert((int)$s->fetchColumn()===1,'Cobrança duplicada não ficou rastreável para estorno.');
 
+    // IDs externos pertencem ao contexto da conta/tenant. O mesmo identificador não pode
+    // fazer uma empresa bloquear ou contaminar a liquidação de outra empresa.
+    $pdo->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,?,"premium","active")')->execute(['CI Payment Tenant 2','ci-pay-2-'.$suffix]);
+    $tenant2=(int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,"CI Payment Unit 2",1)')->execute([$tenant2,'ci-pay-unit-2-'.$suffix]);
+    $unit2=(int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO orders (public_token,tenant_id,unit_id,channel,status,payment_status,subtotal_cents,total_cents) VALUES (?, ?, ?, "counter", "pending", "unpaid", 1000, 1000)')->execute([bin2hex(random_bytes(20)),$tenant2,$unit2]);
+    $order2=(int)$pdo->lastInsertId();
+    $insert->execute([$tenant2,$order2,'manual','ci-payment-c-'.$suffix,1000]);
+    $paymentC=(int)$pdo->lastInsertId();
+    $service->confirmVerified([
+        'tenant_id'=>$tenant2,
+        'order_id'=>$order2,
+        'provider'=>'manual',
+        'provider_payment_id'=>$providerTxnA,
+        'amount_cents'=>1000,
+        'currency'=>'BRL',
+        'account_reference'=>'manual-ci-2',
+        'payment_id'=>$paymentC,
+        'source'=>'ci-cross-tenant',
+    ]);
+    $s=$pdo->prepare('SELECT status FROM payments WHERE id=? AND tenant_id=?');$s->execute([$paymentC,$tenant2]);
+    payment_invariant_assert((string)$s->fetchColumn()==='paid','ID externo igual em outro tenant bloqueou pagamento válido.');
+    $s=$pdo->prepare('SELECT payment_status FROM orders WHERE id=? AND tenant_id=?');$s->execute([$order2,$tenant2]);
+    payment_invariant_assert((string)$s->fetchColumn()==='paid','Pagamento do segundo tenant não liquidou seu próprio pedido.');
+
     echo "CI payment invariants OK ({$driver})\n";
 }catch(Throwable $e){
     payment_invariant_fail($e->getMessage()."\n".$e->getTraceAsString());
