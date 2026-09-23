@@ -1,0 +1,133 @@
+name: EventMenu Connect Production Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Versão (ex.: 1.0.0)'
+        required: true
+        type: string
+      version_code:
+        description: 'Android versionCode inteiro'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+environment: eventmenu-connect-production
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile/eventmenu-connect
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate release inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${{ inputs.version_name }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][A-Za-z0-9]+)*$ ]]
+          [[ "${{ inputs.version_code }}" =~ ^[0-9]+$ ]]
+          test "${{ inputs.version_code }}" -ge 1
+          test "${{ inputs.version_code }}" -le 2100000000
+
+      - name: Install Android SDK 36 + NDK + CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.0.13004108" "cmake;3.22.1"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Prepare Node 24 mobile runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL="https://github.com/fogtape/nodejs-mobile/releases/download/v24.21.0-0/nodejs-mobile-android-24.21.0-0.zip"
+          EXPECTED="e3cd29a1be03405f11dd5c857af8cd3ad13f84f1409ea648f5328f0bada5bd76"
+          rm -rf .node-mobile app/libnode
+          mkdir -p .node-mobile app/libnode/bin/arm64-v8a app/libnode/include
+          curl -fL --retry 3 "$URL" -o .node-mobile/node.zip
+          echo "$EXPECTED  .node-mobile/node.zip" | sha256sum -c -
+          unzip -q .node-mobile/node.zip -d .node-mobile/unpacked
+          LIBNODE="$(find .node-mobile/unpacked -type f -path '*/bin/arm64-v8a/libnode.so' -print -quit)"
+          NODE_H="$(find .node-mobile/unpacked -type f -path '*/include/node/node.h' -print -quit)"
+          test -n "$LIBNODE" && test -n "$NODE_H"
+          cp "$LIBNODE" app/libnode/bin/arm64-v8a/libnode.so
+          INCLUDE_ROOT="$(dirname "$(dirname "$NODE_H")")"
+          cp -R "$INCLUDE_ROOT"/. app/libnode/include/
+
+      - name: Bundle Baileys
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf node-runtime/node_modules app/src/main/assets/nodejs-project.zip
+          npm --prefix node-runtime install --omit=dev --legacy-peer-deps --no-audit --no-fund
+          mkdir -p app/src/main/assets
+          (cd node-runtime && zip -q -r ../app/src/main/assets/nodejs-project.zip . -x '*.log' '.npmrc' 'npm-debug.log' 'hardening-smoke.mjs')
+          node --check node-runtime/main.js
+          node node-runtime/hardening-smoke.mjs
+
+      - name: Restore production signing key
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.EVENTMENU_CONNECT_RELEASE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          test -n "$KEYSTORE_B64"
+          printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/eventmenu-connect-release.jks"
+          test -s "$RUNNER_TEMP/eventmenu-connect-release.jks"
+          echo "EVENTMENU_CONNECT_RELEASE_KEYSTORE_PATH=$RUNNER_TEMP/eventmenu-connect-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build signed release
+        shell: bash
+        env:
+          EVENTMENU_CONNECT_RELEASE_STORE_PASSWORD: ${{ secrets.EVENTMENU_CONNECT_RELEASE_STORE_PASSWORD }}
+          EVENTMENU_CONNECT_RELEASE_KEY_ALIAS: ${{ secrets.EVENTMENU_CONNECT_RELEASE_KEY_ALIAS }}
+          EVENTMENU_CONNECT_RELEASE_KEY_PASSWORD: ${{ secrets.EVENTMENU_CONNECT_RELEASE_KEY_PASSWORD }}
+          EVENTMENU_CONNECT_VERSION_NAME: ${{ inputs.version_name }}
+          EVENTMENU_CONNECT_VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          gradle :app:assembleRelease --stacktrace --no-daemon
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" | tee "$RUNNER_TEMP/apksigner.txt"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt"
+          grep -F "versionName='${EVENTMENU_CONNECT_VERSION_NAME}'" "$RUNNER_TEMP/badging.txt"
+          grep -F "versionCode='${EVENTMENU_CONNECT_VERSION_CODE}'" "$RUNNER_TEMP/badging.txt"
+          mkdir -p dist-release
+          cp "$APK" "dist-release/EventMenu-Connect-${EVENTMENU_CONNECT_VERSION_NAME}.apk"
+          sha256sum "dist-release/EventMenu-Connect-${EVENTMENU_CONNECT_VERSION_NAME}.apk" > "dist-release/EventMenu-Connect-${EVENTMENU_CONNECT_VERSION_NAME}.apk.sha256"
+          rm -f "$EVENTMENU_CONNECT_RELEASE_KEYSTORE_PATH"
+
+      - name: Upload signed production APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Connect-${{ inputs.version_name }}-signed-release
+          path: |
+            mobile/eventmenu-connect/dist-release/*.apk
+            mobile/eventmenu-connect/dist-release/*.sha256
+          if-no-files-found: error
+          retention-days: 30
