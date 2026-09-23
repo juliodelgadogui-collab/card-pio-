@@ -57,7 +57,6 @@ final class WhatsAppCommerceConversionService
 
         $existing=$this->validDraftId($pdo,$tenantId,(int)($conversation['draft_order_id']??0));
         if($existing>0){$pdo->prepare("UPDATE whatsapp_conversations SET state='CART',context_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$this->json(['draft_order_id'=>$existing]),$conversationId,$tenantId]);return$this->cartSnapshot($pdo,$tenantId,$conversationId,$existing,'Você já tinha um carrinho em andamento. Continue por ele:','repeat_existing_cart');}
-
         $q=$pdo->prepare("SELECT id,unit_id FROM orders WHERE tenant_id=? AND customer_id=? AND status NOT IN ('draft','cancelled') ORDER BY id DESC LIMIT 1");$q->execute([$tenantId,$customerId]);$previous=$q->fetch(PDO::FETCH_ASSOC);
         if(!$previous)return['handled'=>true,'state'=>'WELCOME','reply'=>"Ainda não encontrei um pedido anterior para repetir.\n\n1 - Fazer um pedido\n3 - Acompanhar pedido\n4 - Falar com atendente",'kind'=>'repeat_not_found'];
 
@@ -87,6 +86,7 @@ final class WhatsAppCommerceConversionService
         $pdo->prepare('UPDATE orders SET subtotal_cents=?,total_cents=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$subtotal,$subtotal,$draftId,$tenantId]);
         $pdo->prepare("UPDATE whatsapp_conversations SET customer_id=?,draft_order_id=?,state='CART',context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")
             ->execute([$customerId,$draftId,$this->json(['draft_order_id'=>$draftId,'repeated_from_order_id'=>(int)$previous['id']]),$conversationId,$tenantId]);
+        (new WhatsAppCommerceAnalyticsService())->track($pdo,$tenantId,'repeat_order',$conversationId,$draftId,0,['source_order_id'=>(int)$previous['id'],'current_total_cents'=>$subtotal,'skipped_items'=>$skipped],'repeat-order|'.$tenantId.'|'.$draftId);
         $prefix='🔁 Repeti os itens disponíveis do pedido #'.(int)$previous['id'].' usando os preços atuais.';if($skipped>0)$prefix.="\n⚠️ {$skipped} item(ns) não puderam ser repetidos porque mudaram ou ficaram indisponíveis.";
         return$this->cartSnapshot($pdo,$tenantId,$conversationId,$draftId,$prefix,'repeat_order');
     }
@@ -101,6 +101,7 @@ final class WhatsAppCommerceConversionService
         if(!$suggestions)return$this->toFulfillment($pdo,$tenantId,$conversation,$draftId,$prefix);
         $ids=array_map(static fn(array$row):int=>(int)$row['id'],$suggestions);$context=['draft_order_id'=>$draftId,'upsell_product_ids'=>$ids];
         $pdo->prepare("UPDATE whatsapp_conversations SET state='UPSELL',context_json=?,last_activity_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?")->execute([$this->json($context),(int)$conversation['id'],$tenantId]);
+        (new WhatsAppCommerceAnalyticsService())->track($pdo,$tenantId,'upsell_offer',(int)$conversation['id'],$draftId,0,['product_ids'=>$ids],'upsell-offer|'.$tenantId.'|'.$draftId);
         $lines=[];if($prefix!=='')$lines[]=$prefix;$lines[]='';$lines[]='✨ *Que tal completar seu pedido?*';$lines[]='Quem compra itens parecidos também costuma pedir:';$lines[]='';foreach($suggestions as$i=>$row)$lines[]=($i+1).' - '.(string)$row['name'].' — '.$this->money((int)$row['price_cents']);$lines[]='';$lines[]='0 - Continuar sem adicionar';
         return['handled'=>true,'state'=>'UPSELL','draft_order_id'=>$draftId,'reply'=>trim(implode("\n",$lines)),'kind'=>'upsell_offer'];
     }
@@ -115,7 +116,8 @@ final class WhatsAppCommerceConversionService
         $productId=$ids[(int)$normalized-1];
         if($this->hasActiveModifiers($pdo,$tenantId,$productId))return$this->beginUpsell($pdo,$tenantId,$conversation,'Esta sugestão mudou e precisa ser escolhida pelo cardápio. Selecione outra opção.');
         $resolved=$this->configured->resolveLine($pdo,$tenantId,['product_id'=>$productId,'qty'=>1,'option_ids'=>[],'notes'=>''],true);
-        $ins=$pdo->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents,notes) VALUES (?,?,?,?,?,?,NULL)');$ins->execute([$draftId,$resolved['product_id'],$resolved['name'],$resolved['unit_price_cents'],1,$resolved['total_cents']]);
+        $ins=$pdo->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents,notes) VALUES (?,?,?,?,?,?,NULL)');$ins->execute([$draftId,$resolved['product_id'],$resolved['name'],$resolved['unit_price_cents'],1,$resolved['total_cents']]);$orderItemId=(int)$pdo->lastInsertId();
+        (new WhatsAppCommerceAnalyticsService())->track($pdo,$tenantId,'upsell_accepted',(int)$conversation['id'],$draftId,(int)$resolved['total_cents'],['product_id'=>(int)$resolved['product_id'],'order_item_id'=>$orderItemId,'product_name'=>(string)$resolved['name']],'upsell-accepted|'.$tenantId.'|'.$draftId.'|'.$orderItemId);
         $this->recalculate($pdo,$tenantId,$draftId);
         $fresh=$this->conversation($pdo,$tenantId,(int)$conversation['id']);
         return$this->beginUpsell($pdo,$tenantId,$fresh,'✅ '.(string)$resolved['name'].' adicionado ao pedido.');
