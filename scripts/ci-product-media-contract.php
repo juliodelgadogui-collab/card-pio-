@@ -12,7 +12,7 @@ media_contract_assert(str_contains($service,"WHERE id=? AND tenant_id=?"),'Produ
 media_contract_assert(str_contains($service,"'image/jpeg'=>'jpg'")&&str_contains($service,"'image/png'=>'png'")&&str_contains($service,"'image/webp'=>'webp'"),'Tipos seguros de imagem não estão restritos a JPG/PNG/WebP.');
 media_contract_assert(str_contains($service,'5*1024*1024'),'Limite de 5 MB da foto não está protegido.');
 media_contract_assert(str_contains($service,"app_absolute_url('media.php?t='") ,'Foto local precisa ser gravada com URL absoluta para o Android.');
-media_contract_assert(str_contains($service,"'product-'.$productId.'-'") ,'Nome da mídia precisa carregar o product_id.');
+media_contract_assert(str_contains($service,"'product-'.\$productId.'-'") ,'Nome da mídia precisa carregar o product_id.');
 
 $media=media_contract_file($root.'/public/media.php');
 media_contract_assert(str_contains($media,"product-[1-9][0-9]*-[a-f0-9]{24}"),'media.php não aceita o padrão seguro de foto de produto.');
