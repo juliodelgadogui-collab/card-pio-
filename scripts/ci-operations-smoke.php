@@ -9,6 +9,7 @@ use EventMenu\Services\CashService;
 use EventMenu\Services\DeliveryProgressService;
 use EventMenu\Services\OperatingUnitService;
 use EventMenu\Services\OrderCancellationService;
+use EventMenu\Services\OrderCreationService;
 use EventMenu\Services\OrderService;
 
 function ops_fail(string $message): never { fwrite(STDERR,"OPS CI FAIL: {$message}\n"); exit(1); }
@@ -22,6 +23,22 @@ $pdo->prepare('INSERT INTO users (tenant_id,name,email,password_hash,role,status
 
 $_SESSION['user_id']=$adminId;$_SESSION['tenant_id']=$tenantId;$_SESSION['role']='admin';$_SESSION['name']='Ops Admin';unset($_SESSION['acting_tenant_id']);
 $service=new OrderService();
+
+// Criação de pedido precisa ser idempotente para retry de rede/toque concorrente no EventMenu GO.
+$sku='OPS-IDEM-'.strtoupper(bin2hex(random_bytes(4)));
+$pdo->prepare('INSERT INTO products (tenant_id,name,sku,price_cents,stock_qty,track_stock,active) VALUES (?,"Produto Idempotência",?,1250,0,0,1)')->execute([$tenantId,$sku]);
+$idempotentProductId=(int)$pdo->lastInsertId();
+$creation=new OrderCreationService();
+$creationKey='go-order-ci-'.bin2hex(random_bytes(12));
+$creationPayload=['channel'=>'counter','customer_name'=>'Cliente Idempotente','customer_phone'=>'22999990000','items'=>[['product_id'=>$idempotentProductId,'quantity'=>1]],'idempotency_key'=>$creationKey];
+$created=$creation->create($creationPayload);$replayed=$creation->create($creationPayload);
+ops_assert((int)$created['id']===(int)$replayed['id'],'Retry idempotente criou outro pedido.');
+ops_assert(($created['idempotent_replay']??true)===false,'Primeira criação foi marcada como replay.');
+ops_assert(($replayed['idempotent_replay']??false)===true,'Segunda criação não foi reconhecida como replay.');
+$q=$pdo->prepare('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND creation_idempotency_key=?');$q->execute([$tenantId,$creationKey]);ops_assert((int)$q->fetchColumn()===1,'Banco persistiu mais de um pedido para a mesma chave de criação.');
+$q=$pdo->prepare('SELECT COUNT(*) FROM order_items WHERE order_id=?');$q->execute([(int)$created['id']]);ops_assert((int)$q->fetchColumn()===1,'Replay alterou os itens do pedido existente.');
+$changed=$creationPayload;$changed['items']=[['product_id'=>$idempotentProductId,'quantity'=>2]];
+try{$creation->create($changed);ops_fail('A mesma chave foi aceita com conteúdo diferente.');}catch(RuntimeException $e){ops_assert(str_contains($e->getMessage(),'dados diferentes'),'Conflito de chave retornou motivo inesperado.');}
 
 $token=bin2hex(random_bytes(20));$pdo->prepare('INSERT INTO orders (public_token,tenant_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?, ?, "counter", "confirmed", "unpaid", 1000, 1000, ?)')->execute([$token,$tenantId,$adminId]);$kitchenOrder=(int)$pdo->lastInsertId();
 $service->changeStatus($kitchenOrder,'preparing','kitchen');$service->changeStatus($kitchenOrder,'ready','kitchen');
