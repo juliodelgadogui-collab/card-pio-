@@ -80,6 +80,23 @@ final class ProductionReadinessService
             $warnings[] = ['key' => 'push', 'message' => 'Push instantâneo não está totalmente pronto. O app ainda pode usar sincronização periódica.'];
         }
 
+        $whatsapp = is_array($checks['whatsapp'] ?? null) ? $checks['whatsapp'] : [];
+        $whatsappState = (string)($whatsapp['state'] ?? 'disabled');
+        if ($whatsappState === 'ok') {
+            $passed[] = ['key' => 'whatsapp', 'message' => (string)($whatsapp['message'] ?? 'WhatsApp / EventMenu Connect saudável.')];
+        } elseif ($whatsappState === 'disabled') {
+            $passed[] = ['key' => 'whatsapp_optional', 'message' => 'WhatsApp não está configurado; este canal opcional não bloqueia a operação principal.'];
+        } else {
+            $warnings[] = ['key' => 'whatsapp', 'message' => 'WhatsApp / EventMenu Connect está ativo ou possui fila e precisa de atenção antes de ampliar o uso deste canal.'];
+        }
+
+        $printQueue = is_array($checks['print_queue'] ?? null) ? $checks['print_queue'] : [];
+        if (($printQueue['state'] ?? 'warning') === 'ok') {
+            $passed[] = ['key' => 'print_queue', 'message' => (string)($printQueue['message'] ?? 'Fila de impressão saudável.')];
+        } else {
+            $warnings[] = ['key' => 'print_queue', 'message' => 'A fila automática de impressão precisa de atenção; a operação deve confirmar impressões antes do go-live.'];
+        }
+
         $webhooks = is_array($checks['webhooks'] ?? null) ? $checks['webhooks'] : [];
         $webhookLast = $webhooks['details']['last'] ?? null;
         if (($webhooks['state'] ?? 'warning') === 'ok' && is_array($webhookLast) && $webhookLast !== []) {
