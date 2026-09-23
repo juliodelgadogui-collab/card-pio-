@@ -15,3 +15,5 @@ foreach($checks as$file=>$needle){
     }
 }
 echo "event schedule contract ok\n";
+
+require __DIR__.'/ci-event-checkin-contract.php';
