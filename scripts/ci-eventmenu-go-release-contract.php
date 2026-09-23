@@ -33,7 +33,8 @@ foreach ([
     'EVENTMENU_GO_RELEASE_KEYSTORE_B64',
     'EVENTMENU_APK_PUBLISH_TOKEN',
     ':app:assembleRelease',
-    'apksigner verify',
+    'APKSIGNER=',
+    'verify --verbose --print-certs',
     '/api/apk/publish',
     'sha256sum',
 ] as $needle) {
