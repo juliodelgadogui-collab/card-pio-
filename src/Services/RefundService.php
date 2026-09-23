@@ -34,7 +34,7 @@ final class RefundService
             $stmt->execute([$tenantId,$payment['id'],$payment['order_id'],$userId,$payment['provider'],$payment['amount_cents'],$payment['currency'],$reason,$key]);
             $id=(int)$pdo->lastInsertId();
             Auth::audit('refund.requested','refund',(string)$id,['payment_id'=>(int)$payment['id'],'order_id'=>(int)$payment['order_id'],'unit_id'=>$payment['unit_id']??null,'duplicate_payment'=>$payment['status']==='duplicate_paid','late_event_payment'=>$this->isLateEventPayment($payment)]);
-            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$id]);
+            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=? AND tenant_id=?');$s->execute([$id,$tenantId]);
             return $s->fetch()?:throw new RuntimeException('Falha ao criar solicitação de estorno.');
         });
 
@@ -49,7 +49,7 @@ final class RefundService
             $stmt=$pdo->prepare('UPDATE refunds SET provider_refund_id=?,status=?,provider_payload=?,error_message=NULL,provider_succeeded_at=CASE WHEN ?="provider_succeeded" THEN CURRENT_TIMESTAMP ELSE provider_succeeded_at END WHERE id=? AND tenant_id=?');
             $stmt->execute([(string)($result['provider_refund_id']??''),$status,json_encode($result['payload']??[],JSON_UNESCAPED_UNICODE),$status,$refund['id'],$tenantId]);
             if($status==='provider_succeeded')return $this->finalize((int)$refund['id']);
-            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$refund['id']]);return $s->fetch();
+            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=? AND tenant_id=?');$s->execute([$refund['id'],$tenantId]);return $s->fetch();
         }catch(Throwable $e){
             Database::connection()->prepare('UPDATE refunds SET status="failed",error_message=? WHERE id=? AND tenant_id=?')->execute([mb_substr($e->getMessage(),0,1000),$refund['id'],$tenantId]);
             Auth::audit('refund.failed','refund',(string)$refund['id'],['error'=>$e->getMessage(),'unit_id'=>$payment['unit_id']??null]);
@@ -129,7 +129,7 @@ final class RefundService
                 $pdo->prepare('UPDATE payments SET status="refunded" WHERE id=? AND tenant_id=?')->execute([$refund['payment_id'],$tenantId]);
                 $pdo->prepare('UPDATE refunds SET status="completed",completed_at=CURRENT_TIMESTAMP,error_message=NULL WHERE id=? AND tenant_id=?')->execute([$refundId,$tenantId]);
                 Auth::audit('refund.duplicate_completed','refund',(string)$refundId,['payment_id'=>(int)$refund['payment_id'],'order_id'=>(int)$refund['order_id'],'unit_id'=>$unitId,'amount_cents'=>(int)$refund['amount_cents']]);
-                $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$refundId]);return $s->fetch();
+                $s=$pdo->prepare('SELECT * FROM refunds WHERE id=? AND tenant_id=?');$s->execute([$refundId,$tenantId]);return $s->fetch();
             }
             $parts=$pdo->prepare('SELECT COUNT(*) FROM payments WHERE tenant_id=? AND order_id=? AND status="paid"');$parts->execute([$tenantId,$refund['order_id']]);
             if((int)$parts->fetchColumn()>1)throw new RuntimeException('Estorno individual de parcela bloqueado: o pedido possui pagamento dividido.');
@@ -149,8 +149,8 @@ final class RefundService
                 $this->syncLegacyProduct($pdo,$tenantId,$productId);
             }
 
-            $tickets=$pdo->prepare(Database::portableSql($pdo,'SELECT batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="paid" GROUP BY batch_id FOR UPDATE'));$tickets->execute([$tenantId,$refund['order_id']]);
-            foreach($tickets->fetchAll()as$row)$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_sold=GREATEST(0,quantity_sold-?) WHERE id=?'))->execute([(int)$row['qty'],$row['batch_id']]);
+            $tickets=$pdo->prepare(Database::portableSql($pdo,'SELECT event_id,batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="paid" GROUP BY event_id,batch_id FOR UPDATE'));$tickets->execute([$tenantId,$refund['order_id']]);
+            foreach($tickets->fetchAll()as$row)$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_sold=GREATEST(0,quantity_sold-?) WHERE id=? AND event_id=?'))->execute([(int)$row['qty'],$row['batch_id'],$row['event_id']]);
             $pdo->prepare('UPDATE tickets SET status="refunded" WHERE tenant_id=? AND order_id=? AND status="paid"')->execute([$tenantId,$refund['order_id']]);
 
             if(!empty($payment['coupon_id'])){$r=$pdo->prepare('SELECT id FROM coupon_redemptions WHERE tenant_id=? AND order_id=? LIMIT 1');$r->execute([$tenantId,$refund['order_id']]);if($r->fetchColumn())$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET uses_count=GREATEST(0,uses_count-1) WHERE id=? AND tenant_id=?'))->execute([$payment['coupon_id'],$tenantId]);}
@@ -170,7 +170,7 @@ final class RefundService
             (new MarketplaceCommissionService())->reverse($pdo,$tenantId,(int)$refund['order_id'],'Estorno integral confirmado #'.$refundId.'.');
             $pdo->prepare('UPDATE refunds SET status="completed",completed_at=CURRENT_TIMESTAMP,error_message=NULL WHERE id=? AND tenant_id=?')->execute([$refundId,$tenantId]);
             Auth::audit('refund.completed','refund',(string)$refundId,['payment_id'=>(int)$refund['payment_id'],'order_id'=>(int)$refund['order_id'],'unit_id'=>$unitId,'amount_cents'=>(int)$refund['amount_cents']]);
-            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=?');$s->execute([$refundId]);return $s->fetch();
+            $s=$pdo->prepare('SELECT * FROM refunds WHERE id=? AND tenant_id=?');$s->execute([$refundId,$tenantId]);return $s->fetch();
         });
     }
 
