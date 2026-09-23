@@ -108,7 +108,7 @@ em_header('WhatsApp','whatsapp');
 ?>
 <section class="page-hero">
   <div><span class="eyebrow">EVENTMENU CONNECT</span><h2>WhatsApp da empresa</h2><p>O servidor organiza conversas, pedidos, respostas e a Base da IA. Pareamento, sessão, reconexão e envio real ficam exclusivamente no aplicativo EventMenu Connect.</p></div>
-  <div class="hero-actions"><a class="button primary" href="<?=Security::e(app_url('support.php?list=1'))?>">Atender / iniciar conversa</a><a class="button secondary" href="<?=Security::e(app_url('support.php'))?>">Central de Atendimento</a><a class="button secondary" href="<?=Security::e(app_url('?route=settings'))?>">Voltar</a></div>
+  <div class="hero-actions"><a class="button primary" href="<?=Security::e(app_url('support.php?list=1'))?>">Atender / iniciar conversa</a><a class="button secondary" href="<?=Security::e(app_url('whatsapp-results.php'))?>">Resultados</a><a class="button secondary" href="<?=Security::e(app_url('support.php'))?>">Central de Atendimento</a><a class="button secondary" href="<?=Security::e(app_url('?route=settings'))?>">Voltar</a></div>
 </section>
 
 <div class="settings-layout"><div class="settings-main">
@@ -187,6 +187,7 @@ em_header('WhatsApp','whatsapp');
 </div>
 
 <aside class="settings-side">
+  <section class="card"><span class="eyebrow">RESULTADOS</span><h3>Desempenho do WhatsApp</h3><p class="muted">Veja funil, vendas pagas, carrinhos recuperados, repetição de pedidos, sugestões aceitas e saúde da fila.</p><a class="button secondary compact" href="<?=Security::e(app_url('whatsapp-results.php'))?>">Ver resultados</a></section>
   <section class="card"><span class="eyebrow">VENDAS</span><h3>Conversão no WhatsApp</h3><p class="muted">Controle repetição de pedidos, sugestões de itens e lembrete de carrinho não finalizado.</p><a class="button secondary compact" href="#whatsapp-sales">Configurar vendas</a></section>
   <section class="card"><span class="eyebrow">ASSISTENTE</span><h3>IA sem inventar dados</h3><p class="muted">Perguntas da empresa usam a Base da IA. Pedido, catálogo, valores, estoque e pagamentos continuam consultando o EventMenu como fonte da verdade.</p><a class="button secondary compact" href="#whatsapp-ai">Configurar IA</a></section>
   <section class="card"><span class="eyebrow">ATENDIMENTO</span><h3>Inbox completo</h3><p class="muted">Use a Central de Atendimento para assumir conversas, responder manualmente e devolver o cliente ao fluxo automático.</p><a class="button secondary compact" href="<?=Security::e(app_url('support.php'))?>">Abrir Central</a></section>
