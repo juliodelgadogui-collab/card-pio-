@@ -42,7 +42,7 @@ final class ReceiptPresentationService
         ]:['enabled'=>false,'label'=>'PUBLICIDADE','headline'=>'','body'=>'','image_url'=>'','target_url'=>'','campaign'=>''];
         return [
             'schema_version'=>2,
-            'paper_width'=>in_array((string)($settings['receipt_paper_width']??'80'),['58','80'],true)?(string)$settings['receipt_paper_width']:'80',
+            'paper_width'=>$this->paperWidth($settings),
             'title'=>$this->text($settings,'receipt_title',80)?:'COMPROVANTE NÃO FISCAL',
             'subtitle'=>$this->text($settings,'receipt_subtitle',120)?:'Documento operacional EventMenu',
             'footer'=>$this->text($settings,'receipt_footer',300)?:'Obrigado pela preferência!',
@@ -66,6 +66,7 @@ final class ReceiptPresentationService
         ];
     }
 
+    private function paperWidth(array $settings):string{$paper=(string)($settings['receipt_paper_width']??'80');return in_array($paper,['58','80'],true)?$paper:'80';}
     private function bool(array $s,string $key,bool $default):bool{return array_key_exists($key,$s)?(bool)$s[$key]:$default;}
     private function text(array $s,string $key,int $max):string{return mb_substr(trim((string)($s[$key]??'')),0,$max);}
     private function url(array $s,string $key):string{$v=trim((string)($s[$key]??''));return $v!==''&&filter_var($v,FILTER_VALIDATE_URL)&&in_array(strtolower((string)parse_url($v,PHP_URL_SCHEME)),['http','https'],true)?$v:'';}
