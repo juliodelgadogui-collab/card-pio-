@@ -1,0 +1,32 @@
+name: EventMenu GO Release Contract
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mobile/eventmenu-go/app/build.gradle.kts'
+      - '.github/workflows/eventmenu-go-release.yml'
+      - '.github/workflows/eventmenu-go-release-contract.yml'
+      - 'scripts/ci-eventmenu-go-release-contract.php'
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/eventmenu-go/app/build.gradle.kts'
+      - '.github/workflows/eventmenu-go-release.yml'
+      - '.github/workflows/eventmenu-go-release-contract.yml'
+      - 'scripts/ci-eventmenu-go-release-contract.php'
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: Validate signed release contract
+        run: php scripts/ci-eventmenu-go-release-contract.php
