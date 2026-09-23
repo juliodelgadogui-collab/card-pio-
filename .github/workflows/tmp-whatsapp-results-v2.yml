@@ -37,3 +37,4 @@ jobs:
           rm -f /tmp/eventmenu-whatsapp-results-v2.sqlite*
           php scripts/ci-db-smoke.php
           php scripts/ci-whatsapp-analytics-smoke.php
+# temporary branch-only validation
