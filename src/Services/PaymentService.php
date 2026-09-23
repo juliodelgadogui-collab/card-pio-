@@ -30,7 +30,7 @@ final class PaymentService
             if(!in_array($provider,['manual','tef'],true)){$gw=$pdo->prepare('SELECT id FROM payment_gateways WHERE tenant_id=? AND provider=? AND active=1');$gw->execute([$tenantId,$provider]);if(!$gw->fetchColumn())throw new RuntimeException('Gateway não está ativo para esta empresa.');}
             $open=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM payments WHERE tenant_id=? AND order_id=? AND status IN ("created","pending","authorized") ORDER BY id DESC LIMIT 1 FOR UPDATE'));$open->execute([$tenantId,$orderId]);if($payment=$open->fetch())return $payment;
             $stmt=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")');$stmt->execute([$tenantId,$orderId,$provider,$idempotencyKey,$amount]);$id=(int)$pdo->lastInsertId();
-            $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$orderId,$tenantId]);
+            $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$orderId,$tenantId]);
             Auth::audit('payment.created','payment',(string)$id,['order_id'=>$orderId,'provider'=>$provider,'amount_cents'=>$amount,'remaining_before_cents'=>$remaining]);
             return ['id'=>$id,'order_id'=>$orderId,'amount_cents'=>$amount,'remaining_before_cents'=>$remaining,'status'=>'created'];
         });
@@ -77,7 +77,7 @@ final class PaymentService
 
             $pdo->prepare('UPDATE payments SET provider_payment_id=?,status="paid",verified_at=CURRENT_TIMESTAMP,raw_payload=? WHERE id=? AND tenant_id=?')->execute([(string)$verified['provider_payment_id'],json_encode($verified,JSON_UNESCAPED_UNICODE),$payment['id'],$tenantId]);
             if($paidAfter<$total){
-                $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=? AND tenant_id=?')->execute([$orderId,$tenantId]);
+                $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=?')->execute([$orderId,$tenantId]);
                 Auth::audit('payment.partial_confirmed','payment',(string)$payment['id'],['order_id'=>$orderId,'paid_cents'=>$paidAfter,'remaining_cents'=>$total-$paidAfter]);
                 if($lateEvent)$lateRefundRequired=true;
                 return;
@@ -99,7 +99,7 @@ final class PaymentService
             }
 
             $becameConfirmed=(string)$order['status']==='pending';
-            $pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=? AND tenant_id=? AND tenant_id=?')->execute([$orderId,$tenantId]);
+            $pdo->prepare('UPDATE orders SET payment_status="paid",status=CASE WHEN status="pending" THEN "confirmed" ELSE status END WHERE id=? AND tenant_id=?')->execute([$orderId,$tenantId]);
             $order['payment_status']='paid';if($becameConfirmed)$order['status']='confirmed';$customerConfirmed=$becameConfirmed&&(string)($order['channel']??'')==='delivery';
             $this->settleOrderEffects($pdo,$tenantId,$order,$orderId);
             if((string)($order['channel']??'')!=='event')(new ProductionService())->ensureOrderJobs($pdo,$tenantId,$orderId,null);
