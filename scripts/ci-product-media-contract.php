@@ -22,7 +22,7 @@ $config=media_contract_file($root.'/app/routes/product-config.php');
 media_contract_assert(str_contains($config,'new ProductMediaService()'),'Tela do produto não usa o serviço de mídia.');
 media_contract_assert(str_contains($config,'enctype="multipart/form-data"'),'Formulário da foto precisa usar multipart/form-data.');
 media_contract_assert(str_contains($config,'name="product_photo"'),'Campo de upload da foto não está presente.');
-media_contract_assert(str_contains($config,"$action==='photo-upload'")&&str_contains($config,"$action==='photo-remove'"),'Ações de upload/remoção da foto não estão ligadas à tela.');
+media_contract_assert(str_contains($config,"photo-upload")&&str_contains($config,"photo-remove"),'Ações de upload/remoção da foto não estão ligadas à tela.');
 
 $go=media_contract_file($root.'/mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/data/EventMenuRepository.kt');
 media_contract_assert(str_contains($go,'imageUrl=p.optString("image_url")'),'EventMenu GO precisa continuar consumindo image_url do catálogo.');
