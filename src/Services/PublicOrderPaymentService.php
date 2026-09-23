@@ -72,7 +72,7 @@ final class PublicOrderPaymentService
     public function order(PDO $pdo,string $publicToken):array
     {
         $publicToken=trim($publicToken);if($publicToken===''||strlen($publicToken)>100)throw new RuntimeException('Pedido inválido.');
-        $q=$pdo->prepare('SELECT o.*,c.name customer_name,c.email customer_email,c.phone customer_phone,c.document customer_document,t.slug tenant_slug FROM orders o LEFT JOIN customers c ON c.id=o.customer_id JOIN tenants t ON t.id=o.tenant_id AND t.status="active" WHERE o.public_token=? LIMIT 1');$q->execute([$publicToken]);$order=$q->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');return$order;
+        $q=$pdo->prepare('SELECT o.*,c.name customer_name,c.email customer_email,c.phone customer_phone,c.document customer_document,t.slug tenant_slug FROM orders o LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id JOIN tenants t ON t.id=o.tenant_id AND t.status="active" WHERE o.public_token=? LIMIT 1');$q->execute([$publicToken]);$order=$q->fetch();if(!$order)throw new RuntimeException('Pedido não encontrado.');return$order;
     }
 
     private function context(PDO $pdo,string $publicToken,string $provider):array
