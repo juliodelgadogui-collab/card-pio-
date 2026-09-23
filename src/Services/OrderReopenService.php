@@ -18,7 +18,7 @@ final class OrderReopenService
         $shift=(new WorkShiftService())->current();
         if(!$shift||!in_array((string)$shift['mode'],['operation','pay'],true))throw new RuntimeException('A reabertura deve ser feita durante um turno de Operação ou Pay.');
         $unitId=$shift['unit_id']!==null&&$shift['unit_id']!==''?(int)$shift['unit_id']:null;$pdo=Database::connection();
-        $sql='SELECT o.id,o.unit_id,o.channel,o.payment_status,o.total_cents,o.tab_id,o.updated_at,c.name customer_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id WHERE o.tenant_id=? AND o.status="completed"';$args=[$tenantId];
+        $sql='SELECT o.id,o.unit_id,o.channel,o.payment_status,o.total_cents,o.tab_id,o.updated_at,c.name customer_name,rt.name table_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id LEFT JOIN restaurant_tables rt ON rt.id=o.table_id AND rt.tenant_id=o.tenant_id WHERE o.tenant_id=? AND o.status="completed"';$args=[$tenantId];
         if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' ORDER BY o.updated_at DESC,o.id DESC LIMIT 50';
         $s=$pdo->prepare($sql);$s->execute($args);$rows=$s->fetchAll();
         foreach($rows as &$row){[$eligible,$reason]=$this->eligibility($pdo,$tenantId,$row);$row['reopen_eligible']=$eligible?1:0;$row['reopen_block_reason']=$reason;}unset($row);
