@@ -3,10 +3,19 @@ name: EventMenu Connect Android
 on:
   push:
     branches:
-      - wip/eventmenu-delivery-customer-auth-payments
+      - main
+      - 'hardening/eventmenu-connect-*'
     paths:
       - 'mobile/eventmenu-connect/**'
       - '.github/workflows/eventmenu-connect-android.yml'
+      - '.github/workflows/eventmenu-connect-release.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'mobile/eventmenu-connect/**'
+      - '.github/workflows/eventmenu-connect-android.yml'
+      - '.github/workflows/eventmenu-connect-release.yml'
   workflow_dispatch:
 
 permissions:
@@ -19,6 +28,7 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: mobile/eventmenu-connect
@@ -37,17 +47,11 @@ jobs:
       - name: Install Android SDK 36 + NDK + CMake
         shell: bash
         run: |
+          set -euo pipefail
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          if [ ! -x "$SDKMANAGER" ]; then
-            SDKMANAGER="$(command -v sdkmanager)"
-          fi
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER="$(command -v sdkmanager)"; fi
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" --install \
-            "platform-tools" \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "ndk;28.0.13004108" \
-            "cmake;3.22.1"
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0" "ndk;28.0.13004108" "cmake;3.22.1"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
@@ -64,19 +68,12 @@ jobs:
           curl -fL --retry 3 "$URL" -o .node-mobile/node.zip
           echo "$EXPECTED  .node-mobile/node.zip" | sha256sum -c -
           unzip -q .node-mobile/node.zip -d .node-mobile/unpacked
-
           LIBNODE="$(find .node-mobile/unpacked -type f -path '*/bin/arm64-v8a/libnode.so' -print -quit)"
           NODE_H="$(find .node-mobile/unpacked -type f -path '*/include/node/node.h' -print -quit)"
-          if [ -z "$LIBNODE" ] || [ -z "$NODE_H" ]; then
-            echo "Estrutura do nodejs-mobile inesperada" >&2
-            find .node-mobile/unpacked -maxdepth 4 -type f | head -100
-            exit 1
-          fi
+          test -n "$LIBNODE" && test -n "$NODE_H"
           cp "$LIBNODE" app/libnode/bin/arm64-v8a/libnode.so
           INCLUDE_ROOT="$(dirname "$(dirname "$NODE_H")")"
           cp -R "$INCLUDE_ROOT"/. app/libnode/include/
-          test -f app/libnode/include/node/node.h
-          test -f app/libnode/bin/arm64-v8a/libnode.so
 
       - name: Bundle Baileys inside APK
         shell: bash
@@ -85,8 +82,7 @@ jobs:
           rm -rf node-runtime/node_modules app/src/main/assets/nodejs-project.zip
           npm --prefix node-runtime install --omit=dev --legacy-peer-deps --no-audit --no-fund
           mkdir -p app/src/main/assets
-          (cd node-runtime && zip -q -r ../app/src/main/assets/nodejs-project.zip . \
-            -x '*.log' '.npmrc' 'npm-debug.log' 'hardening-smoke.mjs')
+          (cd node-runtime && zip -q -r ../app/src/main/assets/nodejs-project.zip . -x '*.log' '.npmrc' 'npm-debug.log' 'hardening-smoke.mjs')
           test -s app/src/main/assets/nodejs-project.zip
           unzip -tq app/src/main/assets/nodejs-project.zip >/dev/null
 
@@ -96,39 +92,42 @@ jobs:
           node node-runtime/hardening-smoke.mjs
           npm --prefix node-runtime ls @whiskeysockets/baileys --depth=0
 
-      - name: Restore stable EventMenu Connect debug key
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: eventmenu-connect-debug-keystore-v1
+      - name: Android unit tests and lint
+        run: gradle :app:testDebugUnitTest :app:lintDebug --stacktrace --no-daemon
 
-      - name: Ensure stable debug signing key exists
-        run: |
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android \
-              -alias androiddebugkey \
-              -keypass android \
-              -dname "CN=EventMenu Connect Development,O=EventMenu,C=BR" \
-              -keyalg RSA -keysize 2048 -validity 10000
-          fi
-
-      - name: Build silent-background APK
+      - name: Build debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Prepare artifact
+      - name: Smoke-test minified signed Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/eventmenu-connect-ci-release.jks"
+          PASS="eventmenu-connect-ci"
+          keytool -genkeypair -noprompt -keystore "$KEYSTORE" -storepass "$PASS" -alias eventmenu-connect-ci -keypass "$PASS" -dname "CN=EventMenu Connect CI,O=EventMenu,C=BR" -keyalg RSA -keysize 2048 -validity 3650
+          export EVENTMENU_CONNECT_RELEASE_KEYSTORE_PATH="$KEYSTORE"
+          export EVENTMENU_CONNECT_RELEASE_STORE_PASSWORD="$PASS"
+          export EVENTMENU_CONNECT_RELEASE_KEY_ALIAS="eventmenu-connect-ci"
+          export EVENTMENU_CONNECT_RELEASE_KEY_PASSWORD="$PASS"
+          export EVENTMENU_CONNECT_VERSION_CODE=$((100000000 + GITHUB_RUN_NUMBER))
+          export EVENTMENU_CONNECT_VERSION_NAME="1.1.${GITHUB_RUN_NUMBER}-ci"
+          gradle :app:assembleRelease --stacktrace --no-daemon
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | head -n 3
+          rm -f "$KEYSTORE" "$APK"
+
+      - name: Prepare debug artifact
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/EventMenu-Connect-Silencioso-Teste.apk
-          sha256sum dist/EventMenu-Connect-Silencioso-Teste.apk > dist/SHA256.txt
-          ls -lh dist/EventMenu-Connect-Silencioso-Teste.apk
+          cp app/build/outputs/apk/debug/app-debug.apk dist/EventMenu-Connect-Debug.apk
+          sha256sum dist/EventMenu-Connect-Debug.apk > dist/EventMenu-Connect-Debug.apk.sha256
 
-      - name: Upload APK
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: EventMenu-Connect-Silencioso-APK
+          name: EventMenu-Connect-${{ github.run_number }}-debug-apk
           path: mobile/eventmenu-connect/dist/*
           if-no-files-found: error
           retention-days: 14
