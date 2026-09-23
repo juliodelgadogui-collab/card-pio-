@@ -62,6 +62,7 @@ jobs:
           php scripts/ci-whatsapp-commerce-status-smoke.php
           php scripts/ci-whatsapp-support-smoke.php
           php scripts/ci-whatsapp-connect-hardening-smoke.php
+          php scripts/ci-whatsapp-menu-receipt-smoke.php
           php scripts/ci-production-print-policy-smoke.php
           php scripts/ci-whatsapp-history-smoke.php
           php scripts/ci-sqlite-legacy-upgrade-smoke.php
@@ -106,6 +107,7 @@ jobs:
           test -f src/Services/WhatsAppIntegrationService.php
           test -f src/Services/WhatsAppDesktopAgentService.php
           test -f src/Services/WhatsAppOrderReceivedSyncService.php
+          test -f src/Services/WhatsAppOrderReceiptService.php
           test -f src/Services/WhatsAppCommerceService.php
           test -f src/Services/WhatsAppCommerceAssistantService.php
           test -f src/Services/WhatsAppCustomerRegistrationService.php
@@ -123,6 +125,7 @@ jobs:
           test -f scripts/ci-whatsapp-support-smoke.php
           test -f scripts/ci-whatsapp-connect-hardening-smoke.php
           test -f scripts/ci-whatsapp-assistant-smoke.php
+          test -f scripts/ci-whatsapp-menu-receipt-smoke.php
           test ! -e integrations/whatsapp-worker/server.js
           test ! -e integrations/whatsapp-worker/package.json
           ! grep -q 'WHATSAPP_BRIDGE_' .env.example
@@ -141,6 +144,7 @@ jobs:
           test -f "$PACKAGE/src/Services/WhatsAppIntegrationService.php"
           test -f "$PACKAGE/src/Services/WhatsAppDesktopAgentService.php"
           test -f "$PACKAGE/src/Services/WhatsAppOrderReceivedSyncService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppOrderReceiptService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceAssistantService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCustomerRegistrationService.php"
