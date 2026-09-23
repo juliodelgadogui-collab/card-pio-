@@ -1,0 +1,38 @@
+name: EventMenu Root Portal Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'portal-root/**'
+      - 'scripts/ci-portal-root-smoke.php'
+      - '.github/workflows/portal-root.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'portal-root/**'
+      - 'scripts/ci-portal-root-smoke.php'
+      - '.github/workflows/portal-root.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eventmenu-root-portal-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+      - name: PHP syntax
+        run: find portal-root -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Portal security contracts
+        run: php scripts/ci-portal-root-smoke.php
+      - name: Manifest JSON
+        run: php -r '$m=json_decode(file_get_contents("portal-root/data/apps.json"),true,512,JSON_THROW_ON_ERROR); if(!isset($m["apps"]["eventmenu-go"],$m["apps"]["delyvre"])) exit(1);'
