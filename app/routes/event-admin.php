@@ -12,13 +12,43 @@ $eventId=(int)($_GET['id']??$_POST['event_id']??0);
 if($eventId<1)em_go('events');
 $service=new EventProfessionalService();
 $section=(string)($_GET['section']??$_POST['section']??'overview');
-if(!in_array($section,['overview','tickets','page','marketing','operation','audit'],true))$section='overview';
+if(!in_array($section,['overview','tickets','schedule','page','marketing','operation','audit'],true))$section='overview';
 
 if($_SERVER['REQUEST_METHOD']==='POST'){
     em_post_csrf();
     $action=(string)($_POST['action']??'');
     try{
-        if($action==='public-settings'){
+        if($action==='schedule-save'){
+            $scheduleId=max(0,(int)($_POST['schedule_id']??0));
+            $title=mb_substr(trim((string)($_POST['title']??'')),0,180);
+            $starts=str_replace('T',' ',trim((string)($_POST['starts_at']??'')));
+            $ends=str_replace('T',' ',trim((string)($_POST['ends_at']??'')));
+            $description=mb_substr(trim((string)($_POST['description']??'')),0,1000);
+            $location=mb_substr(trim((string)($_POST['location']??'')),0,180);
+            $sort=(int)($_POST['sort_order']??0);
+            $active=!empty($_POST['active'])?1:0;
+            if($title===''||$starts===''||strtotime($starts)===false)throw new RuntimeException('Informe título e horário válidos para a programação.');
+            if($ends!==''&&(strtotime($ends)===false||strtotime($ends)<=strtotime($starts)))throw new RuntimeException('O término da atração deve ser posterior ao início.');
+            if($scheduleId>0){
+                $s=$pdo->prepare('UPDATE event_schedule_items SET starts_at=?,ends_at=?,title=?,description=?,location=?,sort_order=?,active=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND event_id=?');
+                $s->execute([$starts,$ends?:null,$title,$description?:null,$location?:null,$sort,$active,$scheduleId,$tenantId,$eventId]);
+                if($s->rowCount()===0){$q=$pdo->prepare('SELECT id FROM event_schedule_items WHERE id=? AND tenant_id=? AND event_id=?');$q->execute([$scheduleId,$tenantId,$eventId]);if(!$q->fetchColumn())throw new RuntimeException('Item da programação não encontrado.');}
+            }else{
+                $s=$pdo->prepare('INSERT INTO event_schedule_items (tenant_id,event_id,starts_at,ends_at,title,description,location,sort_order,active) VALUES (?,?,?,?,?,?,?,?,?)');
+                $s->execute([$tenantId,$eventId,$starts,$ends?:null,$title,$description?:null,$location?:null,$sort,$active]);
+                $scheduleId=(int)$pdo->lastInsertId();
+            }
+            Auth::audit('event.schedule_saved','event_schedule',(string)$scheduleId,['event_id'=>$eventId,'title'=>$title,'active'=>$active]);
+            em_flash('ok','Programação salva.');
+            $section='schedule';
+        }elseif($action==='schedule-delete'){
+            $scheduleId=max(0,(int)($_POST['schedule_id']??0));
+            $s=$pdo->prepare('DELETE FROM event_schedule_items WHERE id=? AND tenant_id=? AND event_id=?');
+            $s->execute([$scheduleId,$tenantId,$eventId]);
+            Auth::audit('event.schedule_deleted','event_schedule',(string)$scheduleId,['event_id'=>$eventId]);
+            em_flash('ok','Item removido da programação.');
+            $section='schedule';
+        }elseif($action==='public-settings'){
             $service->savePublicSettings($eventId,$_POST);
             em_flash('ok','Página pública e capacidade atualizadas.');
             $section='page';
@@ -98,7 +128,7 @@ $checkins=(int)($ticketStats['checkins']??0);
 $checkinPct=$sold>0?(int)round($checkins*100/$sold):0;
 $publicUrl=app_url('evento.php?empresa='.rawurlencode((string)$event['tenant_slug']).'&evento='.rawurlencode((string)$event['slug']));
 $statusLabels=['draft'=>'Rascunho','published'=>'Publicado','closed'=>'Encerrado','cancelled'=>'Cancelado'];
-$tabs=['overview'=>'Visão geral','tickets'=>'Ingressos e lotes','page'=>'Página pública','marketing'=>'Promoção e cupons','operation'=>'Operação e check-in','audit'=>'Auditoria'];
+$tabs=['overview'=>'Visão geral','tickets'=>'Ingressos e lotes','schedule'=>'Programação','page'=>'Página pública','marketing'=>'Promoção e cupons','operation'=>'Operação e check-in','audit'=>'Auditoria'];
 
 $editBatchId=max(0,(int)($_GET['edit_batch']??0));
 $editBatch=null;
@@ -107,6 +137,13 @@ $editTypeId=max(0,(int)($_GET['edit_type']??0));
 $editType=null;
 foreach($types as $candidate)if((int)$candidate['id']===$editTypeId){$editType=$candidate;break;}
 $dtValue=static fn(?string $value):string=>$value?date('Y-m-d\TH:i',strtotime($value)):'';
+$scheduleStmt=$pdo->prepare('SELECT * FROM event_schedule_items WHERE tenant_id=? AND event_id=? ORDER BY starts_at,sort_order,id');
+$scheduleStmt->execute([$tenantId,$eventId]);
+$scheduleItems=$scheduleStmt->fetchAll();
+$editScheduleId=max(0,(int)($_GET['edit_schedule']??0));
+$editSchedule=null;
+foreach($scheduleItems as $candidate)if((int)$candidate['id']===$editScheduleId){$editSchedule=$candidate;break;}
+
 
 em_header('Evento · '.$event['name'],'events');
 ?>
@@ -120,6 +157,22 @@ em_header('Evento · '.$event['name'],'events');
 <?php if($section==='overview'):?>
 <section class="metric-grid"><div class="metric-card"><span>Receita confirmada</span><strong><?= em_money((int)($sales['revenue']??0)) ?></strong><small><?= (int)($sales['orders_count']??0) ?> compras pagas</small></div><div class="metric-card"><span>Ingressos vendidos</span><strong><?= $sold ?></strong><small><?= (int)($ticketStats['reserved']??0) ?> reservados</small></div><div class="metric-card"><span>Check-ins</span><strong><?= $checkins ?></strong><small><?= $checkinPct ?>% dos pagos</small></div><div class="metric-card"><span>Capacidade restante</span><strong><?= $remaining===null?'∞':$remaining ?></strong><small><?= $capacity===null?'sem limite definido':'inclui '.$guestSeats.' vaga(s) de convidados/acompanhantes' ?></small></div></section>
 <div class="grid" style="grid-template-columns:minmax(0,1.35fr) minmax(280px,.65fr);gap:16px;margin-top:18px"><section class="card"><div class="section-head"><div><span class="eyebrow">PRÓXIMOS PASSOS</span><h2>Preparação do evento</h2></div></div><?php $checks=[['Página publicada',$event['status']==='published','page'],['Tipos de ingresso cadastrados',count($types)>0,'tickets'],['Lotes de venda cadastrados',count($batches)>0,'tickets'],['Capacidade definida',$capacity!==null,'page'],['Promotores configurados',count($d['promoters'])>0,'marketing'],['Cupons do evento configurados',count($d['coupons'])>0,'marketing']];foreach($checks as[$label,$ok,$target]):?><div class="list-row"><div><strong><?= $ok?'✓':'○' ?> <?= Security::e($label) ?></strong></div><a class="button secondary compact" href="<?= Security::e(app_url('?route=event-admin&id='.$eventId.'&section='.$target)) ?>"><?= $ok?'Revisar':'Configurar' ?></a></div><?php endforeach;?></section><aside class="card"><span class="eyebrow">ATALHOS</span><h2>Operação</h2><div class="actions" style="display:grid;margin-top:14px"><a class="button primary" href="<?= Security::e(app_url('?route=tickets&event_id='.$eventId)) ?>">Abrir check-in</a><a class="button secondary" href="<?= Security::e(app_url('?route=guests&event_id='.$eventId)) ?>">Lista de convidados</a><a class="button secondary" href="<?= Security::e(app_url('?route=reports')) ?>">Relatórios</a><a class="button secondary" href="<?= Security::e(app_url('?route=payments')) ?>">Pagamentos</a></div></aside></div>
+<?php endif;?>
+
+<?php if($section==='schedule'):?>
+<div class="event-ticket-layout">
+<section class="card"><span class="eyebrow">PROGRAMAÇÃO</span><h2><?= $editSchedule?'Editar atração':'Adicionar horário / atração' ?></h2><p class="muted">Cadastre abertura, DJs, bandas, shows, intervalos e encerramento. Itens ativos aparecem automaticamente na página pública.</p>
+<form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="schedule-save"><input type="hidden" name="event_id" value="<?= $eventId ?>"><input type="hidden" name="section" value="schedule"><input type="hidden" name="schedule_id" value="<?= (int)($editSchedule['id']??0) ?>">
+<label class="span-2">Título<input name="title" required maxlength="180" placeholder="Ex.: Show principal" value="<?= Security::e($editSchedule['title']??'') ?>"></label>
+<label>Início<input type="datetime-local" name="starts_at" required value="<?= Security::e($dtValue($editSchedule['starts_at']??$event['starts_at'])) ?>"></label>
+<label>Término<input type="datetime-local" name="ends_at" value="<?= Security::e($dtValue($editSchedule['ends_at']??null)) ?>"></label>
+<label>Local / palco<input name="location" maxlength="180" placeholder="Ex.: Palco principal" value="<?= Security::e($editSchedule['location']??'') ?>"></label>
+<label>Ordem<input type="number" name="sort_order" value="<?= (int)($editSchedule['sort_order']??0) ?>"></label>
+<label class="span-2">Descrição<textarea name="description" rows="3" maxlength="1000"><?= Security::e($editSchedule['description']??'') ?></textarea></label>
+<label class="checkbox"><input type="checkbox" name="active"<?= em_checked($editSchedule['active']??1) ?>> Exibir na página pública</label>
+<div class="actions span-2"><button class="primary"><?= $editSchedule?'Salvar alteração':'Adicionar à programação' ?></button><?php if($editSchedule):?><a class="button secondary" href="<?= Security::e(app_url('?route=event-admin&id='.$eventId.'&section=schedule')) ?>">Cancelar</a><?php endif;?></div></form></section>
+<section class="card"><span class="eyebrow">AGENDA DO EVENTO</span><h2><?= count($scheduleItems) ?> item(ns)</h2><?php if(!$scheduleItems):?><p class="muted">Nenhum horário cadastrado ainda.</p><?php else:?><?php foreach($scheduleItems as$item):?><div class="list-row"><div><strong><?= Security::e(date('d/m · H:i',strtotime($item['starts_at']))) ?> · <?= Security::e($item['title']) ?></strong><small style="display:block"><?= $item['location']?Security::e($item['location']).' · ':'' ?><?= (int)$item['active']===1?'Visível':'Oculto' ?></small></div><div class="batch-actions"><a class="button secondary compact" href="<?= Security::e(app_url('?route=event-admin&id='.$eventId.'&section=schedule&edit_schedule='.(int)$item['id'])) ?>">Editar</a><form method="post" onsubmit="return confirm('Remover este item da programação?')"><input type="hidden" name="_csrf" value="<?= em_csrf() ?>"><input type="hidden" name="action" value="schedule-delete"><input type="hidden" name="event_id" value="<?= $eventId ?>"><input type="hidden" name="section" value="schedule"><input type="hidden" name="schedule_id" value="<?= (int)$item['id'] ?>"><button class="button danger-compact compact">Excluir</button></form></div></div><?php endforeach;?><?php endif;?></section>
+</div>
 <?php endif;?>
 
 <?php if($section==='tickets'):?>
