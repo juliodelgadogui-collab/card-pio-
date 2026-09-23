@@ -54,7 +54,7 @@ final class ManagerOperationsService
 
         $sql='SELECT o.id,o.unit_id,o.channel,o.status,o.payment_status,o.total_cents,o.assigned_delivery_user_id,o.updated_at,c.name customer_name,u.name delivery_name,
             CASE WHEN o.status="preparing" AND o.updated_at<? THEN "kitchen_delay" WHEN o.channel="delivery" AND o.status="ready" AND o.assigned_delivery_user_id IS NULL THEN "delivery_unassigned" WHEN o.payment_status IN ("unpaid","pending") AND o.status NOT IN ("cancelled","completed") THEN "payment_pending" ELSE "attention" END problem_type
-            FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id
+            FROM orders o LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id LEFT JOIN users u ON u.id=o.assigned_delivery_user_id AND u.tenant_id=o.tenant_id
             WHERE o.tenant_id=?';$args=[$cutoff,$tenantId];if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' AND ((o.status="preparing" AND o.updated_at<?) OR (o.channel="delivery" AND o.status="ready" AND o.assigned_delivery_user_id IS NULL) OR (o.payment_status IN ("unpaid","pending") AND o.status NOT IN ("cancelled","completed"))) ORDER BY CASE WHEN o.status="preparing" AND o.updated_at<? THEN 0 WHEN o.channel="delivery" AND o.status="ready" AND o.assigned_delivery_user_id IS NULL THEN 1 ELSE 2 END,o.updated_at LIMIT 100';$args[]=$cutoff;$args[]=$cutoff;
         $problems=$pdo->prepare($sql);$problems->execute($args);
 
