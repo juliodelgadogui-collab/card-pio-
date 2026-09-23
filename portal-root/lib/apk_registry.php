@@ -1,6 +1,13 @@
 <?php
 declare(strict_types=1);
 
+const EM_APK_MAX_BYTES = 250 * 1024 * 1024;
+const EM_APK_ALLOWED_MIME_TYPES = [
+    'application/vnd.android.package-archive',
+    'application/zip',
+    'application/octet-stream',
+];
+
 function em_portal_root(): string
 {
     return dirname(__DIR__);
@@ -68,7 +75,7 @@ function em_write_manifest(array $manifest): void
         throw new RuntimeException('Não foi possível gerar o manifesto dos aplicativos.');
     }
 
-    $tmp = $path . '.tmp';
+    $tmp = $path . '.tmp-' . bin2hex(random_bytes(6));
     if (file_put_contents($tmp, $json . PHP_EOL, LOCK_EX) === false || !rename($tmp, $path)) {
         @unlink($tmp);
         throw new RuntimeException('Não foi possível salvar o manifesto dos aplicativos.');
@@ -135,6 +142,47 @@ function em_public_manifest(): array
     return $manifest;
 }
 
+function em_validate_apk_upload(string $tmpFile, string $originalName): int
+{
+    if (!is_uploaded_file($tmpFile)) {
+        throw new RuntimeException('Upload inválido.');
+    }
+    if (strtolower(pathinfo($originalName, PATHINFO_EXTENSION)) !== 'apk') {
+        throw new RuntimeException('Envie somente arquivo .apk.');
+    }
+
+    $size = filesize($tmpFile);
+    if ($size === false || $size < 1) {
+        throw new RuntimeException('O arquivo APK está vazio ou não pôde ser lido.');
+    }
+    if ($size > EM_APK_MAX_BYTES) {
+        throw new RuntimeException('O APK excede o limite de 250 MB.');
+    }
+
+    if (class_exists('finfo')) {
+        $finfo = new finfo(FILEINFO_MIME_TYPE);
+        $mime = (string) $finfo->file($tmpFile);
+        if ($mime !== '' && !in_array($mime, EM_APK_ALLOWED_MIME_TYPES, true)) {
+            throw new RuntimeException('O conteúdo enviado não parece ser um APK válido.');
+        }
+    }
+
+    $fh = fopen($tmpFile, 'rb');
+    if ($fh === false) {
+        throw new RuntimeException('Não foi possível validar o APK.');
+    }
+    try {
+        $signature = fread($fh, 4);
+    } finally {
+        fclose($fh);
+    }
+    if ($signature !== "PK\x03\x04" && $signature !== "PK\x05\x06" && $signature !== "PK\x07\x08") {
+        throw new RuntimeException('O conteúdo enviado não possui estrutura ZIP/APK válida.');
+    }
+
+    return (int) $size;
+}
+
 function em_publish_apk(string $slug, string $version, int $versionCode, string $tmpFile, string $originalName): array
 {
     $manifest = em_read_manifest();
@@ -147,12 +195,8 @@ function em_publish_apk(string $slug, string $version, int $versionCode, string 
     if ($versionCode < 1) {
         throw new RuntimeException('O versionCode deve ser maior que zero.');
     }
-    if (!is_uploaded_file($tmpFile)) {
-        throw new RuntimeException('Upload inválido.');
-    }
-    if (strtolower(pathinfo($originalName, PATHINFO_EXTENSION)) !== 'apk') {
-        throw new RuntimeException('Envie somente arquivo .apk.');
-    }
+
+    $size = em_validate_apk_upload($tmpFile, $originalName);
 
     $dir = em_apk_storage_dir($slug);
     if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
@@ -169,7 +213,7 @@ function em_publish_apk(string $slug, string $version, int $versionCode, string 
         'version' => $version,
         'version_code' => $versionCode,
         'file' => $file,
-        'size_bytes' => (int) filesize($target),
+        'size_bytes' => $size,
         'sha256' => hash_file('sha256', $target),
         'published_at' => gmdate('c'),
     ];
@@ -178,7 +222,12 @@ function em_publish_apk(string $slug, string $version, int $versionCode, string 
     $oldPrevious = $manifest['apps'][$slug]['previous'] ?? null;
     $manifest['apps'][$slug]['previous'] = $oldCurrent;
     $manifest['apps'][$slug]['current'] = $meta;
-    em_write_manifest($manifest);
+    try {
+        em_write_manifest($manifest);
+    } catch (Throwable $e) {
+        @unlink($target);
+        throw $e;
+    }
 
     // Mantém somente a versão atual e a imediatamente anterior para economizar os 500 MB.
     if (is_array($oldPrevious) && !empty($oldPrevious['file'])) {
