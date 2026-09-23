@@ -26,7 +26,7 @@ final class ReceiptService
         if($tickets){$first=$tickets[0];$event=['id'=>(int)$first['event_id'],'name'=>(string)$first['event_name'],'starts_at'=>(string)$first['starts_at'],'ends_at'=>$first['ends_at']??null,'venue'=>$first['venue']??null,'address'=>$first['address']??null];}
         elseif(preg_match('/Evento\s*#(\d+)/i',(string)($order['notes']??''),$match)){$e=$pdo->prepare('SELECT id,name,starts_at,ends_at,venue,address FROM events WHERE id=? AND tenant_id=? LIMIT 1');$e->execute([(int)$match[1],$tenantId]);$event=$e->fetch()?:null;}
 
-        $settings=json_decode((string)($order['tenant_settings']??'{}'),true);if(!is_array($settings))$settings=[];$paper=in_array((string)($settings['receipt_paper_width']??'80'),['58','80'],true)?(string)$settings['receipt_paper_width']:'80';
+        $settings=json_decode((string)($order['tenant_settings']??'{}'),true);if(!is_array($settings))$settings=[];$paper=(string)($settings['receipt_paper_width']??'80');if(!in_array($paper,['58','80'],true))$paper='80';
         $identity=[
             'trade_name'=>trim((string)($settings['receipt_trade_name']??''))?:((string)$order['tenant_name']),
             'legal_name'=>trim((string)($settings['receipt_legal_name']??'')),
