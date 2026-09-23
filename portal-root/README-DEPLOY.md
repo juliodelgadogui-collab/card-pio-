@@ -11,7 +11,7 @@ Ele é independente do sistema existente em `https://go.gestao2.store/1/` e não
 - `/apk/delyvre/latest.apk` — link permanente do DELYVRE
 - `/updates/apps.json` — manifesto JSON para consulta de versão pelos aplicativos
 - `/admin-apks.php` — publicação manual protegida por token
-- `/api/apk/publish` — publicação automática via GitHub Actions/CI
+- `/api/apk/publish` — endpoint protegido para publicação automatizada
 
 ## Publicação
 
@@ -46,13 +46,29 @@ EVENTMENU_APK_ADMIN_TOKEN=<token forte com pelo menos 20 caracteres>
 
 Não existe senha padrão no código.
 
-Para publicação automática por CI, configure também:
+Para uma futura publicação automatizada por CI, configure também:
 
 ```text
 EVENTMENU_APK_PUBLISH_TOKEN=<token forte com pelo menos 24 caracteres>
 ```
 
-No GitHub, salve o mesmo valor como secret `EVENTMENU_APK_PUBLISH_TOKEN`. O workflow do EventMenu GO usa esse secret para publicar o APK novo automaticamente após um build bem-sucedido.
+O endpoint `/api/apk/publish` já aceita esse token via Bearer ou `X-EventMenu-Token`, mas a automação de release deve ser configurada separadamente e somente em workflow confiável da `main`. Esta entrega **não publica builds automaticamente**.
+
+## Segurança do upload
+
+O portal valida:
+
+- aplicativo cadastrado e slug permitido;
+- versão e `versionCode`;
+- upload HTTP real (`is_uploaded_file`);
+- extensão `.apk`;
+- MIME compatível com APK/ZIP;
+- assinatura ZIP esperada do APK;
+- tamanho máximo de 250 MB;
+- nome final gerado pelo servidor, sem usar caminho fornecido pelo cliente;
+- SHA-256 após a publicação.
+
+As pastas `data`, `lib` e `storage` são bloqueadas para acesso HTTP direto pelo `.htaccess`.
 
 ## Política dos 500 MB
 
@@ -76,4 +92,4 @@ O `latest.apk` **não é uma cópia física**: a regra de rewrite encaminha o li
 
 ## Limites de upload do PHP
 
-Se APKs maiores falharem, ajuste no hosting/cPanel os valores de `upload_max_filesize` e `post_max_size` para valores acima do tamanho máximo esperado.
+O portal limita o APK a 250 MB. No hosting/cPanel, `upload_max_filesize` e `post_max_size` precisam estar acima do tamanho real do APK e nunca devem ser usados como substitutos da validação da aplicação.
