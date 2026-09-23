@@ -44,6 +44,7 @@ try {
         'promoter_commissions','event_guests','ticket_checkin_logs','nfc_devices',
         'cash_sessions','cash_movements','saas_plans','tenant_subscriptions','migrations',
         'background_jobs','push_devices','system_runtime_status','api_rate_limits',
+        'whatsapp_connections','whatsapp_outbox','whatsapp_desktop_agents','production_print_queue',
     ];
     foreach ($requiredTables as $table) {
         try {
@@ -190,9 +191,11 @@ try {
     assert_ci((string)$s->fetchColumn()==='ready','Pedido event_bar sem preparo não ficou pronto automaticamente.');
 
     $health = (new SystemHealthService())->snapshot();
-    assert_ci(isset($health['checks']['database'],$health['checks']['worker'],$health['checks']['queue'],$health['checks']['backup']), 'Snapshot de saúde incompleto.');
+    assert_ci(isset($health['checks']['database'],$health['checks']['worker'],$health['checks']['queue'],$health['checks']['backup'],$health['checks']['whatsapp'],$health['checks']['print_queue']), 'Snapshot de saúde incompleto.');
     assert_ci(($health['checks']['worker']['state'] ?? null) === 'ok', 'Heartbeat recente do worker não apareceu saudável no health check.');
     assert_ci(($health['checks']['queue']['state'] ?? null) === 'ok', 'Fila vazia gerou alerta falso no health check.');
+    assert_ci(in_array(($health['checks']['whatsapp']['state'] ?? null),['ok','disabled'],true), 'WhatsApp vazio/configurado gerou alerta falso no health check.');
+    assert_ci(($health['checks']['print_queue']['state'] ?? null) === 'ok', 'Fila de impressão vazia gerou alerta falso no health check.');
 
     echo "CI DB smoke OK ({$driver})\n";
 } catch (\Throwable $e) {
