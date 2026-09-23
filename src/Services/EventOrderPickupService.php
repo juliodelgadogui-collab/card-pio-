@@ -91,7 +91,7 @@ final class EventOrderPickupService
 
     private function loadOrder(PDO $pdo, int $tenantId, int $eventId, string $token, bool $lock): array
     {
-        $sql = 'SELECT o.*,c.name customer_name,c.phone customer_phone,e.name event_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id LEFT JOIN events e ON e.id=o.event_id WHERE o.tenant_id=? AND o.event_id=? AND o.public_token=? AND o.channel IN ("bar","event_bar") LIMIT 1';
+        $sql = 'SELECT o.*,c.name customer_name,c.phone customer_phone,e.name event_name FROM orders o LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id LEFT JOIN events e ON e.id=o.event_id AND e.tenant_id=o.tenant_id WHERE o.tenant_id=? AND o.event_id=? AND o.public_token=? AND o.channel IN ("bar","event_bar") LIMIT 1';
         if ($lock) $sql = Database::portableSql($pdo, str_replace(' LIMIT 1', ' LIMIT 1 FOR UPDATE', $sql));
         $s = $pdo->prepare($sql);
         $s->execute([$tenantId, $eventId, $token]);
