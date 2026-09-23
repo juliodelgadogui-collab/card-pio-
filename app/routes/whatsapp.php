@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use EventMenu\Core\Auth;
 use EventMenu\Core\Security;
+use EventMenu\Services\WhatsAppCommerceAssistantService;
 use EventMenu\Services\WhatsAppIntegrationService;
 
 Auth::requirePermission('settings.manage');
@@ -11,6 +12,7 @@ $tenantId=(int)(Auth::tenantId()??0);
 if($tenantId<1){http_response_code(403);exit('Selecione uma empresa para configurar o WhatsApp.');}
 
 $service=new WhatsAppIntegrationService();
+$assistantService=new WhatsAppCommerceAssistantService();
 $eventLabels=[
     'order_received'=>'Pedido recebido',
     'order_confirmed'=>'Pedido confirmado',
@@ -28,7 +30,7 @@ if(($_GET['ajax']??'')==='status'){
 }
 
 if($_SERVER['REQUEST_METHOD']==='POST'){
-    em_post_csrf();$action=(string)($_POST['action']??'');
+    em_post_csrf();$action=(string)($_POST['action']??'');$anchor='';
     try{
         if($action==='save'){
             $templates=[];
@@ -41,17 +43,44 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
             $pdo->prepare('UPDATE whatsapp_connections SET commerce_enabled=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?')->execute([$enabled?1:0,$tenantId]);
             Auth::audit('whatsapp.commerce_toggled','whatsapp_connection',(string)$tenantId,['commerce_enabled'=>$enabled]);
             em_flash('ok',$enabled?'WhatsApp Commerce ativado.':'WhatsApp Commerce pausado. As mensagens recebidas continuam no histórico sem respostas automáticas.');
+        }elseif($action==='save_assistant'){
+            $saved=$assistantService->saveSettings($pdo,$tenantId,[
+                'enabled'=>isset($_POST['assistant_enabled']),
+                'knowledge_enabled'=>isset($_POST['knowledge_enabled']),
+                'assistant_name'=>(string)($_POST['assistant_name']??''),
+                'tone'=>(string)($_POST['tone']??'friendly'),
+                'greeting_message'=>(string)($_POST['greeting_message']??''),
+                'unknown_behavior'=>(string)($_POST['unknown_behavior']??'menu'),
+                'unknown_message'=>(string)($_POST['unknown_message']??''),
+                'handoff_message'=>(string)($_POST['handoff_message']??''),
+                'handoff_keywords'=>(string)($_POST['handoff_keywords']??''),
+            ]);
+            Auth::audit('whatsapp.assistant_settings_saved','whatsapp_assistant_settings',(string)$tenantId,['enabled'=>(int)($saved['enabled']??0)===1,'knowledge_enabled'=>(int)($saved['knowledge_enabled']??0)===1,'unknown_behavior'=>(string)($saved['unknown_behavior']??'menu')]);
+            em_flash('ok','Configurações do Assistente IA salvas.');$anchor='#whatsapp-ai';
+        }elseif($action==='save_knowledge'){
+            $knowledgeId=$assistantService->saveKnowledge($pdo,$tenantId,[
+                'id'=>(int)($_POST['knowledge_id']??0),
+                'title'=>(string)($_POST['knowledge_title']??''),
+                'answer'=>(string)($_POST['knowledge_answer']??''),
+                'keywords'=>(string)($_POST['knowledge_keywords']??''),
+                'enabled'=>isset($_POST['knowledge_item_enabled']),
+                'sort_order'=>(int)($_POST['knowledge_sort_order']??0),
+            ]);
+            Auth::audit('whatsapp.assistant_knowledge_saved','whatsapp_assistant_knowledge',(string)$knowledgeId,[]);em_flash('ok','Informação salva na Base da IA.');$anchor='#knowledge-base';
+        }elseif($action==='delete_knowledge'){
+            $knowledgeId=(int)($_POST['knowledge_id']??0);$assistantService->deleteKnowledge($pdo,$tenantId,$knowledgeId);Auth::audit('whatsapp.assistant_knowledge_deleted','whatsapp_assistant_knowledge',(string)$knowledgeId,[]);em_flash('ok','Informação removida da Base da IA.');$anchor='#knowledge-base';
         }else{
             throw new RuntimeException('Ação de WhatsApp não permitida no servidor. Use o EventMenu Connect para parear, reconectar ou trocar o número.');
         }
-    }catch(Throwable$e){em_flash('error',$e->getMessage());}
-    header('Location: '.app_url('whatsapp.php'));exit;
+    }catch(Throwable$e){em_flash('error',$e->getMessage());if(in_array($action,['save_assistant','save_knowledge','delete_knowledge'],true))$anchor='#whatsapp-ai';}
+    header('Location: '.app_url('whatsapp.php').$anchor);exit;
 }
 
 $connection=$service->status($pdo,$tenantId,false);
 $templates=$service->templates($pdo,$tenantId);$templatesByEvent=[];foreach($templates as$row)$templatesByEvent[(string)$row['event_type']]=$row;$defaults=$service->defaultTemplates();
 $status=(string)($connection['status']??'disconnected');$agent=is_array($connection['agent']??null)?$connection['agent']:[];
 $commerceStmt=$pdo->prepare('SELECT commerce_enabled FROM whatsapp_connections WHERE tenant_id=? LIMIT 1');$commerceStmt->execute([$tenantId]);$commerceEnabled=(int)($commerceStmt->fetchColumn()?:0)===1;
+$assistantSettings=$assistantService->settings($pdo,$tenantId);$knowledgeItems=$assistantService->knowledge($pdo,$tenantId,false);
 $statusLabel=match($status){'connected'=>'Conectado','starting'=>'Iniciando','qr'=>'Aguardando pareamento no Connect','reconnecting'=>'Reconectando','error'=>'Precisa de atenção',default=>'Desconectado'};
 $statusTone=match($status){'connected'=>'success','starting','qr','reconnecting'=>'warning','error'=>'danger',default=>'muted'};
 $pollUrl=json_encode(app_url('whatsapp.php?ajax=status'),JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE);
@@ -59,7 +88,7 @@ $pollUrl=json_encode(app_url('whatsapp.php?ajax=status'),JSON_UNESCAPED_SLASHES|
 em_header('WhatsApp','whatsapp');
 ?>
 <section class="page-hero">
-  <div><span class="eyebrow">EVENTMENU CONNECT</span><h2>WhatsApp da empresa</h2><p>O servidor organiza conversas e filas. Pareamento, sessão, reconexão e envio real ficam exclusivamente no aplicativo EventMenu Connect.</p></div>
+  <div><span class="eyebrow">EVENTMENU CONNECT</span><h2>WhatsApp da empresa</h2><p>O servidor organiza conversas, pedidos, respostas e a Base da IA. Pareamento, sessão, reconexão e envio real ficam exclusivamente no aplicativo EventMenu Connect.</p></div>
   <div class="hero-actions"><a class="button primary" href="<?=Security::e(app_url('support.php?list=1'))?>">Atender / iniciar conversa</a><a class="button secondary" href="<?=Security::e(app_url('support.php'))?>">Central de Atendimento</a><a class="button secondary" href="<?=Security::e(app_url('?route=settings'))?>">Voltar</a></div>
 </section>
 
@@ -78,8 +107,34 @@ em_header('WhatsApp','whatsapp');
 
 <section class="card">
   <div class="section-head"><div><span class="eyebrow">WHATSAPP COMMERCE</span><h2>Pedidos e conversas automáticas</h2></div><span class="badge status-<?=$commerceEnabled?'success':'muted'?>"><?=$commerceEnabled?'Ativo':'Pausado'?></span></div>
-  <p class="muted">Quando ativo, mensagens recebidas pelo Baileys embarcado no EventMenu Connect entram no servidor, seguem o fluxo de cardápio/pedido e as respostas voltam pela mesma fila segura.</p>
+  <p class="muted">Quando ativo, mensagens recebidas pelo EventMenu Connect entram no servidor, seguem o fluxo de cardápio/pedido e as respostas voltam pela mesma fila segura.</p>
   <form method="post" class="form-grid" id="commerceForm"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="action" value="save_commerce"><label class="checkbox span-2"><input type="checkbox" name="commerce_enabled"<?=em_checked($commerceEnabled)?>> Ativar WhatsApp Commerce nesta empresa</label><div class="span-2"><span class="badge status-warning" id="commerceUnsaved" hidden>Alteração não salva</span></div><div class="span-2 actions"><button class="primary" type="submit">Salvar WhatsApp Commerce</button></div></form>
+</section>
+
+<section class="card" id="whatsapp-ai">
+  <div class="section-head"><div><span class="eyebrow">ASSISTENTE IA</span><h2>Como o atendimento deve conversar</h2><p class="muted">O assistente usa o fluxo real do EventMenu para produtos, preços, pedido e pagamento e usa a Base da IA abaixo para informações da empresa. Se não encontrar informação confiável, ele não inventa.</p></div><span class="badge status-<?=(int)($assistantSettings['enabled']??0)===1?'success':'muted'?>"><?=(int)($assistantSettings['enabled']??0)===1?'Ativo':'Pausado'?></span></div>
+  <div class="alert"><strong>Segurança:</strong> a Base da IA serve para conversa e dúvidas. Preços, estoque, total do pedido, PIX e confirmação de pagamento continuam vindo exclusivamente dos serviços reais do EventMenu.</div>
+  <form method="post" class="form-grid" style="margin-top:16px"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="action" value="save_assistant">
+    <label class="checkbox span-2"><input type="checkbox" name="assistant_enabled"<?=em_checked((int)($assistantSettings['enabled']??0)===1)?>> Ativar Assistente IA no WhatsApp Commerce</label>
+    <label class="checkbox span-2"><input type="checkbox" name="knowledge_enabled"<?=em_checked((int)($assistantSettings['knowledge_enabled']??0)===1)?>> Permitir respostas usando a Base da IA</label>
+    <label>Nome do assistente<input type="text" name="assistant_name" maxlength="80" value="<?=Security::e((string)($assistantSettings['assistant_name']??'Assistente EventMenu'))?>" placeholder="Ex.: Bia"></label>
+    <label>Estilo do atendimento<select name="tone"><option value="friendly"<?=((string)($assistantSettings['tone']??''))==='friendly'?' selected':''?>>Amigável</option><option value="professional"<?=((string)($assistantSettings['tone']??''))==='professional'?' selected':''?>>Profissional</option><option value="direct"<?=((string)($assistantSettings['tone']??''))==='direct'?' selected':''?>>Direto</option><option value="casual"<?=((string)($assistantSettings['tone']??''))==='casual'?' selected':''?>>Descontraído</option></select></label>
+    <label class="span-2">Mensagem de boas-vindas<textarea name="greeting_message" rows="3" maxlength="1500"><?=Security::e((string)($assistantSettings['greeting_message']??''))?></textarea><small class="muted">Variáveis: <code>{cliente}</code>, <code>{empresa}</code> e <code>{assistente}</code>. As opções de pedido são acrescentadas pelo sistema.</small></label>
+    <label>Quando não souber responder<select name="unknown_behavior"><option value="menu"<?=((string)($assistantSettings['unknown_behavior']??'menu'))==='menu'?' selected':''?>>Não inventar e mostrar o menu</option><option value="human"<?=((string)($assistantSettings['unknown_behavior']??''))==='human'?' selected':''?>>Transferir para atendimento humano</option></select></label>
+    <label>Palavras para chamar atendente<input type="text" name="handoff_keywords" maxlength="1500" value="<?=Security::e((string)($assistantSettings['handoff_keywords']??''))?>" placeholder="atendente, humano, falar com gerente"></label>
+    <label class="span-2">Mensagem quando não houver informação segura<textarea name="unknown_message" rows="3" maxlength="1500"><?=Security::e((string)($assistantSettings['unknown_message']??''))?></textarea></label>
+    <label class="span-2">Mensagem ao transferir para uma pessoa<textarea name="handoff_message" rows="3" maxlength="1200"><?=Security::e((string)($assistantSettings['handoff_message']??''))?></textarea></label>
+    <div class="span-2 actions"><button class="primary" type="submit">Salvar Assistente IA</button></div>
+  </form>
+</section>
+
+<section class="card" id="knowledge-base">
+  <div class="section-head"><div><span class="eyebrow">BASE DA IA</span><h2>Conhecimento da empresa</h2><p class="muted">Cadastre fatos e respostas que não estão no cardápio ou no pedido: entrega em bairros, estacionamento, encomendas, políticas, horários especiais e outras dúvidas frequentes.</p></div><span class="badge status-muted"><?=count($knowledgeItems)?> item(ns)</span></div>
+  <section style="padding:14px;border:1px solid #ddd;border-radius:16px;margin-bottom:16px"><h3>Adicionar informação</h3><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="action" value="save_knowledge"><input type="hidden" name="knowledge_id" value="0"><label class="span-2">Pergunta ou assunto<input type="text" name="knowledge_title" maxlength="180" required placeholder="Ex.: Vocês têm estacionamento?"></label><label class="span-2">Resposta<textarea name="knowledge_answer" rows="4" maxlength="3000" required placeholder="Ex.: Sim. Temos estacionamento gratuito ao lado da entrada principal."></textarea></label><label>Palavras-chave<input type="text" name="knowledge_keywords" maxlength="1500" placeholder="estacionamento, carro, vaga"></label><label>Prioridade<input type="number" name="knowledge_sort_order" min="0" max="9999" value="0"></label><label class="checkbox span-2"><input type="checkbox" name="knowledge_item_enabled" checked> Informação ativa</label><div class="span-2 actions"><button class="primary" type="submit">Adicionar à Base da IA</button></div></form></section>
+  <?php if(!$knowledgeItems):?><p class="muted">A Base da IA ainda está vazia. O WhatsApp Commerce continua usando normalmente os dados reais do EventMenu e não inventará informações que não conhece.</p><?php endif;?>
+  <?php foreach($knowledgeItems as$item):?>
+    <section style="padding:14px;border:1px solid #ddd;border-radius:16px;margin-top:12px"><form method="post" class="form-grid"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="knowledge_id" value="<?=(int)$item['id']?>"><label class="span-2">Pergunta ou assunto<input type="text" name="knowledge_title" maxlength="180" required value="<?=Security::e((string)$item['title'])?>"></label><label class="span-2">Resposta<textarea name="knowledge_answer" rows="4" maxlength="3000" required><?=Security::e((string)$item['answer'])?></textarea></label><label>Palavras-chave<input type="text" name="knowledge_keywords" maxlength="1500" value="<?=Security::e((string)($item['keywords']??''))?>"></label><label>Prioridade<input type="number" name="knowledge_sort_order" min="0" max="9999" value="<?=(int)($item['sort_order']??0)?>"></label><label class="checkbox span-2"><input type="checkbox" name="knowledge_item_enabled"<?=em_checked((int)($item['enabled']??0)===1)?>> Informação ativa</label><div class="span-2 actions"><button class="primary" type="submit" name="action" value="save_knowledge">Salvar</button><button class="button secondary" type="submit" name="action" value="delete_knowledge" onclick="return confirm('Remover esta informação da Base da IA?')">Excluir</button></div></form></section>
+  <?php endforeach;?>
 </section>
 
 <section class="card">
@@ -90,9 +145,9 @@ em_header('WhatsApp','whatsapp');
 </div>
 
 <aside class="settings-side">
-  <section class="card"><span class="eyebrow">ARQUITETURA</span><h3>Baileys somente no Connect</h3><p class="muted">A hospedagem não executa Node.js, WPPConnect ou Baileys. O navegador também nunca conversa diretamente com o motor do WhatsApp.</p></section>
+  <section class="card"><span class="eyebrow">ASSISTENTE</span><h3>IA sem inventar dados</h3><p class="muted">Perguntas da empresa usam a Base da IA. Pedido, catálogo, valores, estoque e pagamentos continuam consultando o EventMenu como fonte da verdade.</p><a class="button secondary compact" href="#whatsapp-ai">Configurar IA</a></section>
   <section class="card"><span class="eyebrow">ATENDIMENTO</span><h3>Inbox completo</h3><p class="muted">Use a Central de Atendimento para assumir conversas, responder manualmente e devolver o cliente ao fluxo automático.</p><a class="button secondary compact" href="<?=Security::e(app_url('support.php'))?>">Abrir Central</a></section>
-  <section class="card"><span class="eyebrow">FILA SEGURA</span><h3>ACK e novas tentativas</h3><p class="muted">O Connect reivindica mensagens com lease, confirma o envio por ACK e o servidor controla novas tentativas sem duplicar mensagens.</p></section>
+  <section class="card"><span class="eyebrow">ARQUITETURA</span><h3>Connect só transporta</h3><p class="muted">O aplicativo mantém a sessão do WhatsApp. Configurações, conhecimento, pedidos e regras ficam centralizados no EventMenu Server.</p></section>
 </aside></div>
 
 <script>(()=>{const commerce=document.getElementById('commerceForm'),dirty=document.getElementById('commerceUnsaved');commerce?.querySelector('input[name="commerce_enabled"]')?.addEventListener('change',()=>{if(dirty)dirty.hidden=false});})();</script>
