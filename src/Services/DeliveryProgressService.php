@@ -30,7 +30,7 @@ final class DeliveryProgressService
                 $pdo->prepare('INSERT INTO delivery_progress (tenant_id,order_id,delivery_user_id,unit_id,picked_up_at) VALUES (?,?,?,?,CURRENT_TIMESTAMP)')->execute([$tenantId,$orderId,$userId,$order['unit_id']]);
                 (new OrderHistoryService())->record($pdo,$tenantId,$orderId,'ready','ready','delivery_pickup','Pedido retirado no balcão pelo entregador.',$userId);
             }elseif(!$progress['picked_up_at']){
-                $pdo->prepare('UPDATE delivery_progress SET delivery_user_id=?,unit_id=?,picked_up_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$userId,$order['unit_id'],$progress['id']]);
+                $pdo->prepare('UPDATE delivery_progress SET delivery_user_id=?,unit_id=?,picked_up_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$userId,$order['unit_id'],$progress['id'],$tenantId]);
                 (new OrderHistoryService())->record($pdo,$tenantId,$orderId,'ready','ready','delivery_pickup','Pedido retirado no balcão pelo entregador.',$userId);
             }
             Auth::audit('delivery.picked_up','order',(string)$orderId,['shift_id'=>(int)$shift['id'],'unit_id'=>$order['unit_id']]);return $this->progressByOrder($pdo,$tenantId,$orderId);
@@ -49,7 +49,7 @@ final class DeliveryProgressService
         if($row['status']==='ready')(new OrderService())->changeStatus($orderId,'out_for_delivery','delivery');elseif($row['status']!=='out_for_delivery')throw new RuntimeException('Pedido não está disponível para iniciar rota.');
         Database::transaction(function(PDO $tx)use($tenantId,$userId,$orderId):void{
             $p=$this->lockedProgress($tx,$tenantId,$orderId);if(!$p)throw new RuntimeException('Não foi possível carregar o andamento da entrega.');
-            if(!$p['route_started_at'])$tx->prepare('UPDATE delivery_progress SET route_started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
+            if(!$p['route_started_at'])$tx->prepare('UPDATE delivery_progress SET route_started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$p['id'],$tenantId]);
         });
         try{(new DeliveryPublicTrackingService())->issue($orderId);}catch(\Throwable$e){error_log('[delivery-tracking-auto] '.$e::class.': '.$e->getMessage());}
         try{(new DeliveryCustomerPushService())->sendOrderStatus($orderId,'out_for_delivery');}catch(\Throwable$e){error_log('[delivery-customer-route-push] '.$e::class.': '.$e->getMessage());}
@@ -64,7 +64,7 @@ final class DeliveryProgressService
             $order=$this->lockedAssignedOrder($pdo,$tenantId,$userId,$shift,$orderId);if($order['status']!=='out_for_delivery')throw new RuntimeException('Inicie a rota antes de marcar chegada.');
             $p=$this->lockedProgress($pdo,$tenantId,$orderId);if(!$p||!$p['route_started_at'])throw new RuntimeException('A rota ainda não foi iniciada.');
             if(!$p['arrived_at']){
-                $pdo->prepare('UPDATE delivery_progress SET arrived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$p['id']]);
+                $pdo->prepare('UPDATE delivery_progress SET arrived_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$p['id'],$tenantId]);
                 (new OrderHistoryService())->record($pdo,$tenantId,$orderId,'out_for_delivery','out_for_delivery','delivery_arrived','Entregador informou chegada ao endereço do cliente.',$userId);$changed=true;
             }
             Auth::audit('delivery.arrived','order',(string)$orderId,['shift_id'=>(int)$shift['id']]);return $this->progressByOrder($pdo,$tenantId,$orderId);
