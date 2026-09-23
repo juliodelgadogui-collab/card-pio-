@@ -75,7 +75,7 @@ final class ProductMediaService
         @chmod($path,0640);
 
         return[
-            'url'=>app_url('media.php?t='.$tenantId.'&n='.rawurlencode($name)),
+            'url'=>app_absolute_url('media.php?t='.$tenantId.'&n='.rawurlencode($name)),
             'path'=>$path,
             'mime'=>$mime,
             'size'=>$size,
