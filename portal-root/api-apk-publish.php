@@ -4,6 +4,7 @@ require __DIR__ . '/lib/apk_registry.php';
 
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, max-age=0');
+header('X-Content-Type-Options: nosniff');
 
 function respond(int $status, array $payload): never
 {
@@ -38,7 +39,7 @@ if (!isset($_FILES['apk']) || !is_array($_FILES['apk'])) {
     respond(422, ['ok' => false, 'error' => 'apk_required']);
 }
 if ((int) $_FILES['apk']['error'] !== UPLOAD_ERR_OK) {
-    respond(422, ['ok' => false, 'error' => 'upload_failed', 'upload_code' => (int) $_FILES['apk']['error']]);
+    respond(422, ['ok' => false, 'error' => 'upload_failed']);
 }
 
 try {
@@ -63,5 +64,6 @@ try {
         'latest_url' => $latestUrl,
     ]);
 } catch (Throwable $e) {
-    respond(422, ['ok' => false, 'error' => 'publish_failed', 'message' => $e->getMessage()]);
+    error_log('EventMenu APK publish failed: ' . $e->getMessage());
+    respond(422, ['ok' => false, 'error' => 'publish_failed']);
 }
