@@ -4,6 +4,7 @@ plugins {
 }
 
 fun envValue(name: String): String = System.getenv(name)?.trim().orEmpty()
+fun envRaw(name: String): String = System.getenv(name).orEmpty()
 fun buildConfigString(value: String): String = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 val apiBase = envValue("EVENTMENU_API_BASE_URL")
@@ -13,7 +14,45 @@ if (!apiBase.startsWith("https://", ignoreCase = true)) {
     throw GradleException("EVENTMENU_API_BASE_URL precisa usar HTTPS.")
 }
 
+val requestedTasks = gradle.startParameter.taskNames.map { it.lowercase() }
+val releaseArtifactRequested = requestedTasks.any { it.contains("assemblerelease") || it.contains("bundlerelease") }
 val ciBuild = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val explicitVersionCode = envValue("EVENTMENU_CONNECT_VERSION_CODE").toIntOrNull()
+if (explicitVersionCode != null && explicitVersionCode !in 1..2_100_000_000) {
+    throw GradleException("EVENTMENU_CONNECT_VERSION_CODE deve estar entre 1 e 2100000000.")
+}
+val appVersionCode = explicitVersionCode ?: ciBuild ?: 1
+val appVersionName = envValue("EVENTMENU_CONNECT_VERSION_NAME").ifBlank {
+    if (ciBuild != null) "1.1.$ciBuild" else "1.1.0"
+}
+
+val releaseKeystorePath = envValue("EVENTMENU_CONNECT_RELEASE_KEYSTORE_PATH")
+val releaseStorePassword = envRaw("EVENTMENU_CONNECT_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = envValue("EVENTMENU_CONNECT_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = envRaw("EVENTMENU_CONNECT_RELEASE_KEY_PASSWORD")
+val releaseSigning = linkedMapOf(
+    "EVENTMENU_CONNECT_RELEASE_KEYSTORE_PATH" to releaseKeystorePath,
+    "EVENTMENU_CONNECT_RELEASE_STORE_PASSWORD" to releaseStorePassword,
+    "EVENTMENU_CONNECT_RELEASE_KEY_ALIAS" to releaseKeyAlias,
+    "EVENTMENU_CONNECT_RELEASE_KEY_PASSWORD" to releaseKeyPassword,
+)
+val releaseSigningCount = releaseSigning.values.count { it.isNotEmpty() }
+val releaseSigningConfigured = releaseSigningCount == releaseSigning.size
+val releaseSigningPartial = releaseSigningCount in 1 until releaseSigning.size
+
+if (releaseSigningPartial) {
+    val missing = releaseSigning.filterValues { it.isEmpty() }.keys.joinToString(", ")
+    throw GradleException("Assinatura Release do EventMenu Connect incompleta. Faltando: $missing")
+}
+if (releaseArtifactRequested && !releaseSigningConfigured) {
+    throw GradleException(
+        "Release do EventMenu Connect exige assinatura oficial. Configure EVENTMENU_CONNECT_RELEASE_KEYSTORE_PATH, " +
+            "EVENTMENU_CONNECT_RELEASE_STORE_PASSWORD, EVENTMENU_CONNECT_RELEASE_KEY_ALIAS e EVENTMENU_CONNECT_RELEASE_KEY_PASSWORD."
+    )
+}
+if (releaseSigningConfigured && !file(releaseKeystorePath).isFile) {
+    throw GradleException("Keystore Release do EventMenu Connect não encontrado.")
+}
 
 android {
     namespace = "br.com.eventmenu.connect"
@@ -24,8 +63,8 @@ android {
         applicationId = "br.com.eventmenu.connect"
         minSdk = 26
         targetSdk = 36
-        versionCode = ciBuild ?: 1
-        versionName = if (ciBuild != null) "1.1.$ciBuild" else "1.1.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
         buildConfigField("String", "API_BASE_URL", buildConfigString(apiBase))
 
         ndk {
@@ -64,9 +103,23 @@ android {
         jniLibs.useLegacyPackaging = false
     }
 
+    signingConfigs {
+        if (releaseSigningConfigured) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (releaseSigningConfigured) signingConfig = signingConfigs.getByName("release")
         }
     }
 }
