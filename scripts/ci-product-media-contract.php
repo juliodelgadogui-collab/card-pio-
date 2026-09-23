@@ -26,5 +26,12 @@ media_contract_assert(str_contains($config,"photo-upload")&&str_contains($config
 
 $go=media_contract_file($root.'/mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/data/EventMenuRepository.kt');
 media_contract_assert(str_contains($go,'imageUrl=p.optString("image_url")'),'EventMenu GO precisa continuar consumindo image_url do catálogo.');
+$gradle=media_contract_file($root.'/mobile/eventmenu-go/app/build.gradle.kts');
+media_contract_assert(str_contains($gradle,'io.coil-kt.coil3:coil-compose:3.5.0')&&str_contains($gradle,'io.coil-kt.coil3:coil-network-okhttp:3.5.0'),'EventMenu GO precisa manter o carregador de imagens compatível com compileSdk 36.');
+foreach(['PosScreen.kt','EventBarScreen.kt'] as$screen){
+    $ui=media_contract_file($root.'/mobile/eventmenu-go/app/src/main/java/br/com/eventmenu/go/ui/screens/'.$screen);
+    media_contract_assert(str_contains($ui,'coil3.compose.AsyncImage'),'Tela '.$screen.' precisa usar AsyncImage.');
+    media_contract_assert(str_contains($ui,'product.imageUrl'),'Tela '.$screen.' precisa renderizar imageUrl do produto.');
+}
 
 echo "CI product media contract OK\n";
