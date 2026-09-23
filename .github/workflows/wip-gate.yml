@@ -39,6 +39,7 @@ jobs:
           php scripts/ci-url-smoke.php
           php scripts/ci-production-readiness-smoke.php
           php scripts/ci-permission-smoke.php
+          php scripts/ci-product-media-contract.php
 
   sqlite-core:
     runs-on: ubuntu-latest

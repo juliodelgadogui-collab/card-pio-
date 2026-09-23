@@ -109,6 +109,10 @@ dependencies {
     implementation("com.google.zxing:core:3.5.4")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 
+    // Coil 3.5.0 mantém compileSdk 36 e minSdk 23, alinhado ao EventMenu GO.
+    implementation("io.coil-kt.coil3:coil-compose:3.5.0")
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.5.0")
+
     testImplementation("junit:junit:4.13.2")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
