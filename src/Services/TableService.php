@@ -16,11 +16,11 @@ final class TableService
         Auth::requirePermission('tables.manage');
         $tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');$pdo=Database::connection();$unitId=$this->currentUnitId();
         $sql='SELECT rt.id,rt.unit_id,rt.name,rt.seats,rt.status,rt.qr_token,t.id tab_id,t.label tab_label,t.opened_at,
-            (SELECT COALESCE(SUM(o.total_cents),0) FROM orders o WHERE o.tab_id=t.id AND o.status<>"cancelled") tab_total_cents,
+            (SELECT COALESCE(SUM(o.total_cents),0) FROM orders o WHERE o.tenant_id=rt.tenant_id AND o.unit_id=rt.unit_id AND o.tab_id=t.id AND o.status<>"cancelled") tab_total_cents,
             (SELECT COALESCE(SUM(GREATEST(0,o.total_cents-COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.tenant_id=o.tenant_id AND p.order_id=o.id AND p.status="paid"),0))),0)
-             FROM orders o WHERE o.tab_id=t.id AND o.status<>"cancelled") unpaid_cents
+             FROM orders o WHERE o.tenant_id=rt.tenant_id AND o.unit_id=rt.unit_id AND o.tab_id=t.id AND o.status<>"cancelled") unpaid_cents
             FROM restaurant_tables rt
-            LEFT JOIN tabs t ON t.table_id=rt.id AND t.status="open"
+            LEFT JOIN tabs t ON t.table_id=rt.id AND t.tenant_id=rt.tenant_id AND t.status="open"
             WHERE rt.tenant_id=?';$args=[$tenantId];
         if($unitId!==null){$sql.=' AND rt.unit_id=?';$args[]=$unitId;}
         $sql.=' ORDER BY rt.name';
@@ -31,7 +31,7 @@ final class TableService
     {
         Auth::requirePermission('tables.manage');
         $tenantId=Auth::tenantId();if(!$tenantId||$tabId<1)throw new RuntimeException('Comanda inválida.');$pdo=Database::connection();$unitId=$this->currentUnitId();
-        $sql='SELECT t.*,rt.name table_name,rt.seats,rt.unit_id FROM tabs t JOIN restaurant_tables rt ON rt.id=t.table_id WHERE t.id=? AND t.tenant_id=?';$args=[$tabId,$tenantId];if($unitId!==null){$sql.=' AND rt.unit_id=?';$args[]=$unitId;}$sql.=' LIMIT 1';
+        $sql='SELECT t.*,rt.name table_name,rt.seats,rt.unit_id FROM tabs t JOIN restaurant_tables rt ON rt.id=t.table_id AND rt.tenant_id=t.tenant_id WHERE t.id=? AND t.tenant_id=?';$args=[$tabId,$tenantId];if($unitId!==null){$sql.=' AND rt.unit_id=?';$args[]=$unitId;}$sql.=' LIMIT 1';
         $t=$pdo->prepare($sql);$t->execute($args);$tab=$t->fetch();if(!$tab)throw new RuntimeException('Comanda não encontrada nesta unidade.');
         $sql='SELECT o.id,o.status,o.payment_status,o.total_cents,o.created_at,
             COALESCE((SELECT SUM(p.amount_cents) FROM payments p WHERE p.tenant_id=o.tenant_id AND p.order_id=o.id AND p.status="paid"),0) paid_cents,
@@ -49,7 +49,7 @@ final class TableService
             $sql='SELECT id,name,status,unit_id FROM restaurant_tables WHERE id=? AND tenant_id=?';$args=[$tableId,$tenantId];if($unitId!==null){$sql.=' AND unit_id=?';$args[]=$unitId;}$sql.=' FOR UPDATE';
             $t=$pdo->prepare(Database::portableSql($pdo,$sql));$t->execute($args);$table=$t->fetch();if(!$table||$table['status']==='inactive')throw new RuntimeException('Mesa indisponível nesta unidade.');
             $open=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM tabs WHERE tenant_id=? AND table_id=? AND status="open" ORDER BY id DESC LIMIT 1 FOR UPDATE'));$open->execute([$tenantId,$tableId]);if($existing=$open->fetch())return $existing;
-            $s=$pdo->prepare('INSERT INTO tabs (tenant_id,table_id,opened_by,label,status) VALUES (?,?,?, ?,"open")');$s->execute([$tenantId,$tableId,$userId,$label?:null]);$id=(int)$pdo->lastInsertId();$pdo->prepare('UPDATE restaurant_tables SET status="occupied" WHERE id=? AND tenant_id=?')->execute([$tableId,$tenantId]);Auth::audit('tab.opened','tab',(string)$id,['table_id'=>$tableId,'unit_id'=>$table['unit_id']??null,'source'=>'eventmenu_go']);$q=$pdo->prepare('SELECT * FROM tabs WHERE id=?');$q->execute([$id]);return $q->fetch()?:throw new RuntimeException('Falha ao abrir comanda.');
+            $s=$pdo->prepare('INSERT INTO tabs (tenant_id,table_id,opened_by,label,status) VALUES (?,?,?, ?,"open")');$s->execute([$tenantId,$tableId,$userId,$label?:null]);$id=(int)$pdo->lastInsertId();$pdo->prepare('UPDATE restaurant_tables SET status="occupied" WHERE id=? AND tenant_id=?')->execute([$tableId,$tenantId]);Auth::audit('tab.opened','tab',(string)$id,['table_id'=>$tableId,'unit_id'=>$table['unit_id']??null,'source'=>'eventmenu_go']);$q=$pdo->prepare('SELECT * FROM tabs WHERE id=? AND tenant_id=?');$q->execute([$id,$tenantId]);return $q->fetch()?:throw new RuntimeException('Falha ao abrir comanda.');
         });
     }
 
@@ -57,11 +57,12 @@ final class TableService
     {
         Auth::requirePermission('tables.manage');$tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)throw new RuntimeException('Sessão inválida.');$unitId=$this->currentUnitId();
         return Database::transaction(function(PDO $pdo)use($tenantId,$userId,$unitId,$tabId):array{
-            $sql='SELECT t.*,rt.unit_id FROM tabs t JOIN restaurant_tables rt ON rt.id=t.table_id WHERE t.id=? AND t.tenant_id=? AND t.status="open"';$args=[$tabId,$tenantId];if($unitId!==null){$sql.=' AND rt.unit_id=?';$args[]=$unitId;}$sql.=' FOR UPDATE';
+            $sql='SELECT t.*,rt.unit_id FROM tabs t JOIN restaurant_tables rt ON rt.id=t.table_id AND rt.tenant_id=t.tenant_id WHERE t.id=? AND t.tenant_id=? AND t.status="open"';$args=[$tabId,$tenantId];if($unitId!==null){$sql.=' AND rt.unit_id=?';$args[]=$unitId;}$sql.=' FOR UPDATE';
             $s=$pdo->prepare(Database::portableSql($pdo,$sql));$s->execute($args);$tab=$s->fetch();if(!$tab)throw new RuntimeException('Comanda aberta não encontrada nesta unidade.');
             $u=$pdo->prepare('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND tab_id=? AND status<>"cancelled" AND payment_status<>"paid"');$u->execute([$tenantId,$tabId]);if((int)$u->fetchColumn()>0)throw new RuntimeException('Existem pedidos não pagos nesta comanda.');
             $active=$pdo->prepare('SELECT COUNT(*) FROM orders WHERE tenant_id=? AND tab_id=? AND status IN ("confirmed","preparing","ready","out_for_delivery")');$active->execute([$tenantId,$tabId]);if((int)$active->fetchColumn()>0)throw new RuntimeException('Existem pedidos operacionais ainda não finalizados nesta comanda.');
-            $pdo->prepare('UPDATE tabs SET status="closed",closed_by=?,closed_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$userId,$tabId]);if($tab['table_id'])$pdo->prepare('UPDATE restaurant_tables SET status="available" WHERE id=? AND tenant_id=?')->execute([$tab['table_id'],$tenantId]);Auth::audit('tab.closed','tab',(string)$tabId,['unit_id'=>$tab['unit_id']??null,'source'=>'eventmenu_go']);$tab['status']='closed';return $tab;
+            $close=$pdo->prepare('UPDATE tabs SET status="closed",closed_by=?,closed_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="open"');$close->execute([$userId,$tabId,$tenantId]);if($close->rowCount()!==1)throw new RuntimeException('A comanda já foi encerrada ou alterada por outro atendimento.');
+            if($tab['table_id'])$pdo->prepare('UPDATE restaurant_tables SET status="available" WHERE id=? AND tenant_id=?')->execute([$tab['table_id'],$tenantId]);Auth::audit('tab.closed','tab',(string)$tabId,['unit_id'=>$tab['unit_id']??null,'source'=>'eventmenu_go']);$tab['status']='closed';return $tab;
         });
     }
 
