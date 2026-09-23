@@ -1,0 +1,110 @@
+name: EventMenu Server Deploy Ready
+
+on:
+  push:
+    branches:
+      - wip/eventmenu-delivery-customer-auth-payments
+      - fix/eventmenu-error-log-deploy-consistency
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-ready:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: 'curl, mbstring, openssl, pdo_sqlite'
+          coverage: none
+
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+
+      - name: PHP syntax validation
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Error-log regression contracts
+        run: |
+          php scripts/ci-error-log-regression-smoke.php
+          php scripts/ci-receipt-paper-width-smoke.php
+          php scripts/ci-mercadopago-security-smoke.php
+          php scripts/ci-deployment-metadata-smoke.php
+
+      - name: Existing stateless contracts
+        run: |
+          php scripts/ci-public-ux-smoke.php
+          php scripts/ci-coupon-pricing-smoke.php
+          php scripts/ci-order-payment-preference-smoke.php
+          php scripts/ci-native-payment-route-smoke.php
+          php scripts/ci-whatsapp-smoke.php
+
+      - name: SQLite regression suite
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: deploy-ready-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          APP_URL: https://example.test/1
+          APP_BASE_PATH: /1
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-deploy-ready.sqlite
+          SESSION_NAME: eventmenu_deploy_ready
+        run: |
+          set -euo pipefail
+          rm -f /tmp/eventmenu-deploy-ready.sqlite /tmp/eventmenu-deploy-ready.sqlite-shm /tmp/eventmenu-deploy-ready.sqlite-wal
+          php scripts/ci-db-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-whatsapp-connect-hardening-smoke.php
+          php scripts/ci-production-readiness-smoke.php
+
+      - name: Build one-SHA package
+        run: |
+          set -euo pipefail
+          PACKAGE="$RUNNER_TEMP/EventMenu-Premium-Servidor-Deploy-Ready"
+          php scripts/build-package.php "$PACKAGE"
+          mkdir -p "$PACKAGE/deployment"
+          cp scripts/post-deploy.php "$PACKAGE/deployment/post-deploy.php"
+          printf 'Require all denied\n' > "$PACKAGE/deployment/.htaccess"
+          test -f DEPLOYMENT.md && cp DEPLOYMENT.md "$PACKAGE/DEPLOYMENT.md" || true
+          php scripts/generate-deployment-metadata.php "$PACKAGE"
+
+          test "$(php -r '$m=json_decode(file_get_contents($argv[1]),true);echo $m["commit_sha"]??"";' "$PACKAGE/app/deployment.json")" = "$GITHUB_SHA"
+
+          for file in \
+            public/api-whatsapp-desktop.php \
+            src/Services/DeliveryCustomerBenefitsService.php \
+            src/Services/ReceiptService.php \
+            src/Services/ReceiptPresentationService.php \
+            public/api-go-events.php \
+            public/delivery-settings.php \
+            app/admin_helpers.php; do
+            cmp "$file" "$PACKAGE/$file"
+          done
+
+          if find "$PACKAGE" -type f \( -iname '*-test.php' -o -iname 'test-*.php' -o -iname 'debug-*.php' -o -iname 'phpinfo*.php' \) -print -quit | grep -q .; then
+            echo 'Deploy bloqueado: script de teste/debug encontrado no pacote.' >&2
+            exit 1
+          fi
+
+          test ! -e "$PACKAGE/wa-send-test.php"
+          test -f "$PACKAGE/app/deployment.json"
+          test -f "$PACKAGE/storage/deployment.json"
+          test -f "$PACKAGE/deployment/post-deploy.php"
+
+          cd "$PACKAGE"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-Servidor-Deploy-Ready
+          path: '${{ runner.temp }}/EventMenu-Premium-Servidor-Deploy-Ready'
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
