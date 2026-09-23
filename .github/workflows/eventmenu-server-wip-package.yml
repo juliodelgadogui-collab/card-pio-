@@ -55,6 +55,7 @@ jobs:
           php scripts/ci-db-smoke.php
           php scripts/ci-whatsapp-commerce-smoke.php
           php scripts/ci-whatsapp-assistant-smoke.php
+          php scripts/ci-whatsapp-conversion-smoke.php
           php scripts/ci-whatsapp-registration-smoke.php
           php scripts/ci-whatsapp-commerce-order-smoke.php
           php scripts/ci-whatsapp-commerce-fulfillment-smoke.php
@@ -101,15 +102,18 @@ jobs:
           test -f database/migrations/074_production_print_policy.sql
           test -f database/migrations/075_whatsapp_support_center.sql
           test -f database/migrations/077_whatsapp_commerce_assistant.sql
+          test -f database/migrations/078_whatsapp_commerce_conversion.sql
           test -f database/sqlite/migrations/065_whatsapp_integration.sql
           test -f database/sqlite/migrations/075_whatsapp_support_center.sql
           test -f database/sqlite/migrations/077_whatsapp_commerce_assistant.sql
+          test -f database/sqlite/migrations/078_whatsapp_commerce_conversion.sql
           test -f src/Services/WhatsAppIntegrationService.php
           test -f src/Services/WhatsAppDesktopAgentService.php
           test -f src/Services/WhatsAppOrderReceivedSyncService.php
           test -f src/Services/WhatsAppOrderReceiptService.php
           test -f src/Services/WhatsAppCommerceService.php
           test -f src/Services/WhatsAppCommerceAssistantService.php
+          test -f src/Services/WhatsAppCommerceConversionService.php
           test -f src/Services/WhatsAppCustomerRegistrationService.php
           test -f src/Services/WhatsAppCommerceOrderService.php
           test -f src/Services/WhatsAppCommerceFulfillmentService.php
@@ -125,6 +129,7 @@ jobs:
           test -f scripts/ci-whatsapp-support-smoke.php
           test -f scripts/ci-whatsapp-connect-hardening-smoke.php
           test -f scripts/ci-whatsapp-assistant-smoke.php
+          test -f scripts/ci-whatsapp-conversion-smoke.php
           test -f scripts/ci-whatsapp-menu-receipt-smoke.php
           test ! -e integrations/whatsapp-worker/server.js
           test ! -e integrations/whatsapp-worker/package.json
@@ -147,6 +152,7 @@ jobs:
           test -f "$PACKAGE/src/Services/WhatsAppOrderReceiptService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceAssistantService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceConversionService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCustomerRegistrationService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceOrderService.php"
           test -f "$PACKAGE/src/Services/WhatsAppCommerceFulfillmentService.php"
