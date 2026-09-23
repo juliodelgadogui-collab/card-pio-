@@ -42,6 +42,14 @@ $pdo->prepare("INSERT INTO audit_logs (tenant_id,action,entity_type,entity_id) V
 
 $slug2='wa-other-'.bin2hex(random_bytes(4));$pdo->prepare('INSERT INTO tenants (name,slug,plan,status) VALUES (?,? ,"premium","active")')->execute(['Outro Tenant',$slug2]);$otherTenant=(int)$pdo->lastInsertId();$pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,?,1)')->execute([$otherTenant,'principal','Principal']);$otherUnit=(int)$pdo->lastInsertId();$pdo->prepare("INSERT INTO orders (public_token,tenant_id,unit_id,channel,order_source,status,payment_status,subtotal_cents,discount_cents,delivery_fee_cents,total_cents) VALUES (?,?,?,'pickup','WHATSAPP','completed','paid',999900,0,0,999900)")->execute([bin2hex(random_bytes(20)),$otherTenant,$otherUnit]);
 
+// Evita que o fixture e o relatório caiam no mesmo segundo do limite superior exclusivo.
+$pdo->prepare("UPDATE whatsapp_conversations SET created_at=datetime('now','-1 minute') WHERE tenant_id=?")->execute([$tenantId]);
+$pdo->prepare("UPDATE whatsapp_messages SET created_at=datetime('now','-1 minute') WHERE tenant_id=?")->execute([$tenantId]);
+$pdo->prepare("UPDATE orders SET created_at=datetime('now','-1 minute') WHERE tenant_id=?")->execute([$tenantId]);
+$pdo->prepare("UPDATE whatsapp_outbox SET created_at=datetime('now','-1 minute') WHERE tenant_id=? AND event_type<>'cart_abandoned'")->execute([$tenantId]);
+$pdo->prepare("UPDATE whatsapp_commerce_events SET created_at=datetime('now','-1 minute') WHERE tenant_id=?")->execute([$tenantId]);
+$pdo->prepare("UPDATE audit_logs SET created_at=datetime('now','-1 minute') WHERE tenant_id=? AND action='whatsapp.support_message_queued'")->execute([$tenantId]);
+
 $report=$service->report($pdo,$tenantId,'7d');
 waa_assert((int)$report['funnel']['conversations']===1,'Funil não contou a conversa do tenant.');
 waa_assert((int)$report['funnel']['carts_started']===2&&(int)$report['funnel']['finalized_orders']===1,'Funil não separou carrinho e finalização.');
