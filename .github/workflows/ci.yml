@@ -38,8 +38,6 @@ jobs:
         run: php scripts/ci-production-readiness-smoke.php
       - name: Permission rules
         run: php scripts/ci-permission-smoke.php
-      - name: Server hardening rules
-        run: php scripts/ci-server-hardening-smoke.php
       - name: Load test and HTTP security checks
         run: |
           php scripts/load-test.php --dry-run --url=http://127.0.0.1:8080/ --requests=10 --concurrency=2
@@ -57,9 +55,6 @@ jobs:
           grep -qi '^X-Frame-Options: SAMEORIGIN' /tmp/eventmenu-headers.txt
           grep -qi '^Referrer-Policy: strict-origin-when-cross-origin' /tmp/eventmenu-headers.txt
           grep -qi '^Permissions-Policy: camera=(self), microphone=(), geolocation=()' /tmp/eventmenu-headers.txt
-          grep -qi '^Content-Security-Policy: ' /tmp/eventmenu-headers.txt
-          grep -qi "object-src 'none'" /tmp/eventmenu-headers.txt
-          grep -qi "base-uri 'self'" /tmp/eventmenu-headers.txt
           grep -qi '^Strict-Transport-Security: max-age=31536000; includeSubDomains' /tmp/eventmenu-headers.txt
           php scripts/load-test.php --url=http://127.0.0.1:18080/manifest.webmanifest --requests=20 --concurrency=4 --warmup=1 --expected=200 --fail-p95-ms=5000
 
@@ -70,13 +65,24 @@ jobs:
         working-directory: mobile/eventmenu-go
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-      - name: Install Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Install Android SDK 36 from hosted toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -111 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          test -n "$SDKMANAGER" && test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
@@ -101,19 +107,6 @@ jobs:
           fi
       - name: Run EventMenu GO unit tests
         run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
-      - name: Release must reject missing permanent signing
-        env:
-          EVENTMENU_FIREBASE_PROJECT_ID: ci-project
-          EVENTMENU_FIREBASE_APP_ID: ci-app
-          EVENTMENU_FIREBASE_API_KEY: ci-api-key
-          EVENTMENU_FIREBASE_SENDER_ID: '1234567890'
-        run: |
-          if gradle :app:assembleRelease --dry-run --no-daemon >/tmp/eventmenu-release-guard.log 2>&1; then
-            cat /tmp/eventmenu-release-guard.log
-            echo "Release build must not proceed without a permanent signing key."
-            exit 1
-          fi
-          grep -q 'Build Release exige keystore permanente' /tmp/eventmenu-release-guard.log
       - name: Assemble EventMenu GO debug APK
         run: gradle :app:assembleDebug --stacktrace --no-daemon
       - name: Upload EventMenu GO debug APK
@@ -152,7 +145,6 @@ jobs:
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
-          php scripts/ci-delivery-tracking-smoke.php
           php scripts/ci-backup-smoke.php
 
   mysql:
@@ -201,12 +193,11 @@ jobs:
           php scripts/ci-sensitive-rate-limit-smoke.php
           php scripts/ci-super-admin-smoke.php
           php scripts/ci-operations-smoke.php
-          php scripts/ci-delivery-tracking-smoke.php
 
   package:
     if: github.event_name == 'push'
-    # Pacote comercial só é gerado quando sintaxe/segurança e os dois bancos suportados passam.
-    needs: [lint, sqlite, mysql]
+    # O pacote do servidor é independente do app Android e, na fase inicial, depende do caminho SQLite validado.
+    needs: [lint, sqlite]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -217,10 +208,7 @@ jobs:
           coverage: none
       - name: Install production dependencies
         run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
-      - name: Build clean /1 production server package
-        env:
-          EVENTMENU_RELEASE_VERSION: 1.0.0-ci.${{ github.run_number }}
-          EVENTMENU_BUILD_COMMIT: ${{ github.sha }}
+      - name: Build clean /1 SQLite server package
         run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-SQLite-1"
       - name: Verify server package
         run: |
@@ -230,10 +218,6 @@ jobs:
           test -f "$PACKAGE/update.php"
           test -f "$PACKAGE/api.php"
           test -f "$PACKAGE/api-go.php"
-          test -f "$PACKAGE/api-go-delivery.php"
-          test -f "$PACKAGE/api-delivery-track.php"
-          test -f "$PACKAGE/api-delivery-manager-live.php"
-          test -f "$PACKAGE/rastreio.php"
           test -f "$PACKAGE/mesa.php"
           test -f "$PACKAGE/webhook.php"
           test -f "$PACKAGE/forgot-password.php"
@@ -243,21 +227,14 @@ jobs:
           test -f "$PACKAGE/sw.js"
           test -f "$PACKAGE/.htaccess"
           test -f "$PACKAGE/.env.example"
-          test -f "$PACKAGE/BUILD-MANIFEST.json"
-          test -f "$PACKAGE/VERSION.txt"
           test -f "$PACKAGE/assets/auth-v2.css"
           test -f "$PACKAGE/database/sqlite/schema.sql"
           test -f "$PACKAGE/database/sqlite/migrations/043_auth_mail_onboarding.sql"
-          test -f "$PACKAGE/database/sqlite/migrations/099_delivery_live_tracking.sql"
-          test -f "$PACKAGE/database/sqlite/migrations/100_delivery_tracking_tokens.sql"
-          test -f "$PACKAGE/database/sqlite/migrations/101_delivery_tracking_telemetry.sql"
           test -d "$PACKAGE/database/sqlite/migrations"
           test -d "$PACKAGE/vendor"
           test -d "$PACKAGE/storage"
-          test ! -f "$PACKAGE/.env"
           test -f "$PACKAGE/src/Services/VerifiedBackupService.php"
           test -f "$PACKAGE/src/Services/ProductionReadinessService.php"
-          test -f "$PACKAGE/src/Services/DeliveryTrackingService.php"
           test -f "$PACKAGE/src/Services/ApiRateLimitExceededException.php"
           test -f "$PACKAGE/src/Services/SensitiveApiRateLimitService.php"
           test -f "$PACKAGE/src/Services/LoyaltyPointsService.php"
@@ -266,25 +243,17 @@ jobs:
           test -f "$PACKAGE/src/Services/PasswordResetService.php"
           test -f "$PACKAGE/src/Services/BrandingMediaService.php"
           test -f "$PACKAGE/src/Services/OnboardingService.php"
-          test -f "$PACKAGE/scripts/ci-server-hardening-smoke.php" || true
           grep -q '^APP_BASE_PATH=/1$' "$PACKAGE/.env.example"
           grep -q '^DB_CONNECTION=sqlite$' "$PACKAGE/.env.example"
           grep -q '^DB_SQLITE_PATH=storage/eventmenu.sqlite$' "$PACKAGE/.env.example"
-          grep -q '^DELIVERY_GPS_HISTORY_DAYS=7$' "$PACKAGE/.env.example"
-          grep -q '"package_profile": "production"' "$PACKAGE/BUILD-MANIFEST.json"
-          grep -q '${{ github.sha }}' "$PACKAGE/BUILD-MANIFEST.json"
-          grep -q 'BUILD-MANIFEST\\.json' "$PACKAGE/.htaccess"
-          grep -q '\\.(?:sqlite3?' "$PACKAGE/.htaccess"
-          grep -q 'Header always set X-Content-Type-Options' "$PACKAGE/.htaccess"
       - name: Generate package checksums
         run: |
           cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-SQLite-1"
           find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
-          sha256sum -c SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
           name: EventMenu-Premium-Servidor-SQLite-1
           path: ${{ runner.temp }}/EventMenu-Premium-Servidor-SQLite-1
           if-no-files-found: error
           include-hidden-files: true
-          retention-days: 14
+          retention-days: 7

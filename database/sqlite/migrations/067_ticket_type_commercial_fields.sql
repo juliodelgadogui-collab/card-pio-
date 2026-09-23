@@ -1,0 +1,4 @@
+ALTER TABLE ticket_types ADD COLUMN price NUMERIC NOT NULL DEFAULT 0.00;
+ALTER TABLE ticket_types ADD COLUMN sale_start_at TEXT NULL;
+ALTER TABLE ticket_types ADD COLUMN sale_end_at TEXT NULL;
+ALTER TABLE ticket_types ADD COLUMN sales_enabled INTEGER NOT NULL DEFAULT 1;

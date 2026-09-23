@@ -38,8 +38,14 @@ final class OrderService
             if($source==='delivery'){if(!Auth::can('orders.delivery'))throw new RuntimeException('Sua conta não possui permissão de entrega.');if(!in_array($target,['out_for_delivery','completed'],true))throw new RuntimeException('A entrega só pode retirar ou concluir o pedido.');if((int)($order['assigned_delivery_user_id']??0)!==(int)Auth::id())throw new RuntimeException('Pedido não está atribuído a este entregador.');if($order['channel']!=='delivery')throw new RuntimeException('Pedido não é de delivery.');$shift=(new WorkShiftService())->current();if($shift&&$shift['unit_id']!==null&&$order['unit_id']!==null&&(int)$shift['unit_id']!==(int)$order['unit_id'])throw new RuntimeException('A entrega pertence a outra unidade.');}
             if($source==='dispatch'){if($current!=='ready')throw new RuntimeException('O Balcão só pode liberar pedido pronto.');if($order['channel']==='table'&&$target!=='served')throw new RuntimeException('Pedido de mesa deve ser marcado como servido.');if(in_array($order['channel'],['counter','pickup'],true)&&$target!=='completed')throw new RuntimeException('Pedido local pronto deve ser concluído na retirada.');if($order['channel']==='delivery')throw new RuntimeException('Delivery deve ser atribuído a um entregador antes da saída.');}
             if($target==='confirmed')$pdo->prepare('UPDATE stock_reservations SET expires_at=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);elseif($target==='cancelled')(new StockReservationService())->release($pdo,$tenantId,$orderId);
-            $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$target,$orderId,$tenantId]);(new OrderHistoryService())->record($pdo,$tenantId,$orderId,$current,$target,$source,$this->historyNote($target,$source));Auth::audit('order.status','order',(string)$orderId,['from'=>$current,'to'=>$target,'source'=>$source,'unit_id'=>$order['unit_id']??null]);$order['status']=$target;return$order;
-        });$this->publishOperationalNotification($result,$target);return$result;
+            $pdo->prepare('UPDATE orders SET status=? WHERE id=? AND tenant_id=?')->execute([$target,$orderId,$tenantId]);
+            $marketplace=new MarketplaceCommissionService();if($target==='completed')$marketplace->markDue($pdo,$tenantId,$orderId);elseif($target==='cancelled')$marketplace->reverse($pdo,$tenantId,$orderId,'Pedido cancelado antes da conclusão.');
+            (new OrderHistoryService())->record($pdo,$tenantId,$orderId,$current,$target,$source,$this->historyNote($target,$source));Auth::audit('order.status','order',(string)$orderId,['from'=>$current,'to'=>$target,'source'=>$source,'unit_id'=>$order['unit_id']??null]);$order['status']=$target;return$order;
+        });
+        $this->publishOperationalNotification($result,$target);
+        $this->publishCustomerNotification($result,$target,$source);
+        $this->queueCustomerWhatsApp($result,$target);
+        return$result;
     }
 
     private function assertPickupFullyFulfilled(PDO$pdo,int$tenantId,int$orderId):void
@@ -52,5 +58,32 @@ final class OrderService
     private function publishOperationalNotification(array$order,string$target):void
     {
         if(!in_array((string)($order['channel']??''),['counter','table','delivery','pickup'],true))return;try{$notifications=new NotificationService();$id=(int)$order['id'];$unitId=!empty($order['unit_id'])?(int)$order['unit_id']:null;$expires=gmdate('Y-m-d H:i:s',time()+86400);if($target==='confirmed')$notifications->publishToPermission('orders.kitchen','operation','order.new','Novo pedido #'.$id,'Um novo pedido confirmado entrou na fila da cozinha.','order',(string)$id,'order:'.$id.':kitchen-confirmed','info',$expires,$unitId);if($target==='ready')$notifications->publishToPermission('orders.dispatch','operation','order.ready','Pedido #'.$id.' pronto','A cozinha marcou o pedido como pronto para despacho.','order',(string)$id,'order:'.$id.':ready-dispatch','success',$expires,$unitId);}catch(\Throwable){}
+    }
+
+    private function queueCustomerWhatsApp(array$order,string$target):void
+    {
+        if(!in_array((string)($order['channel']??''),['delivery','pickup','counter'],true))return;
+        $event=match($target){
+            'confirmed'=>'order_confirmed',
+            'preparing'=>'preparing',
+            'ready'=>'ready',
+            'out_for_delivery'=>'out_for_delivery',
+            'completed'=>'delivered',
+            'cancelled'=>'cancelled',
+            default=>null,
+        };
+        if($event===null)return;
+        try{
+            $pdo=Database::connection();$tenantId=(int)($order['tenant_id']??Auth::tenantId()??0);$orderId=(int)($order['id']??0);
+            if($tenantId>0&&$orderId>0)(new WhatsAppIntegrationService())->queueOrderEvent($pdo,$tenantId,$orderId,$event,'status:'.$target);
+        }catch(\Throwable $e){error_log('[order-whatsapp] '.$e::class.': '.$e->getMessage());}
+    }
+
+    private function publishCustomerNotification(array$order,string$target,string$source):void
+    {
+        if((string)($order['channel']??'')!=='delivery')return;
+        if($target==='out_for_delivery'&&$source==='delivery')return;
+        if(!in_array($target,['confirmed','preparing','ready','out_for_delivery','completed','cancelled'],true))return;
+        try{(new DeliveryCustomerPushService())->sendOrderStatus((int)$order['id'],$target);}catch(\Throwable$e){error_log('[delivery-customer-push] '.$e::class.': '.$e->getMessage());}
     }
 }

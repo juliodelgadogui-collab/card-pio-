@@ -20,6 +20,8 @@ final class FcmPushService
     {
         if($notificationId<1)throw new RuntimeException('Notificação push inválida.');
         $pdo=Database::connection();$s=$pdo->prepare('SELECT n.*,u.status user_status FROM app_notifications n JOIN users u ON u.id=n.user_id AND u.tenant_id=n.tenant_id WHERE n.id=? LIMIT 1');$s->execute([$notificationId]);$notification=$s->fetch();if(!$notification)return['sent'=>0,'devices'=>0,'missing'=>true];if((string)$notification['user_status']!=='active')return['sent'=>0,'devices'=>0,'inactive_user'=>true];
+        if(!empty($notification['expires_at'])&&strtotime((string)$notification['expires_at'])<=time())return['sent'=>0,'devices'=>0,'expired'=>true];
+        if(!empty($notification['read_at']))return['sent'=>0,'devices'=>0,'already_read'=>true];
         $d=$pdo->prepare('SELECT id,push_token FROM push_devices WHERE tenant_id=? AND user_id=? AND active=1 ORDER BY id');$d->execute([(int)$notification['tenant_id'],(int)$notification['user_id']]);$devices=$d->fetchAll();if(!$devices)return['sent'=>0,'devices'=>0,'configured'=>$this->configured()];
         if(!$this->configured())return['sent'=>0,'devices'=>count($devices),'configured'=>false];
 
@@ -36,7 +38,7 @@ final class FcmPushService
 
     private function sendToToken(string $token,array $notification,string $projectId,string $accessToken):array
     {
-        $type=(string)$notification['type'];$mode=(string)($notification['mode']??'');
+        $type=(string)$notification['type'];$mode=(string)($notification['mode']??'');$ttlSeconds=3600;
         $data=[
             'notification_id'=>(string)$notification['id'],
             'notification_type'=>$type,
@@ -48,13 +50,14 @@ final class FcmPushService
             'message'=>(string)$notification['message'],
         ];
         if($mode!==''){$data['notification_mode']=$mode;$data['mode']=$mode;}
-        foreach(['entity_type','entity_id','expires_at']as$key)if(!empty($notification[$key]))$data[$key]=(string)$notification[$key];
+        foreach(['entity_type','entity_id']as$key)if(!empty($notification[$key]))$data[$key]=(string)$notification[$key];
+        if(!empty($notification['expires_at'])){$expiresAt=(string)$notification['expires_at'];$expiresEpoch=strtotime($expiresAt);$data['expires_at']=$expiresAt;if($expiresEpoch!==false){$data['expires_at_epoch']=(string)$expiresEpoch;$ttlSeconds=max(60,min(3600,$expiresEpoch-time()));}}
         $body=['message'=>[
             'token'=>$token,
             'data'=>$data,
             'android'=>[
                 'priority'=>in_array((string)$notification['priority'],['critical','warning'],true)?'high':'normal',
-                'ttl'=>'3600s',
+                'ttl'=>$ttlSeconds.'s',
             ],
         ]];
         $url='https://fcm.googleapis.com/v1/projects/'.rawurlencode($projectId).'/messages:send';$response=$this->request($url,['Authorization: Bearer '.$accessToken,'Content-Type: application/json'],json_encode($body,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR));$http=$response['http'];

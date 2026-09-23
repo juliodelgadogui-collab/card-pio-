@@ -1,0 +1,66 @@
+/* DELYVRE order/payment experience — presentation only; payment/order logic stays in pedido.php. */
+body.delyvre-order-context{
+  --op-bg:#fffaf7;
+  --op-surface:#fff;
+  --op-text:#211b19;
+  --op-primary:#ff4f3d;
+  --op-secondary:#168451!important;
+  --op-muted:#756c68;
+  --op-line:#eee5e1;
+  --op-soft:#fff0ec;
+  --op-warning:#a76300;
+  --op-danger:#c83232;
+  --op-info:#1e6ee8;
+  --op-shadow:0 16px 46px rgba(54,34,27,.09);
+  background:#fffaf7;
+  color:#211b19;
+}
+body.delyvre-order-context .shell{width:min(900px,100%);padding-top:0}
+.delyvre-order-bar{position:sticky;top:0;z-index:80;margin:0 calc(clamp(14px,3vw,24px)*-1) 14px;padding:max(10px,env(safe-area-inset-top)) clamp(14px,3vw,24px) 10px;background:rgba(255,250,247,.94);backdrop-filter:blur(22px) saturate(1.25);-webkit-backdrop-filter:blur(22px) saturate(1.25);border-bottom:1px solid rgba(238,229,225,.9)}
+.delyvre-order-bar-inner{display:flex;align-items:center;gap:10px;max-width:900px;margin:auto}
+.delyvre-order-home{width:42px;height:42px;display:grid;place-items:center;border:1px solid var(--op-line);border-radius:14px;background:#fff;font-size:20px;font-weight:900}
+.delyvre-order-brand{display:flex;align-items:center;gap:9px;font-weight:1000;letter-spacing:-.045em}
+.delyvre-order-brand-mark{width:38px;height:38px;border-radius:13px;display:grid;place-items:center;background:linear-gradient(145deg,#ff6a58,#ff4f3d);color:#fff;box-shadow:0 8px 20px rgba(255,79,61,.22)}
+.delyvre-order-brand-copy{display:flex;flex-direction:column;line-height:1}.delyvre-order-brand-copy small{margin-top:4px;font-size:9px;letter-spacing:.02em;color:var(--op-muted);font-weight:800}
+.delyvre-order-spacer{flex:1}.delyvre-order-label{font-size:11px;font-weight:900;color:#5d534f}
+body.delyvre-order-context .top{margin-bottom:12px;padding:0 2px}
+body.delyvre-order-context .brand-logo,body.delyvre-order-context .brand-mark{border-radius:16px}
+body.delyvre-order-context .brand-name{font-size:17px}.delyvre-order-context .top-state{color:#756c68}
+body.delyvre-order-context .card{border-color:var(--op-line);border-radius:28px;box-shadow:0 18px 50px rgba(54,34,27,.09)}
+body.delyvre-order-context .channel{background:#fff0ec;color:#d94232}
+body.delyvre-order-context .status-pill{background:#edf6ff;color:#1f5da8}
+body.delyvre-order-context .payment-pill{background:#fff6e8;color:#915b00}
+body.delyvre-order-context .payment-pill.paid{background:#eaf8f2;color:#087750}
+body.delyvre-order-context .title h1{font-size:clamp(32px,6vw,48px);letter-spacing:-1.8px}
+body.delyvre-order-context .timeline-card{border-radius:22px;border-color:var(--op-line);background:#fffaf7}
+body.delyvre-order-context .timeline-step.done .timeline-dot{border-color:#168451;background:#168451}
+body.delyvre-order-context .timeline-step.done:not(:last-child)::after{background:#168451}
+body.delyvre-order-context .timeline-step.current .timeline-dot{border-color:#ff4f3d;color:#ff4f3d;box-shadow:0 0 0 5px rgba(255,79,61,.1)}
+body.delyvre-order-context .tracking-action{border-color:#d9e7ff;background:#f1f6ff;border-radius:16px}
+body.delyvre-order-context .tracking-action a{border-radius:12px}
+body.delyvre-order-context .section-title h2{font-size:22px;letter-spacing:-.45px}
+body.delyvre-order-context .payment-card,body.delyvre-order-context .pay-method{border-color:var(--op-line)!important;border-radius:20px!important;box-shadow:0 7px 24px rgba(54,34,27,.035)}
+body.delyvre-order-context .native-primary,body.delyvre-order-context .primary{background:#ff4f3d!important;color:#fff;box-shadow:0 8px 20px rgba(255,79,61,.18)}
+body.delyvre-order-context .native-secondary{background:#fff0ec!important;color:#c94031!important}
+body.delyvre-order-context .native-pay input,body.delyvre-order-context .native-pay select,body.delyvre-order-context .mp-field{border-color:#e2d7d1!important;border-radius:14px!important}
+body.delyvre-order-context .native-pay input:focus,body.delyvre-order-context .native-pay select:focus{outline:3px solid rgba(255,79,61,.11);border-color:#ff8f82!important}
+body.delyvre-order-context .card-type-row label{background:#fff4f0!important}
+body.delyvre-order-context .secure-note{padding:11px 12px;border-radius:13px;background:#fffaf7;border:1px solid var(--op-line);line-height:1.45}
+body.delyvre-order-context .secure-note strong{color:#168451!important}
+body.delyvre-order-context .qr-card{background:#fff6f2;border-color:#f4ddd5;border-radius:22px}
+body.delyvre-order-context .qr-box{border-radius:17px;border-color:#eee1dc}
+body.delyvre-order-context .ticket-link{border-radius:17px;border-color:var(--op-line)}
+body.delyvre-order-context .ticket-link strong{color:#ff4f3d}
+body.delyvre-order-context .foot{font-weight:700;color:#7a706b}.delyvre-order-context .foot b{color:#211b19}
+body.delyvre-order-context .sync-indicator{border-color:var(--op-line);box-shadow:0 9px 25px rgba(54,34,27,.09)}
+body.delyvre-order-context .event-box{background:linear-gradient(135deg,#211b19,#6d2a20)}
+@media(max-width:620px){
+ body.delyvre-order-context{padding-bottom:max(18px,env(safe-area-inset-bottom))}
+ body.delyvre-order-context .shell{padding-left:10px;padding-right:10px}
+ .delyvre-order-bar{margin-left:-10px;margin-right:-10px;padding-left:10px;padding-right:10px}
+ .delyvre-order-brand-copy small{display:none}.delyvre-order-label{display:none}
+ body.delyvre-order-context .card{border-radius:22px}
+ body.delyvre-order-context .title h1{font-size:32px}
+}
+@media(max-width:370px){.delyvre-order-brand-copy{display:none}}
+@media(prefers-reduced-motion:reduce){body.delyvre-order-context *{transition:none!important}}

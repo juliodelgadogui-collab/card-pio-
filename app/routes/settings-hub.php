@@ -6,12 +6,10 @@ use EventMenu\Core\Auth;
 use EventMenu\Core\Security;
 use EventMenu\Core\TenantFeatures;
 use EventMenu\Services\MailSettingsService;
-use EventMenu\Services\WhatsAppSettingsService;
 
 Auth::requirePermission('settings.manage');
 $tenantId = em_require_tenant();
 $mail = (new MailSettingsService())->get($tenantId);
-$whatsapp = (new WhatsAppSettingsService())->get($tenantId);
 
 em_header('Configurações','settings');
 ?>
@@ -31,11 +29,14 @@ em_header('Configurações','settings');
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=media-settings')) ?>">
     <span class="eyebrow">IMAGENS</span><h3>Logo e capa</h3><p class="muted">Envie arquivos direto do celular ou computador, sem precisar colar URL.</p><span class="button secondary compact">Gerenciar imagens</span>
   </a>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('whatsapp.php')) ?>">
+    <span class="eyebrow">WHATSAPP · EVENTMENU CONNECT</span><h3>Conexão e mensagens</h3><p class="muted">Acompanhe o EventMenu Connect e configure avisos automáticos de pedido, pagamento, preparo e entrega. Pareamento e sessão ficam no aplicativo Connect.</p><span class="button secondary compact">Configurar WhatsApp</span>
+  </a>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('support.php')) ?>">
+    <span class="eyebrow">ATENDIMENTO</span><h3>Central WhatsApp</h3><p class="muted">Veja conversas, assuma atendimentos, responda clientes e acompanhe pedido, endereço e histórico em uma tela.</p><span class="button secondary compact">Abrir Central</span>
+  </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=email-settings')) ?>">
     <span class="eyebrow">E-MAIL</span><h3>Servidor SMTP</h3><p class="muted"><?= !empty($mail['enabled']) ? 'Envio de e-mail está configurado e ativo.' : 'Configure remetente, servidor, usuário, senha e teste de envio.' ?></p><span class="status-pill <?= !empty($mail['enabled']) ? 'active' : '' ?>"><?= !empty($mail['enabled']) ? 'Ativo' : 'Configurar' ?></span>
-  </a>
-  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=whatsapp-settings')) ?>">
-    <span class="eyebrow">WHATSAPP</span><h3>Mensagens automáticas</h3><p class="muted"><?= !empty($whatsapp['enabled']) ? 'Confirmação de pedido e rastreamento estão habilitados.' : 'Conecte a WhatsApp Cloud API para avisar clientes automaticamente.' ?></p><span class="status-pill <?= !empty($whatsapp['enabled']) ? 'active' : '' ?>"><?= !empty($whatsapp['enabled']) ? 'Ativo' : 'Configurar' ?></span>
   </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=customers')) ?>">
     <span class="eyebrow">FIDELIDADE</span><h3>Clientes e pontos</h3><p class="muted">Programa de pontos, saldos, extrato e regras de resgate.</p><span class="button secondary compact">Abrir pontos</span>
@@ -44,15 +45,21 @@ em_header('Configurações','settings');
     <span class="eyebrow">IMPRESSÃO</span><h3>Cupom e impressora</h3><p class="muted">Ajuste o comprovante operacional e a impressão térmica.</p><span class="button secondary compact">Configurar</span>
   </a>
   <?php if(TenantFeatures::menu($tenantId)):?>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('delivery-settings.php')) ?>">
+    <span class="eyebrow">DELIVERY</span><h3>App do cliente</h3><p class="muted">Taxa, pedido mínimo, raio, Pix, cartão, dinheiro e disponibilidade no EventMenu Delivery.</p><span class="button secondary compact">Configurar Delivery</span>
+  </a>
   <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('?route=gateways')) ?>">
-    <span class="eyebrow">PAGAMENTOS</span><h3>Gateways e NFC</h3><p class="muted">Contas recebedoras, Pix, cartão e pagamento por aproximação.</p><span class="button secondary compact">Abrir pagamentos</span>
+    <span class="eyebrow">PAGAMENTOS</span><h3>Mercado Pago / PagBank</h3><p class="muted">Pix, cartão online e PagBank Tap On. Mercado Pago não é oferecido como NFC interno.</p><span class="button secondary compact">Abrir pagamentos</span>
+  </a>
+  <a class="card" style="text-decoration:none;color:inherit" href="<?= Security::e(app_url('bank-pix-settings.php')) ?>">
+    <span class="eyebrow">PIX BANCÁRIO</span><h3>Efí e Banco Inter</h3><p class="muted">Conecte APIs Pix com OAuth2, certificado e conciliação automática.</p><span class="button secondary compact">Configurar bancos</span>
   </a>
   <?php endif;?>
 </div>
 
 <section class="card">
   <div class="section-head"><div><span class="eyebrow">PRIMEIRO ACESSO</span><h2>Precisa configurar uma empresa nova?</h2></div></div>
-  <p class="muted">O checklist orienta a sequência recomendada: empresa, imagens, unidade, produtos, pagamentos, equipe, e-mail e WhatsApp.</p>
+  <p class="muted">O checklist orienta a sequência recomendada: empresa, imagens, unidade, produtos, pagamentos, equipe e e-mail.</p>
   <a class="button primary" href="<?= Security::e(app_url('?route=onboarding')) ?>">Abrir checklist</a>
 </section>
 <?php em_footer(); ?>

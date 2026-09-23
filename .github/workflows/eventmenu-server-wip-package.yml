@@ -1,0 +1,200 @@
+name: EventMenu Server WIP Package
+on:
+  push:
+    branches: [wip/eventmenu-delivery-customer-auth-payments]
+    paths:
+      - '.github/workflows/eventmenu-server-wip-package.yml'
+      - 'app/**'
+      - 'public/**'
+      - 'src/**'
+      - 'database/**'
+      - 'scripts/**'
+      - 'composer.json'
+      - 'composer.lock'
+      - '.env.example'
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  server-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: 'curl, mbstring, openssl, pdo_sqlite'
+          coverage: none
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: PHP syntax validation
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Public UX contract
+        run: |
+          php scripts/ci-public-ux-smoke.php
+          php scripts/ci-event-schedule-contract.php
+      - name: Coupon pricing contract
+        run: php scripts/ci-coupon-pricing-smoke.php
+      - name: Order payment preference contract
+        run: php scripts/ci-order-payment-preference-smoke.php
+      - name: Native payment route contract
+        run: php scripts/ci-native-payment-route-smoke.php
+      - name: WhatsApp isolation and outbox contract
+        run: php scripts/ci-whatsapp-smoke.php
+      - name: SQLite smoke validation
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: package-eventmenu-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          APP_URL: https://example.test/1
+          APP_BASE_PATH: /1
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-package.sqlite
+          SESSION_NAME: eventmenu_package_sqlite
+        run: |
+          set -euo pipefail
+          rm -f /tmp/eventmenu-package.sqlite /tmp/eventmenu-package.sqlite-shm /tmp/eventmenu-package.sqlite-wal
+          php scripts/ci-db-smoke.php
+          php scripts/ci-whatsapp-commerce-smoke.php
+          php scripts/ci-whatsapp-assistant-smoke.php
+          php scripts/ci-whatsapp-conversion-smoke.php
+          php scripts/ci-whatsapp-analytics-smoke.php
+          php scripts/ci-whatsapp-registration-smoke.php
+          php scripts/ci-whatsapp-commerce-order-smoke.php
+          php scripts/ci-whatsapp-commerce-fulfillment-smoke.php
+          php scripts/ci-whatsapp-commerce-payment-smoke.php
+          php scripts/ci-whatsapp-commerce-status-smoke.php
+          php scripts/ci-whatsapp-support-smoke.php
+          php scripts/ci-whatsapp-connect-hardening-smoke.php
+          php scripts/ci-whatsapp-menu-receipt-smoke.php
+          php scripts/ci-production-print-policy-smoke.php
+          php scripts/ci-whatsapp-history-smoke.php
+          php scripts/ci-sqlite-legacy-upgrade-smoke.php
+          php scripts/ci-db-repair-page-smoke.php
+          php scripts/ci-super-admin-smoke.php
+          php scripts/ci-permission-smoke.php
+          php scripts/ci-sensitive-rate-limit-smoke.php
+          php scripts/ci-operations-smoke.php
+          php scripts/ci-customer-identity-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-marketplace-finance-smoke.php
+          php scripts/ci-marketplace-native-contract-smoke.php
+          php scripts/ci-delivery-customer-order-smoke.php
+          php scripts/ci-auth-mail-smoke.php
+          php scripts/ci-url-smoke.php
+          php scripts/ci-backup-smoke.php
+          php scripts/ci-operational-resilience-smoke.php
+          php scripts/ci-production-readiness-smoke.php
+      - name: Verify latest delivery, WhatsApp, support and print files
+        run: |
+          set -euo pipefail
+          test -f database/migrations/058_delivery_customer_accounts.sql
+          test -f database/migrations/059_delivery_customer_payment_preferences.sql
+          test -f database/migrations/060_delivery_customer_legal_consents.sql
+          test -f database/migrations/061_bank_pix_payment_providers.sql
+          test -f database/migrations/062_marketplace_delivery_coupons.sql
+          test -f database/migrations/063_delivery_coupon_customer_payment_hardening.sql
+          test -f database/migrations/064_order_payment_preferences.sql
+          test -f database/migrations/065_whatsapp_integration.sql
+          test -f database/migrations/066_ticket_counter_sales.sql
+          test -f database/migrations/067_ticket_type_commercial_fields.sql
+          test -f database/migrations/071_whatsapp_commerce_inbound.sql
+          test -f database/migrations/072_whatsapp_commerce_draft_channel.sql
+          test -f database/migrations/073_customer_addresses.sql
+          test -f database/migrations/074_production_print_policy.sql
+          test -f database/migrations/075_whatsapp_support_center.sql
+          test -f database/migrations/077_whatsapp_commerce_assistant.sql
+          test -f database/migrations/078_whatsapp_commerce_conversion.sql
+          test -f database/migrations/079_whatsapp_commerce_analytics.sql
+          test -f database/migrations/080_event_schedule.sql
+          test -f database/sqlite/migrations/080_event_schedule.sql
+          test -f database/sqlite/migrations/065_whatsapp_integration.sql
+          test -f database/sqlite/migrations/075_whatsapp_support_center.sql
+          test -f database/sqlite/migrations/077_whatsapp_commerce_assistant.sql
+          test -f database/sqlite/migrations/078_whatsapp_commerce_conversion.sql
+          test -f database/sqlite/migrations/079_whatsapp_commerce_analytics.sql
+          test -f src/Services/WhatsAppIntegrationService.php
+          test -f src/Services/WhatsAppDesktopAgentService.php
+          test -f src/Services/WhatsAppOrderReceivedSyncService.php
+          test -f src/Services/WhatsAppOrderReceiptService.php
+          test -f src/Services/WhatsAppCommerceService.php
+          test -f src/Services/WhatsAppCommerceAssistantService.php
+          test -f src/Services/WhatsAppCommerceConversionService.php
+          test -f src/Services/WhatsAppCommerceAnalyticsService.php
+          test -f src/Services/WhatsAppCustomerRegistrationService.php
+          test -f src/Services/WhatsAppCommerceOrderService.php
+          test -f src/Services/WhatsAppCommerceFulfillmentService.php
+          test -f src/Services/WhatsAppCommercePaymentService.php
+          test -f src/Services/WhatsAppCommerceStatusSyncService.php
+          test -f src/Services/WhatsAppCommerceDraftCheckoutService.php
+          test -f src/Services/WhatsAppSupportService.php
+          test -f src/Services/CustomerAddressService.php
+          test -f src/Services/ProductionPrintPolicyService.php
+          test -f app/routes/support.php
+          test -f app/routes/whatsapp-results.php
+          test -f public/support.php
+          test -f public/whatsapp-results.php
+          test -f scripts/ci-whatsapp-registration-smoke.php
+          test -f scripts/ci-whatsapp-support-smoke.php
+          test -f scripts/ci-whatsapp-connect-hardening-smoke.php
+          test -f scripts/ci-whatsapp-assistant-smoke.php
+          test -f scripts/ci-whatsapp-conversion-smoke.php
+          test -f scripts/ci-whatsapp-analytics-smoke.php
+          test -f scripts/ci-whatsapp-menu-receipt-smoke.php
+          test ! -e integrations/whatsapp-worker/server.js
+          test ! -e integrations/whatsapp-worker/package.json
+          ! grep -q 'WHATSAPP_BRIDGE_' .env.example
+          ! grep -q 'curl_init(' src/Services/WhatsAppIntegrationService.php
+      - name: Build SQLite server package
+        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
+      - name: Verify WIP package uses EventMenu Connect only
+        run: |
+          PACKAGE="$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
+          test -f "$PACKAGE/src/Services/BankPixProviderService.php"
+          test -f "$PACKAGE/src/Services/BankPixRefundService.php"
+          test -f "$PACKAGE/src/Services/ProviderRefundService.php"
+          test -f "$PACKAGE/src/Services/DeliveryCustomerPaymentService.php"
+          test -f "$PACKAGE/src/Services/PublicOrderPaymentService.php"
+          test -f "$PACKAGE/src/Services/OrderPaymentPreferenceService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppIntegrationService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppDesktopAgentService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppOrderReceivedSyncService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppOrderReceiptService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceAssistantService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceConversionService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceAnalyticsService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCustomerRegistrationService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceOrderService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceFulfillmentService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommercePaymentService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceStatusSyncService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppCommerceDraftCheckoutService.php"
+          test -f "$PACKAGE/src/Services/WhatsAppSupportService.php"
+          test -f "$PACKAGE/src/Services/CustomerAddressService.php"
+          test -f "$PACKAGE/src/Services/ProductionPrintPolicyService.php"
+          test -f "$PACKAGE/src/Services/TicketCounterSaleService.php"
+          test -f "$PACKAGE/app/routes/support.php"
+          test -f "$PACKAGE/app/routes/whatsapp-results.php"
+          test -f "$PACKAGE/public/support.php"
+          test -f "$PACKAGE/public/whatsapp-results.php"
+          test -f "$PACKAGE/public/api-delivery-payment-methods.php"
+          test -f "$PACKAGE/public/api-order-payment.php"
+          test -f "$PACKAGE/public/api-go-events.php"
+          test -f "$PACKAGE/public/api-whatsapp-desktop.php"
+          test -f "$PACKAGE/public/api-production.php"
+          test -f "$PACKAGE/public/whatsapp.php"
+          test ! -d "$PACKAGE/integrations"
+          ! grep -q 'WHATSAPP_BRIDGE_' "$PACKAGE/.env.example"
+      - name: Generate checksums
+        run: |
+          cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-WIP"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-Servidor-WIP
+          path: '${{ runner.temp }}/EventMenu-Premium-Servidor-WIP'
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7

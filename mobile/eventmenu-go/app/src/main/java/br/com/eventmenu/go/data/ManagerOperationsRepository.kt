@@ -6,6 +6,7 @@ import org.json.JSONObject
 
 class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val sessionStore: SecureSessionStore) {
     private val api = ApiClient(baseUrl, deviceId)
+    private val inventoryAlerts = InventoryAlertRepository(baseUrl, deviceId, sessionStore)
 
     suspend fun overview(): ManagerOverview {
         val o = api.getManager("overview", requireToken()).getJSONObject("overview")
@@ -14,6 +15,12 @@ class ManagerOperationsRepository(baseUrl: String, deviceId: String, private val
             for (i in 0 until alertsJson.length()) {
                 val a = alertsJson.getJSONObject(i)
                 add(ManagerAlert(a.optString("level"), a.optString("title"), a.optString("message")))
+            }
+        }.toMutableList()
+        runCatching { inventoryAlerts.summary() }.getOrNull()?.let { stock ->
+            if (stock.low > 0) {
+                val detail = if (stock.zero > 0) " ${stock.zero} zerado(s)." else ""
+                alerts.add(0, ManagerAlert("warning", "Estoque baixo", "${stock.low} produto(s) estão no mínimo ou abaixo.$detail"))
             }
         }
         return ManagerOverview(

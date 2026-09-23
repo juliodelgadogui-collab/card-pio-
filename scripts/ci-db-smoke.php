@@ -11,6 +11,7 @@ use EventMenu\Services\BackgroundJobService;
 use EventMenu\Services\GatewayService;
 use EventMenu\Services\ProductionService;
 use EventMenu\Services\RuntimeStatusService;
+use EventMenu\Services\StockReservationService;
 use EventMenu\Services\SystemHealthService;
 
 function fail_ci(string $message): never
@@ -43,6 +44,7 @@ try {
         'promoter_commissions','event_guests','ticket_checkin_logs','nfc_devices',
         'cash_sessions','cash_movements','saas_plans','tenant_subscriptions','migrations',
         'background_jobs','push_devices','system_runtime_status','api_rate_limits',
+        'whatsapp_connections','whatsapp_outbox','whatsapp_desktop_agents','production_print_queue',
     ];
     foreach ($requiredTables as $table) {
         try {
@@ -158,6 +160,23 @@ try {
     $pdo->prepare('INSERT INTO operating_units (tenant_id,code,name,active) VALUES (?,?,"Bar CI",1)')->execute([$tenantId,$unitCode]);
     $unitId = (int)$pdo->lastInsertId();
     assert_ci($unitId > 0, 'Unidade de teste do evento não foi criada.');
+
+    // A reserva representa estoque já abatido. A primeira liberação devolve a quantidade;
+    // qualquer repetição precisa ser inofensiva e não pode inflar o inventário.
+    $pdo->prepare('INSERT INTO unit_inventory (tenant_id,unit_id,product_id,stock_qty,average_cost_cents,min_stock_qty) VALUES (?,?,?,?,0,0)')->execute([$tenantId,$unitId,$productId,8]);
+    $pdo->prepare('INSERT INTO orders (public_token,tenant_id,unit_id,channel,status,payment_status,subtotal_cents,total_cents,created_by) VALUES (?,?,?,"counter","pending","unpaid",2000,2000,?)')->execute([bin2hex(random_bytes(20)),$tenantId,$unitId,$userId]);
+    $stockOrderId=(int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO stock_reservations (tenant_id,unit_id,order_id,product_id,quantity,status) VALUES (?,?,?,?,2,"reserved")')->execute([$tenantId,$unitId,$stockOrderId,$productId]);
+    $stockService=new StockReservationService();
+    $releasedFirst=Database::transaction(fn(\PDO $tx):int=>$stockService->release($tx,$tenantId,$stockOrderId));
+    $releasedAgain=Database::transaction(fn(\PDO $tx):int=>$stockService->release($tx,$tenantId,$stockOrderId));
+    assert_ci($releasedFirst===1,'Primeira liberação da reserva não devolveu o estoque.');
+    assert_ci($releasedAgain===0,'Segunda liberação devolveu a mesma reserva novamente.');
+    $s=$pdo->prepare('SELECT stock_qty FROM unit_inventory WHERE tenant_id=? AND unit_id=? AND product_id=?');$s->execute([$tenantId,$unitId,$productId]);
+    assert_ci(abs((float)$s->fetchColumn()-10.0)<0.0005,'Liberação idempotente deixou o estoque da unidade incorreto.');
+    $s=$pdo->prepare('SELECT status FROM stock_reservations WHERE tenant_id=? AND order_id=? AND product_id=?');$s->execute([$tenantId,$stockOrderId,$productId]);
+    assert_ci((string)$s->fetchColumn()==='released','Reserva não ficou marcada como released.');
+
     $eventSlug = 'ci-event-' . bin2hex(random_bytes(4));
     $pdo->prepare('INSERT INTO events (tenant_id,name,slug,starts_at,status,bar_enabled,bar_unit_id) VALUES (?,?,?,CURRENT_TIMESTAMP,"published",1,?)')->execute([$tenantId,'Evento CI',$eventSlug,$unitId]);
     $eventId = (int)$pdo->lastInsertId();
@@ -172,9 +191,11 @@ try {
     assert_ci((string)$s->fetchColumn()==='ready','Pedido event_bar sem preparo não ficou pronto automaticamente.');
 
     $health = (new SystemHealthService())->snapshot();
-    assert_ci(isset($health['checks']['database'],$health['checks']['worker'],$health['checks']['queue'],$health['checks']['backup']), 'Snapshot de saúde incompleto.');
+    assert_ci(isset($health['checks']['database'],$health['checks']['worker'],$health['checks']['queue'],$health['checks']['backup'],$health['checks']['whatsapp'],$health['checks']['print_queue']), 'Snapshot de saúde incompleto.');
     assert_ci(($health['checks']['worker']['state'] ?? null) === 'ok', 'Heartbeat recente do worker não apareceu saudável no health check.');
     assert_ci(($health['checks']['queue']['state'] ?? null) === 'ok', 'Fila vazia gerou alerta falso no health check.');
+    assert_ci(in_array(($health['checks']['whatsapp']['state'] ?? null),['ok','disabled'],true), 'WhatsApp vazio/configurado gerou alerta falso no health check.');
+    assert_ci(($health['checks']['print_queue']['state'] ?? null) === 'ok', 'Fila de impressão vazia gerou alerta falso no health check.');
 
     echo "CI DB smoke OK ({$driver})\n";
 } catch (\Throwable $e) {

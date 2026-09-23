@@ -1,0 +1,13 @@
+{
+  "name": "eventmenu-whatsapp-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "6.7.24",
+    "pino": "^9.9.5"
+  }
+}

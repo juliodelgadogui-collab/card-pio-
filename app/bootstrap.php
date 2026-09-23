@@ -87,10 +87,8 @@ if (PHP_SAPI !== 'cli' && !headers_sent()) {
     header('X-Content-Type-Options: nosniff');
     header('X-Frame-Options: SAMEORIGIN');
     header('Referrer-Policy: strict-origin-when-cross-origin');
+    // O leitor QR do painel usa a câmera do próprio domínio; microfone e geolocalização não são necessários.
     header('Permissions-Policy: camera=(self), microphone=(), geolocation=()');
-    // Compatível com o painel atual, que ainda possui scripts/estilos inline.
-    // O mapa público de eventos usa o embed oficial do Google Maps.
-    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; frame-src 'self' https://maps.google.com https://www.google.com; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https:; worker-src 'self'; manifest-src 'self'; upgrade-insecure-requests");
     $production = strtolower(trim((string)env('APP_ENV', 'production'))) === 'production';
     $httpsConfigured = strtolower((string)parse_url((string)env('APP_URL', ''), PHP_URL_SCHEME)) === 'https';
     if ($production && $httpsConfigured) {
@@ -114,9 +112,6 @@ if (PHP_SAPI !== 'cli' && ob_get_level() === 0) ob_start('app_rewrite_root_urls'
 if (session_status() !== PHP_SESSION_ACTIVE) {
     $secure = filter_var(env('SESSION_SECURE', 'false'), FILTER_VALIDATE_BOOL);
     $cookiePath = app_base_path() === '' ? '/' : app_base_path() . '/';
-    ini_set('session.use_strict_mode', '1');
-    ini_set('session.use_only_cookies', '1');
-    ini_set('session.cookie_httponly', '1');
     session_name((string)env('SESSION_NAME', 'eventmenu_session'));
     session_set_cookie_params([
         'httponly' => true,

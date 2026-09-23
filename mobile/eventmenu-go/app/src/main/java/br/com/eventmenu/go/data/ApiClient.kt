@@ -12,6 +12,8 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 class ApiException(message: String, val status: Int = 0) : RuntimeException(message)
 
@@ -57,6 +59,8 @@ class ApiClient(
     suspend fun postTabPayments(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-tab-payments.php", "POST", action, token, emptyMap(), body)
     suspend fun getUnits(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-go-units.php", "GET", action, token, query, null)
     suspend fun postUnits(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-go-units.php", "POST", action, token, emptyMap(), body)
+    suspend fun getHub(action: String, token: String? = null, query: Map<String, String> = emptyMap()): JSONObject = request("api-hub.php", "GET", action, token, query, null)
+    suspend fun postHub(action: String, token: String? = null, body: JSONObject = JSONObject()): JSONObject = request("api-hub.php", "POST", action, token, emptyMap(), body)
 
     private suspend fun request(
         path: String,
@@ -69,6 +73,7 @@ class ApiClient(
         val store = sessionStore ?: sharedSessionStore
         val requestKey = cacheRequestKey(path, action, query)
         val cacheable = isCacheableRead(path, method, action, token)
+        val orderCreationFingerprint = prepareOrderCreationIdempotency(path, method, action, body)
 
         try {
             val result = try {
@@ -79,12 +84,16 @@ class ApiClient(
                 execute(path, method, action, refreshed, query, body)
             }
 
+            orderCreationFingerprint?.let { pendingOrderCreationKeys.remove(it) }
             if (path == "api.php" && action == "login" && result.has("refresh_token")) saveTokenPair(store, result)
             if (cacheable) {
                 val scope = cacheScope(store, token)
                 if (scope.isNotBlank()) sharedOfflineCache?.save(scope, requestKey, result)
             }
             result
+        } catch (error: ApiException) {
+            if (orderCreationFingerprint != null && error.status in 400..499) pendingOrderCreationKeys.remove(orderCreationFingerprint)
+            throw error
         } catch (error: IOException) {
             ApiConnectionMonitor.offline()
             if (cacheable) {
@@ -98,6 +107,15 @@ class ApiClient(
             }
             throw ApiException(message, 0)
         }
+    }
+
+    private fun prepareOrderCreationIdempotency(path: String, method: String, action: String, body: JSONObject?): String? {
+        if (path != "api.php" || method != "POST" || action != "order-create" || body == null) return null
+        if (body.has("idempotency_key") && body.optString("idempotency_key").isNotBlank()) return null
+        val fingerprint = baseUrl.trimEnd('/') + "|" + deviceId + "|" + body.toString()
+        val key = pendingOrderCreationKeys.computeIfAbsent(fingerprint) { "go-order-${UUID.randomUUID()}" }
+        body.put("idempotency_key", key)
+        return fingerprint
     }
 
     private fun execute(
@@ -196,11 +214,14 @@ class ApiClient(
     private fun isCacheableRead(path: String, method: String, action: String, token: String?): Boolean {
         if (method != "GET" || token.isNullOrBlank()) return false
         if (path == "api-go-events.php" && action == "bar-order-resolve") return false
+        // O Hub representa estado de hardware e comandos em tempo quase real. Nunca servir de cache.
+        if (path == "api-hub.php") return false
         return path in CACHEABLE_PATHS
     }
 
     companion object {
         private val refreshMutex = Mutex()
+        private val pendingOrderCreationKeys = ConcurrentHashMap<String,String>()
         @Volatile private var sharedSessionStore: SecureSessionStore? = null
         @Volatile private var sharedOfflineCache: OfflineReadCache? = null
 

@@ -18,6 +18,8 @@ $base = [
         'worker' => ['state' => 'ok', 'message' => 'Worker ativo.', 'details' => []],
         'queue' => ['state' => 'ok', 'message' => 'Fila em dia.', 'details' => []],
         'backup' => ['state' => 'ok', 'message' => 'Backup verificado.', 'details' => []],
+        'whatsapp' => ['state' => 'disabled', 'message' => 'WhatsApp ainda não configurado.', 'details' => []],
+        'print_queue' => ['state' => 'ok', 'message' => 'Fila de impressão saudável.', 'details' => []],
         'gateways' => ['state' => 'warning', 'message' => 'Nenhum gateway.', 'details' => []],
         'push' => ['state' => 'warning', 'message' => 'Push não configurado.', 'details' => []],
         'webhooks' => ['state' => 'ok', 'message' => 'Nenhum webhook recebido ainda.', 'details' => ['last' => null, 'failed_last_24h' => 0]],
@@ -39,6 +41,9 @@ readiness_assert(count($ready['blockers']) === 0, 'Instalação saudável retorn
 readiness_assert(readiness_has($ready['warnings'], 'gateways'), 'Gateway ausente deveria aparecer como aviso.');
 readiness_assert(readiness_has($ready['warnings'], 'push'), 'Push ausente deveria aparecer como aviso.');
 readiness_assert(readiness_has($ready['warnings'], 'webhooks'), 'Webhook ainda não comprovado deveria aparecer como aviso.');
+readiness_assert(!readiness_has($ready['warnings'], 'whatsapp'), 'WhatsApp desativado/opcional não deveria gerar aviso de prontidão.');
+readiness_assert(readiness_has($ready['passed'], 'whatsapp_optional'), 'WhatsApp opcional/desativado precisa aparecer como verificação aprovada.');
+readiness_assert(readiness_has($ready['passed'], 'print_queue'), 'Fila de impressão saudável precisa aparecer como verificação aprovada.');
 readiness_assert(($ready['payments']['ready'] ?? true) === false, 'Pagamento real não pode ficar pronto sem gateway/webhook comprovado.');
 readiness_assert(readiness_has($ready['payments']['blockers'] ?? [], 'gateway_live'), 'Gateway ausente não bloqueou pagamentos reais.');
 readiness_assert(readiness_has($ready['payments']['blockers'] ?? [], 'webhook_live'), 'Webhook ausente não bloqueou pagamentos reais.');
@@ -73,9 +78,19 @@ readiness_assert($sqliteResult['ready'] === true, 'SQLite não deveria bloquear 
 readiness_assert(readiness_has($sqliteResult['warnings'], 'database_capacity'), 'SQLite deveria gerar aviso de capacidade.');
 readiness_assert(readiness_has($sqliteResult['payments']['warnings'] ?? [], 'payment_database_capacity'), 'SQLite deveria gerar aviso específico para pagamentos concorrentes.');
 
+$channelWarning = $base;
+$channelWarning['checks']['whatsapp'] = ['state' => 'warning', 'message' => 'WhatsApp com backlog.', 'details' => ['queued' => 12]];
+$channelWarning['checks']['print_queue'] = ['state' => 'warning', 'message' => 'Fila de impressão com retry.', 'details' => ['waiting' => 2]];
+$channelWarningResult = $service->evaluate($channelWarning);
+readiness_assert($channelWarningResult['ready'] === true, 'Falha de canal opcional não deveria bloquear o núcleo.');
+readiness_assert(readiness_has($channelWarningResult['warnings'], 'whatsapp'), 'Problema no WhatsApp ativo precisa aparecer como aviso.');
+readiness_assert(readiness_has($channelWarningResult['warnings'], 'print_queue'), 'Problema na impressão precisa aparecer como aviso.');
+
 $fullyIntegrated = $base;
 $fullyIntegrated['checks']['gateways'] = ['state' => 'ok', 'message' => 'Gateway ativo.', 'details' => ['providers' => [['provider' => 'pagbank', 'qty' => 1]]]];
 $fullyIntegrated['checks']['push'] = ['state' => 'ok', 'message' => 'Push configurado.', 'details' => []];
+$fullyIntegrated['checks']['whatsapp'] = ['state' => 'ok', 'message' => 'WhatsApp / EventMenu Connect saudável.', 'details' => []];
+$fullyIntegrated['checks']['print_queue'] = ['state' => 'ok', 'message' => 'Fila de impressão saudável.', 'details' => []];
 $fullyIntegrated['checks']['webhooks'] = ['state' => 'ok', 'message' => 'Webhooks registrados.', 'details' => ['last' => ['provider' => 'pagbank', 'status' => 'processed'], 'failed_last_24h' => 0]];
 $fullResult = $service->evaluate($fullyIntegrated);
 readiness_assert($fullResult['ready'] === true, 'Integrações opcionais saudáveis alteraram prontidão incorretamente.');

@@ -35,7 +35,7 @@ final class OrderCancellationService
             if(($shift['mode']??'')==='delivery'&&((int)($order['assigned_delivery_user_id']??0)!==$userId||$order['channel']!=='delivery'))throw new RuntimeException('No modo Delivery você só pode solicitar cancelamento de entrega atribuída a você.');
             $pdo->prepare('UPDATE order_cancellation_requests SET status="cancelled",decided_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND order_id=? AND status="pending"')->execute([$tenantId,$orderId]);
             $pdo->prepare('INSERT INTO order_cancellation_requests (tenant_id,order_id,unit_id,requested_by,reason,status) VALUES (?,?,?,?,?,"pending")')->execute([$tenantId,$orderId,$order['unit_id'],$userId,$reason]);
-            $id=(int)$pdo->lastInsertId();$q=$pdo->prepare('SELECT r.*,u.name requester_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by WHERE r.id=?');$q->execute([$id]);return $q->fetch()?:throw new RuntimeException('Falha ao registrar solicitação.');
+            $id=(int)$pdo->lastInsertId();$q=$pdo->prepare('SELECT r.*,u.name requester_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by AND u.tenant_id=r.tenant_id AND u.tenant_id=r.tenant_id WHERE r.id=? AND r.tenant_id=?');$q->execute([$id,$tenantId]);return $q->fetch()?:throw new RuntimeException('Falha ao registrar solicitação.');
         });
 
         Auth::audit('order.cancellation_requested','order',(string)$orderId,['request_id'=>(int)$request['id'],'reason'=>$reason,'unit_id'=>$request['unit_id']]);
@@ -61,11 +61,12 @@ final class OrderCancellationService
         if(!$shift||($panelUnitId===null&&!in_array((string)$shift['mode'],['operation','pay'],true)))throw new RuntimeException('Aprovação de cancelamento exige turno de Operação ou Pay.');
 
         $result=Database::transaction(function(PDO $pdo)use($tenantId,$deciderId,$shift,$requestId):array{
-            $q=$pdo->prepare(Database::portableSql($pdo,'SELECT r.*,u.name requester_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by WHERE r.id=? AND r.tenant_id=? FOR UPDATE'));$q->execute([$requestId,$tenantId]);$request=$q->fetch();if(!$request)throw new RuntimeException('Solicitação de cancelamento não encontrada.');if($request['status']!=='pending')throw new RuntimeException('Esta solicitação já foi decidida.');
+            $q=$pdo->prepare(Database::portableSql($pdo,'SELECT r.*,u.name requester_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by AND u.tenant_id=r.tenant_id AND u.tenant_id=r.tenant_id WHERE r.id=? AND r.tenant_id=? FOR UPDATE'));$q->execute([$requestId,$tenantId]);$request=$q->fetch();if(!$request)throw new RuntimeException('Solicitação de cancelamento não encontrada.');if($request['status']!=='pending')throw new RuntimeException('Esta solicitação já foi decidida.');
             $order=$this->lockOrder($pdo,$tenantId,(int)$request['order_id']);$this->assertUnit($order,$shift);$this->assertRequestable($pdo,$order);
             $current=(string)$order['status'];(new StockReservationService())->release($pdo,$tenantId,(int)$order['id']);(new LoyaltyPointsService())->releaseForOrder($pdo,$tenantId,(int)$order['id']);
             $pdo->prepare('UPDATE orders SET status="cancelled" WHERE id=? AND tenant_id=?')->execute([$order['id'],$tenantId]);
-            $pdo->prepare('UPDATE order_cancellation_requests SET status="approved",decided_by=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND status="pending"')->execute([$deciderId,$requestId]);
+            (new MarketplaceCommissionService())->reverse($pdo,$tenantId,(int)$order['id'],'Cancelamento autorizado: '.(string)$request['reason']);
+            $pdo->prepare('UPDATE order_cancellation_requests SET status="approved",decided_by=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND status="pending"')->execute([$deciderId,$requestId,$tenantId]);
             $pdo->prepare('UPDATE order_cancellation_requests SET status="cancelled",decided_at=CURRENT_TIMESTAMP WHERE tenant_id=? AND order_id=? AND id<>? AND status="pending"')->execute([$tenantId,$order['id'],$requestId]);
             (new OrderHistoryService())->record($pdo,$tenantId,(int)$order['id'],$current,'cancelled','cancellation_approved','Cancelamento autorizado. Motivo: '.$request['reason'],$deciderId);
             return ['request_id'=>$requestId,'order_id'=>(int)$order['id'],'requested_by'=>(int)$request['requested_by'],'requester_name'=>(string)$request['requester_name'],'status'=>'approved','reason'=>(string)$request['reason']];
@@ -91,9 +92,9 @@ final class OrderCancellationService
     {
         Auth::requirePermission('cancellations.approve');$tenantId=Auth::tenantId();$deciderId=Auth::id();if(!$tenantId||!$deciderId)throw new RuntimeException('Sessão inválida.');$reason=mb_substr(trim($reason),0,500);
         $result=Database::transaction(function(PDO $pdo)use($tenantId,$deciderId,$requestId,$reason,$panelUnitId):array{
-            $q=$pdo->prepare(Database::portableSql($pdo,'SELECT r.*,o.unit_id,u.name requester_name FROM order_cancellation_requests r JOIN orders o ON o.id=r.order_id AND o.tenant_id=r.tenant_id JOIN users u ON u.id=r.requested_by WHERE r.id=? AND r.tenant_id=? FOR UPDATE'));$q->execute([$requestId,$tenantId]);$request=$q->fetch();if(!$request)throw new RuntimeException('Solicitação não encontrada.');if($request['status']!=='pending')throw new RuntimeException('Esta solicitação já foi decidida.');
+            $q=$pdo->prepare(Database::portableSql($pdo,'SELECT r.*,o.unit_id,u.name requester_name FROM order_cancellation_requests r JOIN orders o ON o.id=r.order_id AND o.tenant_id=r.tenant_id JOIN users u ON u.id=r.requested_by AND u.tenant_id=r.tenant_id AND u.tenant_id=r.tenant_id WHERE r.id=? AND r.tenant_id=? FOR UPDATE'));$q->execute([$requestId,$tenantId]);$request=$q->fetch();if(!$request)throw new RuntimeException('Solicitação não encontrada.');if($request['status']!=='pending')throw new RuntimeException('Esta solicitação já foi decidida.');
             if($panelUnitId!==null)$this->assertUnit(['unit_id'=>$request['unit_id']],['unit_id'=>$panelUnitId]);else{$shift=(new WorkShiftService())->current();if($shift)$this->assertUnit(['unit_id'=>$request['unit_id']],$shift);}
-            $pdo->prepare('UPDATE order_cancellation_requests SET status="rejected",decided_by=?,decided_at=CURRENT_TIMESTAMP WHERE id=?')->execute([$deciderId,$requestId]);
+            $pdo->prepare('UPDATE order_cancellation_requests SET status="rejected",decided_by=?,decided_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?')->execute([$deciderId,$requestId,$tenantId]);
             return ['request_id'=>$requestId,'order_id'=>(int)$request['order_id'],'requested_by'=>(int)$request['requested_by'],'status'=>'rejected','reason'=>$reason];
         });
         Auth::audit('order.cancellation_rejected','order',(string)$result['order_id'],['request_id'=>$requestId,'reason'=>$reason,'unit_id'=>$panelUnitId]);
@@ -110,17 +111,17 @@ final class OrderCancellationService
     public function pendingForUnit(?int $unitId):array
     {
         Auth::requirePermission('cancellations.approve');$tenantId=Auth::tenantId();if(!$tenantId)throw new RuntimeException('Empresa inválida.');
-        $sql='SELECT r.id,r.order_id,r.reason,r.created_at,r.unit_id,u.name requester_name,o.channel,o.status order_status,o.payment_status,o.total_cents,c.name customer_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by JOIN orders o ON o.id=r.order_id AND o.tenant_id=r.tenant_id LEFT JOIN customers c ON c.id=o.customer_id WHERE r.tenant_id=? AND r.status="pending"';$args=[$tenantId];if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' ORDER BY r.created_at,r.id';$q=Database::connection()->prepare($sql);$q->execute($args);return $q->fetchAll();
+        $sql='SELECT r.id,r.order_id,r.reason,r.created_at,r.unit_id,u.name requester_name,o.channel,o.status order_status,o.payment_status,o.total_cents,c.name customer_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by AND u.tenant_id=r.tenant_id AND u.tenant_id=r.tenant_id JOIN orders o ON o.id=r.order_id AND o.tenant_id=r.tenant_id LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id AND c.tenant_id=o.tenant_id WHERE r.tenant_id=? AND r.status="pending"';$args=[$tenantId];if($unitId!==null){$sql.=' AND o.unit_id=?';$args[]=$unitId;}$sql.=' ORDER BY r.created_at,r.id';$q=Database::connection()->prepare($sql);$q->execute($args);return$q->fetchAll();
     }
 
     public function forOrder(int $orderId):?array
     {
-        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)return null;$q=Database::connection()->prepare('SELECT r.*,u.name requester_name,d.name decider_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by LEFT JOIN users d ON d.id=r.decided_by WHERE r.tenant_id=? AND r.order_id=? ORDER BY r.id DESC LIMIT 1');$q->execute([$tenantId,$orderId]);$row=$q->fetch();return $row?:null;
+        $tenantId=Auth::tenantId();$userId=Auth::id();if(!$tenantId||!$userId)return null;$q=Database::connection()->prepare('SELECT r.*,u.name requester_name,d.name decider_name FROM order_cancellation_requests r JOIN users u ON u.id=r.requested_by AND u.tenant_id=r.tenant_id AND u.tenant_id=r.tenant_id LEFT JOIN users d ON d.id=r.decided_by AND d.tenant_id=r.tenant_id WHERE r.tenant_id=? AND r.order_id=? ORDER BY r.id DESC LIMIT 1');$q->execute([$tenantId,$orderId]);$row=$q->fetch();return$row?:null;
     }
 
     private function lockOrder(PDO $pdo,int $tenantId,int $orderId):array
     {
-        $q=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$q->execute([$orderId,$tenantId]);return $q->fetch()?:throw new RuntimeException('Pedido não encontrado.');
+        $q=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$q->execute([$orderId,$tenantId]);return$q->fetch()?:throw new RuntimeException('Pedido não encontrado.');
     }
 
     private function assertRequestable(PDO $pdo,array $order):void

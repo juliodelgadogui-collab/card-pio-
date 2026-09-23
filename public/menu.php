@@ -18,6 +18,7 @@ $tenant=$stmt->fetch();
 if(!$tenant){http_response_code(404);exit('Empresa não encontrada.');}
 $tenantId=(int)$tenant['id'];
 if(!TenantFeatures::menu($tenantId)){http_response_code(404);exit('Cardápio não habilitado para esta empresa.');}
+
 $settings=json_decode((string)($tenant['settings']??'{}'),true)?:[];
 $publicUnits=new PublicUnitService();
 $units=$publicUnits->units($tenantId);
@@ -54,11 +55,44 @@ $configured=new ConfiguredOrderService();
 
 $legacy=false;
 foreach($cart as$value){if(!is_array($value)){$legacy=true;break;}}
-if($legacy){$old=$cart;$cart=[];foreach($old as$productId=>$qty){$productId=(int)$productId;$qty=(float)$qty;if($productId<1||$qty<=0)continue;$key=hash('sha256',$productId.':');$cart[$key]=['product_id'=>$productId,'qty'=>$qty,'option_ids'=>[]];}}
+if($legacy){
+    $old=$cart;$cart=[];
+    foreach($old as$productId=>$qty){
+        $productId=(int)$productId;$qty=(float)$qty;
+        if($productId<1||$qty<=0)continue;
+        $key=hash('sha256',$productId.':');
+        $cart[$key]=['product_id'=>$productId,'qty'=>$qty,'option_ids'=>[]];
+    }
+}
 
-function flatten_options(mixed$value):array{$out=[];$walk=function(mixed$v)use(&$out,&$walk):void{if(is_array($v)){foreach($v as$x)$walk($x);return;}$id=(int)$v;if($id>0)$out[]=$id;};$walk($value);$out=array_values(array_unique($out));sort($out);return$out;}
+function flatten_options(mixed$value):array{
+    $out=[];
+    $walk=function(mixed$v)use(&$out,&$walk):void{
+        if(is_array($v)){foreach($v as$x)$walk($x);return;}
+        $id=(int)$v;if($id>0)$out[]=$id;
+    };
+    $walk($value);$out=array_values(array_unique($out));sort($out);return$out;
+}
 function menu_money(int$cents):string{return 'R$ '.number_format($cents/100,2,',','.');}
 function menu_color(mixed$value,string$fallback):string{$v=strtolower(trim((string)$value));return preg_match('/^#[0-9a-f]{6}$/',$v)?$v:$fallback;}
+function menu_modifier_rule(int$min,int$max):string{
+    if($min>0&&$min===$max)return $min===1?'Escolha 1 opção':'Escolha '.$min.' opções';
+    if($min>0)return 'Escolha de '.$min.' a '.$max.' opções';
+    return $max===1?'Escolha até 1 opção':'Escolha até '.$max.' opções';
+}
+function menu_friendly_error(Throwable$e):string{
+    $message=trim($e->getMessage());
+    if($message==='')return'Não foi possível concluir a operação. Tente novamente.';
+    $technical=['sqlstate','select ','insert ','update ','delete ','http 4','http 5','json','payload','endpoint','webhook','provider','stack trace','exception','undefined','nullpointer','pdoexception'];
+    $lower=mb_strtolower($message);
+    foreach($technical as$term)if(str_contains($lower,$term))return'Não foi possível concluir a operação agora. Tente novamente.';
+    return mb_substr($message,0,220);
+}
+function menu_stock_row(PDO$pdo,int$unitId,int$productId,int$tenantId):array{
+    $q=$pdo->prepare('SELECT p.id,p.track_stock,EXISTS(SELECT 1 FROM product_recipes r WHERE r.tenant_id=p.tenant_id AND r.product_id=p.id) has_recipe,COALESCE(ui.stock_qty,0) unit_stock FROM products p LEFT JOIN unit_inventory ui ON ui.tenant_id=p.tenant_id AND ui.unit_id=? AND ui.product_id=p.id WHERE p.id=? AND p.tenant_id=? AND p.active=1');
+    $q->execute([$unitId,$productId,$tenantId]);
+    return $q->fetch()?:[];
+}
 
 $selectedFulfillment=in_array((string)($_POST['fulfillment']??'pickup'),['pickup','delivery'],true)?(string)($_POST['fulfillment']??'pickup'):'pickup';
 if($_SERVER['REQUEST_METHOD']==='POST'){
@@ -67,37 +101,354 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         $action=(string)($_POST['action']??'');
         if($action==='add'){
             try{
-                $id=(int)($_POST['product_id']??0);$qty=max(1,min(99,(int)($_POST['qty']??1)));$optionIds=flatten_options($_POST['option_ids']??[]);
-                $availability=$pdo->prepare('SELECT p.id,p.track_stock,EXISTS(SELECT 1 FROM product_recipes r WHERE r.tenant_id=p.tenant_id AND r.product_id=p.id) has_recipe,COALESCE(ui.stock_qty,0) unit_stock FROM products p LEFT JOIN unit_inventory ui ON ui.tenant_id=p.tenant_id AND ui.unit_id=? AND ui.product_id=p.id WHERE p.id=? AND p.tenant_id=? AND p.active=1');$availability->execute([$publicUnitId,$id,$tenantId]);$stock=$availability->fetch();if(!$stock)throw new RuntimeException('Produto indisponível.');if((int)$stock['track_stock']&&!(int)$stock['has_recipe']&&(float)$stock['unit_stock']<=0)throw new RuntimeException('Produto esgotado nesta unidade.');
-                $resolved=$configured->resolveLine($pdo,$tenantId,['product_id'=>$id,'qty'=>$qty,'option_ids'=>$optionIds],false);$lineKey=hash('sha256',$id.':'.implode(',',$resolved['option_ids']));if(isset($cart[$lineKey]))$cart[$lineKey]['qty']=min(99,(float)$cart[$lineKey]['qty']+$qty);else$cart[$lineKey]=['product_id'=>$id,'qty'=>$qty,'option_ids'=>$resolved['option_ids']];
-            }catch(Throwable$e){$error=$e->getMessage();}
-        }elseif($action==='remove')unset($cart[(string)($_POST['line_key']??'')]);
-        elseif($action==='clear')$cart=[];
-        elseif($action==='checkout'){
-            try{$order=(new PublicMenuService())->create($tenantId,array_values($cart),(string)($_POST['name']??''),(string)($_POST['phone']??''),(string)($_POST['address']??''),$table?$tableToken:null,$table?'table':$selectedFulfillment);$cart=[];header('Location: '.app_url('pedido.php?t='.rawurlencode($order['public_token'])),true,303);exit;}catch(Throwable$e){$error=$e->getMessage();}
+                $id=(int)($_POST['product_id']??0);
+                $qty=max(1,min(99,(int)($_POST['qty']??1)));
+                $optionIds=flatten_options($_POST['option_ids']??[]);
+                $stock=menu_stock_row($pdo,$publicUnitId,$id,$tenantId);
+                if(!$stock)throw new RuntimeException('Produto indisponível.');
+                if((int)$stock['track_stock']&&!(int)$stock['has_recipe']&&(float)$stock['unit_stock']<=0)throw new RuntimeException('Produto esgotado nesta unidade.');
+                $resolved=$configured->resolveLine($pdo,$tenantId,['product_id'=>$id,'qty'=>$qty,'option_ids'=>$optionIds],false);
+                $lineKey=hash('sha256',$id.':'.implode(',',$resolved['option_ids']));
+                if(isset($cart[$lineKey]))$cart[$lineKey]['qty']=min(99,(float)$cart[$lineKey]['qty']+$qty);
+                else$cart[$lineKey]=['product_id'=>$id,'qty'=>$qty,'option_ids'=>$resolved['option_ids']];
+            }catch(Throwable$e){$error=menu_friendly_error($e);}
+        }elseif($action==='restore'){
+            try{
+                $decoded=json_decode((string)($_POST['cart_backup']??''),true,64,JSON_THROW_ON_ERROR);
+                if(!is_array($decoded)||count($decoded)>60)throw new RuntimeException('Não foi possível recuperar este carrinho.');
+                $restored=[];
+                foreach($decoded as$line){
+                    if(!is_array($line))continue;
+                    $id=(int)($line['product_id']??0);
+                    $qty=max(1,min(99,(int)($line['qty']??1)));
+                    $optionIds=flatten_options($line['option_ids']??[]);
+                    $stock=menu_stock_row($pdo,$publicUnitId,$id,$tenantId);
+                    if(!$stock)continue;
+                    if((int)$stock['track_stock']&&!(int)$stock['has_recipe']&&(float)$stock['unit_stock']<=0)continue;
+                    $resolved=$configured->resolveLine($pdo,$tenantId,['product_id'=>$id,'qty'=>$qty,'option_ids'=>$optionIds],false);
+                    $lineKey=hash('sha256',$id.':'.implode(',',$resolved['option_ids']));
+                    if(isset($restored[$lineKey]))$restored[$lineKey]['qty']=min(99,(float)$restored[$lineKey]['qty']+$qty);
+                    else$restored[$lineKey]=['product_id'=>$id,'qty'=>$qty,'option_ids'=>$resolved['option_ids']];
+                }
+                if(!$restored)throw new RuntimeException('Os itens salvos não estão mais disponíveis.');
+                $cart=$restored;
+            }catch(Throwable$e){$error=menu_friendly_error($e);}
+        }elseif($action==='remove'){
+            unset($cart[(string)($_POST['line_key']??'')]);
+        }elseif($action==='clear'){
+            $cart=[];
+        }elseif($action==='checkout'){
+            try{
+                $order=(new PublicMenuService())->create(
+                    $tenantId,
+                    array_values($cart),
+                    (string)($_POST['name']??''),
+                    (string)($_POST['phone']??''),
+                    (string)($_POST['address']??''),
+                    $table?$tableToken:null,
+                    $table?'table':$selectedFulfillment
+                );
+                $cart=[];
+                header('Location: '.app_url('pedido.php?t='.rawurlencode($order['public_token'])),true,303);exit;
+            }catch(Throwable$e){$error=menu_friendly_error($e);}
         }
-        if($action!=='checkout'&&$error===null){$query=['empresa'=>$slug];if($table)$query['mesa']=$tableToken;else$query['unidade']=$unitCode;header('Location: '.app_url('menu.php?'.http_build_query($query)),true,303);exit;}
+        if($action!=='checkout'&&$error===null){
+            $query=['empresa'=>$slug];if($table)$query['mesa']=$tableToken;else$query['unidade']=$unitCode;
+            header('Location: '.app_url('menu.php?'.http_build_query($query)),true,303);exit;
+        }
     }
 }
 
-$c=$pdo->prepare('SELECT * FROM categories WHERE tenant_id=? AND active=1 ORDER BY sort_order,name');$c->execute([$tenantId]);$categories=$c->fetchAll();
-$p=$pdo->prepare('SELECT p.*,COALESCE(ui.stock_qty,0) unit_stock_qty,EXISTS(SELECT 1 FROM product_recipes r WHERE r.tenant_id=p.tenant_id AND r.product_id=p.id) has_recipe FROM products p LEFT JOIN unit_inventory ui ON ui.tenant_id=p.tenant_id AND ui.unit_id=? AND ui.product_id=p.id WHERE p.tenant_id=? AND p.active=1 ORDER BY p.category_id,p.name');$p->execute([$publicUnitId,$tenantId]);$products=$p->fetchAll();
-$modifierCatalog=$configured->catalogModifiers($pdo,$tenantId,array_column($products,'id'));$categoryNames=[];foreach($categories as$cat)$categoryNames[(int)$cat['id']]=(string)$cat['name'];$groups=[];foreach($products as$prod){$cid=(int)($prod['category_id']??0);$groups[$categoryNames[$cid]??'Outros'][]=$prod;}
-$cartRows=[];$cartTotal=0;$cartCount=0;$invalid=[];foreach($cart as$lineKey=>$line){try{$resolved=$configured->resolveLine($pdo,$tenantId,$line,false);$mods=[];foreach($resolved['modifiers']as$m)$mods[]=$m['group_name'].': '.$m['name'];$cartTotal+=(int)$resolved['total_cents'];$cartCount+=(int)ceil((float)$resolved['quantity']);$cartRows[]=['line_key'=>$lineKey,'id'=>$resolved['product_id'],'name'=>$resolved['name'],'qty'=>$resolved['quantity'],'line'=>$resolved['total_cents'],'mods'=>$mods];}catch(Throwable){$invalid[]=$lineKey;if($error===null)$error='Um item do carrinho foi alterado e precisa ser adicionado novamente.';}}foreach($invalid as$key)unset($cart[$key]);
+$c=$pdo->prepare('SELECT * FROM categories WHERE tenant_id=? AND active=1 ORDER BY sort_order,name');
+$c->execute([$tenantId]);$categories=$c->fetchAll();
+$p=$pdo->prepare('SELECT p.*,COALESCE(ui.stock_qty,0) unit_stock_qty,EXISTS(SELECT 1 FROM product_recipes r WHERE r.tenant_id=p.tenant_id AND r.product_id=p.id) has_recipe FROM products p LEFT JOIN unit_inventory ui ON ui.tenant_id=p.tenant_id AND ui.unit_id=? AND ui.product_id=p.id WHERE p.tenant_id=? AND p.active=1 ORDER BY p.category_id,p.name');
+$p->execute([$publicUnitId,$tenantId]);$products=$p->fetchAll();
+$modifierCatalog=$configured->catalogModifiers($pdo,$tenantId,array_column($products,'id'));
+$categoryNames=[];foreach($categories as$cat)$categoryNames[(int)$cat['id']]=(string)$cat['name'];
+$groups=[];foreach($products as$prod){$cid=(int)($prod['category_id']??0);$groups[$categoryNames[$cid]??'Outros'][]=$prod;}
 
-$deliveryFee=max(0,(int)($settings['delivery_fee_cents']??0));$minimum=max(0,(int)($settings['min_delivery_order_cents']??0));$title=trim((string)($settings['menu_public_title']??''))?:$tenant['name'];$subtitle=trim((string)($settings['menu_subtitle']??''))?:'Sabor, praticidade e uma experiência feita para você.';$primary=menu_color($settings['menu_primary_color']??'','#6236df');$background=menu_color($settings['menu_background_color']??'','#f7f7fb');$surface=menu_color($settings['menu_surface_color']??'','#ffffff');$text=menu_color($settings['menu_text_color']??'','#242136');$layout=in_array(($settings['menu_layout']??'cards'),['cards','compact'],true)?(string)$settings['menu_layout']:'cards';$headerStyle=in_array(($settings['menu_header_style']??'gradient'),['gradient','solid','minimal'],true)?(string)$settings['menu_header_style']:'gradient';$showImages=(bool)($settings['menu_show_images']??true);$showSearch=(bool)($settings['menu_show_search']??true);$showBranding=(bool)($settings['menu_show_branding']??true);$logoUrl=trim((string)($settings['menu_logo_url']??''));$coverUrl=trim((string)($settings['menu_cover_url']??''));$whatsapp=preg_replace('/\D+/','',(string)($settings['whatsapp']??''))?:'';$canonical=app_url('menu.php?empresa='.rawurlencode($slug).'&unidade='.rawurlencode($unitCode));$changeUnitUrl=app_url('loja.php?empresa='.rawurlencode($slug));
+$cartRows=[];$cartTotal=0;$cartCount=0;$invalid=[];
+foreach($cart as$lineKey=>$line){
+    try{
+        $resolved=$configured->resolveLine($pdo,$tenantId,$line,false);
+        $mods=[];foreach($resolved['modifiers']as$m)$mods[]=$m['group_name'].': '.$m['name'];
+        $cartTotal+=(int)$resolved['total_cents'];
+        $cartCount+=(int)ceil((float)$resolved['quantity']);
+        $cartRows[]=['line_key'=>$lineKey,'id'=>$resolved['product_id'],'name'=>$resolved['name'],'qty'=>$resolved['quantity'],'line'=>$resolved['total_cents'],'mods'=>$mods];
+    }catch(Throwable){
+        $invalid[]=$lineKey;
+        if($error===null)$error='Um item do carrinho foi alterado e precisa ser adicionado novamente.';
+    }
+}
+foreach($invalid as$key)unset($cart[$key]);
+
+$deliveryFee=max(0,(int)($settings['delivery_fee_cents']??0));
+$minimum=max(0,(int)($settings['min_delivery_order_cents']??0));
+$title=trim((string)($settings['menu_public_title']??''))?:$tenant['name'];
+$subtitle=trim((string)($settings['menu_subtitle']??''))?:'Sabor, praticidade e uma experiência feita para você.';
+$primary=menu_color($settings['menu_primary_color']??'','#6236df');
+$background=menu_color($settings['menu_background_color']??'','#f7f7fb');
+$surface=menu_color($settings['menu_surface_color']??'','#ffffff');
+$text=menu_color($settings['menu_text_color']??'','#242136');
+$layout=in_array(($settings['menu_layout']??'cards'),['cards','compact'],true)?(string)$settings['menu_layout']:'cards';
+$headerStyle=in_array(($settings['menu_header_style']??'gradient'),['gradient','solid','minimal'],true)?(string)$settings['menu_header_style']:'gradient';
+$showImages=(bool)($settings['menu_show_images']??true);
+$showSearch=(bool)($settings['menu_show_search']??true);
+$showBranding=(bool)($settings['menu_show_branding']??true);
+$logoUrl=trim((string)($settings['menu_logo_url']??''));
+$coverUrl=trim((string)($settings['menu_cover_url']??''));
+$whatsapp=preg_replace('/\D+/','',(string)($settings['whatsapp']??''))?:'';
+$canonical=app_url('menu.php?empresa='.rawurlencode($slug).'&unidade='.rawurlencode($unitCode));
+$changeUnitUrl=app_url('loja.php?empresa='.rawurlencode($slug));
+$unitAddress=trim((string)($selectedUnit['address']??''));
+$storageKey='eventmenu:menu:'.$tenantId.':'.$publicUnitId.':'.($table?(int)$table['id']:0);
+$cartBackup=array_values(array_map(static fn(array$line):array=>[
+    'product_id'=>(int)($line['product_id']??0),
+    'qty'=>(int)max(1,(float)($line['qty']??1)),
+    'option_ids'=>array_values(array_map('intval',(array)($line['option_ids']??[])))
+],array_filter($cart,'is_array')));
 ?>
-<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="<?= Security::e($primary) ?>"><title><?= Security::e($title) ?> — <?= Security::e($selectedUnit['name']) ?></title><meta name="description" content="<?= Security::e($subtitle) ?>"><link rel="canonical" href="<?= Security::e($canonical) ?>">
-<style>
-:root{--bg:<?= Security::e($background) ?>;--surface:<?= Security::e($surface) ?>;--text:<?= Security::e($text) ?>;--primary:<?= Security::e($primary) ?>;--muted:#77748b;--line:#e7e4ee;--soft:#f4f1ff;--success:#2eaa68;--shadow:0 10px 30px rgba(52,43,86,.08)}*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;min-height:100vh}a{color:inherit;text-decoration:none}button,input,textarea{font:inherit}.shell{width:min(1180px,100%);margin:auto;padding:18px 18px 110px}.topbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:8px 0 16px}.identity{display:flex;align-items:center;gap:12px;min-width:0}.logo{width:52px;height:52px;border-radius:15px;object-fit:cover;border:1px solid var(--line);background:#fff}.monogram{display:grid;place-items:center;background:var(--primary);color:#fff;font-size:20px;font-weight:900}.identity strong,.identity small{display:block}.identity strong{font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.identity small{color:var(--muted);font-size:11px;margin-top:2px}.contact{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}.contact a{padding:9px 12px;border:1px solid var(--line);background:#fff;border-radius:10px;font-size:11px;font-weight:800;color:#4f4a60}.hero{position:relative;overflow:hidden;border-radius:20px;border:1px solid var(--line);background:linear-gradient(120deg,#fff 0,color-mix(in srgb,var(--primary) 8%,#fff) 70%);box-shadow:var(--shadow);margin-bottom:14px}.hero-cover{width:100%;height:188px;object-fit:cover;display:block}.hero-body{padding:24px}.hero.with-cover .hero-body{margin-top:-54px;position:relative;background:linear-gradient(180deg,transparent 0,#fff 45%);padding-top:72px}.hero.minimal{box-shadow:none;border:0;background:transparent}.hero.solid{background:#fff}.eyebrow{font-size:9px;letter-spacing:.14em;font-weight:900;color:var(--primary)}h1{font-size:clamp(30px,5vw,48px);letter-spacing:-1.4px;line-height:1.02;margin:6px 0 8px}.hero p{margin:0;color:var(--muted);font-size:13px;line-height:1.5;max-width:720px}.meta{display:flex;gap:7px;flex-wrap:wrap;margin-top:14px}.pill{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 10px;font-size:10px;font-weight:750;color:#5f5a70}.pill.open{background:#edf9f2;color:#24794f;border-color:#ccebd9}.message,.alert{padding:12px 14px;border-radius:11px;margin-top:13px;font-size:11px}.message{background:var(--soft);border:1px solid color-mix(in srgb,var(--primary) 20%,#fff);color:#56477f}.alert{background:#fff0f1;border:1px solid #efc6ca;color:#a4434c}.toolbar{position:sticky;top:0;z-index:10;background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:blur(14px);padding:9px 0 6px}.search{height:46px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:0 13px;display:flex;align-items:center;box-shadow:0 5px 16px rgba(52,43,86,.035)}.search input{width:100%;border:0;outline:0;background:transparent;color:var(--text)}.cats{display:flex;gap:7px;overflow:auto;padding:8px 0 3px;scrollbar-width:none}.cats a{white-space:nowrap;background:#fff;border:1px solid var(--line);color:#5e596e;border-radius:999px;padding:8px 12px;font-size:10px;font-weight:800}.cats a:hover{background:var(--soft);color:var(--primary);border-color:#d9ceff}.main{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:18px;align-items:start}.catalog-section{scroll-margin-top:96px;margin:18px 0 24px}.section-head{display:flex;align-items:end;justify-content:space-between;gap:10px;margin-bottom:10px}.section-head h2{margin:0;font-size:19px}.section-head small{color:var(--muted);font-size:10px}.products{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:11px}.products.compact{grid-template-columns:1fr}.product{display:grid;grid-template-columns:110px minmax(0,1fr);gap:12px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px;box-shadow:0 5px 18px rgba(52,43,86,.045);min-width:0}.product.no-image{grid-template-columns:1fr}.photo{width:110px;height:110px;object-fit:cover;border-radius:11px;background:#f2f0f5}.product-info{display:flex;flex-direction:column;min-width:0}.product h3{margin:1px 0 4px;font-size:14px}.desc{margin:0;color:var(--muted);font-size:10px;line-height:1.45;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.product-bottom{display:flex;justify-content:space-between;align-items:end;gap:8px;margin-top:auto;padding-top:8px}.price{color:var(--primary);font-size:13px;font-weight:900}.sold{display:block;color:#c34d55;font-size:9px;margin-top:2px}.add-row{display:flex;gap:5px;align-items:center}.add-row input[type=number]{width:49px;border:1px solid var(--line);border-radius:8px;padding:7px;text-align:center;background:#fff}.add-row button,.checkout{border:0;background:var(--primary);color:#fff;border-radius:9px;padding:8px 10px;font-weight:850;cursor:pointer}.add-row button:disabled{opacity:.4}.modifier-box{grid-column:1/-1;border-top:1px solid var(--line);padding-top:8px;margin-top:7px}.modifier-box summary{cursor:pointer;color:var(--primary);font-size:10px;font-weight:900}.modifier-group{padding:9px 0;border-bottom:1px solid #efedf3}.modifier-group:last-child{border-bottom:0}.modifier-title{display:flex;justify-content:space-between;gap:8px;font-size:10px;font-weight:850}.modifier-rule{color:var(--muted);font-size:9px}.modifier-options{display:grid;gap:5px;margin-top:6px}.modifier-option{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);background:#faf9fd;border-radius:9px;padding:7px 8px;font-size:10px}.modifier-option label{display:flex;align-items:center;gap:6px}.modifier-option input{accent-color:var(--primary)}.cart{position:sticky;top:90px;background:#fff;border:1px solid var(--line);border-radius:15px;padding:16px;box-shadow:var(--shadow)}.cart-head{display:flex;align-items:center;justify-content:space-between;gap:10px}.cart-head h2{font-size:17px;margin:3px 0}.clear,.remove{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 8px;color:#665f75;cursor:pointer}.empty{padding:20px 10px;text-align:center;color:var(--muted);font-size:11px;border:1px dashed #d9d6e2;border-radius:10px;margin-top:10px}.cart-line{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #efedf3}.cart-line strong{font-size:11px}.cart-line small{display:block;color:var(--muted);font-size:9px;margin-top:2px}.mods{color:#766e88;font-size:9px;line-height:1.45;margin-top:3px}.total{display:flex;justify-content:space-between;align-items:center;padding:14px 0;font-size:14px}.checkout-form{display:grid;gap:9px}.checkout-form label{display:grid;gap:5px;color:#666176;font-size:10px;font-weight:750}.checkout-form input,.checkout-form textarea{width:100%;border:1px solid var(--line);background:#fff;color:var(--text);border-radius:9px;padding:10px;outline:0}.checkout-form textarea{min-height:68px;resize:vertical}.fulfillment-title{font-size:10px;color:#686376;font-weight:850}.fulfillment{display:grid;grid-template-columns:1fr 1fr;gap:7px}.choice{position:relative}.choice>input{position:absolute;opacity:0;pointer-events:none}.choice span{display:block;border:1px solid var(--line);border-radius:10px;padding:9px;background:#faf9fd;min-height:67px}.choice b,.choice small{display:block}.choice b{font-size:10px}.choice small{color:var(--muted);font-size:8px;line-height:1.3;margin-top:3px}.choice input:checked+span{border-color:#a18be6;background:var(--soft);box-shadow:0 0 0 2px color-mix(in srgb,var(--primary) 10%,transparent)}.checkout{width:100%;padding:11px;font-size:11px}.delivery-info{font-size:9px;color:var(--muted);line-height:1.45}.powered{text-align:center;color:#918d9f;font-size:10px;padding:28px 0}.mobile-cart{display:none}
-@media(max-width:900px){.shell{padding:12px 12px 100px}.main{grid-template-columns:1fr}.cart{position:static}.products{grid-template-columns:1fr}.toolbar{top:0}.hero{border-radius:16px}.hero-cover{height:150px}.hero-body{padding:19px}.product{grid-template-columns:90px minmax(0,1fr)}.photo{width:90px;height:90px}.product.no-image{grid-template-columns:1fr}.mobile-cart{display:flex;position:fixed;z-index:30;left:10px;right:10px;bottom:max(10px,env(safe-area-inset-bottom));align-items:center;justify-content:space-between;background:var(--primary);color:#fff;padding:12px 14px;border-radius:12px;font-size:11px;font-weight:900;box-shadow:0 15px 35px rgba(52,43,86,.25)}}
-@media(max-width:480px){.topbar{padding-top:3px}.contact{gap:5px}.contact a{padding:8px 9px;font-size:9px}.identity strong{font-size:16px}.identity small{font-size:9px}.hero-cover{height:130px}.fulfillment{grid-template-columns:1fr}.product{grid-template-columns:82px minmax(0,1fr)}.photo{width:82px;height:82px}.add-row input[type=number]{display:none}}
-</style></head><body><main class="shell">
-<header class="topbar"><div class="identity"><?php if($logoUrl!==''):?><img class="logo" src="<?= Security::e($logoUrl) ?>" alt="Logo <?= Security::e($title) ?>"><?php else:?><div class="logo monogram"><?= Security::e(mb_strtoupper(mb_substr($title,0,1))) ?></div><?php endif;?><div><strong><?= Security::e($title) ?></strong><small><?= $table?'Pedido pela '.$table['name'].' · '.$selectedUnit['name']:$selectedUnit['name'].' · Cardápio digital' ?></small></div></div><div class="contact"><?php if(!$table&&count($units)>1):?><a href="<?= Security::e($changeUnitUrl) ?>">Trocar unidade</a><?php endif;?><?php if($whatsapp!==''):?><a target="_blank" rel="noopener" href="https://wa.me/<?= Security::e($whatsapp) ?>">WhatsApp</a><?php endif;?></div></header>
-<section class="hero <?= Security::e($headerStyle) ?><?= $coverUrl!==''?' with-cover':'' ?>"><?php if($coverUrl!==''):?><img class="hero-cover" src="<?= Security::e($coverUrl) ?>" alt=""><?php endif;?><div class="hero-body"><span class="eyebrow"><?= $table?'PEDIDO NA MESA':'CARDÁPIO · '.Security::e(mb_strtoupper((string)$selectedUnit['name'])) ?></span><h1><?= Security::e($title) ?></h1><p><?= Security::e($subtitle) ?></p><div class="meta"><span class="pill open"><?= Security::e($selectedUnit['name']) ?></span><?php if($table):?><span class="pill"><?= Security::e($table['name']) ?></span><span class="pill">Comanda automática</span><?php else:?><span class="pill">Retirada</span><span class="pill">Delivery</span><?php if($deliveryFee>0):?><span class="pill">Entrega <?= menu_money($deliveryFee) ?></span><?php endif;?><?php endif;?></div><?php if(!empty($settings['menu_message'])):?><div class="message"><?= Security::e((string)$settings['menu_message']) ?></div><?php endif;?></div></section>
-<?php if($error):?><div class="alert"><?= Security::e($error) ?></div><?php endif;?>
-<?php if($groups):?><div class="toolbar"><?php if($showSearch):?><label class="search"><input id="menu-search" type="search" placeholder="Buscar no cardápio" autocomplete="off"></label><?php endif;?><nav class="cats"><?php foreach($groups as$name=>$rows):$anchor='cat-'.substr(hash('sha256',$name),0,8);?><a href="#<?= $anchor ?>"><?= Security::e($name) ?></a><?php endforeach;?></nav></div><?php endif;?>
-<div class="main"><section><?php if(!$groups):?><div class="empty"><strong>Cardápio em preparação</strong><br>Os produtos serão publicados em breve.</div><?php else:?><?php foreach($groups as$name=>$rows):$anchor='cat-'.substr(hash('sha256',$name),0,8);?><section class="catalog-section" id="<?= $anchor ?>"><div class="section-head"><h2><?= Security::e($name) ?></h2><small><?= count($rows) ?> <?= count($rows)===1?'item':'itens' ?></small></div><div class="products <?= Security::e($layout) ?>"><?php foreach($rows as$prod):$out=(int)$prod['track_stock']&&!(int)$prod['has_recipe']&&(float)$prod['unit_stock_qty']<=0;$hasImage=$showImages&&!empty($prod['image_url']);$productModifiers=$modifierCatalog[(int)$prod['id']]??[];$searchText=mb_strtolower(trim((string)$prod['name'].' '.(string)($prod['description']??'').' '.$name));?><article class="product<?= $hasImage?'':' no-image' ?>" data-product data-search="<?= Security::e($searchText) ?>"><?php if($hasImage):?><img class="photo" src="<?= Security::e($prod['image_url']) ?>" alt="<?= Security::e($prod['name']) ?>" loading="lazy"><?php endif;?><div class="product-info"><h3><?= Security::e($prod['name']) ?></h3><?php if(trim((string)($prod['description']??''))!==''):?><p class="desc"><?= Security::e($prod['description']) ?></p><?php endif;?><form method="post"><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="action" value="add"><input type="hidden" name="product_id" value="<?= (int)$prod['id'] ?>"><?php if($productModifiers):?><details class="modifier-box"><summary>Personalizar produto</summary><?php foreach($productModifiers as$mg):$max=max(1,(int)$mg['max_select']);$min=max((int)$mg['min_select'],(int)$mg['required']?1:0);?><div class="modifier-group"><div class="modifier-title"><span><?= Security::e($mg['name']) ?></span><span class="modifier-rule"><?= $min>0?'Obrigatório · ':'' ?><?= $min ?>–<?= $max ?> escolha(s)</span></div><div class="modifier-options"><?php foreach($mg['options']as$opt):?><div class="modifier-option"><label><input type="<?= $max===1?'radio':'checkbox' ?>" name="option_ids[<?= (int)$mg['id'] ?>]<?= $max===1?'':'[]' ?>" value="<?= (int)$opt['id'] ?>"> <span><?= Security::e($opt['name']) ?></span></label><strong><?= (int)$opt['price_delta_cents']!==0?Security::e(((int)$opt['price_delta_cents']>0?'+ ':'- ').menu_money(abs((int)$opt['price_delta_cents']))):'Incluído' ?></strong></div><?php endforeach;?></div></div><?php endforeach;?></details><?php endif;?><div class="product-bottom"><div><span class="price"><?= menu_money((int)$prod['price_cents']) ?><?= $productModifiers?' + adicionais':'' ?></span><?php if($out):?><span class="sold">Esgotado nesta unidade</span><?php endif;?></div><div class="add-row"><input type="number" name="qty" min="1" max="99" value="1"<?= $out?' disabled':'' ?>><button<?= $out?' disabled':'' ?>><?= $out?'Esgotado':($productModifiers?'Personalizar e adicionar':'Adicionar') ?></button></div></div></form></div></article><?php endforeach;?></div></section><?php endforeach;?><?php endif;?></section>
-<aside class="cart" id="cart"><div class="cart-head"><div><span class="eyebrow"><?= $table?'MESA':'SEU PEDIDO' ?> · <?= Security::e(mb_strtoupper((string)$selectedUnit['name'])) ?></span><h2><?= $cartCount>0?$cartCount.' '.($cartCount===1?'item':'itens'):'Seu pedido' ?></h2></div><?php if($cartRows):?><form method="post"><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="action" value="clear"><button class="clear">Limpar</button></form><?php endif;?></div><?php if(!$cartRows):?><div class="empty">Adicione produtos para começar.</div><?php else:?><?php foreach($cartRows as$item):?><div class="cart-line"><div><strong><?= Security::e((string)$item['qty']) ?>× <?= Security::e($item['name']) ?></strong><small><?= menu_money((int)$item['line']) ?></small><?php if($item['mods']):?><div class="mods"><?= Security::e(implode(' · ',$item['mods'])) ?></div><?php endif;?></div><form method="post"><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="action" value="remove"><input type="hidden" name="line_key" value="<?= Security::e($item['line_key']) ?>"><button class="remove" aria-label="Remover">×</button></form></div><?php endforeach;?><div class="total"><span>Subtotal</span><strong><?= menu_money($cartTotal) ?></strong></div><form method="post" class="checkout-form" id="checkout"><input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="action" value="checkout"><div class="message" style="margin-top:0">Atendimento por <strong><?= Security::e($selectedUnit['name']) ?></strong><?= !empty($selectedUnit['address'])?' · '.Security::e($selectedUnit['address']):'' ?>.</div><label>Seu nome<input name="name" required placeholder="Como podemos te chamar?"></label><label>Telefone<input name="phone"<?= $table?'':' required' ?> inputmode="tel" placeholder="(22) 99999-9999"></label><?php if(!$table):?><div class="fulfillment-title">Como você quer receber?</div><div class="fulfillment"><label class="choice"><input type="radio" name="fulfillment" value="pickup"<?= $selectedFulfillment==='pickup'?' checked':'' ?>><span><b>Retirada no local</b><small>Busque em <?= Security::e($selectedUnit['name']) ?> e apresente o QR do pedido.</small></span></label><label class="choice"><input type="radio" name="fulfillment" value="delivery"<?= $selectedFulfillment==='delivery'?' checked':'' ?>><span><b>Delivery</b><small>Entrega atendida por <?= Security::e($selectedUnit['name']) ?><?= $deliveryFee>0?' · '.menu_money($deliveryFee):'' ?>.</small></span></label></div><label id="address-field">Endereço de entrega<textarea name="address" placeholder="Rua, número, bairro e referência"></textarea></label><div id="delivery-info" class="delivery-info"><?php if($minimum>0):?>Pedido mínimo: <?= menu_money($minimum) ?>. <?php endif;?>A taxa é aplicada somente no delivery.</div><?php else:?><div class="message">O pedido será vinculado à <?= Security::e($table['name']) ?> e à comanda desta unidade.</div><?php endif;?><button class="checkout"><?= $table?'Enviar pedido para a mesa':'Confirmar pedido em '.Security::e($selectedUnit['name']) ?></button></form><?php endif;?></aside></div>
-<?php if($showBranding):?><footer class="powered">Tecnologia <b>EventMenu</b> · Gastronomia, eventos e boas experiências.</footer><?php endif;?></main><?php if($cartRows):?><a class="mobile-cart" href="#cart"><span>Ver pedido · <?= $cartCount ?> <?= $cartCount===1?'item':'itens' ?></span><strong><?= menu_money($cartTotal) ?></strong></a><?php endif;?>
-<script>const search=document.getElementById('menu-search');if(search)search.addEventListener('input',()=>{const q=search.value.trim().toLocaleLowerCase('pt-BR');document.querySelectorAll('[data-product]').forEach(card=>card.hidden=q!==''&&!card.dataset.search.includes(q));document.querySelectorAll('.catalog-section').forEach(section=>section.hidden=![...section.querySelectorAll('[data-product]')].some(card=>!card.hidden))});const choices=document.querySelectorAll('input[name="fulfillment"]'),addressField=document.getElementById('address-field'),deliveryInfo=document.getElementById('delivery-info');function syncFulfillment(){const delivery=document.querySelector('input[name="fulfillment"]:checked')?.value==='delivery';if(addressField){addressField.hidden=!delivery;const ta=addressField.querySelector('textarea');if(ta)ta.required=delivery}if(deliveryInfo)deliveryInfo.hidden=!delivery}choices.forEach(el=>el.addEventListener('change',syncFulfillment));syncFulfillment();</script></body></html>
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="<?= Security::e($primary) ?>">
+<title><?= Security::e($title) ?> — <?= Security::e($selectedUnit['name']) ?></title>
+<meta name="description" content="<?= Security::e($subtitle) ?>">
+<link rel="canonical" href="<?= Security::e($canonical) ?>">
+<link rel="stylesheet" href="<?= Security::e(app_url('assets/menu-premium-v5.css')) ?>">
+<style>:root{--em-bg:<?= Security::e($background) ?>;--em-surface:<?= Security::e($surface) ?>;--em-text:<?= Security::e($text) ?>;--em-primary:<?= Security::e($primary) ?>}</style>
+</head>
+<body>
+<div id="offline-banner" class="offline-banner" hidden>Sem internet. Seu pedido continua salvo neste aparelho.</div>
+<main class="shell" data-menu-root data-storage-key="<?= Security::e($storageKey) ?>">
+<header class="topbar">
+    <div class="identity">
+        <?php if($logoUrl!==''):?>
+            <img class="logo" src="<?= Security::e($logoUrl) ?>" alt="Logo <?= Security::e($title) ?>" width="48" height="48" decoding="async">
+        <?php else:?>
+            <div class="logo monogram" aria-hidden="true"><?= Security::e(mb_strtoupper(mb_substr($title,0,1))) ?></div>
+        <?php endif;?>
+        <div>
+            <strong><?= Security::e($title) ?></strong>
+            <small><?= $table?'Pedido pela '.$table['name'].' · '.$selectedUnit['name']:$selectedUnit['name'].' · Cardápio digital' ?></small>
+        </div>
+    </div>
+    <div class="contact">
+        <?php if(!$table&&count($units)>1):?><a href="<?= Security::e($changeUnitUrl) ?>">Trocar unidade</a><?php endif;?>
+        <?php if($whatsapp!==''):?><a target="_blank" rel="noopener" href="https://wa.me/<?= Security::e($whatsapp) ?>">Falar com a loja</a><?php endif;?>
+    </div>
+</header>
+
+<section class="hero <?= Security::e($headerStyle) ?><?= $coverUrl!==''?' with-cover':'' ?>">
+    <?php if($coverUrl!==''):?><img class="hero-cover" src="<?= Security::e($coverUrl) ?>" alt="" fetchpriority="high" decoding="async"><?php endif;?>
+    <div class="hero-body">
+        <span class="eyebrow"><?= $table?'Pedido na mesa':'Cardápio · '.Security::e(mb_strtoupper((string)$selectedUnit['name'])) ?></span>
+        <h1><?= Security::e($title) ?></h1>
+        <p><?= Security::e($subtitle) ?></p>
+        <div class="meta">
+            <span class="pill success">✓ Pedidos online</span>
+            <?php if($table):?>
+                <span class="pill"><?= Security::e($table['name']) ?></span>
+                <span class="pill">Consumo no local</span>
+            <?php else:?>
+                <span class="pill">Retirada</span>
+                <span class="pill">Delivery</span>
+            <?php endif;?>
+        </div>
+        <div class="commercial-meta">
+            <?php if(!$table):?>
+                <div class="info"><span>Entrega</span><strong><?= $deliveryFee>0?menu_money($deliveryFee):'Consulte no pedido' ?></strong></div>
+                <div class="info"><span>Pedido mínimo</span><strong><?= $minimum>0?menu_money($minimum):'Sem mínimo informado' ?></strong></div>
+            <?php else:?>
+                <div class="info"><span>Atendimento</span><strong><?= Security::e($table['name']) ?></strong></div>
+            <?php endif;?>
+            <div class="info"><span>Unidade</span><strong><?= Security::e((string)$selectedUnit['name']) ?></strong></div>
+            <?php if($unitAddress!==''):?><div class="info"><span>Onde estamos</span><strong><?= Security::e($unitAddress) ?></strong></div><?php endif;?>
+        </div>
+        <?php if(!empty($settings['menu_message'])):?><div class="message"><?= Security::e((string)$settings['menu_message']) ?></div><?php endif;?>
+    </div>
+</section>
+
+<div data-restore-host></div>
+<?php if($error):?><div class="alert" role="alert"><?= Security::e($error) ?></div><?php endif;?>
+
+<?php if($groups):?>
+<div class="toolbar" aria-label="Navegação do cardápio">
+    <div class="toolbar-row">
+        <?php if($showSearch):?>
+        <label class="search" aria-label="Buscar produtos">
+            <span aria-hidden="true">⌕</span>
+            <input id="menu-search" type="search" placeholder="O que você quer pedir?" autocomplete="off">
+            <button type="button" class="search-clear" aria-label="Limpar busca">×</button>
+        </label>
+        <?php endif;?>
+        <?php if($cartRows):?><a class="ghost-action" href="#cart" aria-label="Ir para o pedido">Pedido · <?= $cartCount ?></a><?php endif;?>
+    </div>
+    <nav class="cats" aria-label="Categorias">
+        <?php $firstCategory=true;foreach($groups as$name=>$rows):$anchor='cat-'.substr(hash('sha256',$name),0,8);?>
+            <a data-category-link class="<?= $firstCategory?'active':'' ?>" href="#<?= $anchor ?>"><?= Security::e($name) ?></a>
+        <?php $firstCategory=false;endforeach;?>
+    </nav>
+</div>
+<?php endif;?>
+
+<div class="main">
+<section aria-label="Produtos">
+<?php if(!$groups):?>
+    <div class="screen-state"><strong>Cardápio em preparação</strong><p>Os produtos serão publicados em breve.</p></div>
+<?php else:?>
+    <?php foreach($groups as$name=>$rows):$anchor='cat-'.substr(hash('sha256',$name),0,8);?>
+    <section class="catalog-section" id="<?= $anchor ?>">
+        <div class="section-head"><h2><?= Security::e($name) ?></h2><small><?= count($rows) ?> <?= count($rows)===1?'item':'itens' ?></small></div>
+        <div class="products <?= Security::e($layout) ?>">
+        <?php foreach($rows as$prod):
+            $out=(int)$prod['track_stock']&&!(int)$prod['has_recipe']&&(float)$prod['unit_stock_qty']<=0;
+            $hasImage=$showImages&&!empty($prod['image_url']);
+            $productModifiers=$modifierCatalog[(int)$prod['id']]??[];
+            $searchText=mb_strtolower(trim((string)$prod['name'].' '.(string)($prod['description']??'').' '.$name));
+        ?>
+        <article class="product<?= $hasImage?'':' no-image' ?>" data-product data-search="<?= Security::e($searchText) ?>">
+            <?php if($hasImage):?><img class="photo" src="<?= Security::e($prod['image_url']) ?>" alt="<?= Security::e($prod['name']) ?>" loading="lazy" decoding="async" width="118" height="118"><?php endif;?>
+            <div class="product-info">
+                <h3><?= Security::e($prod['name']) ?></h3>
+                <?php if(trim((string)($prod['description']??''))!==''):?><p class="desc"><?= Security::e($prod['description']) ?></p><?php endif;?>
+                <form method="post" data-product-form data-base-price="<?= (int)$prod['price_cents'] ?>">
+                    <input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>">
+                    <input type="hidden" name="action" value="add">
+                    <input type="hidden" name="product_id" value="<?= (int)$prod['id'] ?>">
+                    <input type="hidden" name="qty" value="1">
+                    <?php if($productModifiers):?>
+                    <div class="product-customizer">
+                        <?php foreach($productModifiers as$mg):
+                            $max=max(1,(int)$mg['max_select']);
+                            $min=max((int)$mg['min_select'],(int)$mg['required']?1:0);
+                            $rule=menu_modifier_rule($min,$max);
+                        ?>
+                        <section class="modifier-group" data-modifier-group data-min="<?= $min ?>" data-max="<?= $max ?>" data-rule="<?= Security::e($rule) ?>">
+                            <div class="modifier-head">
+                                <div><strong><?= Security::e($mg['name']) ?></strong><span class="modifier-rule"><?= Security::e($rule) ?></span></div>
+                                <span class="modifier-badge<?= $min>0?' required':'' ?>"><?= $min>0?'Obrigatório':'Opcional' ?></span>
+                            </div>
+                            <div class="modifier-options">
+                            <?php foreach($mg['options']as$opt):?>
+                                <div class="modifier-option">
+                                    <label><input data-price-delta="<?= (int)$opt['price_delta_cents'] ?>" type="<?= $max===1?'radio':'checkbox' ?>" name="option_ids[<?= (int)$mg['id'] ?>]<?= $max===1?'':'[]' ?>" value="<?= (int)$opt['id'] ?>"> <span><?= Security::e($opt['name']) ?></span></label>
+                                    <strong><?= (int)$opt['price_delta_cents']!==0?Security::e(((int)$opt['price_delta_cents']>0?'+ ':'- ').menu_money(abs((int)$opt['price_delta_cents']))):'Incluído' ?></strong>
+                                </div>
+                            <?php endforeach;?>
+                            </div>
+                        </section>
+                        <?php endforeach;?>
+                    </div>
+                    <?php endif;?>
+                    <noscript><button class="quick-add"<?= $out?' disabled':'' ?>><?= $out?'Esgotado':'Adicionar' ?></button></noscript>
+                </form>
+                <div class="product-bottom">
+                    <div>
+                        <?php if($productModifiers):?><span class="from-label">A partir de</span><?php endif;?>
+                        <span class="price"><?= menu_money((int)$prod['price_cents']) ?></span>
+                        <?php if($out):?><span class="sold">Indisponível agora</span><?php endif;?>
+                    </div>
+                    <button type="button" class="open-product"<?= $out?' disabled':'' ?>><?= $out?'Indisponível':($productModifiers?'Escolher':'Adicionar') ?></button>
+                </div>
+            </div>
+        </article>
+        <?php endforeach;?>
+        </div>
+    </section>
+    <?php endforeach;?>
+<?php endif;?>
+</section>
+
+<aside class="cart" id="cart" aria-label="Seu pedido">
+    <div class="cart-head">
+        <div><span class="eyebrow"><?= $table?'Mesa':'Seu pedido' ?></span><h2><?= $cartCount>0?$cartCount.' '.($cartCount===1?'item':'itens'):'Carrinho vazio' ?></h2></div>
+        <?php if($cartRows):?>
+        <form method="post" data-clear-form>
+            <input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="action" value="clear">
+            <button class="clear">Limpar</button>
+        </form>
+        <?php endif;?>
+    </div>
+    <?php if(!$cartRows):?>
+        <div class="empty">Escolha seus produtos. Seu pedido fica salvo neste aparelho enquanto você navega.</div>
+    <?php else:?>
+        <?php foreach($cartRows as$item):?>
+        <div class="cart-line">
+            <div><strong><?= Security::e((string)$item['qty']) ?>× <?= Security::e($item['name']) ?></strong><small><?= menu_money((int)$item['line']) ?></small><?php if($item['mods']):?><div class="mods"><?= Security::e(implode(' · ',$item['mods'])) ?></div><?php endif;?></div>
+            <form method="post" data-remove-form>
+                <input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="action" value="remove"><input type="hidden" name="line_key" value="<?= Security::e($item['line_key']) ?>">
+                <button class="remove" aria-label="Remover <?= Security::e($item['name']) ?>">×</button>
+            </form>
+        </div>
+        <?php endforeach;?>
+        <div class="total"><span>Subtotal</span><strong><?= menu_money($cartTotal) ?></strong></div>
+
+        <form method="post" class="checkout-form" id="checkout">
+            <input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>">
+            <input type="hidden" name="action" value="checkout">
+            <div class="checkout-progress" aria-hidden="true"><span></span><span></span><span></span></div>
+
+            <section class="checkout-step">
+                <div class="step-label"><b>Seus dados</b><small>1 de 3</small></div>
+                <label>Nome<input name="name" required autocomplete="name" placeholder="Como podemos te chamar?"></label>
+                <label>Telefone<input name="phone"<?= $table?'':' required' ?> inputmode="tel" autocomplete="tel" placeholder="(22) 99999-9999"></label>
+                <div class="checkout-actions"><button type="button" class="step-next" data-step-next>Continuar</button></div>
+            </section>
+
+            <section class="checkout-step" hidden>
+                <div class="step-label"><b><?= $table?'Atendimento':'Entrega' ?></b><small>2 de 3</small></div>
+                <?php if(!$table):?>
+                    <div class="fulfillment-title">Como você quer receber?</div>
+                    <div class="fulfillment">
+                        <label class="choice"><input type="radio" name="fulfillment" value="pickup"<?= $selectedFulfillment==='pickup'?' checked':'' ?>><span><b>Retirada no local</b><small>Busque em <?= Security::e($selectedUnit['name']) ?> e apresente o código do pedido.</small></span></label>
+                        <label class="choice"><input type="radio" name="fulfillment" value="delivery"<?= $selectedFulfillment==='delivery'?' checked':'' ?>><span><b>Receber em casa</b><small><?= $deliveryFee>0?'Taxa de '.menu_money($deliveryFee).'.':'A taxa será informada no pedido.' ?></small></span></label>
+                    </div>
+                    <label id="address-field">Endereço de entrega<textarea name="address" autocomplete="street-address" placeholder="Rua, número, bairro e referência"></textarea></label>
+                    <div id="delivery-info" class="delivery-info"><?php if($minimum>0):?>Pedido mínimo para entrega: <?= menu_money($minimum) ?>. <?php endif;?>A taxa é aplicada somente quando você escolher entrega.</div>
+                <?php else:?>
+                    <div class="message">Seu pedido será enviado para <strong><?= Security::e($table['name']) ?></strong> nesta unidade.</div>
+                <?php endif;?>
+                <div class="checkout-actions"><button type="button" class="step-back" data-step-back>Voltar</button><button type="button" class="step-next" data-step-next>Continuar</button></div>
+            </section>
+
+            <section class="checkout-step" hidden>
+                <div class="step-label"><b><?= $table?'Confirmar pedido':'Pagamento' ?></b><small>3 de 3</small></div>
+                <div class="checkout-summary">
+                    <?= $table?'Revise e envie seu pedido para a mesa.':'Seu pedido está pronto para continuar.' ?>
+                    <strong><?= menu_money($cartTotal) ?></strong>
+                    <?php if(!$table):?><span>Na próxima tela você poderá acompanhar o pedido e escolher a forma de pagamento disponível.</span><?php endif;?>
+                </div>
+                <div class="checkout-actions"><button type="button" class="step-back" data-step-back>Voltar</button><button type="submit" class="checkout"><?= $table?'Enviar pedido':'Continuar para pagamento' ?></button></div>
+            </section>
+        </form>
+    <?php endif;?>
+</aside>
+</div>
+
+<form method="post" id="restore-cart-form" hidden>
+    <input type="hidden" name="_csrf" value="<?= Security::e(Security::csrfToken()) ?>"><input type="hidden" name="action" value="restore"><input type="hidden" name="cart_backup" value="">
+</form>
+<script type="application/json" id="menu-cart-state"><?= json_encode($cartBackup,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_HEX_TAG|JSON_HEX_AMP) ?></script>
+
+<?php if($showBranding):?><footer class="powered">Tecnologia <b>EventMenu</b> · Pedido simples, atendimento melhor.</footer><?php endif;?>
+</main>
+
+<?php if($cartRows):?><a class="mobile-cart" href="#cart"><span>Ver pedido · <?= $cartCount ?> <?= $cartCount===1?'item':'itens' ?></span><strong><?= menu_money($cartTotal) ?></strong></a><?php endif;?>
+
+<dialog id="product-dialog" class="product-dialog" aria-label="Personalizar produto">
+    <div class="product-sheet">
+        <div class="product-sheet-head"><img class="product-sheet-photo" alt=""><button type="button" class="dialog-close" aria-label="Fechar">×</button></div>
+        <div class="product-sheet-body"><h2 class="sheet-title"></h2><p class="sheet-desc"></p><div class="sheet-price"></div></div>
+        <div class="product-sheet-footer">
+            <div class="qty-stepper" aria-label="Quantidade"><button type="button" data-qty-minus aria-label="Diminuir quantidade">−</button><output>1</output><button type="button" data-qty-plus aria-label="Aumentar quantidade">+</button></div>
+            <button type="button" class="sheet-add">Adicionar</button>
+        </div>
+    </div>
+</dialog>
+<div class="toast-region" aria-live="polite"></div>
+<script src="<?= Security::e(app_url('assets/menu-premium-v5.js')) ?>" defer></script>
+</body>
+</html>
