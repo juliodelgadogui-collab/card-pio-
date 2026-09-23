@@ -37,7 +37,7 @@ final class MercadoPagoPixService
         if(!filter_var($email,FILTER_VALIDATE_EMAIL))$email=trim((string)($settings['pix_default_email']??''));
         if(!filter_var($email,FILTER_VALIDATE_EMAIL))$email=trim((string)($settings['receipt_email']??''));
         if(!filter_var($email,FILTER_VALIDATE_EMAIL))$email=trim((string)($config['fallback_payer_email']??''));
-        if(!filter_var($email,FILTER_VALIDATE_EMAIL))throw new RuntimeException('Informe um e-mail válido do cliente ou configure o e-mail técnico de fallback do PIX Mercado Pago.');
+        if(!filter_var($email,FILTER_VALIDATE_EMAIL))$email=$this->technicalPayerEmail($tenantId,$orderId,(string)($order['tenant_slug']??''));
         $payer=['email'=>$email,'identification'=>['type'=>strlen($doc)===11?'CPF':'CNPJ','number'=>$doc]];
 
         if(!$payment){Database::transaction(function(PDO $tx)use(&$payment,$tenantId,$orderId,$key,$amount):void{$lock=$tx->prepare(Database::portableSql($tx,'SELECT * FROM orders WHERE id=? AND tenant_id=? FOR UPDATE'));$lock->execute([$orderId,$tenantId]);$fresh=$lock->fetch();if(!$fresh||in_array((string)$fresh['status'],['cancelled','completed'],true)||(string)$fresh['payment_status']==='paid')throw new RuntimeException('Pedido não aceita cobrança.');$check=(new PaymentService())->remaining($orderId,$tenantId);if($amount>(int)$check['remaining_cents'])throw new RuntimeException('Saldo do pedido mudou. Atualize o pagamento.');$tx->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,"mercadopago",?,?,"BRL","created")')->execute([$tenantId,$orderId,$key,$amount]);$id=(int)$tx->lastInsertId();$tx->prepare('UPDATE orders SET payment_status="pending" WHERE id=?')->execute([$orderId]);$s=$tx->prepare('SELECT * FROM payments WHERE id=?');$s->execute([$id]);$payment=$s->fetch();});}
@@ -46,6 +46,15 @@ final class MercadoPagoPixService
         $notification=\app_absolute_url('webhook.php?provider=mercadopago&tenant='.rawurlencode((string)$order['tenant_slug']));$body=['transaction_amount'=>$amount/100,'description'=>'Pedido EventMenu #'.$orderId,'payment_method_id'=>'pix','external_reference'=>'eventmenu:'.$tenantId.':'.$orderId,'notification_url'=>$notification,'payer'=>$payer,'metadata'=>['tenant_id'=>$tenantId,'order_id'=>$orderId,'eventmenu_payment_id'=>(int)$payment['id']]];
         try{$data=$this->httpJson('POST','https://api.mercadopago.com/v1/payments',['Authorization: Bearer '.$token,'X-Idempotency-Key: '.$key],$body);$tx=$data['point_of_interaction']['transaction_data']??[];$copy=trim((string)($tx['qr_code']??''));if($copy==='')throw new RuntimeException('Mercado Pago não retornou o PIX copia e cola.');$base64=trim((string)($tx['qr_code_base64']??''));$image=$base64!==''?'data:image/png;base64,'.$base64:'';$expires=(string)($data['date_of_expiration']??'');$data['_eventmenu_pix_text']=$copy;$data['_eventmenu_pix_image_url']=$image;$data['_eventmenu_pix_expires_at']=$expires;$data['_eventmenu_payment_id']=(int)$payment['id'];$pdo->prepare('UPDATE payments SET provider_payment_id=?,status="pending",raw_payload=? WHERE id=? AND tenant_id=?')->execute([(string)($data['id']??''),json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),$payment['id'],$tenantId]);Auth::audit('payment.pix_created','payment',(string)$payment['id'],['order_id'=>$orderId,'amount_cents'=>$amount,'provider'=>'mercadopago']);$payment['status']='pending';$payment['provider_payment_id']=(string)($data['id']??'');return $this->response($payment,$data,false);
         }catch(\Throwable $e){$pdo->prepare('UPDATE payments SET status="failed",raw_payload=? WHERE id=? AND tenant_id=?')->execute([json_encode(['error'=>$e->getMessage()],JSON_UNESCAPED_UNICODE),$payment['id'],$tenantId]);$sum=$pdo->prepare('SELECT COALESCE(SUM(amount_cents),0) FROM payments WHERE tenant_id=? AND order_id=? AND status="paid"');$sum->execute([$tenantId,$orderId]);$pdo->prepare('UPDATE orders SET payment_status=? WHERE id=? AND tenant_id=? AND payment_status<>"paid"')->execute([(int)$sum->fetchColumn()>0?'pending':'failed',$orderId,$tenantId]);(new StockReservationService())->rearmAfterPaymentFailure($tenantId,$orderId,30);throw $e;}
+    }
+
+    private function technicalPayerEmail(int $tenantId,int $orderId,string $tenantSlug):string
+    {
+        $domain=trim((string)(getenv('PIX_TECHNICAL_EMAIL_DOMAIN')?:'gestao2.store'));
+        if(!preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/i',$domain))$domain='gestao2.store';
+        $slug=strtolower(trim((string)preg_replace('/[^a-z0-9]+/i','-',trim($tenantSlug)),'-'));
+        if($slug==='')$slug='tenant'.$tenantId;
+        return 'pix+'.$slug.'-t'.$tenantId.'-o'.$orderId.'@'.$domain;
     }
 
     private function validTaxId(string $value):string
