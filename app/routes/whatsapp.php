@@ -5,6 +5,7 @@ declare(strict_types=1);
 use EventMenu\Core\Auth;
 use EventMenu\Core\Security;
 use EventMenu\Services\WhatsAppCommerceAssistantService;
+use EventMenu\Services\WhatsAppCommerceConversionService;
 use EventMenu\Services\WhatsAppIntegrationService;
 
 Auth::requirePermission('settings.manage');
@@ -13,6 +14,7 @@ if($tenantId<1){http_response_code(403);exit('Selecione uma empresa para configu
 
 $service=new WhatsAppIntegrationService();
 $assistantService=new WhatsAppCommerceAssistantService();
+$conversionService=new WhatsAppCommerceConversionService();
 $eventLabels=[
     'order_received'=>'Pedido recebido',
     'order_confirmed'=>'Pedido confirmado',
@@ -43,6 +45,22 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
             $pdo->prepare('UPDATE whatsapp_connections SET commerce_enabled=?,updated_at=CURRENT_TIMESTAMP WHERE tenant_id=?')->execute([$enabled?1:0,$tenantId]);
             Auth::audit('whatsapp.commerce_toggled','whatsapp_connection',(string)$tenantId,['commerce_enabled'=>$enabled]);
             em_flash('ok',$enabled?'WhatsApp Commerce ativado.':'WhatsApp Commerce pausado. As mensagens recebidas continuam no histórico sem respostas automáticas.');
+        }elseif($action==='save_conversion'){
+            $saved=$conversionService->saveSettings($pdo,$tenantId,[
+                'repeat_last_order_enabled'=>isset($_POST['repeat_last_order_enabled']),
+                'upsell_enabled'=>isset($_POST['upsell_enabled']),
+                'upsell_max_suggestions'=>(int)($_POST['upsell_max_suggestions']??3),
+                'abandoned_cart_enabled'=>isset($_POST['abandoned_cart_enabled']),
+                'abandoned_delay_minutes'=>(int)($_POST['abandoned_delay_minutes']??60),
+            ]);
+            Auth::audit('whatsapp.conversion_settings_saved','whatsapp_commerce_conversion_settings',(string)$tenantId,[
+                'repeat_last_order_enabled'=>(int)($saved['repeat_last_order_enabled']??0)===1,
+                'upsell_enabled'=>(int)($saved['upsell_enabled']??0)===1,
+                'upsell_max_suggestions'=>(int)($saved['upsell_max_suggestions']??3),
+                'abandoned_cart_enabled'=>(int)($saved['abandoned_cart_enabled']??0)===1,
+                'abandoned_delay_minutes'=>(int)($saved['abandoned_delay_minutes']??60),
+            ]);
+            em_flash('ok','Recursos de venda do WhatsApp Commerce salvos.');$anchor='#whatsapp-sales';
         }elseif($action==='save_assistant'){
             $saved=$assistantService->saveSettings($pdo,$tenantId,[
                 'enabled'=>isset($_POST['assistant_enabled']),
@@ -72,7 +90,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
         }else{
             throw new RuntimeException('Ação de WhatsApp não permitida no servidor. Use o EventMenu Connect para parear, reconectar ou trocar o número.');
         }
-    }catch(Throwable$e){em_flash('error',$e->getMessage());if(in_array($action,['save_assistant','save_knowledge','delete_knowledge'],true))$anchor='#whatsapp-ai';}
+    }catch(Throwable$e){em_flash('error',$e->getMessage());if($action==='save_conversion')$anchor='#whatsapp-sales';elseif(in_array($action,['save_assistant','save_knowledge','delete_knowledge'],true))$anchor='#whatsapp-ai';}
     header('Location: '.app_url('whatsapp.php').$anchor);exit;
 }
 
@@ -80,6 +98,7 @@ $connection=$service->status($pdo,$tenantId,false);
 $templates=$service->templates($pdo,$tenantId);$templatesByEvent=[];foreach($templates as$row)$templatesByEvent[(string)$row['event_type']]=$row;$defaults=$service->defaultTemplates();
 $status=(string)($connection['status']??'disconnected');$agent=is_array($connection['agent']??null)?$connection['agent']:[];
 $commerceStmt=$pdo->prepare('SELECT commerce_enabled FROM whatsapp_connections WHERE tenant_id=? LIMIT 1');$commerceStmt->execute([$tenantId]);$commerceEnabled=(int)($commerceStmt->fetchColumn()?:0)===1;
+$conversionSettings=$conversionService->settings($pdo,$tenantId);
 $assistantSettings=$assistantService->settings($pdo,$tenantId);$knowledgeItems=$assistantService->knowledge($pdo,$tenantId,false);
 $statusLabel=match($status){'connected'=>'Conectado','starting'=>'Iniciando','qr'=>'Aguardando pareamento no Connect','reconnecting'=>'Reconectando','error'=>'Precisa de atenção',default=>'Desconectado'};
 $statusTone=match($status){'connected'=>'success','starting','qr','reconnecting'=>'warning','error'=>'danger',default=>'muted'};
@@ -109,6 +128,29 @@ em_header('WhatsApp','whatsapp');
   <div class="section-head"><div><span class="eyebrow">WHATSAPP COMMERCE</span><h2>Pedidos e conversas automáticas</h2></div><span class="badge status-<?=$commerceEnabled?'success':'muted'?>"><?=$commerceEnabled?'Ativo':'Pausado'?></span></div>
   <p class="muted">Quando ativo, mensagens recebidas pelo EventMenu Connect entram no servidor, seguem o fluxo de cardápio/pedido e as respostas voltam pela mesma fila segura.</p>
   <form method="post" class="form-grid" id="commerceForm"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="action" value="save_commerce"><label class="checkbox span-2"><input type="checkbox" name="commerce_enabled"<?=em_checked($commerceEnabled)?>> Ativar WhatsApp Commerce nesta empresa</label><div class="span-2"><span class="badge status-warning" id="commerceUnsaved" hidden>Alteração não salva</span></div><div class="span-2 actions"><button class="primary" type="submit">Salvar WhatsApp Commerce</button></div></form>
+</section>
+
+<section class="card" id="whatsapp-sales">
+  <div class="section-head"><div><span class="eyebrow">VENDER MAIS</span><h2>Recursos para aumentar os pedidos</h2><p class="muted">Ative só o que fizer sentido para sua operação. Esses recursos usam o catálogo, os preços e o histórico real do EventMenu.</p></div></div>
+  <?php if(!$commerceEnabled):?><div class="alert"><strong>WhatsApp Commerce está pausado.</strong> Estas preferências ficam salvas, mas só entram em ação quando o WhatsApp Commerce estiver ativo.</div><?php endif;?>
+  <form method="post" class="form-grid" style="margin-top:16px"><input type="hidden" name="_csrf" value="<?=em_csrf()?>"><input type="hidden" name="action" value="save_conversion">
+    <section class="span-2" style="padding:14px;border:1px solid #ddd;border-radius:16px">
+      <label class="checkbox"><input type="checkbox" name="repeat_last_order_enabled"<?=em_checked((int)($conversionSettings['repeat_last_order_enabled']??0)===1)?>> <strong>Permitir repetir o último pedido</strong></label>
+      <p class="muted" style="margin:8px 0 0">O cliente pode escolher “Repetir último pedido”. O carrinho é recriado com os preços atuais e itens indisponíveis não são forçados.</p>
+    </section>
+    <section class="span-2" style="padding:14px;border:1px solid #ddd;border-radius:16px">
+      <label class="checkbox"><input type="checkbox" name="upsell_enabled"<?=em_checked((int)($conversionSettings['upsell_enabled']??0)===1)?>> <strong>Sugerir itens antes de finalizar</strong></label>
+      <p class="muted" style="margin:8px 0 12px">Antes de escolher entrega ou retirada, o EventMenu pode sugerir produtos que combinam com o carrinho usando o histórico real de pedidos.</p>
+      <label style="max-width:280px">Máximo de sugestões<input type="number" name="upsell_max_suggestions" min="1" max="5" value="<?=max(1,min(5,(int)($conversionSettings['upsell_max_suggestions']??3)))?>"></label>
+    </section>
+    <section class="span-2" style="padding:14px;border:1px solid #ddd;border-radius:16px">
+      <label class="checkbox"><input type="checkbox" name="abandoned_cart_enabled"<?=em_checked((int)($conversionSettings['abandoned_cart_enabled']??0)===1)?>> <strong>Lembrar o cliente do carrinho não finalizado</strong></label>
+      <p class="muted" style="margin:8px 0 12px">Se o cliente parar no meio do pedido, o EventMenu pode enviar um único lembrete para ele continuar de onde parou.</p>
+      <label style="max-width:280px">Esperar quantos minutos<input type="number" name="abandoned_delay_minutes" min="15" max="1440" value="<?=max(15,min(1440,(int)($conversionSettings['abandoned_delay_minutes']??60)))?>"><small class="muted">Mínimo de 15 minutos. O lembrete só é usado em carrinhos recentes.</small></label>
+    </section>
+    <div class="span-2 alert"><strong>Segurança dos pedidos:</strong> preços e disponibilidade são verificados novamente antes de adicionar itens. Estes recursos não confirmam pagamento e não alteram o PIX.</div>
+    <div class="span-2 actions"><button class="primary" type="submit">Salvar recursos de venda</button></div>
+  </form>
 </section>
 
 <section class="card" id="whatsapp-ai">
@@ -145,6 +187,7 @@ em_header('WhatsApp','whatsapp');
 </div>
 
 <aside class="settings-side">
+  <section class="card"><span class="eyebrow">VENDAS</span><h3>Conversão no WhatsApp</h3><p class="muted">Controle repetição de pedidos, sugestões de itens e lembrete de carrinho não finalizado.</p><a class="button secondary compact" href="#whatsapp-sales">Configurar vendas</a></section>
   <section class="card"><span class="eyebrow">ASSISTENTE</span><h3>IA sem inventar dados</h3><p class="muted">Perguntas da empresa usam a Base da IA. Pedido, catálogo, valores, estoque e pagamentos continuam consultando o EventMenu como fonte da verdade.</p><a class="button secondary compact" href="#whatsapp-ai">Configurar IA</a></section>
   <section class="card"><span class="eyebrow">ATENDIMENTO</span><h3>Inbox completo</h3><p class="muted">Use a Central de Atendimento para assumir conversas, responder manualmente e devolver o cliente ao fluxo automático.</p><a class="button secondary compact" href="<?=Security::e(app_url('support.php'))?>">Abrir Central</a></section>
   <section class="card"><span class="eyebrow">ARQUITETURA</span><h3>Connect só transporta</h3><p class="muted">O aplicativo mantém a sessão do WhatsApp. Configurações, conhecimento, pedidos e regras ficam centralizados no EventMenu Server.</p></section>
