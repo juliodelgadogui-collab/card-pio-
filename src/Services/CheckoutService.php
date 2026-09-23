@@ -13,7 +13,7 @@ final class CheckoutService
     public function create(string $publicToken,string $provider): array
     {
         $provider=strtolower(trim($provider));if(!in_array($provider,['stripe','mercadopago','pagbank'],true))throw new RuntimeException('Provedor inválido.');
-        $pdo=Database::connection();$s=$pdo->prepare('SELECT o.*,t.slug tenant_slug,t.status tenant_status,c.name customer_name,c.email customer_email,c.phone customer_phone FROM orders o JOIN tenants t ON t.id=o.tenant_id LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id WHERE o.public_token=? LIMIT 1');$s->execute([$publicToken]);$order=$s->fetch();
+        $pdo=Database::connection();$s=$pdo->prepare('SELECT o.*,t.slug tenant_slug,t.status tenant_status,c.name customer_name,c.email customer_email,c.phone customer_phone FROM orders o JOIN tenants t ON t.id=o.tenant_id LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id AND c.tenant_id=o.tenant_id WHERE o.public_token=? LIMIT 1');$s->execute([$publicToken]);$order=$s->fetch();
         if(!$order||$order['tenant_status']!=='active')throw new RuntimeException('Pedido não encontrado.');
         if(PHP_SAPI!=='cli'){$rate=new ApiRateLimitService();$rate->assertAllowed('public.checkout',$rate->requestSubject('order:'.(int)$order['id']),20,600,'Muitas tentativas de pagamento. Aguarde alguns minutos e tente novamente.');}
         if(in_array($order['status'],['cancelled','completed'],true)||$order['payment_status']==='paid')throw new RuntimeException('Pedido não aceita nova cobrança.');
