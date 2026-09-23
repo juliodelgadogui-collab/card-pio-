@@ -90,7 +90,7 @@ final class TicketService
             if($couponCode){
                 $code=strtoupper(trim($couponCode));
                 $sql=Database::portableSql($pdo,'SELECT c.* FROM coupons c WHERE c.tenant_id=? AND c.code=? AND c.active=1 AND EXISTS (SELECT 1 FROM event_coupons ec WHERE ec.tenant_id=c.tenant_id AND ec.event_id=? AND ec.coupon_id=c.id AND ec.active=1) FOR UPDATE');
-                $c=$pdo->prepare($sql);$c->execute([$event['tenant_id'],$code,$eventId]);$coupon=$c->fetch();
+                $c=$pdo->prepare($sql);$c->execute([$tenantId,$code,$eventId]);$coupon=$c->fetch();
                 if(!$coupon)throw new RuntimeException('Cupom inválido para este evento.');
                 if($coupon['starts_at']&&$now<new \DateTimeImmutable($coupon['starts_at']))throw new RuntimeException('Cupom ainda não está válido.');
                 if($coupon['ends_at']&&$now>new \DateTimeImmutable($coupon['ends_at']))throw new RuntimeException('Cupom expirado.');
@@ -103,14 +103,14 @@ final class TicketService
             $promoterId=null;
             if($promoterCode){
                 $sql='SELECT p.id FROM promoters p WHERE p.tenant_id=? AND p.code=? AND p.active=1 AND EXISTS (SELECT 1 FROM event_promoters ep WHERE ep.tenant_id=p.tenant_id AND ep.event_id=? AND ep.promoter_id=p.id AND ep.active=1)';
-                $p=$pdo->prepare($sql);$p->execute([$event['tenant_id'],strtoupper(trim($promoterCode)),$eventId]);$promoterId=$p->fetchColumn()?:null;
+                $p=$pdo->prepare($sql);$p->execute([$tenantId,strtoupper(trim($promoterCode)),$eventId]);$promoterId=$p->fetchColumn()?:null;
                 if(!$promoterId)throw new RuntimeException('Código de promotor inválido para este evento.');
             }
 
             $total=max(0,$subtotal-$discount);
             $publicToken=bin2hex(random_bytes(20));
             $stmt=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,coupon_id,promoter_id,channel,status,payment_status,subtotal_cents,discount_cents,total_cents,notes) VALUES (?,?,?,?,?,"event","pending","unpaid",?,?,?,?)');
-            $stmt->execute([$publicToken,$event['tenant_id'],$customerId,$couponId,$promoterId,$subtotal,$discount,$total,'Evento #'.$eventId]);
+            $stmt->execute([$publicToken,$tenantId,$customerId,$couponId,$promoterId,$subtotal,$discount,$total,'Evento #'.$eventId]);
             $orderId=(int)$pdo->lastInsertId();
             $typeLabel=trim((string)($batch['ticket_type_name']??''));
             $itemName='Ingresso '.$event['name'].' — '.($typeLabel!==''?$typeLabel.' · ':'').$batch['name'];
@@ -178,13 +178,23 @@ final class TicketService
     public function releaseExpired(): int
     {
         return Database::transaction(function(PDO $pdo): int {
-            $s=$pdo->query(Database::portableSql($pdo,'SELECT event_id,batch_id,COUNT(*) qty FROM tickets WHERE status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP GROUP BY event_id,batch_id FOR UPDATE'));
-            $groups=$s->fetchAll();
-            $total=0;
-            foreach($groups as$g){$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?) WHERE id=? AND event_id=?'))->execute([(int)$g['qty'],$g['batch_id'],$g['event_id']]);$total+=(int)$g['qty'];}
+            $rows=$pdo->query(Database::portableSql($pdo,'SELECT id,tenant_id,event_id,batch_id FROM tickets WHERE status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP ORDER BY id FOR UPDATE'))->fetchAll();
+            $releasedByBatch=[];$total=0;
+            $cancel=$pdo->prepare('UPDATE tickets SET status="cancelled" WHERE id=? AND tenant_id=? AND event_id=? AND status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP');
+            foreach($rows as$row){
+                $cancel->execute([$row['id'],$row['tenant_id'],$row['event_id']]);if($cancel->rowCount()!==1)continue;
+                $key=(int)$row['event_id'].':'.(int)$row['batch_id'];
+                if(!isset($releasedByBatch[$key]))$releasedByBatch[$key]=['event_id'=>(int)$row['event_id'],'batch_id'=>(int)$row['batch_id'],'qty'=>0];
+                $releasedByBatch[$key]['qty']++;$total++;
+            }
+            foreach($releasedByBatch as$g)$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?) WHERE id=? AND event_id=?'))->execute([$g['qty'],$g['batch_id'],$g['event_id']]);
+
             $couponRows=$pdo->query(Database::portableSql($pdo,'SELECT tenant_id,id,coupon_id FROM coupon_reservations WHERE status="reserved" AND expires_at<CURRENT_TIMESTAMP FOR UPDATE'))->fetchAll();
-            foreach($couponRows as$row){$pdo->prepare('UPDATE coupon_reservations SET status="released" WHERE id=? AND tenant_id=? AND status="reserved"')->execute([$row['id'],$row['tenant_id']]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1) WHERE id=? AND tenant_id=?'))->execute([$row['coupon_id'],$row['tenant_id']]);}
-            $pdo->exec('UPDATE tickets SET status="cancelled" WHERE status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP');
+            $releaseCoupon=$pdo->prepare('UPDATE coupon_reservations SET status="released" WHERE id=? AND tenant_id=? AND status="reserved" AND expires_at<CURRENT_TIMESTAMP');
+            foreach($couponRows as$row){
+                $releaseCoupon->execute([$row['id'],$row['tenant_id']]);if($releaseCoupon->rowCount()!==1)continue;
+                $pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1) WHERE id=? AND tenant_id=?'))->execute([$row['coupon_id'],$row['tenant_id']]);
+            }
             $pdo->exec('UPDATE orders SET status="cancelled",payment_status=CASE WHEN payment_status="unpaid" THEN "failed" ELSE payment_status END WHERE channel="event" AND payment_status<>"paid" AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.order_id=orders.id AND t.tenant_id=orders.tenant_id AND t.status="reserved") AND EXISTS (SELECT 1 FROM tickets t2 WHERE t2.order_id=orders.id AND t2.tenant_id=orders.tenant_id)');
             return $total;
         });
