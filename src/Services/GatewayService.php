@@ -159,7 +159,9 @@ final class GatewayService
             $amount=(int)($verified['amount_cents']??0);if($amount>0&&$amount!==(int)$payment['amount_cents'])throw new RuntimeException('Valor terminal divergente.');
             $raw=json_decode((string)($payment['raw_payload']??''),true);if(!is_array($raw))$raw=[];$raw['_eventmenu_terminal_status']=$rawStatus;$raw['_eventmenu_terminal_at']=gmdate('c');
             $storedProviderId=$providerId!==''?$providerId:$localProviderId;
-            $tx->prepare('UPDATE payments SET status=?,provider_payment_id=?,raw_payload=? WHERE id=? AND status IN ("created","pending","authorized")')->execute([$target,$storedProviderId!==''?$storedProviderId:null,json_encode($raw,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id']]);
+            $update=$tx->prepare('UPDATE payments SET status=?,provider_payment_id=?,raw_payload=? WHERE id=? AND tenant_id=? AND order_id=? AND provider=? AND status IN ("created","pending","authorized")');
+            $update->execute([$target,$storedProviderId!==''?$storedProviderId:null,json_encode($raw,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),(int)$payment['id'],$tenantId,$orderId,$provider]);
+            if($update->rowCount()!==1)throw new RuntimeException('Cobrança terminal mudou durante o processamento do webhook.');
             $tx->prepare('UPDATE orders SET payment_status="failed" WHERE id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$orderId,$tenantId]);
             try{(new StockReservationService())->rearmAfterPaymentFailure($tenantId,$orderId,30);}catch(\Throwable){}
             return true;
