@@ -1,0 +1,213 @@
+name: EventMenu WIP Gate
+
+on:
+  push:
+    branches:
+      - wip/eventmenu-delivery-customer-auth-payments
+  pull_request:
+    branches:
+      - wip/eventmenu-delivery-customer-auth-payments
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eventmenu-wip-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  php-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_mysql, pdo_sqlite
+          coverage: none
+      - name: Validate Composer
+        run: composer validate --strict
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: PHP syntax
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Static smoke rules
+        env:
+          APP_BASE_PATH: /1
+          APP_URL: https://example.test
+        run: |
+          php scripts/ci-url-smoke.php
+          php scripts/ci-production-readiness-smoke.php
+          php scripts/ci-permission-smoke.php
+
+  sqlite-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_sqlite
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Run SQLite core and operational smoke suite
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: ci-eventmenu-wip-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-wip-ci.sqlite
+          SESSION_NAME: eventmenu_wip_ci_sqlite
+        run: |
+          rm -f /tmp/eventmenu-wip-ci.sqlite /tmp/eventmenu-wip-ci.sqlite-shm /tmp/eventmenu-wip-ci.sqlite-wal
+          php scripts/ci-db-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-auth-mail-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-sensitive-rate-limit-smoke.php
+          php scripts/ci-super-admin-smoke.php
+          php scripts/ci-operations-smoke.php
+          php scripts/ci-backup-smoke.php
+          php scripts/ci-coupon-pricing-smoke.php
+          php scripts/ci-customer-identity-smoke.php
+          php scripts/ci-delivery-customer-order-smoke.php
+          php scripts/ci-event-schedule-contract.php
+          php scripts/ci-marketplace-finance-smoke.php
+          php scripts/ci-marketplace-native-contract-smoke.php
+          php scripts/ci-native-payment-route-smoke.php
+          php scripts/ci-operational-resilience-smoke.php
+          php scripts/ci-order-payment-preference-smoke.php
+          php scripts/ci-production-print-policy-smoke.php
+          php scripts/ci-public-ux-smoke.php
+
+  whatsapp-sqlite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_sqlite
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Run WhatsApp regression suite
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: ci-eventmenu-whatsapp-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: sqlite
+          DB_SQLITE_PATH: /tmp/eventmenu-whatsapp-ci.sqlite
+          SESSION_NAME: eventmenu_wip_ci_whatsapp
+        run: |
+          rm -f /tmp/eventmenu-whatsapp-ci.sqlite /tmp/eventmenu-whatsapp-ci.sqlite-shm /tmp/eventmenu-whatsapp-ci.sqlite-wal
+          php scripts/ci-db-smoke.php
+          php scripts/ci-whatsapp-smoke.php
+          php scripts/ci-whatsapp-connect-hardening-smoke.php
+          php scripts/ci-whatsapp-registration-smoke.php
+          php scripts/ci-whatsapp-commerce-smoke.php
+          php scripts/ci-whatsapp-commerce-order-smoke.php
+          php scripts/ci-whatsapp-commerce-fulfillment-smoke.php
+          php scripts/ci-whatsapp-commerce-payment-smoke.php
+          php scripts/ci-whatsapp-commerce-status-smoke.php
+          php scripts/ci-whatsapp-assistant-smoke.php
+          php scripts/ci-whatsapp-history-smoke.php
+          php scripts/ci-whatsapp-menu-receipt-smoke.php
+          php scripts/ci-whatsapp-conversion-smoke.php
+          php scripts/ci-whatsapp-support-smoke.php
+          php scripts/ci-whatsapp-analytics-smoke.php
+
+  mysql-core:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: eventmenu
+          MYSQL_USER: eventmenu
+          MYSQL_PASSWORD: eventmenu
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: curl, mbstring, openssl, pdo_mysql
+          coverage: none
+      - name: Install dependencies
+        run: composer install --no-interaction --no-progress --prefer-dist
+      - name: Run MySQL core smoke suite
+        env:
+          APP_ENV: testing
+          APP_DEBUG: 'false'
+          APP_KEY: ci-eventmenu-wip-key-0123456789-abcdefghijklmnopqrstuvwxyz
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: '3306'
+          DB_DATABASE: eventmenu
+          DB_USERNAME: eventmenu
+          DB_PASSWORD: eventmenu
+          SESSION_NAME: eventmenu_wip_ci_mysql
+        run: |
+          php scripts/ci-db-smoke.php
+          php scripts/ci-payment-invariants-smoke.php
+          php scripts/ci-auth-mail-smoke.php
+          php scripts/ci-loyalty-points-smoke.php
+          php scripts/ci-sensitive-rate-limit-smoke.php
+          php scripts/ci-super-admin-smoke.php
+          php scripts/ci-operations-smoke.php
+
+  android:
+    runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+      ANDROID_HOME: /usr/local/lib/android/sdk
+    defaults:
+      run:
+        working-directory: mobile/eventmenu-go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK 36 from hosted toolchain
+        run: |
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Restore stable EventMenu GO debug signing key
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: eventmenu-go-debug-keystore-v1
+      - name: Ensure stable debug signing key exists
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -dname "CN=EventMenu GO Development,O=EventMenu,C=BR" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000
+          fi
+      - name: Run EventMenu GO unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
+      - name: Assemble EventMenu GO debug APK
+        run: gradle :app:assembleDebug --stacktrace --no-daemon
