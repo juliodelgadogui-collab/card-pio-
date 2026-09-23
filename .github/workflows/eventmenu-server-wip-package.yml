@@ -30,7 +30,9 @@ jobs:
       - name: PHP syntax validation
         run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Public UX contract
-        run: php scripts/ci-public-ux-smoke.php
+        run: |
+          php scripts/ci-public-ux-smoke.php
+          php scripts/ci-event-schedule-contract.php
       - name: Coupon pricing contract
         run: php scripts/ci-coupon-pricing-smoke.php
       - name: Order payment preference contract
@@ -105,6 +107,8 @@ jobs:
           test -f database/migrations/077_whatsapp_commerce_assistant.sql
           test -f database/migrations/078_whatsapp_commerce_conversion.sql
           test -f database/migrations/079_whatsapp_commerce_analytics.sql
+          test -f database/migrations/080_event_schedule.sql
+          test -f database/sqlite/migrations/080_event_schedule.sql
           test -f database/sqlite/migrations/065_whatsapp_integration.sql
           test -f database/sqlite/migrations/075_whatsapp_support_center.sql
           test -f database/sqlite/migrations/077_whatsapp_commerce_assistant.sql
