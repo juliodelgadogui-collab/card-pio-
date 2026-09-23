@@ -104,7 +104,7 @@ final class WhatsAppIntegrationService
 
     public function queueOrderEvent(PDO $pdo,int $tenantId,int $orderId,string $eventType,string $dedupeSuffix=''):?int
     {
-        $q=$pdo->prepare('SELECT o.id,o.status,o.total_cents,c.name customer_name,c.phone customer_phone,t.name restaurant_name FROM orders o JOIN tenants t ON t.id=o.tenant_id LEFT JOIN customers c ON c.id=o.customer_id WHERE o.id=? AND o.tenant_id=? LIMIT 1');
+        $q=$pdo->prepare('SELECT o.id,o.status,o.total_cents,c.name customer_name,c.phone customer_phone,t.name restaurant_name FROM orders o JOIN tenants t ON t.id=o.tenant_id LEFT JOIN customers c ON c.id=o.customer_id AND c.tenant_id=o.tenant_id WHERE o.id=? AND o.tenant_id=? LIMIT 1');
         $q->execute([$orderId,$tenantId]);$order=$q->fetch(PDO::FETCH_ASSOC);if(!$order)return null;
         $link='';
         if($eventType==='out_for_delivery'){
@@ -129,7 +129,7 @@ final class WhatsAppIntegrationService
         $stableSuffix=($orderId!==null&&in_array($eventType,self::ORDER_LIFECYCLE_EVENTS,true))?'':$dedupeSuffix;
         $key=hash('sha256',implode('|',[$tenantId,$orderId??0,$eventType,$phone,$stableSuffix]));
         try{$pdo->prepare('INSERT INTO whatsapp_outbox (tenant_id,order_id,event_type,recipient,message_text,status,idempotency_key) VALUES (?,?,?,?,?,"desktop_queued",?)')->execute([$tenantId,$orderId,$eventType,$phone,$message,$key]);return(int)$pdo->lastInsertId();}
-        catch(Throwable$e){$q=$pdo->prepare('SELECT id FROM whatsapp_outbox WHERE idempotency_key=? LIMIT 1');$q->execute([$key]);$existing=$q->fetchColumn();if($existing!==false)return(int)$existing;throw$e;}
+        catch(Throwable$e){$q=$pdo->prepare('SELECT id FROM whatsapp_outbox WHERE tenant_id=? AND idempotency_key=? LIMIT 1');$q->execute([$tenantId,$key]);$existing=$q->fetchColumn();if($existing!==false)return(int)$existing;throw$e;}
     }
 
     public function syncPaymentEvents(PDO $pdo,int $limit=100):int
