@@ -118,6 +118,11 @@ final class PublicMenuService
         });
 
         if($orderSource===MarketplaceCommissionService::ORDER_SOURCE)unset($_SESSION['_eventmenu_delivery_entry'][$tenantId]);
+        try{
+            (new WhatsAppOrderReceiptService())->queue(Database::connection(),$tenantId,(int)$result['id']);
+        }catch(\Throwable $e){
+            error_log('[whatsapp-menu-receipt] '.$e::class.': '.$e->getMessage());
+        }
         return $result;
     }
 }
