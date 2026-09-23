@@ -55,7 +55,8 @@ foreach (['EVENTMENU_APK_PUBLISH_TOKEN', 'hash_equals', 'Cache-Control', "'publi
         exit(1);
     }
 }
-if (str_contains($publisher, "'message' => $e->getMessage()")) {
+$leakNeedle = "'message' => \$e->getMessage()";
+if (str_contains($publisher, $leakNeedle)) {
     fwrite(STDERR, "Publisher must not expose internal exception messages.\n");
     exit(1);
 }
