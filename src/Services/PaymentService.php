@@ -63,7 +63,7 @@ final class PaymentService
             $payment=$this->findLocalPayment($pdo,$tenantId,$orderId,$provider,$verified);if(!$payment)throw new RuntimeException('Cobrança local não encontrada.');
             if(in_array($payment['status'],['paid','duplicate_paid','refunded'],true))return;
             if((int)$payment['amount_cents']!==(int)$verified['amount_cents']||strtoupper((string)$payment['currency'])!=='BRL')throw new RuntimeException('Valor da parcela divergente.');
-            $dupe=$pdo->prepare('SELECT id FROM payments WHERE tenant_id=? AND provider=? AND provider_payment_id=? AND id<>? LIMIT 1');$dupe->execute([$tenantId,$provider,(string)$verified['provider_payment_id'],$payment['id']]);if($dupe->fetchColumn())throw new RuntimeException('Transação do provedor já vinculada a outra cobrança.');
+            $dupe=$pdo->prepare('SELECT id FROM payments WHERE provider=? AND provider_payment_id=? AND id<>? LIMIT 1');$dupe->execute([$provider,(string)$verified['provider_payment_id'],$payment['id']]);if($dupe->fetchColumn())throw new RuntimeException('Transação do provedor já vinculada a outra cobrança.');
 
             $lateEvent=(string)$order['channel']==='event'&&(string)$order['status']==='cancelled';
             if(!$lateEvent&&in_array($order['status'],['cancelled','completed'],true))throw new RuntimeException('Pedido cancelado ou finalizado não pode ser confirmado.');
@@ -113,7 +113,7 @@ final class PaymentService
 
     private function restoreExpiredEventTickets(PDO $pdo,int $tenantId,int $orderId):bool
     {
-        $rows=$pdo->prepare(Database::portableSql($pdo,'SELECT t.event_id,t.batch_id,b.ticket_type_id,COUNT(*) qty FROM tickets t JOIN ticket_batches b ON b.id=t.batch_id AND b.tenant_id=t.tenant_id WHERE t.tenant_id=? AND t.order_id=? AND t.status="cancelled" GROUP BY t.event_id,t.batch_id,b.ticket_type_id FOR UPDATE'));
+        $rows=$pdo->prepare(Database::portableSql($pdo,'SELECT t.event_id,t.batch_id,b.ticket_type_id,COUNT(*) qty FROM tickets t JOIN ticket_batches b ON b.id=t.batch_id AND b.event_id=t.event_id WHERE t.tenant_id=? AND t.order_id=? AND t.status="cancelled" GROUP BY t.event_id,t.batch_id,b.ticket_type_id FOR UPDATE'));
         $rows->execute([$tenantId,$orderId]);$groups=$rows->fetchAll();if(!$groups)return false;
         $all=$pdo->prepare('SELECT COUNT(*) FROM tickets WHERE tenant_id=? AND order_id=?');$all->execute([$tenantId,$orderId]);$allCount=(int)$all->fetchColumn();$cancelled=array_sum(array_map(static fn($r)=>(int)$r['qty'],$groups));if($allCount!==$cancelled)return false;
         $eventId=(int)$groups[0]['event_id'];foreach($groups as$g)if((int)$g['event_id']!==$eventId)return false;
@@ -126,13 +126,13 @@ final class PaymentService
         }
         $neededByType=[];
         foreach($groups as$group){
-            $b=$pdo->prepare(Database::portableSql($pdo,'SELECT b.*,tt.capacity_total ticket_type_capacity,tt.active ticket_type_active FROM ticket_batches b LEFT JOIN ticket_types tt ON tt.id=b.ticket_type_id AND tt.tenant_id=b.tenant_id AND tt.event_id=b.event_id WHERE b.id=? AND b.tenant_id=? AND b.event_id=? FOR UPDATE'));$b->execute([(int)$group['batch_id'],$tenantId,$eventId]);$batch=$b->fetch();if(!$batch)return false;
+            $b=$pdo->prepare(Database::portableSql($pdo,'SELECT b.*,tt.capacity_total ticket_type_capacity,tt.active ticket_type_active FROM ticket_batches b LEFT JOIN ticket_types tt ON tt.id=b.ticket_type_id AND tt.tenant_id=? AND tt.event_id=b.event_id WHERE b.id=? AND b.event_id=? FOR UPDATE'));$b->execute([$tenantId,(int)$group['batch_id'],$eventId]);$batch=$b->fetch();if(!$batch)return false;
             $available=(int)$batch['quantity_total']-(int)$batch['quantity_sold']-(int)$batch['quantity_reserved'];if($available<(int)$group['qty'])return false;
             if(!empty($batch['ticket_type_id'])){$typeId=(int)$batch['ticket_type_id'];if(!(int)$batch['ticket_type_active'])return false;$neededByType[$typeId]=($neededByType[$typeId]??0)+(int)$group['qty'];}
         }
         foreach($neededByType as$typeId=>$needed){
-            $t=$pdo->prepare('SELECT capacity_total FROM ticket_types WHERE id=? AND tenant_id=? AND event_id=?');$t->execute([$typeId,$tenantId,$eventId]);$cap=$t->fetchColumn();if($cap!==false&&$cap!==null){$u=$pdo->prepare('SELECT COUNT(*) FROM tickets t JOIN ticket_batches b ON b.id=t.batch_id AND b.tenant_id=t.tenant_id AND b.event_id=t.event_id WHERE t.tenant_id=? AND t.event_id=? AND b.ticket_type_id=? AND t.status IN ("reserved","paid","checked_in")');$u->execute([$tenantId,$eventId,$typeId]);if((int)$u->fetchColumn()+$needed>(int)$cap)return false;}}
-        foreach($groups as$group)$pdo->prepare('UPDATE ticket_batches SET quantity_sold=quantity_sold+? WHERE id=? AND tenant_id=? AND event_id=?')->execute([(int)$group['qty'],(int)$group['batch_id'],$tenantId,$eventId]);
+            $t=$pdo->prepare('SELECT capacity_total FROM ticket_types WHERE id=? AND tenant_id=? AND event_id=?');$t->execute([$typeId,$tenantId,$eventId]);$cap=$t->fetchColumn();if($cap!==false&&$cap!==null){$u=$pdo->prepare('SELECT COUNT(*) FROM tickets t JOIN ticket_batches b ON b.id=t.batch_id AND b.event_id=t.event_id WHERE t.tenant_id=? AND t.event_id=? AND b.ticket_type_id=? AND t.status IN ("reserved","paid","checked_in")');$u->execute([$tenantId,$eventId,$typeId]);if((int)$u->fetchColumn()+$needed>(int)$cap)return false;}}
+        foreach($groups as$group)$pdo->prepare('UPDATE ticket_batches SET quantity_sold=quantity_sold+? WHERE id=? AND event_id=?')->execute([(int)$group['qty'],(int)$group['batch_id'],$eventId]);
         $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="cancelled"')->execute([$tenantId,$orderId]);
         $this->eventAuditForOrder($pdo,$tenantId,$orderId,'ticket.late_payment_restored',['quantity'=>$cancelled]);
         return true;
@@ -176,8 +176,8 @@ final class PaymentService
     private function settleOrderEffects(PDO $pdo,int $tenantId,array $order,int $orderId):void
     {
         $settlement='settlement:order:'.$orderId;$loyalty=new LoyaltyPointsService();(new StockReservationService())->consumeForSettlement($pdo,$tenantId,$orderId,$settlement);
-        $tickets=$pdo->prepare(Database::portableSql($pdo,'SELECT batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="reserved" GROUP BY batch_id FOR UPDATE'));$tickets->execute([$tenantId,$orderId]);
-        foreach($tickets->fetchAll()as$row){$qty=(int)$row['qty'];$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=? AND tenant_id=?'))->execute([$qty,$qty,$row['batch_id'],$tenantId]);}
+        $tickets=$pdo->prepare(Database::portableSql($pdo,'SELECT event_id,batch_id,COUNT(*) qty FROM tickets WHERE tenant_id=? AND order_id=? AND status="reserved" GROUP BY event_id,batch_id FOR UPDATE'));$tickets->execute([$tenantId,$orderId]);
+        foreach($tickets->fetchAll()as$row){$qty=(int)$row['qty'];$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=? AND event_id=?'))->execute([$qty,$qty,$row['batch_id'],$row['event_id']]);}
         $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);
         if(!empty($order['coupon_id'])){
             $r=$pdo->prepare(Database::portableSql($pdo,'SELECT * FROM coupon_reservations WHERE tenant_id=? AND order_id=? AND status="reserved" FOR UPDATE'));$r->execute([$tenantId,$orderId]);$reservation=$r->fetch();$insertSql=Database::portableSql($pdo,'INSERT IGNORE INTO coupon_redemptions (tenant_id,coupon_id,order_id,customer_id,discount_cents,idempotency_key) VALUES (?,?,?,?,?,?)');
