@@ -1,0 +1,196 @@
+name: EventMenu GO Signed Release
+
+on:
+  push:
+    tags:
+      - 'eventmenu-go-v*'
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: 'Versão sem o prefixo v (ex.: 0.3.0)'
+        required: true
+        type: string
+      version_code:
+        description: 'Version code Android, sempre crescente'
+        required: true
+        type: string
+      publish:
+        description: 'Publicar no portal oficial após validar a assinatura'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: eventmenu-go-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: eventmenu-go-production
+    defaults:
+      run:
+        working-directory: mobile/eventmenu-go
+    env:
+      EVENTMENU_API_BASE_URL: https://go.gestao2.store/1/
+      EVENTMENU_FIREBASE_PROJECT_ID: ${{ secrets.EVENTMENU_FIREBASE_PROJECT_ID }}
+      EVENTMENU_FIREBASE_APP_ID: ${{ secrets.EVENTMENU_FIREBASE_APP_ID }}
+      EVENTMENU_FIREBASE_API_KEY: ${{ secrets.EVENTMENU_FIREBASE_API_KEY }}
+      EVENTMENU_FIREBASE_SENDER_ID: ${{ secrets.EVENTMENU_FIREBASE_SENDER_ID }}
+      EVENTMENU_RELEASE_STORE_PASSWORD: ${{ secrets.EVENTMENU_GO_RELEASE_STORE_PASSWORD }}
+      EVENTMENU_RELEASE_KEY_ALIAS: ${{ secrets.EVENTMENU_GO_RELEASE_KEY_ALIAS }}
+      EVENTMENU_RELEASE_KEY_PASSWORD: ${{ secrets.EVENTMENU_GO_RELEASE_KEY_PASSWORD }}
+      EVENTMENU_APK_PUBLISH_TOKEN: ${{ secrets.EVENTMENU_APK_PUBLISH_TOKEN }}
+    steps:
+      - name: Checkout trusted source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate release version
+        shell: bash
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            git fetch origin main --tags --force
+            git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+              echo "Release tag must point to a commit contained in main." >&2
+              exit 1
+            }
+            VERSION_NAME="${GITHUB_REF_NAME#eventmenu-go-v}"
+            if [[ ! "$VERSION_NAME" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Tag must use eventmenu-go-vMAJOR.MINOR.PATCH." >&2
+              exit 1
+            fi
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            if (( MAJOR > 2000 || MINOR > 999 || PATCH > 999 )); then
+              echo "Version components are outside the supported Android versionCode range." >&2
+              exit 1
+            fi
+            VERSION_CODE=$(( MAJOR * 1000000 + MINOR * 1000 + PATCH ))
+            PUBLISH=true
+          else
+            VERSION_NAME='${{ inputs.version_name }}'
+            VERSION_CODE='${{ inputs.version_code }}'
+            PUBLISH='${{ inputs.publish }}'
+            if [[ ! "$VERSION_NAME" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][A-Za-z0-9.-]+)?$ ]]; then
+              echo "version_name inválida." >&2
+              exit 1
+            fi
+            if [[ ! "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || (( VERSION_CODE > 2100000000 )); then
+              echo "version_code inválido." >&2
+              exit 1
+            fi
+          fi
+          echo "EVENTMENU_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "EVENTMENU_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+          echo "EVENTMENU_RELEASE_PUBLISH=$PUBLISH" >> "$GITHUB_ENV"
+
+      - name: Validate production secrets
+        shell: bash
+        env:
+          EVENTMENU_GO_RELEASE_KEYSTORE_B64: ${{ secrets.EVENTMENU_GO_RELEASE_KEYSTORE_B64 }}
+        run: |
+          set -euo pipefail
+          for value in \
+            "$EVENTMENU_GO_RELEASE_KEYSTORE_B64" \
+            "$EVENTMENU_RELEASE_STORE_PASSWORD" \
+            "$EVENTMENU_RELEASE_KEY_ALIAS" \
+            "$EVENTMENU_RELEASE_KEY_PASSWORD" \
+            "$EVENTMENU_FIREBASE_PROJECT_ID" \
+            "$EVENTMENU_FIREBASE_APP_ID" \
+            "$EVENTMENU_FIREBASE_API_KEY" \
+            "$EVENTMENU_FIREBASE_SENDER_ID"; do
+            test -n "$value" || { echo "Required production secret is missing." >&2; exit 1; }
+          done
+          if [[ "$EVENTMENU_RELEASE_PUBLISH" == "true" ]]; then
+            test -n "$EVENTMENU_APK_PUBLISH_TOKEN" || { echo "EVENTMENU_APK_PUBLISH_TOKEN is required to publish." >&2; exit 1; }
+          fi
+          KEYSTORE="$RUNNER_TEMP/eventmenu-go-release.jks"
+          printf '%s' "$EVENTMENU_GO_RELEASE_KEYSTORE_B64" | base64 --decode > "$KEYSTORE"
+          test -s "$KEYSTORE"
+          chmod 600 "$KEYSTORE"
+          echo "EVENTMENU_RELEASE_STORE_FILE=$KEYSTORE" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android SDK 36 from hosted toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_SDK_ROOT/cmdline-tools" -type f -name sdkmanager -perm -111 2>/dev/null | sort -V | tail -n 1)"
+          fi
+          test -n "$SDKMANAGER" && test -x "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+
+      - name: Run unit tests
+        run: gradle :app:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Build signed release APK
+        run: gradle :app:assembleRelease --stacktrace --no-daemon
+
+      - name: Verify APK signature and version
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          APKSIGNER="$ANDROID_SDK_ROOT/build-tools/36.0.0/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          AAPT2="$ANDROID_SDK_ROOT/build-tools/36.0.0/aapt2"
+          BADGING="$($AAPT2 dump badging "$APK")"
+          echo "$BADGING" | grep -F "versionCode='$EVENTMENU_VERSION_CODE'"
+          echo "$BADGING" | grep -F "versionName='$EVENTMENU_VERSION_NAME'"
+          SHA256="$(sha256sum "$APK" | awk '{print $1}')"
+          echo "EVENTMENU_RELEASE_APK=$APK" >> "$GITHUB_ENV"
+          echo "EVENTMENU_RELEASE_SHA256=$SHA256" >> "$GITHUB_ENV"
+
+      - name: Upload signed release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eventmenu-go-${{ env.EVENTMENU_VERSION_NAME }}-signed
+          path: mobile/eventmenu-go/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish signed APK to EventMenu portal
+        if: env.EVENTMENU_RELEASE_PUBLISH == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESPONSE="$RUNNER_TEMP/eventmenu-go-publish.json"
+          HTTP_CODE="$(curl --silent --show-error --location \
+            --output "$RESPONSE" \
+            --write-out '%{http_code}' \
+            --request POST 'https://go.gestao2.store/api/apk/publish' \
+            --header "Authorization: Bearer $EVENTMENU_APK_PUBLISH_TOKEN" \
+            --form 'app=eventmenu-go' \
+            --form "version=$EVENTMENU_VERSION_NAME" \
+            --form "version_code=$EVENTMENU_VERSION_CODE" \
+            --form "apk=@$EVENTMENU_RELEASE_APK;type=application/vnd.android.package-archive")"
+          test "$HTTP_CODE" = "201" || { cat "$RESPONSE"; exit 1; }
+          jq -e '.ok == true and .app == "eventmenu-go"' "$RESPONSE" >/dev/null
+          REMOTE_SHA="$(jq -r '.sha256' "$RESPONSE")"
+          test "$REMOTE_SHA" = "$EVENTMENU_RELEASE_SHA256" || {
+            echo "Portal SHA-256 does not match the signed APK." >&2
+            exit 1
+          }
