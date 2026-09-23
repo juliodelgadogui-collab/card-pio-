@@ -17,6 +17,7 @@ data class PendingOutboundAck(
 
 class SessionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("eventmenu_connect", Context.MODE_PRIVATE)
+    private val secure = SecureValueStore(context)
 
     fun deviceId(): String {
         val current = prefs.getString("device_id", "").orEmpty()
@@ -27,21 +28,22 @@ class SessionStore(context: Context) {
     }
 
     fun engineSecret(): String {
-        val current = prefs.getString("engine_secret", "").orEmpty()
+        val current = secure.get("engine_secret")
         if (current.length >= 48) return current
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         val created = bytes.joinToString("") { "%02x".format(it) }
-        prefs.edit().putString("engine_secret", created).apply()
+        check(secure.put("engine_secret", created)) { "Não foi possível proteger o segredo do motor local." }
         return created
     }
 
     fun enginePort(): Int = 21567
 
     fun saveAuth(token: String, refresh: String, user: JSONObject) {
+        check(secure.put("token", token) && secure.put("refresh_token", refresh)) {
+            "Não foi possível proteger a sessão EventMenu."
+        }
         prefs.edit()
-            .putString("token", token)
-            .putString("refresh_token", refresh)
             .putInt("tenant_id", user.optInt("tenant_id", 0).coerceAtLeast(0))
             .putString("user_name", user.optString("name"))
             .putString("tenant_name", user.optString("tenant_name"))
@@ -49,20 +51,21 @@ class SessionStore(context: Context) {
     }
 
     fun updateTokens(token: String, refresh: String, user: JSONObject? = null) {
-        val editor = prefs.edit()
-            .putString("token", token)
-            .putString("refresh_token", refresh)
+        check(secure.put("token", token) && secure.put("refresh_token", refresh)) {
+            "Não foi possível atualizar a sessão EventMenu protegida."
+        }
         if (user != null) {
+            val editor = prefs.edit()
             val tenantId = user.optInt("tenant_id", tenantId()).coerceAtLeast(0)
             editor.putInt("tenant_id", tenantId)
             if (user.has("name")) editor.putString("user_name", user.optString("name"))
             if (user.has("tenant_name")) editor.putString("tenant_name", user.optString("tenant_name"))
+            editor.apply()
         }
-        editor.apply()
     }
 
-    fun token(): String = prefs.getString("token", "").orEmpty()
-    fun refreshToken(): String = prefs.getString("refresh_token", "").orEmpty()
+    fun token(): String = secure.get("token")
+    fun refreshToken(): String = secure.get("refresh_token")
     fun tenantId(): Int = prefs.getInt("tenant_id", 0).coerceAtLeast(0)
     fun tenantName(): String = prefs.getString("tenant_name", "").orEmpty()
     fun hasSession(): Boolean = token().length >= 32 && refreshToken().length >= 32
@@ -78,9 +81,12 @@ class SessionStore(context: Context) {
     }
 
     fun clearAuth() {
+        secure.remove("token")
+        secure.remove("refresh_token")
+        secure.remove("runtime_pairing_code")
+        secure.remove("runtime_qr")
+        secure.remove("pending_outbound_acks")
         prefs.edit()
-            .remove("token")
-            .remove("refresh_token")
             .remove("tenant_id")
             .remove("user_name")
             .remove("tenant_name")
@@ -89,9 +95,6 @@ class SessionStore(context: Context) {
             .remove("runtime_error")
             .remove("runtime_last_sync")
             .remove("runtime_phone")
-            .remove("runtime_pairing_code")
-            .remove("runtime_qr")
-            .remove("pending_outbound_acks")
             .apply()
     }
 
@@ -108,7 +111,7 @@ class SessionStore(context: Context) {
                 .put("saved_at", System.currentTimeMillis())
         )
         prunePendingAcks(root)
-        return prefs.edit().putString("pending_outbound_acks", root.toString()).commit()
+        return secure.put("pending_outbound_acks", root.toString())
     }
 
     @Synchronized
@@ -137,11 +140,11 @@ class SessionStore(context: Context) {
         if (id < 1) return
         val root = pendingAckJson()
         root.remove(id.toString())
-        prefs.edit().putString("pending_outbound_acks", root.toString()).commit()
+        secure.put("pending_outbound_acks", root.toString())
     }
 
     private fun pendingAckJson(): JSONObject {
-        val raw = prefs.getString("pending_outbound_acks", "").orEmpty()
+        val raw = secure.get("pending_outbound_acks")
         return runCatching { if (raw.isBlank()) JSONObject() else JSONObject(raw) }.getOrElse { JSONObject() }
     }
 
@@ -164,13 +167,13 @@ class SessionStore(context: Context) {
         pairingCode: String = runtimePairingCode(),
         qr: String = runtimeQr(),
     ) {
+        secure.put("runtime_pairing_code", pairingCode)
+        secure.put("runtime_qr", qr)
         prefs.edit()
             .putString("runtime_status", status)
             .putInt("runtime_pending", pending)
             .putString("runtime_error", error)
             .putString("runtime_phone", phone)
-            .putString("runtime_pairing_code", pairingCode)
-            .putString("runtime_qr", qr)
             .putString("runtime_last_sync", SimpleDateFormat("HH:mm:ss", Locale("pt", "BR")).format(Date()))
             .apply()
     }
@@ -180,6 +183,6 @@ class SessionStore(context: Context) {
     fun runtimeError(): String = prefs.getString("runtime_error", "").orEmpty()
     fun runtimeLastSync(): String = prefs.getString("runtime_last_sync", "").orEmpty()
     fun runtimePhone(): String = prefs.getString("runtime_phone", "").orEmpty()
-    fun runtimePairingCode(): String = prefs.getString("runtime_pairing_code", "").orEmpty()
-    fun runtimeQr(): String = prefs.getString("runtime_qr", "").orEmpty()
+    fun runtimePairingCode(): String = secure.get("runtime_pairing_code")
+    fun runtimeQr(): String = secure.get("runtime_qr")
 }
