@@ -26,7 +26,7 @@ final class CheckoutService
 
         $key='public:'.$provider.':'.$order['tenant_id'].':'.$order['id'];
         try{$ins=$pdo->prepare('INSERT INTO payments (tenant_id,order_id,provider,idempotency_key,amount_cents,currency,status) VALUES (?,?,?,?,?,"BRL","created")');$ins->execute([$order['tenant_id'],$order['id'],$provider,$key,$order['total_cents']]);$paymentId=(int)$pdo->lastInsertId();}catch(\PDOException $e){$x=$pdo->prepare('SELECT * FROM payments WHERE tenant_id=? AND idempotency_key=?');$x->execute([$order['tenant_id'],$key]);$row=$x->fetch();if($row){$raw=json_decode((string)($row['raw_payload']??''),true);if(is_array($raw)&&!empty($raw['_eventmenu_checkout_url'])){$stock->holdForPayment((int)$order['tenant_id'],(int)$order['id']);return ['provider'=>$row['provider'],'url'=>$raw['_eventmenu_checkout_url'],'payment_id'=>$row['id'],'reused'=>true];}}throw $e;}
-        $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$order['id'],$order['tenant_id']]);
+        $pdo->prepare('UPDATE orders SET payment_status="pending" WHERE id=? AND tenant_id=? AND payment_status<>"paid"')->execute([$order['id'],$order['tenant_id']]);
         $stock->holdForPayment((int)$order['tenant_id'],(int)$order['id']);
         try{
             $result=match($provider){'stripe'=>$this->stripe($order,$gateway,$config,$key),'mercadopago'=>$this->mercadoPago($order,$gateway,$config,$key),'pagbank'=>$this->pagBank($order,$gateway,$config,$key)};
