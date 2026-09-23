@@ -28,6 +28,8 @@ $menuCss=ux_file('public/assets/menu-premium-v5.css');
 $menuJs=ux_file('public/assets/menu-premium-v5.js');
 $orderCss=ux_file('public/assets/order-premium-v5.css');
 $orderJs=ux_file('public/assets/order-premium-v5.js');
+$panelRuntimeCss=ux_file('public/assets/premium-v5-runtime.css');
+$serviceWorker=ux_file('public/sw.js');
 
 ux_has($menu,'data-menu-root','raiz do cardápio premium');
 ux_has($menu,'product-dialog','personalização do produto em sheet/modal');
@@ -52,6 +54,15 @@ ux_has($orderPaymentApi,"action==='card'",'endpoint cartão tokenizado');
 ux_has($orderPaymentApi,"action==='status'",'consulta server-side do pagamento');
 ux_has($orderCss,'tracking-action','ação de acompanhamento da entrega');
 ux_has($orderJs,'navigator.onLine','estado offline do acompanhamento');
+
+// O painel administrativo precisa manter a identidade Premium v5 perceptível
+// e invalidar o cache visual antigo durante atualizações do servidor.
+ux_has($panelRuntimeCss,'Premium v5.1 — identidade visual explícita','identidade visual Premium v5.1 do painel');
+ux_has($panelRuntimeCss,'body.em-premium .topbar','novo cabeçalho visual do painel');
+ux_has($panelRuntimeCss,'body.em-premium .sidebar','nova sidebar visual do painel');
+ux_has($serviceWorker,"eventmenu-static-v6",'versão nova do cache estático');
+ux_has($serviceWorker,"/assets/premium-v5.css",'cache controlado do Premium v5');
+ux_has($serviceWorker,"/assets/premium-v5-runtime.css",'cache controlado do runtime Premium v5');
 
 // O fluxo principal de Mercado Pago/PagBank precisa permanecer dentro do EventMenu.
 // Stripe pode continuar como fallback legado opcional para preservar compatibilidade,
