@@ -20,7 +20,7 @@ $pdo->exec(file_get_contents(__DIR__.'/../database/sqlite/migrations/065_whatsap
 
 $pdo->exec("INSERT INTO tenants (id,name) VALUES (1,'Loja Um'),(2,'Loja Dois')");
 $pdo->exec("INSERT INTO customers (id,tenant_id,name,phone) VALUES (1,1,'Maria','22999998888'),(2,2,'João','22988887777')");
-$pdo->exec("INSERT INTO orders (id,tenant_id,customer_id,status,payment_status,total_cents) VALUES (10,1,1,'pending','unpaid',2590),(20,2,2,'pending','unpaid',3000)");
+$pdo->exec("INSERT INTO orders (id,tenant_id,customer_id,status,payment_status,total_cents) VALUES (10,1,1,'pending','unpaid',2590),(11,1,2,'pending','unpaid',1990),(20,2,2,'pending','unpaid',3000)");
 
 $service=new WhatsAppIntegrationService();
 $a=$service->ensureConnection($pdo,1);$b=$service->ensureConnection($pdo,2);
@@ -42,6 +42,8 @@ $id1=$service->queueOrderEvent($pdo,1,10,'order_received','history:1');$id2=$ser
 wa_assert($id1!==null&&$id1===$id2,'Idempotência da outbox falhou.');
 wa_assert((int)$pdo->query('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=1 AND event_type="order_received"')->fetchColumn()===1,'Evento duplicado foi gravado.');
 wa_assert($service->queueOrderEvent($pdo,2,20,'order_received','history:2')===null,'Automação desativada não pode enfileirar mensagem.');
+wa_assert($service->queueOrderEvent($pdo,1,11,'order_received','cross-tenant')===null,'Pedido não pode usar cliente pertencente a outro tenant.');
+wa_assert((int)$pdo->query('SELECT COUNT(*) FROM whatsapp_outbox WHERE tenant_id=1 AND recipient="5522988887777"')->fetchColumn()===0,'Telefone de cliente de outro tenant vazou para a outbox.');
 
 $pdo->exec("UPDATE orders SET payment_status='paid',status='confirmed' WHERE id=10");
 $pdo->exec("INSERT INTO payments (tenant_id,order_id,status,verified_at) VALUES (1,10,'paid',CURRENT_TIMESTAMP)");
