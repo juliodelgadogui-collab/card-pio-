@@ -15,11 +15,10 @@ on:
 permissions:
   contents: read
 
-environment: eventmenu-connect-production
-
 jobs:
   release:
     runs-on: ubuntu-latest
+    environment: eventmenu-connect-production
     timeout-minutes: 45
     defaults:
       run:
