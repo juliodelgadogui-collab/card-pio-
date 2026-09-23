@@ -52,7 +52,7 @@ if($_SERVER['REQUEST_METHOD']==='POST'){
 $health=(new SystemHealthService())->snapshot();
 $readiness=(new ProductionReadinessService())->evaluate($health);
 $paymentReadiness=is_array($readiness['payments']??null)?$readiness['payments']:['ready'=>false,'blockers'=>[['message'=>'Prontidão de pagamentos indisponível.']],'warnings'=>[],'passed'=>[]];
-$labels=['database'=>'Banco de dados','cron'=>'Cron / manutenção','worker'=>'Worker da fila','queue'=>'Fila assíncrona','push'=>'Notificações push','backup'=>'Backup','gateways'=>'Gateways','webhooks'=>'Webhooks','storage'=>'Armazenamento'];
+$labels=['database'=>'Banco de dados','cron'=>'Cron / manutenção','worker'=>'Worker da fila','queue'=>'Fila assíncrona','whatsapp'=>'WhatsApp / EventMenu Connect','print_queue'=>'Fila de impressão','push'=>'Notificações push','backup'=>'Backup','gateways'=>'Gateways','webhooks'=>'Webhooks','storage'=>'Armazenamento'];
 $stateLabel=['ok'=>'OK','warning'=>'Atenção','error'=>'Erro','disabled'=>'Desativado'];
 $overall=$health['overall'];
 $pushTargets=[];
@@ -64,7 +64,7 @@ $rootPath=dirname(__DIR__,2);$cronScript=is_file($rootPath.'/cron.php')?$rootPat
 $cronHealthy=(string)($health['checks']['cron']['state']??'warning')==='ok'&&(string)($health['checks']['worker']['state']??'warning')==='ok';
 em_header('Saúde do sistema','system-health');
 ?>
-<section class="page-hero"><div><span class="eyebrow">INFRAESTRUTURA</span><h2>Saúde do EventMenu</h2><p>Banco, cron, worker, fila, push, backups, pagamentos e armazenamento em uma única visão.</p></div><div class="hero-actions"><a class="button secondary" href="<?= Security::e(app_url('?route=system-health')) ?>">Atualizar</a></div></section>
+<section class="page-hero"><div><span class="eyebrow">INFRAESTRUTURA</span><h2>Saúde do EventMenu</h2><p>Banco, filas, WhatsApp, impressão, push, backups, pagamentos e armazenamento em uma única visão.</p></div><div class="hero-actions"><a class="button secondary" href="<?= Security::e(app_url('?route=system-health')) ?>">Atualizar</a></div></section>
 
 <section class="card" style="margin-bottom:18px;border-width:2px">
     <div class="section-head">
