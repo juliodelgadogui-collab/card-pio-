@@ -64,7 +64,10 @@ ux_has($panelBridge,'@import url("./premium-v5-runtime.css','runtime visual carr
 ux_has($panelBridge,'--em-sidebar:#101828','shell visual Premium v5 evidente');
 ux_has($panelV5,'EventMenu Premium v5','folha principal Premium v5 presente');
 ux_has($panelRuntime,'Premium v5','runtime visual Premium v5 presente');
-ux_has($serviceWorker,"eventmenu-static-v6",'invalidação do cache visual anterior');
+ux_has($panelRuntime,'.route-super .platform-cockpit{display:grid','cockpit do Super ADM em grade');
+ux_has($panelRuntime,'body.em-premium .sidebar .nav a{display:flex','menu mobile alinha ícone e rótulo');
+ux_has($panelRuntime,'grid-template-columns:1fr','fallback mobile do cockpit em uma coluna');
+ux_has($serviceWorker,"eventmenu-static-v7",'invalidação do cache visual anterior');
 ux_has($serviceWorker,"'/assets/premium-v5.css'",'service worker conhece Premium v5');
 
 // O fluxo principal de Mercado Pago/PagBank precisa permanecer dentro do EventMenu.
