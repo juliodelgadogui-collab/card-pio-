@@ -27,8 +27,8 @@ final class TicketService
             $now=new \DateTimeImmutable('now');
             if(!empty($event['ends_at'])&&$now>new \DateTimeImmutable((string)$event['ends_at']))throw new RuntimeException('Este evento já foi encerrado.');
 
-            $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT b.*,tt.name ticket_type_name,tt.capacity_total ticket_type_capacity,tt.active ticket_type_active FROM ticket_batches b LEFT JOIN ticket_types tt ON tt.id=b.ticket_type_id WHERE b.id=? AND b.event_id=? AND b.active=1 FOR UPDATE'));
-            $stmt->execute([$batchId,$eventId]);
+            $stmt=$pdo->prepare(Database::portableSql($pdo,'SELECT b.*,tt.name ticket_type_name,tt.capacity_total ticket_type_capacity,tt.active ticket_type_active FROM ticket_batches b LEFT JOIN ticket_types tt ON tt.id=b.ticket_type_id AND tt.tenant_id=? AND tt.event_id=b.event_id WHERE b.id=? AND b.event_id=? AND b.active=1 FOR UPDATE'));
+            $stmt->execute([(int)$event['tenant_id'],$batchId,$eventId]);
             $batch=$stmt->fetch();
             if(!$batch)throw new RuntimeException('Lote indisponível.');
             if(!empty($batch['ticket_type_id'])&&!(int)$batch['ticket_type_active'])throw new RuntimeException('Tipo de ingresso indisponível.');
@@ -47,7 +47,7 @@ final class TicketService
                 if($used+$quantity>(int)$event['capacity_total'])throw new RuntimeException('Capacidade total do evento atingida.');
             }
             if(!empty($batch['ticket_type_id'])&&!empty($batch['ticket_type_capacity'])){
-                $cap=$pdo->prepare('SELECT COUNT(*) FROM tickets t JOIN ticket_batches b ON b.id=t.batch_id WHERE t.tenant_id=? AND t.event_id=? AND b.ticket_type_id=? AND t.status IN ("reserved","paid","checked_in")');
+                $cap=$pdo->prepare('SELECT COUNT(*) FROM tickets t JOIN ticket_batches b ON b.id=t.batch_id AND b.event_id=t.event_id WHERE t.tenant_id=? AND t.event_id=? AND b.ticket_type_id=? AND t.status IN ("reserved","paid","checked_in")');
                 $cap->execute([$event['tenant_id'],$eventId,$batch['ticket_type_id']]);
                 $used=(int)$cap->fetchColumn();
                 if($used+$quantity>(int)$batch['ticket_type_capacity'])throw new RuntimeException('Capacidade do tipo de ingresso atingida.');
@@ -90,7 +90,7 @@ final class TicketService
             if($couponCode){
                 $code=strtoupper(trim($couponCode));
                 $sql=Database::portableSql($pdo,'SELECT c.* FROM coupons c WHERE c.tenant_id=? AND c.code=? AND c.active=1 AND EXISTS (SELECT 1 FROM event_coupons ec WHERE ec.tenant_id=c.tenant_id AND ec.event_id=? AND ec.coupon_id=c.id AND ec.active=1) FOR UPDATE');
-                $c=$pdo->prepare($sql);$c->execute([$event['tenant_id'],$code,$eventId]);$coupon=$c->fetch();
+                $c=$pdo->prepare($sql);$c->execute([$tenantId,$code,$eventId]);$coupon=$c->fetch();
                 if(!$coupon)throw new RuntimeException('Cupom inválido para este evento.');
                 if($coupon['starts_at']&&$now<new \DateTimeImmutable($coupon['starts_at']))throw new RuntimeException('Cupom ainda não está válido.');
                 if($coupon['ends_at']&&$now>new \DateTimeImmutable($coupon['ends_at']))throw new RuntimeException('Cupom expirado.');
@@ -103,40 +103,40 @@ final class TicketService
             $promoterId=null;
             if($promoterCode){
                 $sql='SELECT p.id FROM promoters p WHERE p.tenant_id=? AND p.code=? AND p.active=1 AND EXISTS (SELECT 1 FROM event_promoters ep WHERE ep.tenant_id=p.tenant_id AND ep.event_id=? AND ep.promoter_id=p.id AND ep.active=1)';
-                $p=$pdo->prepare($sql);$p->execute([$event['tenant_id'],strtoupper(trim($promoterCode)),$eventId]);$promoterId=$p->fetchColumn()?:null;
+                $p=$pdo->prepare($sql);$p->execute([$tenantId,strtoupper(trim($promoterCode)),$eventId]);$promoterId=$p->fetchColumn()?:null;
                 if(!$promoterId)throw new RuntimeException('Código de promotor inválido para este evento.');
             }
 
             $total=max(0,$subtotal-$discount);
             $publicToken=bin2hex(random_bytes(20));
             $stmt=$pdo->prepare('INSERT INTO orders (public_token,tenant_id,customer_id,coupon_id,promoter_id,channel,status,payment_status,subtotal_cents,discount_cents,total_cents,notes) VALUES (?,?,?,?,?,"event","pending","unpaid",?,?,?,?)');
-            $stmt->execute([$publicToken,$event['tenant_id'],$customerId,$couponId,$promoterId,$subtotal,$discount,$total,'Evento #'.$eventId]);
+            $stmt->execute([$publicToken,$tenantId,$customerId,$couponId,$promoterId,$subtotal,$discount,$total,'Evento #'.$eventId]);
             $orderId=(int)$pdo->lastInsertId();
             $typeLabel=trim((string)($batch['ticket_type_name']??''));
             $itemName='Ingresso '.$event['name'].' — '.($typeLabel!==''?$typeLabel.' · ':'').$batch['name'];
             $pdo->prepare('INSERT INTO order_items (order_id,product_id,name_snapshot,unit_price_cents,quantity,total_cents) VALUES (?,NULL,?,?,?,?)')->execute([$orderId,$itemName,$batch['price_cents'],$quantity,$subtotal]);
 
             $expires=(new \DateTimeImmutable('+15 minutes'))->format('Y-m-d H:i:s');
-            if($couponId){$pdo->prepare('INSERT INTO coupon_reservations (tenant_id,coupon_id,order_id,discount_cents,status,expires_at) VALUES (?,?,?,?,"reserved",?)')->execute([$event['tenant_id'],$couponId,$orderId,$discount,$expires]);$pdo->prepare('UPDATE coupons SET reserved_count=reserved_count+1 WHERE id=?')->execute([$couponId]);}
+            if($couponId){$pdo->prepare('INSERT INTO coupon_reservations (tenant_id,coupon_id,order_id,discount_cents,status,expires_at) VALUES (?,?,?,?,"reserved",?)')->execute([$tenantId,$couponId,$orderId,$discount,$expires]);$pdo->prepare('UPDATE coupons SET reserved_count=reserved_count+1 WHERE id=? AND tenant_id=?')->execute([$couponId,$tenantId]);}
 
             $tickets=[];
             for($i=0;$i<$quantity;$i++){
                 $code=sprintf('%s-%s-%s',str_pad((string)$eventId,4,'0',STR_PAD_LEFT),strtoupper(substr(bin2hex(random_bytes(5)),0,10)),strtoupper(substr(bin2hex(random_bytes(2)),0,4)));
                 $qr=bin2hex(random_bytes(32));
                 $s=$pdo->prepare('INSERT INTO tickets (tenant_id,event_id,batch_id,order_id,customer_id,code,status,reserved_until,qr_token) VALUES (?,?,?,?,?,?,"reserved",?,?)');
-                $s->execute([$event['tenant_id'],$eventId,$batchId,$orderId,$customerId,$code,$expires,$qr]);
+                $s->execute([$tenantId,$eventId,$batchId,$orderId,$customerId,$code,$expires,$qr]);
                 $tickets[]=['id'=>(int)$pdo->lastInsertId(),'code'=>$code,'qr_token'=>$qr];
             }
-            $pdo->prepare('UPDATE ticket_batches SET quantity_reserved=quantity_reserved+? WHERE id=?')->execute([$quantity,$batchId]);
-            $this->eventAudit($pdo,(int)$event['tenant_id'],$eventId,null,'ticket.reserved','order',(string)$orderId,['quantity'=>$quantity,'batch_id'=>$batchId,'ticket_type_id'=>$batch['ticket_type_id']?:null,'subtotal_cents'=>$subtotal,'discount_cents'=>$discount]);
+            $pdo->prepare('UPDATE ticket_batches SET quantity_reserved=quantity_reserved+? WHERE id=? AND event_id=?')->execute([$quantity,$batchId,$eventId]);
+            $this->eventAudit($pdo,$tenantId,$eventId,null,'ticket.reserved','order',(string)$orderId,['quantity'=>$quantity,'batch_id'=>$batchId,'ticket_type_id'=>$batch['ticket_type_id']?:null,'subtotal_cents'=>$subtotal,'discount_cents'=>$discount]);
 
             $paid=false;
             if($total===0){
-                $pdo->prepare('UPDATE orders SET status="confirmed",payment_status="paid" WHERE id=? AND tenant_id=?')->execute([$orderId,$event['tenant_id']]);
-                $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$event['tenant_id'],$orderId]);
-                $pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=?'))->execute([$quantity,$quantity,$batchId]);
-                if($couponId){$pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$event['tenant_id'],$orderId]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$couponId,$event['tenant_id']]);$sql=Database::portableSql($pdo,'INSERT IGNORE INTO coupon_redemptions (tenant_id,coupon_id,order_id,customer_id,discount_cents,idempotency_key) VALUES (?,?,?,?,?,?)');$pdo->prepare($sql)->execute([$event['tenant_id'],$couponId,$orderId,$customerId?:null,$discount,'free-ticket:order:'.$orderId.':coupon']);}
-                $expires=null;$paid=true;$this->eventAudit($pdo,(int)$event['tenant_id'],$eventId,null,'ticket.free_issued','order',(string)$orderId,['quantity'=>$quantity]);
+                $pdo->prepare('UPDATE orders SET status="confirmed",payment_status="paid" WHERE id=? AND tenant_id=?')->execute([$orderId,$tenantId]);
+                $pdo->prepare('UPDATE tickets SET status="paid",reserved_until=NULL WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);
+                $pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?),quantity_sold=quantity_sold+? WHERE id=? AND event_id=?'))->execute([$quantity,$quantity,$batchId,$eventId]);
+                if($couponId){$pdo->prepare('UPDATE coupon_reservations SET status="redeemed" WHERE tenant_id=? AND order_id=? AND status="reserved"')->execute([$tenantId,$orderId]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1),uses_count=uses_count+1 WHERE id=? AND tenant_id=?'))->execute([$couponId,$tenantId]);$sql=Database::portableSql($pdo,'INSERT IGNORE INTO coupon_redemptions (tenant_id,coupon_id,order_id,customer_id,discount_cents,idempotency_key) VALUES (?,?,?,?,?,?)');$pdo->prepare($sql)->execute([$tenantId,$couponId,$orderId,$customerId?:null,$discount,'free-ticket:order:'.$orderId.':coupon']);}
+                $expires=null;$paid=true;$this->eventAudit($pdo,$tenantId,$eventId,null,'ticket.free_issued','order',(string)$orderId,['quantity'=>$quantity]);
             }
             return ['order_id'=>$orderId,'public_token'=>$publicToken,'total_cents'=>$total,'expires_at'=>$expires,'paid'=>$paid,'tickets'=>$tickets,'ticket_type'=>$typeLabel?:null];
         });
@@ -151,7 +151,7 @@ final class TicketService
         $token=$this->normalizeScannedToken($token);
         if($token==='')throw new RuntimeException('Código do ingresso é obrigatório.');
         return Database::transaction(function(PDO $pdo)use($tenantId,$token,$expectedEventId): array {
-            $s=$pdo->prepare(Database::portableSql($pdo,'SELECT t.*,e.status event_status,e.starts_at event_starts_at,e.ends_at event_ends_at,tn.status tenant_status FROM tickets t JOIN events e ON e.id=t.event_id JOIN tenants tn ON tn.id=t.tenant_id WHERE t.tenant_id=? AND (t.qr_token=? OR t.code=?) LIMIT 1 FOR UPDATE'));
+            $s=$pdo->prepare(Database::portableSql($pdo,'SELECT t.*,e.status event_status,e.starts_at event_starts_at,e.ends_at event_ends_at,tn.status tenant_status FROM tickets t JOIN events e ON e.id=t.event_id AND e.tenant_id=t.tenant_id JOIN tenants tn ON tn.id=t.tenant_id WHERE t.tenant_id=? AND (t.qr_token=? OR t.code=?) LIMIT 1 FOR UPDATE'));
             $s->execute([$tenantId,$token,$token]);
             $ticket=$s->fetch();
             if(!$ticket)throw new RuntimeException('Ingresso não encontrado.');
@@ -161,7 +161,13 @@ final class TicketService
             catch(RuntimeException $e){$this->logCheckin($pdo,$tenantId,(int)$ticket['id'],'blocked',['reason'=>'checkin_window','message'=>$e->getMessage()]);return ['ok'=>false,'result'=>'window_closed','message'=>$e->getMessage(),'ticket'=>$ticket];}
             if($ticket['status']==='checked_in'){$this->logCheckin($pdo,$tenantId,(int)$ticket['id'],'duplicate');return ['ok'=>false,'result'=>'duplicate','ticket'=>$ticket];}
             if($ticket['status']!=='paid'){$this->logCheckin($pdo,$tenantId,(int)$ticket['id'],'blocked',['status'=>$ticket['status']]);return ['ok'=>false,'result'=>'blocked','ticket'=>$ticket];}
-            $pdo->prepare('UPDATE tickets SET status="checked_in",checked_in_at=CURRENT_TIMESTAMP,checked_in_by=? WHERE id=?')->execute([Auth::id(),$ticket['id']]);
+            $update=$pdo->prepare('UPDATE tickets SET status="checked_in",checked_in_at=CURRENT_TIMESTAMP,checked_in_by=? WHERE id=? AND tenant_id=? AND event_id=? AND status="paid"');
+            $update->execute([Auth::id(),$ticket['id'],$tenantId,$expectedEventId]);
+            if($update->rowCount()!==1){
+                $fresh=$pdo->prepare('SELECT status,checked_in_at,checked_in_by FROM tickets WHERE id=? AND tenant_id=? AND event_id=? LIMIT 1');$fresh->execute([$ticket['id'],$tenantId,$expectedEventId]);$state=$fresh->fetch()?:[];$ticket=array_merge($ticket,$state);
+                if(($state['status']??'')==='checked_in'){$this->logCheckin($pdo,$tenantId,(int)$ticket['id'],'duplicate',['reason'=>'atomic_transition_lost']);return ['ok'=>false,'result'=>'duplicate','ticket'=>$ticket];}
+                $this->logCheckin($pdo,$tenantId,(int)$ticket['id'],'blocked',['reason'=>'atomic_transition_failed','status'=>$state['status']??null]);return ['ok'=>false,'result'=>'blocked','ticket'=>$ticket];
+            }
             $this->logCheckin($pdo,$tenantId,(int)$ticket['id'],'accepted',['event_id'=>$expectedEventId]);
             $this->eventAudit($pdo,$tenantId,(int)$ticket['event_id'],Auth::id(),'ticket.checkin','ticket',(string)$ticket['id'],[]);
             $ticket['status']='checked_in';
@@ -172,14 +178,24 @@ final class TicketService
     public function releaseExpired(): int
     {
         return Database::transaction(function(PDO $pdo): int {
-            $s=$pdo->query(Database::portableSql($pdo,'SELECT batch_id,COUNT(*) qty FROM tickets WHERE status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP GROUP BY batch_id FOR UPDATE'));
-            $groups=$s->fetchAll();
-            $total=0;
-            foreach($groups as$g){$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?) WHERE id=?'))->execute([(int)$g['qty'],$g['batch_id']]);$total+=(int)$g['qty'];}
-            $couponRows=$pdo->query(Database::portableSql($pdo,'SELECT id,coupon_id FROM coupon_reservations WHERE status="reserved" AND expires_at<CURRENT_TIMESTAMP FOR UPDATE'))->fetchAll();
-            foreach($couponRows as$row){$pdo->prepare('UPDATE coupon_reservations SET status="released" WHERE id=?')->execute([$row['id']]);$pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1) WHERE id=?'))->execute([$row['coupon_id']]);}
-            $pdo->exec('UPDATE tickets SET status="cancelled" WHERE status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP');
-            $pdo->exec('UPDATE orders SET status="cancelled",payment_status=CASE WHEN payment_status="unpaid" THEN "failed" ELSE payment_status END WHERE channel="event" AND payment_status<>"paid" AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.order_id=orders.id AND t.status="reserved") AND EXISTS (SELECT 1 FROM tickets t2 WHERE t2.order_id=orders.id)');
+            $rows=$pdo->query(Database::portableSql($pdo,'SELECT id,tenant_id,event_id,batch_id FROM tickets WHERE status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP ORDER BY id FOR UPDATE'))->fetchAll();
+            $releasedByBatch=[];$total=0;
+            $cancel=$pdo->prepare('UPDATE tickets SET status="cancelled" WHERE id=? AND tenant_id=? AND event_id=? AND status="reserved" AND reserved_until IS NOT NULL AND reserved_until<CURRENT_TIMESTAMP');
+            foreach($rows as$row){
+                $cancel->execute([$row['id'],$row['tenant_id'],$row['event_id']]);if($cancel->rowCount()!==1)continue;
+                $key=(int)$row['event_id'].':'.(int)$row['batch_id'];
+                if(!isset($releasedByBatch[$key]))$releasedByBatch[$key]=['event_id'=>(int)$row['event_id'],'batch_id'=>(int)$row['batch_id'],'qty'=>0];
+                $releasedByBatch[$key]['qty']++;$total++;
+            }
+            foreach($releasedByBatch as$g)$pdo->prepare(Database::portableSql($pdo,'UPDATE ticket_batches SET quantity_reserved=GREATEST(0,quantity_reserved-?) WHERE id=? AND event_id=?'))->execute([$g['qty'],$g['batch_id'],$g['event_id']]);
+
+            $couponRows=$pdo->query(Database::portableSql($pdo,'SELECT tenant_id,id,coupon_id FROM coupon_reservations WHERE status="reserved" AND expires_at<CURRENT_TIMESTAMP FOR UPDATE'))->fetchAll();
+            $releaseCoupon=$pdo->prepare('UPDATE coupon_reservations SET status="released" WHERE id=? AND tenant_id=? AND status="reserved" AND expires_at<CURRENT_TIMESTAMP');
+            foreach($couponRows as$row){
+                $releaseCoupon->execute([$row['id'],$row['tenant_id']]);if($releaseCoupon->rowCount()!==1)continue;
+                $pdo->prepare(Database::portableSql($pdo,'UPDATE coupons SET reserved_count=GREATEST(0,reserved_count-1) WHERE id=? AND tenant_id=?'))->execute([$row['coupon_id'],$row['tenant_id']]);
+            }
+            $pdo->exec('UPDATE orders SET status="cancelled",payment_status=CASE WHEN payment_status="unpaid" THEN "failed" ELSE payment_status END WHERE channel="event" AND payment_status<>"paid" AND NOT EXISTS (SELECT 1 FROM tickets t WHERE t.order_id=orders.id AND t.tenant_id=orders.tenant_id AND t.status="reserved") AND EXISTS (SELECT 1 FROM tickets t2 WHERE t2.order_id=orders.id AND t2.tenant_id=orders.tenant_id)');
             return $total;
         });
     }
