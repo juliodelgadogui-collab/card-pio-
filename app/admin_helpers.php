@@ -299,6 +299,7 @@ function em_header(string $title, string $active): void
     $css=Security::e(app_url('assets/app.css?v='.em_asset_version('assets/app.css')));
     $premiumCss=Security::e(app_url('assets/premium-v4.css?v='.em_asset_version('assets/premium-v4.css')));
     $premiumJs=Security::e(app_url('assets/premium-v4.js?v='.em_asset_version('assets/premium-v4.js')));
+    $platformCss=Security::e(app_url('assets/platform-professional-v1.css?v='.em_asset_version('assets/platform-professional-v1.css')));
     $currentTenantId=Auth::tenantId();
     $platformMode=Auth::isSuperAdmin()&&!$currentTenantId;
     $context=em_context_tenant_name();
@@ -321,7 +322,7 @@ function em_header(string $title, string $active): void
     <title><?= Security::e($title) ?> — <?= Security::e($brandName) ?></title>
     <link rel="manifest" href="<?= $manifest ?>">
     <!-- app.css permanece como camada estrutural/compatibilidade; Premium v4 é o padrão visual canônico. -->
-    <link rel="stylesheet" href="<?= $css ?>"><link rel="stylesheet" href="<?= $premiumCss ?>">
+    <link rel="stylesheet" href="<?= $css ?>"><link rel="stylesheet" href="<?= $premiumCss ?>"><?php if($platformMode):?><link rel="stylesheet" href="<?= $platformCss ?>"><?php endif;?>
     <script defer src="<?= $premiumJs ?>"></script>
     <?php if($brandActive):?><style>
     :root{--em-primary:<?=Security::e($brand['primary_color'])?>;--em-primary-2:<?=Security::e($brand['primary_color'])?>;--em-primary-ink:<?=Security::e($primaryInk)?>;--em-bg:<?=Security::e($brand['background_color'])?>;--em-bg-soft:<?=Security::e($brand['background_color'])?>;--em-surface:<?=Security::e($brand['surface_color'])?>;--em-surface-2:<?=Security::e($brand['surface_color'])?>;--em-text:<?=Security::e($brand['text_color'])?>;--em-success:<?=Security::e($brand['secondary_color'])?>;--accent:<?=Security::e($brand['primary_color'])?>;--accent2:<?=Security::e($brand['primary_color'])?>;--bg:<?=Security::e($brand['background_color'])?>;--panel:<?=Security::e($brand['surface_color'])?>;--text:<?=Security::e($brand['text_color'])?>;--ok:<?=Security::e($brand['secondary_color'])?>}

@@ -1,0 +1,158 @@
+/* EventMenu Platform — professional Super ADM design v1
+   Visual-only layer. No business rules or data behavior live here. */
+body.em-platform{
+  --pf-bg:#f4f6fa;--pf-surface:#fff;--pf-surface-soft:#f8fafc;--pf-ink:#111827;
+  --pf-muted:#667085;--pf-line:#e4e7ec;--pf-navy:#101828;--pf-navy-2:#182230;
+  --pf-accent:#6d4aff;--pf-accent-2:#8b5cf6;--pf-accent-soft:#f0ecff;
+  --pf-success:#067647;--pf-success-bg:#ecfdf3;--pf-warning:#b54708;--pf-danger:#b42318;
+  --pf-radius:18px;--pf-shadow:0 1px 2px rgba(16,24,40,.04),0 10px 28px rgba(16,24,40,.06);
+  background:var(--pf-bg);color:var(--pf-ink);font-feature-settings:"cv02","cv03","cv04","cv11";
+}
+body.em-platform .layout{grid-template-columns:264px minmax(0,1fr);min-height:100dvh}
+body.em-platform .sidebar{background:var(--pf-navy);border-right:1px solid rgba(255,255,255,.06);padding:24px 16px;color:#fff;box-shadow:none}
+body.em-platform .sidebar-head{padding:0 8px;min-height:44px}
+body.em-platform .brand{font-size:17px;font-weight:780;letter-spacing:-.35px;color:#fff}
+body.em-platform .brand:before{content:"E";display:inline-grid;place-items:center;width:32px;height:32px;margin-right:10px;border-radius:10px;background:linear-gradient(135deg,#8b5cf6,#6d4aff);font-size:15px;font-weight:900;box-shadow:0 7px 18px rgba(109,74,255,.28)}
+body.em-platform .platform-context{margin:22px 4px 18px;padding:14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:rgba(255,255,255,.04)}
+body.em-platform .platform-context small{display:block;color:#98a2b3;font-size:9px;font-weight:800;letter-spacing:.12em}
+body.em-platform .platform-context strong{display:block;margin-top:5px;color:#fff;font-size:13px}
+body.em-platform .platform-context span{display:block;margin-top:2px;color:#98a2b3;font-size:11px}
+body.em-platform .nav{gap:12px;margin-top:8px}
+body.em-platform .nav-group{display:grid;gap:4px}
+body.em-platform .nav-group-title{padding:0 10px 5px;color:#667085;font-size:9px;font-weight:800;letter-spacing:.12em;text-transform:uppercase}
+body.em-platform .nav a{min-height:42px;padding:9px 10px;border:0;border-radius:10px;color:#98a2b3;font-size:12px;font-weight:650}
+body.em-platform .nav a:hover{background:rgba(255,255,255,.055);color:#fff;transform:none}
+body.em-platform .nav a.active{background:#fff;color:var(--pf-navy);box-shadow:0 6px 16px rgba(0,0,0,.14)}
+body.em-platform .nav a.active:before{display:none}
+body.em-platform .nav-icon{display:inline-grid;place-items:center;width:25px;height:25px;border-radius:7px;background:rgba(255,255,255,.06);font-size:11px}
+body.em-platform .nav a.active .nav-icon{background:var(--pf-accent-soft);color:var(--pf-accent)}
+body.em-platform .sidebar-foot{border-top:1px solid rgba(255,255,255,.07)}
+body.em-platform .user-chip strong{color:#fff} body.em-platform .user-chip small,body.em-platform .foot-links a{color:#98a2b3}
+body.em-platform .user-avatar{background:#fff;color:var(--pf-navy);box-shadow:none}
+
+body.em-platform .content{max-width:none;padding:28px 36px 56px;background:var(--pf-bg)}
+body.em-platform .topbar{min-height:62px;margin-bottom:24px;padding-bottom:18px;border-bottom:1px solid var(--pf-line)}
+body.em-platform .top-eyebrow,body.em-platform .eyebrow{color:var(--pf-accent);font-size:9px;font-weight:850;letter-spacing:.13em}
+body.em-platform .topbar h1{margin:4px 0 3px;color:var(--pf-ink);font-size:26px;letter-spacing:-.8px}
+body.em-platform .top-subtitle,body.em-platform .muted{color:var(--pf-muted)}
+body.em-platform .context-pill{background:#fff;border:1px solid var(--pf-line);color:#344054;box-shadow:0 1px 2px rgba(16,24,40,.03)}
+
+body.em-platform .page-hero{min-height:172px;padding:30px 32px;border:0;border-radius:22px;background:linear-gradient(118deg,#101828 0%,#1d2939 54%,#34246f 100%);box-shadow:0 16px 40px rgba(16,24,40,.13);overflow:hidden}
+body.em-platform .page-hero:before{content:"";position:absolute;width:280px;height:280px;right:10%;top:-190px;border-radius:50%;border:52px solid rgba(255,255,255,.04)}
+body.em-platform .page-hero:after{width:220px;height:220px;right:-70px;top:-80px;background:radial-gradient(circle,rgba(139,92,246,.55),transparent 68%)}
+body.em-platform .page-hero .eyebrow{color:#c4b5fd}
+body.em-platform .page-hero h2{max-width:600px;margin:7px 0 10px;color:#fff;font-size:34px;line-height:1.05;letter-spacing:-1.2px}
+body.em-platform .page-hero p{max-width:580px;color:#cbd5e1;font-size:13px;line-height:1.6}
+body.em-platform .hero-actions{gap:9px}
+body.em-platform .hero-actions .primary{background:#fff;color:#101828;border-color:#fff;box-shadow:none}
+body.em-platform .hero-actions .secondary{background:rgba(255,255,255,.08);color:#fff;border-color:rgba(255,255,255,.16)}
+
+body.em-platform .metric-grid{grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}
+body.em-platform .metric-card{min-height:126px;padding:20px;border:1px solid var(--pf-line);border-radius:16px;background:#fff;box-shadow:var(--pf-shadow)}
+body.em-platform .metric-card:after{display:none}
+body.em-platform .metric-card span{color:#667085;font-size:10px;font-weight:700;letter-spacing:0;text-transform:none}
+body.em-platform .metric-card strong{margin:10px 0 5px;color:#101828;font-size:28px;font-weight:760;letter-spacing:-1px}
+body.em-platform .metric-card small{color:#98a2b3;font-size:10px}
+
+body.em-platform .subtabs{position:static;display:flex;width:max-content;max-width:100%;gap:3px;margin:4px 0 20px;padding:4px;border:1px solid var(--pf-line);border-radius:12px;background:#fff;box-shadow:0 1px 2px rgba(16,24,40,.03);overflow-x:auto}
+body.em-platform .subtabs a{white-space:nowrap;padding:9px 14px;border-radius:8px!important;color:#667085;font-size:11px;font-weight:700}
+body.em-platform .subtabs a.active{background:var(--pf-navy);color:#fff;box-shadow:none}
+
+body.em-platform .card,body.em-platform .pricing-card,body.em-platform .plan-mini{border:1px solid var(--pf-line);background:#fff;color:var(--pf-ink);box-shadow:var(--pf-shadow)}
+body.em-platform .card{padding:24px;border-radius:18px}
+body.em-platform .card h2{color:#101828;font-size:20px;letter-spacing:-.45px}
+body.em-platform .commercial-grid{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:16px}
+body.em-platform .list-row{padding:14px 0;border-color:#eef2f6}
+body.em-platform .list-row strong{color:#101828} body.em-platform .list-row small{color:#98a2b3}
+body.em-platform .status-pill{padding:5px 9px;border-radius:99px;font-size:9px;font-weight:800;letter-spacing:.02em;text-transform:none}
+body.em-platform .status-pill.active{background:var(--pf-success-bg);color:var(--pf-success);border-color:#abefc6}
+body.em-platform .plan-mini-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+body.em-platform .plan-mini{padding:17px;border-radius:14px;box-shadow:none}
+body.em-platform .plan-mini strong{color:#667085;font-size:11px}
+body.em-platform .plan-mini b{margin:8px 0 5px;color:#101828;font-size:21px}
+body.em-platform .plan-mini span{color:#98a2b3;font-size:10px;line-height:1.45}
+
+body.em-platform button,body.em-platform .button{min-height:40px;border-radius:10px;font-weight:720}
+body.em-platform .primary{background:var(--pf-navy);border-color:var(--pf-navy);color:#fff;box-shadow:none}
+body.em-platform .secondary{background:#fff;border:1px solid #d0d5dd;color:#344054;box-shadow:0 1px 2px rgba(16,24,40,.03)}
+body.em-platform .secondary:hover{background:#f9fafb;border-color:#98a2b3}
+body.em-platform label{color:#475467;font-size:11px;font-weight:650}
+body.em-platform input,body.em-platform select,body.em-platform textarea{min-height:44px;border:1px solid #d0d5dd;border-radius:10px;background:#fff;color:#101828;box-shadow:0 1px 2px rgba(16,24,40,.03)}
+body.em-platform input:focus,body.em-platform select:focus,body.em-platform textarea:focus{border-color:#9b8afb;box-shadow:0 0 0 3px rgba(109,74,255,.1)}
+body.em-platform .checkbox{min-height:48px;padding:11px 12px;border:1px solid #eaecf0;border-radius:10px;background:#fff;color:#344054}
+body.em-platform .checkbox:hover{border-color:#c7b9ff;background:#faf9ff}
+body.em-platform input[type=checkbox]{min-height:0;accent-color:var(--pf-accent)}
+body.em-platform .check-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+body.em-platform .field-title{display:block;margin-bottom:8px;color:#344054;font-size:11px;font-weight:750}
+
+body.em-platform .admin-two-col{grid-template-columns:minmax(360px,.8fr) minmax(0,1.2fr);align-items:start;gap:18px}
+body.em-platform .pricing-card{padding:22px;border-radius:16px}
+body.em-platform .pricing-card:not(.is-archived){border-color:#d9d6fe}
+body.em-platform .pricing-head h3{color:#101828;font-size:20px}
+body.em-platform .pricing-card p,body.em-platform .pricing-card li,body.em-platform .limit-line{color:#667085}
+body.em-platform .price-big{color:#101828;font-size:29px}
+body.em-platform .price-big small{color:#98a2b3}
+body.em-platform .table-wrap{border:1px solid var(--pf-line);border-radius:12px;background:#fff;box-shadow:none}
+body.em-platform .table{color:#344054}
+body.em-platform .table th{padding:11px 12px;background:#f9fafb;color:#667085;border-color:#eaecf0;font-size:9px}
+body.em-platform .table td{padding:13px 12px;border-color:#eaecf0}
+body.em-platform .table tbody tr:hover{background:#fcfcfd}
+body.em-platform .alert{border-radius:12px}
+
+@media(max-width:1100px){
+ body.em-platform .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ body.em-platform .commercial-grid,body.em-platform .admin-two-col{grid-template-columns:1fr}
+}
+@media(max-width:950px){
+ body.em-platform .layout{display:block}
+ body.em-platform .sidebar{height:64px;min-height:64px;position:sticky;top:0;z-index:100;padding:8px 14px;border-bottom:1px solid rgba(255,255,255,.08)}
+ body.em-platform .sidebar-head{height:47px;min-height:47px;padding:0}
+ body.em-platform .brand{font-size:16px}
+ body.em-platform .brand:before{width:30px;height:30px;border-radius:9px}
+ body.em-platform .nav-toggle{display:flex;width:42px;height:42px;background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.1)}
+ body.em-platform .sidebar.nav-open{position:fixed;inset:0;height:100dvh;padding:8px 14px 18px;background:#101828;overflow:auto}
+ body.em-platform .sidebar.nav-open .platform-context{display:block}
+ body.em-platform .sidebar.nav-open .nav{display:grid!important;gap:14px}
+ body.em-platform .sidebar.nav-open .nav-group-title{color:#667085}
+ body.em-platform .sidebar.nav-open .nav a{font-size:14px;padding:10px 12px}
+ body.em-platform .sidebar.nav-open .sidebar-foot{display:block}
+ body.em-platform .content{padding:20px 18px 42px}
+ body.em-platform .topbar{margin-bottom:18px}
+ body.em-platform .page-hero{padding:25px}
+ body.em-platform .page-hero h2{font-size:30px}
+}
+@media(max-width:680px){
+ body.em-platform{background:#f5f7fa}
+ body.em-platform .content{padding:16px 12px 34px}
+ body.em-platform .topbar{padding:2px 2px 14px;margin-bottom:14px}
+ body.em-platform .topbar h1{font-size:22px}
+ body.em-platform .top-subtitle{font-size:10px}
+ body.em-platform .page-hero{display:block;padding:22px 20px;border-radius:18px}
+ body.em-platform .page-hero h2{font-size:27px;line-height:1.08}
+ body.em-platform .page-hero p{font-size:12px;line-height:1.55}
+ body.em-platform .hero-actions{display:grid;grid-template-columns:1fr 1fr;margin-top:18px;width:100%}
+ body.em-platform .metric-grid{grid-template-columns:1fr 1fr;gap:9px;margin:12px 0 14px}
+ body.em-platform .metric-card{min-height:104px;padding:15px;border-radius:14px}
+ body.em-platform .metric-card strong{font-size:21px;margin:8px 0 3px}
+ body.em-platform .metric-card span{font-size:9px}
+ body.em-platform .subtabs{width:100%;margin:0 0 14px}
+ body.em-platform .subtabs a{flex:1;text-align:center;padding:9px 10px}
+ body.em-platform .card{padding:17px;border-radius:15px}
+ body.em-platform .commercial-grid{gap:12px}
+ body.em-platform .plan-mini-grid{grid-template-columns:1fr}
+ body.em-platform .plan-mini{display:grid;grid-template-columns:1fr auto;column-gap:10px}
+ body.em-platform .plan-mini span{grid-column:1/-1}
+ body.em-platform .check-grid{grid-template-columns:1fr 1fr;gap:7px}
+ body.em-platform .checkbox{min-height:44px;padding:9px;font-size:10px}
+ body.em-platform .admin-two-col{gap:12px}
+ body.em-platform .pricing-card{padding:17px}
+ body.em-platform .table-wrap{overflow:auto}
+}
+@media(max-width:430px){
+ body.em-platform .content{padding-left:10px;padding-right:10px}
+ body.em-platform .hero-actions{grid-template-columns:1fr}
+ body.em-platform .metric-card{min-width:0}
+ body.em-platform .metric-card strong{font-size:19px}
+ body.em-platform .subtabs a{font-size:10px;padding:9px 7px}
+ body.em-platform .check-grid{grid-template-columns:1fr}
+}
