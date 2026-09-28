@@ -110,7 +110,10 @@ spl_autoload_register(function (string $class): void {
 if (PHP_SAPI !== 'cli' && ob_get_level() === 0) ob_start('app_rewrite_root_urls');
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
-    $secure = filter_var(env('SESSION_SECURE', 'false'), FILTER_VALIDATE_BOOL);
+    $configuredSecure = filter_var(env('SESSION_SECURE', 'false'), FILTER_VALIDATE_BOOL);
+    $requestHttps = (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') || strtolower(trim(explode(',', (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? ''))[0] ?? '')) === 'https';
+    // Nunca rebaixar um cookie de sessão para não-Secure quando a requisição atual é HTTPS.
+    $secure = $configuredSecure || $requestHttps;
     $cookiePath = app_base_path() === '' ? '/' : app_base_path() . '/';
     session_name((string)env('SESSION_NAME', 'eventmenu_session'));
     session_set_cookie_params([

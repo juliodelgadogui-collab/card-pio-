@@ -101,7 +101,7 @@ final class WhatsAppCommerceAssistantService
 
     /** @param array<string,mixed> $settings */
     public function welcome(array $settings,string $customerName,string $tenantName=''):string
-    {$intro=(int)($settings['enabled']??0)===1?(string)($settings['greeting_message']??''):(string)$this->defaults()['greeting_message'];$intro=$this->render($intro,$customerName,$tenantName,(string)($settings['assistant_name']??'Assistente EventMenu'));if($intro==='')$intro=$customerName!==''?'Olá, '.$customerName.'! 👋':'Olá! 👋';return$intro."\n\nO que deseja fazer?\n\n1 - Fazer um pedido\n2 - Repetir último pedido (em breve)\n3 - Acompanhar pedido\n4 - Falar com atendente\n\nVocê também pode digitar *MENU*, *MEU PEDIDO*, *CANCELAR* ou *ATENDENTE* a qualquer momento.";}
+    {$intro=(int)($settings['enabled']??0)===1?(string)($settings['greeting_message']??''):(string)$this->defaults()['greeting_message'];$intro=$this->render($intro,$customerName,$tenantName,(string)($settings['assistant_name']??'Assistente EventMenu'));if($intro==='')$intro=$customerName!==''?'Olá, '.$customerName.'! 👋':'Olá! 👋';return$intro."\n\nO que deseja fazer?\n\n1 - Fazer um pedido\n2 - Repetir último pedido\n3 - Acompanhar pedido\n4 - Falar com atendente\n\nVocê também pode digitar *MENU*, *MEU PEDIDO*, *CANCELAR* ou *ATENDENTE* a qualquer momento.";}
 
     /** @param array<string,mixed> $settings */
     public function unknown(array $settings):string
