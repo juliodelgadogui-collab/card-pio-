@@ -49,7 +49,7 @@ final class TenantFeatures
         ],
         'whatsapp' => [
             'label' => 'WhatsApp Commerce e atendimento',
-            'routes' => [],
+            'routes' => ['whatsapp', 'whatsapp-results', 'communications'],
         ],
         'reports' => [
             'label' => 'Relatórios',
@@ -61,7 +61,7 @@ final class TenantFeatures
         ],
         'printing' => [
             'label' => 'Impressão e cupom',
-            'routes' => ['receipt-settings'],
+            'routes' => ['receipt', 'receipt-settings'],
         ],
     ];
 
