@@ -61,7 +61,7 @@ final class TenantFeatures
         ],
         'printing' => [
             'label' => 'Impressão e cupom',
-            'routes' => ['receipt', 'receipt-settings'],
+            'routes' => ['receipt-settings'],
         ],
     ];
 
