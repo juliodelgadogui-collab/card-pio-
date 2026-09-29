@@ -330,7 +330,7 @@ function em_header(string $title, string $active): void
     .brand-logo{width:30px;height:30px;border-radius:8px;object-fit:contain;background:#fff;margin-right:8px;vertical-align:middle}.tenant-brand-signature{font-size:11px;opacity:.72;margin-left:6px;font-weight:650}
     </style><?php endif;?>
 </head>
-<body class="em-premium em-platform <?= $platformMode?'em-platform-mode':'em-tenant' ?>">
+<body class="em-premium <?= $platformMode?'em-platform':'em-tenant' ?>">
 <div class="layout">
 <aside class="sidebar" aria-label="Navegação principal">
     <div class="sidebar-head"><a class="brand" href="<?=Security::e(app_url('?route='.$homeRoute))?>"><?php if($brandActive&&!empty($brand['logo_url'])):?><img class="brand-logo" src="<?=Security::e($brand['logo_url'])?>" alt=""><?php endif;?><?=Security::e($brandName)?><?php if($brandActive&&!empty($brand['show_eventmenu_brand'])&&strcasecmp($brandName,'EventMenu Premium')!==0):?><span class="tenant-brand-signature">EventMenu</span><?php elseif(!$brandActive&&!$platformMode):?><span>Premium</span><?php endif;?></a><button type="button" class="nav-toggle" aria-label="Abrir menu" aria-expanded="false"><span></span><span></span><span></span></button></div>
