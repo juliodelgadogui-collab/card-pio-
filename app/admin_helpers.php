@@ -308,7 +308,7 @@ function em_header(string $title, string $active): void
     $brandActive=$brand&&!empty($brand['apply_web']);
     $brandName=$brandActive?trim((string)$brand['display_name']):'';
     $brandName=$brandName!==''?$brandName:($platformMode?'EventMenu Plataforma':'EventMenu Premium');
-    $themeColor=$brandActive?(string)$brand['primary_color']:'#21134f';
+    $themeColor=$brandActive?(string)$brand['primary_color']:'#f05a28';
     $primaryInk=em_contrast_ink($themeColor);
     $unitContext=em_operational_unit_context();$units=$unitContext['units'];$currentUnit=$unitContext['current'];
     $homeRoute=$platformMode?'super':'dashboard';
