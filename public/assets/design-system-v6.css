@@ -130,3 +130,33 @@ body.em-premium a:focus-visible,body.em-premium button:focus-visible,body.em-pre
  body.em-premium .page-hero h2{font-size:23px}body.em-premium .topbar h1{font-size:28px}
 }
 @media(prefers-reduced-motion:reduce){body.em-premium *,body.em-premium *:before,body.em-premium *:after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+
+/* V6.1 — dashboard e operações */
+body.em-premium .attention-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}
+body.em-premium .attention-card{min-height:92px;border:1px solid var(--v6-line);border-radius:16px;background:#fffdf8;padding:15px;display:flex;align-items:center;justify-content:space-between;text-decoration:none;color:inherit;box-shadow:var(--v6-shadow);transition:.16s ease}
+body.em-premium .attention-card:hover{transform:translateY(-2px);box-shadow:0 18px 40px rgba(35,28,20,.11)}
+body.em-premium .attention-card span{display:block;color:var(--v6-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+body.em-premium .attention-card strong{display:block;font-size:28px;letter-spacing:-.05em;margin-top:5px}
+body.em-premium .attention-dot{width:10px;height:10px;border-radius:50%;background:var(--v6-accent);box-shadow:0 0 0 5px var(--v6-accent-soft)}
+body.em-premium .attention-card.success .attention-dot{background:var(--v6-success);box-shadow:0 0 0 5px var(--v6-success-soft)}
+body.em-premium .attention-card.warning .attention-dot{background:var(--v6-warning);box-shadow:0 0 0 5px var(--v6-warning-soft)}
+body.em-premium .attention-card.danger .attention-dot{background:var(--v6-danger);box-shadow:0 0 0 5px var(--v6-danger-soft)}
+body.em-premium .dashboard-metrics{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:14px}
+body.em-premium .dashboard-metric .metric-icon{float:right;width:36px;height:36px;border-radius:11px;display:grid;place-items:center;background:var(--v6-accent-soft);color:var(--v6-accent);font-weight:900}
+body.em-premium .dashboard-metric small{display:block;margin-top:5px;color:var(--v6-muted);font-size:11px}
+body.em-premium .dashboard-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,.8fr);gap:14px;margin-top:14px}
+body.em-premium .chart-bars{height:210px;display:flex;align-items:flex-end;gap:10px;padding:15px 5px 0}
+body.em-premium .chart-bar{position:relative;flex:1;min-width:12px;border-radius:8px 8px 3px 3px;background:linear-gradient(180deg,#f05a28,#ff9b78);box-shadow:0 6px 15px rgba(240,90,40,.14)}
+body.em-premium .chart-bar span{position:absolute;top:calc(100% + 8px);left:50%;transform:translateX(-50%);font-size:9px;color:var(--v6-muted);white-space:nowrap}
+body.em-premium .channel-list{display:grid;gap:16px;padding-top:7px}
+body.em-premium .channel-row{display:grid;grid-template-columns:100px 1fr 38px;align-items:center;gap:10px;font-size:11px}
+body.em-premium .channel-track{height:8px;background:var(--v6-surface-3);border-radius:99px;overflow:hidden}
+body.em-premium .channel-fill{height:100%;border-radius:99px;background:var(--v6-accent)}
+body.em-premium .channel-row strong{text-align:right;font-size:11px}
+body.em-premium .quick-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px}
+body.em-premium .quick-card{padding:18px;text-decoration:none;color:inherit}
+body.em-premium .quick-card strong{display:block;font-size:14px;letter-spacing:-.02em}
+body.em-premium .quick-card span{display:block;margin-top:5px;color:var(--v6-muted);font-size:11px;line-height:1.5}
+@media(max-width:1150px){body.em-premium .attention-grid{grid-template-columns:repeat(3,1fr)}body.em-premium .dashboard-metrics{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:760px){body.em-premium .attention-grid{grid-template-columns:repeat(2,1fr)}body.em-premium .dashboard-grid,body.em-premium .quick-grid{grid-template-columns:1fr}body.em-premium .chart-bars{height:180px}}
+@media(max-width:480px){body.em-premium .attention-grid{grid-template-columns:1fr 1fr;gap:8px}body.em-premium .attention-card{min-height:82px;padding:12px}body.em-premium .attention-card strong{font-size:23px}body.em-premium .dashboard-metrics{gap:8px}}
