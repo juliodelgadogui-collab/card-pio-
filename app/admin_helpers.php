@@ -219,8 +219,8 @@ function em_tenant_nav(): array
             ['purchases','Compras / Fornecedores','inventory.manage','⇩'],
         ],
         'Clientes / Marketing' => [
-            ['customers','Clientes e pontos','customers.manage','◎'],
-            ['communications','Central de Comunicação','settings.manage','✉'],
+            ['customers','Clientes','customers.manage','◎'],
+            ['communications','Comunicação','settings.manage','✉'],
             ['coupons','Cupons','coupons.manage','%'],
         ],
         'Financeiro' => [
