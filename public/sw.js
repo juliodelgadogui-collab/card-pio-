@@ -1,4 +1,4 @@
-const CACHE_NAME = 'eventmenu-static-v8';
+const CACHE_NAME = 'eventmenu-static-v9';
 const MANIFEST_URL = './manifest.webmanifest';
 const STATIC_SUFFIXES = [
   '/assets/app.css',
