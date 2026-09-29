@@ -200,3 +200,14 @@ body.em-premium .pos-channel input:checked+span{border-color:var(--v6-accent);ba
 body.em-premium .pos-modifiers summary{color:var(--v6-accent)}
 body.em-premium .pos-submit{background:var(--v6-accent);color:#fff}
 @media(max-width:950px){body.em-premium .pos-shell{grid-template-columns:1fr}body.em-premium .pos-cart{position:static}}
+
+/* V6.4 — kitchen / delivery */
+body.em-premium .kanban-column[data-tone="preparing"]{border-top:3px solid var(--v6-warning)}
+body.em-premium .kanban-column[data-tone="ready"]{border-top:3px solid var(--v6-success)}
+body.em-premium .kanban-column[data-tone="delivery"]{border-top:3px solid var(--v6-accent)}
+body.em-premium .order-action-box{box-shadow:none}
+body.em-premium .alert{border-radius:12px}
+body.em-premium .grid.dashboard-metrics .metric{min-width:0}
+body.em-premium .card[style*="border-color:#e7aab0"]{border-color:#efb0a0!important;background:#fff9f6}
+body.em-premium .card .status-pill.active{background:var(--v6-success-soft);color:#177044}
+body.em-premium .card .status-pill.cancelled{background:#fff0ee;color:#b53b2c}
