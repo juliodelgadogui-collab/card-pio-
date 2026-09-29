@@ -299,7 +299,7 @@ function em_header(string $title, string $active): void
     $css=Security::e(app_url('assets/app.css?v='.em_asset_version('assets/app.css')));
     $premiumCss=Security::e(app_url('assets/premium-v4.css?v='.em_asset_version('assets/premium-v4.css')));
     $premiumJs=Security::e(app_url('assets/premium-v4.js?v='.em_asset_version('assets/premium-v4.js')));
-    $platformCss=Security::e(app_url('assets/platform-professional-v1.css?v='.em_asset_version('assets/platform-professional-v1.css')));
+    $platformCss=Security::e(app_url('assets/super-admin-v2.css?v='.em_asset_version('assets/super-admin-v2.css')));
     $currentTenantId=Auth::tenantId();
     $platformMode=Auth::isSuperAdmin()&&!$currentTenantId;
     $context=em_context_tenant_name();
@@ -321,8 +321,14 @@ function em_header(string $title, string $active): void
     <meta name="theme-color" content="<?= Security::e($themeColor) ?>"><meta name="color-scheme" content="light">
     <title><?= Security::e($title) ?> — <?= Security::e($brandName) ?></title>
     <link rel="manifest" href="<?= $manifest ?>">
-    <!-- app.css permanece como camada estrutural/compatibilidade; Premium v4 é o padrão visual canônico. -->
-    <link rel="stylesheet" href="<?= $css ?>"><link rel="stylesheet" href="<?= $premiumCss ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5.css?v='.em_asset_version('assets/premium-v5.css'))) ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5-runtime.css?v='.em_asset_version('assets/premium-v5-runtime.css'))) ?>"><?php if($platformMode):?><link rel="stylesheet" href="<?= $platformCss ?>"><?php endif;?>
+    <link rel="stylesheet" href="<?= $css ?>">
+    <?php if($platformMode):?>
+    <link rel="stylesheet" href="<?= $platformCss ?>">
+    <?php else:?>
+    <link rel="stylesheet" href="<?= $premiumCss ?>">
+    <link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5.css?v='.em_asset_version('assets/premium-v5.css'))) ?>">
+    <link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5-runtime.css?v='.em_asset_version('assets/premium-v5-runtime.css'))) ?>">
+    <?php endif;?>
     <script defer src="<?= $premiumJs ?>"></script>
     <?php if($brandActive):?><style>
     :root{--em-primary:<?=Security::e($brand['primary_color'])?>;--em-primary-2:<?=Security::e($brand['primary_color'])?>;--em-primary-ink:<?=Security::e($primaryInk)?>;--em-bg:<?=Security::e($brand['background_color'])?>;--em-bg-soft:<?=Security::e($brand['background_color'])?>;--em-surface:<?=Security::e($brand['surface_color'])?>;--em-surface-2:<?=Security::e($brand['surface_color'])?>;--em-text:<?=Security::e($brand['text_color'])?>;--em-success:<?=Security::e($brand['secondary_color'])?>;--accent:<?=Security::e($brand['primary_color'])?>;--accent2:<?=Security::e($brand['primary_color'])?>;--bg:<?=Security::e($brand['background_color'])?>;--panel:<?=Security::e($brand['surface_color'])?>;--text:<?=Security::e($brand['text_color'])?>;--ok:<?=Security::e($brand['secondary_color'])?>}
@@ -330,7 +336,7 @@ function em_header(string $title, string $active): void
     .brand-logo{width:30px;height:30px;border-radius:8px;object-fit:contain;background:#fff;margin-right:8px;vertical-align:middle}.tenant-brand-signature{font-size:11px;opacity:.72;margin-left:6px;font-weight:650}
     </style><?php endif;?>
 </head>
-<body class="em-premium <?= $platformMode?'em-platform':'em-tenant' ?>">
+<body class="<?= $platformMode?'em-platform-v2':'em-premium em-tenant' ?>">
 <div class="layout">
 <aside class="sidebar" aria-label="Navegação principal">
     <div class="sidebar-head"><a class="brand" href="<?=Security::e(app_url('?route='.$homeRoute))?>"><?php if($brandActive&&!empty($brand['logo_url'])):?><img class="brand-logo" src="<?=Security::e($brand['logo_url'])?>" alt=""><?php endif;?><?=Security::e($brandName)?><?php if($brandActive&&!empty($brand['show_eventmenu_brand'])&&strcasecmp($brandName,'EventMenu Premium')!==0):?><span class="tenant-brand-signature">EventMenu</span><?php elseif(!$brandActive&&!$platformMode):?><span>Premium</span><?php endif;?></a><button type="button" class="nav-toggle" aria-label="Abrir menu" aria-expanded="false"><span></span><span></span><span></span></button></div>
