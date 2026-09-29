@@ -211,3 +211,20 @@ body.em-premium .grid.dashboard-metrics .metric{min-width:0}
 body.em-premium .card[style*="border-color:#e7aab0"]{border-color:#efb0a0!important;background:#fff9f6}
 body.em-premium .card .status-pill.active{background:var(--v6-success-soft);color:#177044}
 body.em-premium .card .status-pill.cancelled{background:#fff0ee;color:#b53b2c}
+
+/* V6.5 — catalog / inventory / events */
+body.em-premium .product-admin-item{display:flex;align-items:center;gap:10px}
+body.em-premium .product-thumb{width:42px;height:42px;border-radius:10px;object-fit:cover;border:1px solid var(--v6-line);background:var(--v6-surface-2)}
+body.em-premium .metric-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+body.em-premium .metric-card{background:var(--v6-surface);border:1px solid var(--v6-line);border-radius:16px;padding:16px;box-shadow:var(--v6-shadow)}
+body.em-premium .metric-card span{display:block;color:var(--v6-muted);font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+body.em-premium .metric-card strong{display:block;font-size:25px;letter-spacing:-.04em;margin-top:7px}
+body.em-premium .metric-card small{display:block;color:var(--v6-muted);margin-top:4px}
+body.em-premium .table-wrap{border-radius:14px}
+body.em-premium .table tbody tr:hover{background:#fffaf4}
+body.em-premium .form-grid label{color:var(--v6-ink)}
+body.em-premium .form-grid small{color:var(--v6-muted)}
+body.em-premium .card h2{letter-spacing:-.035em}
+body.em-premium .event-card,body.em-premium .events-card{border:1px solid var(--v6-line);background:var(--v6-surface)}
+@media(max-width:900px){body.em-premium .metric-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){body.em-premium .metric-grid{grid-template-columns:1fr 1fr}body.em-premium .metric-card{padding:13px}body.em-premium .metric-card strong{font-size:21px}}
