@@ -217,7 +217,7 @@ $cartBackup=array_values(array_map(static fn(array$line):array=>[
 <title><?= Security::e($title) ?> — <?= Security::e($selectedUnit['name']) ?></title>
 <meta name="description" content="<?= Security::e($subtitle) ?>">
 <link rel="canonical" href="<?= Security::e($canonical) ?>">
-<link rel="stylesheet" href="<?= Security::e(app_url('assets/menu-premium-v5.css')) ?>">
+<link rel="stylesheet" href="<?= Security::e(app_url('assets/menu-premium-v5.css')) ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/menu-design-v6.css?v='.em_asset_version('assets/menu-design-v6.css'))) ?>">
 <style>:root{--em-bg:<?= Security::e($background) ?>;--em-surface:<?= Security::e($surface) ?>;--em-text:<?= Security::e($text) ?>;--em-primary:<?= Security::e($primary) ?>}</style>
 </head>
 <body>
