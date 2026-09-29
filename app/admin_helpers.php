@@ -299,7 +299,7 @@ function em_header(string $title, string $active): void
     $css=Security::e(app_url('assets/app.css?v='.em_asset_version('assets/app.css')));
     $premiumCss=Security::e(app_url('assets/premium-v4.css?v='.em_asset_version('assets/premium-v4.css')));
     $premiumJs=Security::e(app_url('assets/premium-v4.js?v='.em_asset_version('assets/premium-v4.js')));
-    $platformCss=Security::e(app_url('assets/platform-professional-v1.css?v='.em_asset_version('assets/platform-professional-v1.css')));
+    $platformCss=Security::e(app_url('assets/super-adm-v3.css?v='.em_asset_version('assets/super-adm-v3.css')));
     $currentTenantId=Auth::tenantId();
     $platformMode=Auth::isSuperAdmin()&&!$currentTenantId;
     $context=em_context_tenant_name();
