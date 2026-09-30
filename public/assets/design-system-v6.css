@@ -71,7 +71,7 @@ body.em-premium .card,body.em-premium .metric-card,body.em-premium .quick-card,b
  background:rgba(255,253,248,.96);border:1px solid var(--v6-line);border-radius:var(--v6-radius);box-shadow:var(--v6-shadow);
 }
 body.em-premium .card{padding:21px}body.em-premium .card h2{font-size:19px;letter-spacing:-.03em}
-body.em-premium .card h3{font-size:15px}.body.em-premium .section-head{margin-bottom:17px}
+body.em-premium .card h3{font-size:15px}body.em-premium .section-head{margin-bottom:17px}
 body.em-premium .muted{color:var(--v6-muted)}
 body.em-premium input,body.em-premium select,body.em-premium textarea{
  min-height:45px;border:1px solid var(--v6-line-strong);border-radius:12px;background:#fffefa;color:var(--v6-ink);
