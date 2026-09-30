@@ -219,8 +219,8 @@ function em_tenant_nav(): array
             ['purchases','Compras / Fornecedores','inventory.manage','⇩'],
         ],
         'Clientes / Marketing' => [
-            ['customers','Clientes e pontos','customers.manage','◎'],
-            ['communications','Central de Comunicação','settings.manage','✉'],
+            ['customers','Clientes','customers.manage','◎'],
+            ['communications','Comunicação','settings.manage','✉'],
             ['coupons','Cupons','coupons.manage','%'],
         ],
         'Financeiro' => [
@@ -308,7 +308,7 @@ function em_header(string $title, string $active): void
     $brandActive=$brand&&!empty($brand['apply_web']);
     $brandName=$brandActive?trim((string)$brand['display_name']):'';
     $brandName=$brandName!==''?$brandName:($platformMode?'EventMenu Plataforma':'EventMenu Premium');
-    $themeColor=$brandActive?(string)$brand['primary_color']:'#21134f';
+    $themeColor=$brandActive?(string)$brand['primary_color']:'#f05a28';
     $primaryInk=em_contrast_ink($themeColor);
     $unitContext=em_operational_unit_context();$units=$unitContext['units'];$currentUnit=$unitContext['current'];
     $homeRoute=$platformMode?'super':'dashboard';
@@ -322,7 +322,7 @@ function em_header(string $title, string $active): void
     <title><?= Security::e($title) ?> — <?= Security::e($brandName) ?></title>
     <link rel="manifest" href="<?= $manifest ?>">
     <!-- app.css permanece como camada estrutural/compatibilidade; Premium v4 é o padrão visual canônico. -->
-    <link rel="stylesheet" href="<?= $css ?>"><link rel="stylesheet" href="<?= $premiumCss ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5.css?v='.em_asset_version('assets/premium-v5.css'))) ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5-runtime.css?v='.em_asset_version('assets/premium-v5-runtime.css'))) ?>"><?php if($platformMode):?><link rel="stylesheet" href="<?= $platformCss ?>"><?php endif;?>
+    <link rel="stylesheet" href="<?= $css ?>"><link rel="stylesheet" href="<?= $premiumCss ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5.css?v='.em_asset_version('assets/premium-v5.css'))) ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/premium-v5-runtime.css?v='.em_asset_version('assets/premium-v5-runtime.css'))) ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/design-system-v6.css?v='.em_asset_version('assets/design-system-v6.css'))) ?>"><?php if($platformMode):?><link rel="stylesheet" href="<?= $platformCss ?>"><?php endif;?>
     <script defer src="<?= $premiumJs ?>"></script>
     <?php if($brandActive):?><style>
     :root{--em-primary:<?=Security::e($brand['primary_color'])?>;--em-primary-2:<?=Security::e($brand['primary_color'])?>;--em-primary-ink:<?=Security::e($primaryInk)?>;--em-bg:<?=Security::e($brand['background_color'])?>;--em-bg-soft:<?=Security::e($brand['background_color'])?>;--em-surface:<?=Security::e($brand['surface_color'])?>;--em-surface-2:<?=Security::e($brand['surface_color'])?>;--em-text:<?=Security::e($brand['text_color'])?>;--em-success:<?=Security::e($brand['secondary_color'])?>;--accent:<?=Security::e($brand['primary_color'])?>;--accent2:<?=Security::e($brand['primary_color'])?>;--bg:<?=Security::e($brand['background_color'])?>;--panel:<?=Security::e($brand['surface_color'])?>;--text:<?=Security::e($brand['text_color'])?>;--ok:<?=Security::e($brand['secondary_color'])?>}

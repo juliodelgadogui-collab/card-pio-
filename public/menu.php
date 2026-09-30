@@ -186,7 +186,7 @@ $deliveryFee=max(0,(int)($settings['delivery_fee_cents']??0));
 $minimum=max(0,(int)($settings['min_delivery_order_cents']??0));
 $title=trim((string)($settings['menu_public_title']??''))?:$tenant['name'];
 $subtitle=trim((string)($settings['menu_subtitle']??''))?:'Sabor, praticidade e uma experiência feita para você.';
-$primary=menu_color($settings['menu_primary_color']??'','#6236df');
+$primary=menu_color($settings['menu_primary_color']??'','#f05a28');
 $background=menu_color($settings['menu_background_color']??'','#f7f7fb');
 $surface=menu_color($settings['menu_surface_color']??'','#ffffff');
 $text=menu_color($settings['menu_text_color']??'','#242136');
@@ -217,7 +217,7 @@ $cartBackup=array_values(array_map(static fn(array$line):array=>[
 <title><?= Security::e($title) ?> — <?= Security::e($selectedUnit['name']) ?></title>
 <meta name="description" content="<?= Security::e($subtitle) ?>">
 <link rel="canonical" href="<?= Security::e($canonical) ?>">
-<link rel="stylesheet" href="<?= Security::e(app_url('assets/menu-premium-v5.css')) ?>">
+<link rel="stylesheet" href="<?= Security::e(app_url('assets/menu-premium-v5.css')) ?>"><link rel="stylesheet" href="<?= Security::e(app_url('assets/menu-design-v6.css?v='.em_asset_version('assets/menu-design-v6.css'))) ?>">
 <style>:root{--em-bg:<?= Security::e($background) ?>;--em-surface:<?= Security::e($surface) ?>;--em-text:<?= Security::e($text) ?>;--em-primary:<?= Security::e($primary) ?>}</style>
 </head>
 <body>
