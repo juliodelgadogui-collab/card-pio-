@@ -1,0 +1,41 @@
+name: EventMenu Server Package Temporary
+on:
+  push:
+    branches: [tmp/server-v6-package-20261006]
+permissions: {contents: read}
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: 'curl, mbstring, openssl, pdo_sqlite'
+          coverage: none
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader
+      - name: PHP syntax validation
+        run: find app public src scripts -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Build server package
+        run: php scripts/build-package.php "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6"
+      - name: Verify V6 files
+        run: |
+          test -f "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6/public/assets/design-system-v6.css"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6/public/assets/menu-design-v6.css"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6/public/assets/auth-v2.css"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6/app/admin_helpers.php"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6/public/index.php"
+          test -f "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6/public/menu.php"
+      - name: Checksums
+        run: |
+          cd "$RUNNER_TEMP/EventMenu-Premium-Servidor-V6"
+          find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EventMenu-Premium-Servidor-V6
+          path: ${{ runner.temp }}/EventMenu-Premium-Servidor-V6
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 7
