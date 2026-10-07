@@ -1,0 +1,2 @@
+-keep class com.mercadopago.** { *; }
+-dontwarn com.mercadopago.**
